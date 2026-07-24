@@ -6,7 +6,7 @@
   "description": "v6 TS spike — rendezvous spine on the v5 libp2p base. Crypto handshake (EH-2/ratchet) held pending cryptographer review.",
   "engines": { "node": ">=22" },
   "scripts": {
-    "test": "node --test",
-    "hem": "node src/hem/stub.ts --port 7700"
+    "test": "node --test test/*.test.ts",
+    "bob": "node bob/bob.ts"
   }
 }

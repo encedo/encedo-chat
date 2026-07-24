@@ -21,3 +21,6 @@ Thumbs.db
 .env
 .env.local
 *.local
+
+# test-only software keystores (contain private keys — never commit)
+*.keystore.json
