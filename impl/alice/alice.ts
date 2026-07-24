@@ -89,6 +89,22 @@ switch (cmd) {
     console.log(`macKey:  ${announceMacKey(ss, p).toString('hex').slice(0, 24)}…`)
     break
   }
+  case 'list': {
+    const hsmUrl = opt('--hsm') ?? (existsSync(LOCAL) ? loadLocal().hsmUrl : undefined)
+    if (!hsmUrl) { console.error('usage: list [--pattern ETSEIC:] --hsm <url>'); process.exit(1) }
+    const pattern = opt('--pattern', 'ETSEIC:')
+    const hem = await connect(hsmUrl)
+    const pw = await getPassword()
+    const token = await hem.authorizePassword(pw, 'keymgmt:list')
+    const keys = await hem.searchKeys(token, pattern)   // SDK anchors: ^ + base64(pattern)
+    const dec = new TextDecoder()
+    for (const k of keys) {
+      const descr = k.description ? dec.decode(k.description).replace(/\n+$/, '') : '(no descr)'
+      console.log(`${k.kid}  ${descr.padEnd(34)}  [${k.type}]  "${k.label}"`)
+    }
+    console.log(`\n(${keys.length} key(s) matching "${pattern}")`)
+    break
+  }
   default:
-    console.log('usage: alice <register --hsm <url> [--handle h]|pubkey|topic <peer> --peer-pub <b64> [--network m] [--date d]>  [--password pw]')
+    console.log('usage: alice <register --hsm <url> [--handle h]|pubkey|list [--pattern ETSEIC:] --hsm <url>|topic <peer> --peer-pub <b64> [--network m] [--date d]>  [--password pw]')
 }
