@@ -39,6 +39,24 @@
     .kv { font-size:13px; color:var(--muted); margin:6px 0; word-break:break-all; }
     .kv b { color:var(--text); font-weight:600; }
     .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; background:#eef1fd; color:var(--accent); }
+    #main { width:560px; }
+    .idbar { display:flex; gap:10px; align-items:center; justify-content:space-between; padding-bottom:14px; border-bottom:1px solid var(--border); margin-bottom:14px; }
+    .idbar .who { font-size:13px; color:var(--muted); }
+    .idbar .who b { color:var(--text); }
+    textarea { width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); font-size:13px; font-family:ui-monospace,"Cascadia Code",monospace; resize:vertical; min-height:54px; }
+    textarea:focus { outline:2px solid var(--accent); outline-offset:1px; }
+    #chat { display:none; }
+    .chat-head { display:flex; align-items:center; gap:8px; font-size:14px; margin-bottom:8px; }
+    .chat-head b { color:var(--text); }
+    .transport { font-size:11px; color:var(--muted); margin-left:auto; }
+    #messages { height:300px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; background:var(--bg); padding:10px; font-size:14px; display:flex; flex-direction:column; gap:6px; }
+    .m { padding:6px 10px; border-radius:8px; max-width:80%; word-break:break-word; }
+    .m.me { align-self:flex-end; background:#eef1fd; }
+    .m.peer { align-self:flex-start; background:#eff2f7; }
+    .m.sys { align-self:center; color:var(--muted); font-size:12px; }
+    .composer { display:flex; gap:8px; margin-top:10px; }
+    .composer input { flex:1; }
+    .composer button { width:auto; margin:0; padding:10px 18px; }
   </style>
 </head>
 <body>
@@ -69,13 +87,32 @@
   </div>
 
   <div class="card" id="main">
-    <h1>⚡ Encedo Chat</h1>
-    <p class="sub">Zalogowano <span class="badge">tożsamość w HEM</span></p>
-    <div class="kv" id="me-handle"></div>
-    <div class="kv" id="me-kid"></div>
-    <div class="kv" id="me-fp"></div>
-    <p class="sub" style="margin-top:18px">Okno czatu — następny krok. Silnik rendezvous/wiadomości już działa (CLI); tu je wepniemy.</p>
-    <button id="logout" style="background:#eef1fd;color:var(--accent)">Wyloguj</button>
+    <div class="idbar">
+      <div class="who">Ja: <b id="me-handle"></b> <span class="badge" id="me-fp"></span></div>
+      <button id="logout" style="width:auto;margin:0;padding:7px 14px;background:#eef1fd;color:var(--accent)">Wyloguj</button>
+    </div>
+
+    <div id="join-form">
+      <label>Rozmówca — nazwa</label>
+      <input id="peer-name" type="text" placeholder="np. bob" autocomplete="off" />
+      <label>Klucz publiczny rozmówcy (base64)</label>
+      <textarea id="peer-pub" placeholder="wklej pubkey kontaktu…"></textarea>
+      <button id="join">Wejdź do pokoju</button>
+      <div class="msg" id="join-msg"></div>
+    </div>
+
+    <div id="chat">
+      <div class="chat-head">
+        <span class="dot" id="peer-dot"></span>
+        <b id="peer-title"></b>
+        <span class="transport">⚪ przez relay onchato · E2E (interim)</span>
+      </div>
+      <div id="messages"></div>
+      <div class="composer">
+        <input id="msg-input" type="text" placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off" />
+        <button id="send">Wyślij</button>
+      </div>
+    </div>
   </div>
 </body>
 </html>
