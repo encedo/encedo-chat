@@ -90,7 +90,7 @@ switch (cmd) {
     console.log(`peer:    ${peer}`)
     console.log(`network: ${p.networkId}    date: ${p.dateUTC} (UTC)`)
     console.log(`topic:   ${topicFromSecret(ss, p)}`)
-    console.log(`macKey:  ${announceMacKey(ss, p).toString('hex').slice(0, 24)}…`)
+    console.log(`macKey:  ${[...announceMacKey(ss, p).slice(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join('')}…`)
     break
   }
   case 'list': {

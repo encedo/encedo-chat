@@ -1,20 +1,17 @@
 /**
  * rendezvous.ts — deterministic rendezvous derivation (docs/PROTOCOL.md §5).
  *
- * SHARED module: used identically by Bob (software, Node) and by Alice's client
- * (over her HEM). Both sides compute the same ss = ECDH(IK_a, IK_b) and MUST run
- * this exact derivation, so the topic matches.
- *
- * Firmware phase note (CLAUDE.md): on current HEM firmware the HKDF here runs
- * client-side over the raw ECDH output. On newer firmware the same HKDF moves
- * into the device (/ecdh alg=HKDF-SHA256 + hkdf_salt/info/n). The derivation
- * (inputs, labels, output) is identical either way — only the execution site moves.
+ * SHARED, browser+Node engine: @noble/hashes (sync, no Buffer, no node:crypto).
+ * Both sides compute the same ss = ECDH(IK_a, IK_b) and MUST run this exact
+ * derivation so the topic matches. On current HEM firmware the HKDF runs
+ * client-side over the raw ECDH output; on newer fw it moves into the device
+ * (same inputs/labels/output — only the execution site moves). See CLAUDE.md.
  */
 
-import { hkdfSync } from 'node:crypto'
+import { hkdf } from '@noble/hashes/hkdf'
+import { sha256 } from '@noble/hashes/sha2'
 
-const RENDEZVOUS_SALT   = 'encedo-chat-rendezvous-v1'
-const ANNOUNCE_MAC_SALT = 'encedo-chat-announce-mac-v1'
+const enc = new TextEncoder()
 
 // RFC 4648 base32, lowercase, no padding (multiformats convention).
 const B32 = 'abcdefghijklmnopqrstuvwxyz234567'
@@ -35,22 +32,25 @@ export interface RvParams {
 }
 
 // info = network_id || 0x00 || date_UTC   (§5.1, with the v6 domain separator)
-function info({ networkId, dateUTC }: RvParams): Buffer {
-  return Buffer.concat([Buffer.from(networkId, 'utf8'), Buffer.from([0]), Buffer.from(dateUTC, 'utf8')])
+export function paramsInfo({ networkId, dateUTC }: RvParams): Uint8Array {
+  const n = enc.encode(networkId), d = enc.encode(dateUTC)
+  const out = new Uint8Array(n.length + 1 + d.length)
+  out.set(n, 0); out[n.length] = 0; out.set(d, n.length + 1)
+  return out
 }
 
-function hkdf(ss: Uint8Array, salt: string, p: RvParams, len = 32): Buffer {
-  return Buffer.from(hkdfSync('sha256', ss, Buffer.from(salt, 'utf8'), info(p), len))
+function derive(ss: Uint8Array, salt: string, p: RvParams, len = 32): Uint8Array {
+  return hkdf(sha256, ss, enc.encode(salt), paramsInfo(p), len)
 }
 
 /** Deterministic rendezvous topic (§5.1). ss = raw ECDH(IK_a, IK_b). */
 export function topicFromSecret(ss: Uint8Array, p: RvParams): string {
-  return base32(hkdf(ss, RENDEZVOUS_SALT, p)).slice(0, 52)
+  return base32(derive(ss, 'encedo-chat-rendezvous-v1', p)).slice(0, 52)
 }
 
-/** Announce MAC key (§5.5). */
-export function announceMacKey(ss: Uint8Array, p: RvParams): Buffer {
-  return hkdf(ss, ANNOUNCE_MAC_SALT, p)
+/** Announce MAC key (§5.5) — 32-byte Uint8Array. */
+export function announceMacKey(ss: Uint8Array, p: RvParams): Uint8Array {
+  return derive(ss, 'encedo-chat-announce-mac-v1', p)
 }
 
 export function todayUTC(): string {

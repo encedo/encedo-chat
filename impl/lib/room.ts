@@ -13,7 +13,7 @@
 import { buildAnnounce, verifyAnnounce } from './announce.ts'
 import { encryptMsg, tryDecryptMsg } from './msgcrypto.ts'
 
-export interface RoomKeys { macKey: Buffer; msgKey: Buffer }
+export interface RoomKeys { macKey: Uint8Array; msgKey: Uint8Array }
 export interface ChatOpts {
   onMessage?: (fromPeerId: string, text: string) => void
   onPresence?: (peerId: string, event: 'join' | 'leave') => void

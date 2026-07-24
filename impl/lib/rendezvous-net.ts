@@ -19,7 +19,7 @@ export interface JoinOpts {
   presenceTtlMs?: number
 }
 
-export function joinRoom(node, topic: string, macKey: Buffer, opts: JoinOpts = {}) {
+export function joinRoom(node, topic: string, macKey: Uint8Array, opts: JoinOpts = {}) {
   const onPeer = opts.onPeer ?? (() => {})
   const onLeave = opts.onLeave ?? (() => {})
   const heartbeatMs = opts.heartbeatMs ?? 60_000
