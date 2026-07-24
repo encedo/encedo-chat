@@ -57,6 +57,12 @@
     .composer { display:flex; gap:8px; margin-top:10px; }
     .composer input { flex:1; }
     .composer button { width:auto; margin:0; padding:10px 18px; }
+    #contacts { display:flex; flex-wrap:wrap; gap:6px; min-height:24px; margin-bottom:4px; }
+    .contact { padding:5px 12px; border:1px solid var(--border); border-radius:20px; font-size:13px; cursor:pointer; background:var(--bg); }
+    .contact:hover { border-color:var(--accent); color:var(--accent); }
+    .contact .x { color:var(--muted); margin-left:6px; }
+    .contact.empty { color:var(--muted); border:none; cursor:default; }
+    .row2 { display:flex; gap:8px; margin-top:14px; }
   </style>
 </head>
 <body>
@@ -93,11 +99,17 @@
     </div>
 
     <div id="join-form">
-      <label>Rozmówca — nazwa</label>
+      <label>Kontakty</label>
+      <div id="contacts"></div>
+
+      <label style="margin-top:16px">Rozmówca — nazwa</label>
       <input id="peer-name" type="text" placeholder="np. bob" autocomplete="off" />
       <label>Klucz publiczny rozmówcy (base64)</label>
       <textarea id="peer-pub" placeholder="wklej pubkey kontaktu…"></textarea>
-      <button id="join">Wejdź do pokoju</button>
+      <div class="row2">
+        <button id="join" style="flex:1;margin:0">Wejdź do pokoju</button>
+        <button id="save-contact" style="width:auto;margin:0;padding:11px 14px;background:#eef1fd;color:var(--accent)">Zapisz kontakt</button>
+      </div>
       <div class="msg" id="join-msg"></div>
     </div>
 

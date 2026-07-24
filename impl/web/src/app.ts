@@ -101,7 +101,37 @@ async function enterApp(hem: any, handle: string, kid: string, pub: string) {
   $('main').style.display = 'block'
   $('me-handle').textContent = handle
   $('me-fp').textContent = await fingerprint(pub)
+  renderContacts()
 }
+
+// ---- contacts (localStorage, per identity) ----
+type Contact = { name: string; pub: string }
+const contactsKey = () => 'ec-contacts-' + (session?.handle ?? '_')
+function loadContacts(): Contact[] { try { return JSON.parse(localStorage.getItem(contactsKey()) || '[]') } catch { return [] } }
+function saveContacts(list: Contact[]) { localStorage.setItem(contactsKey(), JSON.stringify(list)) }
+function upsertContact(name: string, pub: string) {
+  const list = loadContacts().filter((c) => c.name !== name)
+  list.push({ name, pub }); saveContacts(list); renderContacts()
+}
+function renderContacts() {
+  const box = $('contacts'); box.innerHTML = ''
+  const list = loadContacts()
+  if (!list.length) { const e = document.createElement('span'); e.className = 'contact empty'; e.textContent = '(brak — dodaj poniżej)'; box.appendChild(e); return }
+  for (const c of list) {
+    const el = document.createElement('span'); el.className = 'contact'; el.textContent = c.name; el.title = c.pub
+    el.addEventListener('click', () => { ($('peer-name') as HTMLInputElement).value = c.name; ($('peer-pub') as HTMLInputElement).value = c.pub })
+    const x = document.createElement('span'); x.className = 'x'; x.textContent = '×'
+    x.addEventListener('click', (e) => { e.stopPropagation(); saveContacts(loadContacts().filter((k) => k.name !== c.name)); renderContacts() })
+    el.appendChild(x); box.appendChild(el)
+  }
+}
+$('save-contact').addEventListener('click', () => {
+  const name = val('peer-name'), pub = val('peer-pub')
+  if (!name || !pub) { setMsg('join-msg', 'Podaj nazwę i klucz, aby zapisać.', 'err'); return }
+  upsertContact(name, pub); setMsg('join-msg', `Zapisano kontakt „${name}”.`, 'ok')
+})
+// Enter to submit on the login card
+$('pass').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') ($('go') as HTMLButtonElement).click() })
 
 // ---- join room + chat ----
 function appendMsg(kind: 'me' | 'peer' | 'sys', text: string) {
@@ -129,6 +159,7 @@ $('join').addEventListener('click', async () => {
     const node = await createPeer()
     await dial(node, RELAY)
 
+    upsertContact(peerName, peerPub)
     $('join-form').style.display = 'none'
     $('chat').style.display = 'block'
     $('peer-title').textContent = peerName
