@@ -19,7 +19,8 @@ import { HEM } from '../../hem-sdk-js/hem-sdk.js'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { topicFromSecret, announceMacKey, todayUTC } from '../lib/rendezvous.ts'
-import { joinRoom } from '../lib/rendezvous-net.ts'
+import { msgKeyFromSecret } from '../lib/msgcrypto.ts'
+import { runChatSession } from '../cli/chat-session.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { onchatoRelay } from '../net/onchato.ts'
 
@@ -111,25 +112,19 @@ switch (cmd) {
   case 'join': {
     const peer = rest[0]; const peerPub = opt('--peer-pub')
     if (!peer || !peerPub) { console.error('usage: join <peer> --peer-pub <b64> [--network m] [--date d] [--heartbeat ms]'); process.exit(1) }
-    const { hsmUrl, kid } = loadLocal()
+    const { hsmUrl, kid, handle } = loadLocal()
     const pr = { networkId: opt('--network', 'main'), dateUTC: opt('--date', todayUTC()) }
     const hem = await connect(hsmUrl)
     const pw = await getPassword()
     const useToken = await hem.authorizePassword(pw, `keymgmt:use:${kid}`)
     const ss = await hem.ecdh(useToken, kid, peerPub)   // Uint8Array, raw 32B
     const topic = topicFromSecret(ss, pr)
-    const macKey = announceMacKey(ss, pr)
+    const keys = { macKey: announceMacKey(ss, pr), msgKey: msgKeyFromSecret(ss, pr) }
     const { multiaddr: relay } = await onchatoRelay()
     const node = await createPeer()
     await dial(node, relay)
-    console.log(`[alice] room with "${peer}"  net=${pr.networkId} date=${pr.dateUTC}  topic=${topic.slice(0, 20)}…`)
-    console.log(`[alice] my PeerId ${node.peerId.toString()}  (via onchato relay; identity in HEM)`)
-    console.log(`[alice] waiting for ${peer}… (Ctrl-C to quit)`)
-    joinRoom(node, topic, macKey, {
-      heartbeatMs: Number(opt('--heartbeat', '15000')),
-      onPeer: (pid) => console.log(`[alice] 🟢 ${peer} IS IN THE ROOM — ${pid}`),
-      onLeave: (pid) => console.log(`[alice] ⚪ ${peer} left — ${pid}`),
-    })
+    console.log(`[alice] joined via onchato relay as ${node.peerId.toString().slice(0, 12)}… (identity in HEM)`)
+    runChatSession(node, topic, keys, handle, peer)
     break
   }
   default:

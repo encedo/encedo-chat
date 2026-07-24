@@ -10,6 +10,7 @@
   "scripts": {
     "test": "node --test test/*.test.ts",
     "meet": "node net/meet.ts",
+    "chat-test": "node net/chat-test.ts",
     "bob": "node bob/bob.ts",
     "alice": "node alice/alice.ts"
   },
