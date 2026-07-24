@@ -1,0 +1,3 @@
+[submodule "hem-sdk-js"]
+	path = hem-sdk-js
+	url = https://github.com/encedo/hem-sdk-js.git

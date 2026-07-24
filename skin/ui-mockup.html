@@ -1,0 +1,614 @@
+<title>Onchato v6 — mockup UI</title>
+<style>
+  :root {
+    --bg: #f8f8fb;
+    --card: #ffffff;
+    --border: #eff2f7;
+    --text: #343a40;
+    --body: #495057;
+    --muted: #74788d;
+    --accent: #556ee6;
+    --accent-ink: #ffffff;
+    --accent-soft: #eef1fd;
+    --bubble-in: #eef1fd;
+    --bubble-out: #eff2f7;
+    --good: #34c38f;
+    --good-soft: #e2f6ef;
+    --warn: #f1b44c;
+    --warn-soft: #fdf3e0;
+    --off: #c8ccd8;
+    --shadow: 0 10px 20px rgba(18, 38, 63, .03);
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #222736;
+      --card: #2a3042;
+      --border: #32394e;
+      --text: #d7dcf1;
+      --body: #a6b0cf;
+      --muted: #79829c;
+      --accent: #6579e0;
+      --accent-soft: #2e3552;
+      --bubble-in: #2e3552;
+      --bubble-out: #32394e;
+      --good-soft: #263f42;
+      --warn-soft: #3e3a33;
+      --off: #4a5170;
+      --shadow: 0 10px 20px rgba(0, 0, 0, .15);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #222736; --card: #2a3042; --border: #32394e; --text: #d7dcf1;
+    --body: #a6b0cf; --muted: #79829c; --accent: #6579e0; --accent-soft: #2e3552;
+    --bubble-in: #2e3552; --bubble-out: #32394e; --good-soft: #263f42;
+    --warn-soft: #3e3a33; --off: #4a5170; --shadow: 0 10px 20px rgba(0,0,0,.15);
+  }
+  :root[data-theme="light"] {
+    --bg: #f8f8fb; --card: #ffffff; --border: #eff2f7; --text: #343a40;
+    --body: #495057; --muted: #74788d; --accent: #556ee6; --accent-soft: #eef1fd;
+    --bubble-in: #eef1fd; --bubble-out: #eff2f7; --good-soft: #e2f6ef;
+    --warn-soft: #fdf3e0; --off: #c8ccd8; --shadow: 0 10px 20px rgba(18,38,63,.03);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: "Poppins", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--body);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  button { font: inherit; cursor: pointer; }
+  input { font: inherit; }
+  button:focus-visible, input:focus-visible, .contact:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+
+  .app {
+    display: flex; gap: 16px;
+    max-width: 1280px; margin: 0 auto; padding: 16px;
+    height: 100vh; min-height: 560px;
+  }
+
+  /* ── Sidebar ──────────────────────────────── */
+  .sidebar {
+    width: 330px; flex-shrink: 0; display: flex; flex-direction: column;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .me {
+    display: flex; align-items: center; gap: 10px;
+    padding: 16px; border-bottom: 1px solid var(--border);
+  }
+  .me .info { flex: 1; min-width: 0; }
+  .me .name { font-weight: 600; color: var(--text); }
+  .fp {
+    font-size: 11.5px; color: var(--muted);
+    font-variant-numeric: tabular-nums; letter-spacing: .03em;
+  }
+  .icon-btn {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+    display: grid; place-items: center; font-size: 15px;
+    transition: border-color .15s;
+  }
+  .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .avatar {
+    width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+    display: grid; place-items: center;
+    font-weight: 600; font-size: 13px; color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .search-wrap { padding: 12px 16px 4px; }
+  .search-wrap input {
+    width: 100%; padding: 9px 12px;
+    background: var(--bg); color: var(--body);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  .search-wrap input::placeholder { color: var(--muted); }
+
+  .tabs { display: flex; gap: 6px; padding: 12px 16px; }
+  .tab {
+    flex: 1; padding: 8px 0; text-align: center;
+    background: none; border: none; border-radius: 8px;
+    color: var(--muted); font-weight: 500; transition: background .15s;
+  }
+  .tab:hover { background: var(--bg); }
+  .tab.active { background: var(--accent); color: var(--accent-ink); }
+
+  .pane { flex: 1; overflow-y: auto; padding: 4px 8px 8px; }
+  .pane-label {
+    font-size: 11px; font-weight: 600; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--muted); padding: 10px 12px 4px;
+  }
+  .contact {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 10px 12px; border: none; background: none; text-align: left;
+    border-radius: 8px; color: var(--body); transition: background .15s;
+  }
+  .contact:hover { background: var(--bg); }
+  .contact.active { background: var(--accent-soft); }
+  .contact .c-name { font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 6px; }
+  .contact .c-sub { font-size: 12px; color: var(--muted); }
+  .contact .c-info { flex: 1; min-width: 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .dot.in-room { background: var(--good); }
+  .dot.away { background: var(--off); }
+  .vbadge { font-size: 11px; color: var(--good); }
+
+  .profile-strip {
+    border-top: 1px solid var(--border); padding: 10px 16px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  }
+  .profile-strip .lbl { font-size: 12px; color: var(--muted); }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11.5px; font-weight: 600;
+    padding: 3px 10px; border-radius: 20px;
+    background: var(--accent-soft); color: var(--accent);
+    border: none; transition: filter .15s;
+  }
+  button.chip:hover { filter: brightness(.95); }
+
+  /* ── Chat panel ───────────────────────────── */
+  .chat {
+    flex: 1; min-width: 0; display: flex; flex-direction: column;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .chat-head {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+  }
+  .chat-head .who { flex: 1; min-width: 180px; }
+  .chat-head .who .name {
+    font-weight: 600; font-size: 15.5px; color: var(--text);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .chat-head .who .sub { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .badge {
+    font-size: 11.5px; font-weight: 600; padding: 4px 12px; border-radius: 20px;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .badge.direct { background: var(--good-soft); color: var(--good); }
+  .badge.relay { background: var(--bubble-out); color: var(--muted); }
+  .badge.hand { background: var(--warn-soft); color: var(--warn); }
+  .badge.rotate {
+    background: var(--bg); color: var(--muted);
+    font-variant-numeric: tabular-nums; border: 1px solid var(--border);
+  }
+
+  .session-note {
+    margin: 14px 20px 0; padding: 9px 14px;
+    background: var(--bg); border: 1px dashed var(--border); border-radius: 8px;
+    font-size: 12px; color: var(--muted); text-align: center;
+  }
+
+  .messages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; }
+  .row.out { justify-content: flex-end; }
+  .bubble {
+    max-width: 62%; padding: 10px 14px; border-radius: 10px;
+    box-shadow: var(--shadow);
+  }
+  .row.in .bubble { background: var(--bubble-in); border-bottom-left-radius: 2px; }
+  .row.out .bubble { background: var(--bubble-out); border-bottom-right-radius: 2px; }
+  .bubble .b-who { font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 2px; }
+  .row.out .bubble .b-who { color: var(--muted); text-align: right; }
+  .bubble .b-text { color: var(--text); overflow-wrap: break-word; }
+  .bubble .b-meta {
+    font-size: 11px; color: var(--muted); margin-top: 4px;
+    font-variant-numeric: tabular-nums; display: flex; gap: 6px;
+  }
+  .row.out .bubble .b-meta { justify-content: flex-end; }
+  .sysline { text-align: center; font-size: 12px; color: var(--muted); }
+
+  .composer {
+    display: flex; gap: 10px; padding: 14px 20px;
+    border-top: 1px solid var(--border);
+  }
+  .composer input {
+    flex: 1; padding: 11px 14px;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  .composer input::placeholder { color: var(--muted); }
+  .btn-send {
+    background: var(--accent); color: var(--accent-ink); border: none;
+    padding: 0 22px; border-radius: 8px; font-weight: 600;
+    transition: filter .15s;
+  }
+  .btn-send:hover { filter: brightness(1.08); }
+
+  /* empty state */
+  .empty {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 10px; padding: 32px; text-align: center;
+  }
+  .empty .big { font-size: 34px; }
+  .empty h3 { margin: 0; color: var(--text); font-size: 16px; }
+  .empty p { margin: 0; max-width: 44ch; font-size: 13px; color: var(--muted); }
+  .roomid {
+    font-variant-numeric: tabular-nums; letter-spacing: .04em;
+    background: var(--bg); border: 1px solid var(--border);
+    padding: 3px 10px; border-radius: 6px; font-size: 12px; color: var(--body);
+  }
+
+  /* network tab */
+  .node {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 8px;
+  }
+  .node .n-name { font-weight: 600; color: var(--text); font-size: 13px; }
+  .node .n-sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .node .n-info { flex: 1; }
+  .node .lat {
+    font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+    padding: 3px 9px; border-radius: 20px; background: var(--bg);
+    border: 1px solid var(--border); color: var(--muted);
+  }
+  .node.active-node .lat { background: var(--good-soft); color: var(--good); border-color: transparent; }
+
+  /* settings drawer */
+  .scrim {
+    position: fixed; inset: 0; background: rgba(18, 38, 63, .35);
+    display: none; z-index: 10;
+  }
+  .scrim.open { display: block; }
+  .drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; width: 360px; max-width: 92vw;
+    background: var(--card); border-left: 1px solid var(--border);
+    z-index: 11; padding: 20px; overflow-y: auto;
+    transform: translateX(100%); transition: transform .2s ease;
+  }
+  .drawer.open { transform: translateX(0); }
+  .drawer h2 { margin: 0 0 4px; font-size: 16px; color: var(--text); }
+  .drawer .d-sub { font-size: 12px; color: var(--muted); margin-bottom: 18px; }
+  .d-head { display: flex; align-items: start; justify-content: space-between; }
+  .opt {
+    display: flex; gap: 10px; padding: 12px; border: 1px solid var(--border);
+    border-radius: 10px; margin-bottom: 10px; cursor: pointer;
+    transition: border-color .15s;
+  }
+  .opt:hover { border-color: var(--accent); }
+  .opt.sel { border-color: var(--accent); background: var(--accent-soft); }
+  .opt input { margin-top: 3px; accent-color: var(--accent); }
+  .opt .o-name { font-weight: 600; color: var(--text); font-size: 13.5px; }
+  .opt .o-desc { font-size: 12px; color: var(--muted); }
+  .d-section {
+    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); margin: 18px 0 8px;
+  }
+  .kv { display: flex; justify-content: space-between; font-size: 12.5px; padding: 5px 0; }
+  .kv .k { color: var(--muted); }
+  .kv .v { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 860px) {
+    .app { flex-direction: column; height: auto; }
+    .sidebar { width: 100%; }
+    .pane { max-height: 300px; }
+    .chat { min-height: 70vh; }
+  }
+</style>
+
+<div class="app">
+  <aside class="sidebar">
+    <div class="me">
+      <div class="avatar">KR</div>
+      <div class="info">
+        <div class="name">krutecki</div>
+        <div class="fp">🔑 A3F2·9C41·D08B <span style="color:var(--good)">· HEM</span></div>
+      </div>
+      <button class="icon-btn" id="btn-settings" title="Ustawienia" aria-label="Ustawienia">⚙</button>
+    </div>
+
+    <div class="search-wrap"><input type="text" placeholder="Szukaj kontaktu…" aria-label="Szukaj kontaktu"></div>
+
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-pane="contacts" role="tab">Kontakty</button>
+      <button class="tab" data-pane="groups" role="tab">Grupy</button>
+      <button class="tab" data-pane="network" role="tab">Sieć</button>
+    </div>
+
+    <div class="pane" id="pane-contacts"></div>
+
+    <div class="pane" id="pane-groups" hidden>
+      <div class="pane-label">Pokoje grupowe (HEM)</div>
+      <button class="contact" data-id="ops">
+        <span class="dot in-room"></span>
+        <div class="avatar" style="border-radius:10px">OP</div>
+        <div class="c-info">
+          <div class="c-name">zespół-ops</div>
+          <div class="c-sub">3 z 5 w pokoju</div>
+        </div>
+      </button>
+    </div>
+
+    <div class="pane" id="pane-network" hidden>
+      <div class="pane-label">Sieć: operator (onchato)</div>
+      <div class="node active-node">
+        <span class="dot in-room"></span>
+        <div class="n-info">
+          <div class="n-name">bs1.onchato.com</div>
+          <div class="n-sub">aktywny · 12D3Koo…9fQ2</div>
+        </div>
+        <span class="lat">24 ms</span>
+      </div>
+      <div class="node">
+        <span class="dot away"></span>
+        <div class="n-info">
+          <div class="n-name">bs2.onchato.com</div>
+          <div class="n-sub">zapasowy</div>
+        </div>
+        <span class="lat">61 ms</span>
+      </div>
+      <div class="node">
+        <span class="dot away"></span>
+        <div class="n-info">
+          <div class="n-name">bs3.onchato.com</div>
+          <div class="n-sub">zapasowy</div>
+        </div>
+        <span class="lat">142 ms</span>
+      </div>
+      <div class="session-note" style="margin:14px 4px 0">
+        Lista węzłów podpisana kluczem operatora · odświeżona dziś
+      </div>
+    </div>
+
+    <div class="profile-strip">
+      <span class="lbl">Profil bezpieczeństwa</span>
+      <button class="chip" id="chip-profile">P1 · prywatny</button>
+    </div>
+  </aside>
+
+  <main class="chat">
+    <div class="chat-head" id="chat-head"></div>
+    <div id="chat-body" style="display:flex;flex-direction:column;flex:1;min-height:0"></div>
+  </main>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="Ustawienia">
+  <div class="d-head">
+    <div>
+      <h2>Ustawienia</h2>
+      <div class="d-sub">Profil = preset transportu i sieci</div>
+    </div>
+    <button class="icon-btn" id="btn-close-drawer" aria-label="Zamknij">✕</button>
+  </div>
+
+  <div class="d-section">Profil bezpieczeństwa</div>
+  <label class="opt sel" data-p="P1">
+    <input type="radio" name="profile" value="P1" checked>
+    <div>
+      <div class="o-name">P1 · Prywatny</div>
+      <div class="o-desc">WebRTC direct dozwolone (najniższa latencja). Rozmówca widzi Twój adres IP. Sieć operatora.</div>
+    </div>
+  </label>
+  <label class="opt" data-p="P2">
+    <input type="radio" name="profile" value="P2">
+    <div>
+      <div class="o-name">P2 · Wrogie otoczenie</div>
+      <div class="o-desc">Wyłącznie relay — IP niewidoczne dla rozmówcy. Zgodne z Tor/VPN. Tylko aplikacja instalowana.</div>
+    </div>
+  </label>
+  <label class="opt" data-p="P3">
+    <input type="radio" name="profile" value="P3">
+    <div>
+      <div class="o-name">P3 · Sieć własna</div>
+      <div class="o-desc">Relay-only na własnych węzłach z własnym kluczem podpisu. Operator poza granicą zaufania.</div>
+    </div>
+  </label>
+
+  <div class="d-section">Sesja</div>
+  <div class="kv"><span class="k">Tożsamość</span><span class="v">HEM · A3F2·9C41·D08B</span></div>
+  <div class="kv"><span class="k">PeerId (efemeryczny)</span><span class="v">12D3Koo…tR8x</span></div>
+  <div class="kv"><span class="k">Rotacja PeerId</span><span class="v">razem z pokojem</span></div>
+  <div class="kv"><span class="k">Historia</span><span class="v">brak — sesja efemeryczna</span></div>
+</aside>
+
+<script>
+(function () {
+  'use strict'
+
+  // ── data ──────────────────────────────────────────────────────────────────
+  const contacts = {
+    aleks: {
+      name: 'Aleks', initials: 'AL', inRoom: true, verified: true, transport: 'direct',
+      room: '#4f2a…c9e1',
+      msgs: [
+        { who: 'Aleks', dir: 'in', text: 'Jestem. Masz te logi z bs1?', t: '10:00' },
+        { who: 'Ty', dir: 'out', text: 'Mam. Wygląda na czysty timeout po stronie ISP, nie nasz problem.', t: '10:02', via: 'direct' },
+        { who: 'Aleks', dir: 'in', text: 'Dobra, to zamykam wątek. Jutro ta sama pora?', t: '10:06' },
+        { who: 'Ty', dir: 'out', text: 'Jutro pokój i tak się przelicza — po prostu wejdź po 9:00.', t: '10:06', via: 'direct' }
+      ]
+    },
+    nadia: {
+      name: 'Nadia', initials: 'NA', inRoom: true, verified: true, transport: 'relay',
+      room: '#b81d…44a7',
+      msgs: [
+        { who: 'Nadia', dir: 'in', text: 'Siedzę za firmowym NAT-em, więc pewnie lecimy przez relay.', t: '09:41' },
+        { who: 'Ty', dir: 'out', text: 'Tak, widzę ⚪ — węzeł i tak nie czyta treści, spokojnie.', t: '09:42', via: 'relay' }
+      ]
+    },
+    borys: {
+      name: 'Borys', initials: 'BO', inRoom: false, verified: false, transport: null,
+      room: '#77c0…12df', msgs: []
+    },
+    ops: {
+      name: 'zespół-ops', initials: 'OP', inRoom: true, verified: true, transport: 'mixed',
+      group: true, room: '#a2e9…07bb',
+      msgs: [
+        { who: 'Marek', dir: 'in', text: 'Nowy obraz dockera węzła wypchnięty, tag 0.4.1.', t: '08:15' },
+        { who: 'Ola', dir: 'in', text: 'Postawiłam na nim testową sieć — 15 minut z domeną, zgodnie z manualem 👌', t: '08:31' },
+        { who: 'Ty', dir: 'out', text: 'Super. CID źródeł zgadza się z podpisanym tagiem, sprawdziłem.', t: '08:40', via: 'direct' }
+      ]
+    }
+  }
+
+  let current = 'aleks'
+  let profile = 'P1'
+
+  const $ = (id) => document.getElementById(id)
+  const esc = (s) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
+  // ── sidebar ───────────────────────────────────────────────────────────────
+  function renderContacts() {
+    const pane = $('pane-contacts')
+    pane.innerHTML = '<div class="pane-label">Kontakty (klucze z HEM)</div>'
+    for (const id of ['aleks', 'nadia', 'borys']) {
+      const c = contacts[id]
+      const b = document.createElement('button')
+      b.className = 'contact' + (id === current ? ' active' : '')
+      b.dataset.id = id
+      b.innerHTML =
+        '<span class="dot ' + (c.inRoom ? 'in-room' : 'away') + '"></span>' +
+        '<div class="avatar">' + c.initials + '</div>' +
+        '<div class="c-info"><div class="c-name">' + c.name +
+        (c.verified ? ' <span class="vbadge" title="Klucz zweryfikowany">✓</span>' : '') +
+        '</div><div class="c-sub">' + (c.inRoom ? 'w pokoju' : 'poza pokojem') + '</div></div>'
+      b.addEventListener('click', () => { current = id; renderAll() })
+      pane.appendChild(b)
+    }
+  }
+
+  document.querySelectorAll('#pane-groups .contact').forEach(b =>
+    b.addEventListener('click', () => { current = b.dataset.id; renderAll() }))
+
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === t))
+    for (const p of ['contacts', 'groups', 'network'])
+      $('pane-' + p).hidden = (t.dataset.pane !== p)
+  }))
+
+  // ── transport per profile ─────────────────────────────────────────────────
+  function effectiveTransport(c) {
+    if (!c.inRoom) return null
+    if (profile !== 'P1') return 'relay'      // P2/P3: relay-only
+    return c.transport
+  }
+  function transportBadge(tr) {
+    if (tr === 'direct') return '<span class="badge direct">🟢 WebRTC Direct</span>'
+    if (tr === 'mixed') return '<span class="badge direct">🟢 Direct 2</span><span class="badge relay">⚪ Relay 1</span>'
+    if (tr === 'relay') return '<span class="badge relay">⚪ Relay (węzeł ślepy)</span>'
+    return ''
+  }
+
+  // ── chat panel ────────────────────────────────────────────────────────────
+  function renderHead() {
+    const c = contacts[current]
+    const tr = effectiveTransport(c)
+    $('chat-head').innerHTML =
+      '<div class="avatar"' + (c.group ? ' style="border-radius:10px"' : '') + '>' + c.initials + '</div>' +
+      '<div class="who"><div class="name">' + c.name +
+      (c.verified ? ' <span class="vbadge" title="Klucz zweryfikowany w HEM">✓ zweryfikowany</span>' : '') +
+      '</div><div class="sub">' +
+      (c.inRoom
+        ? '<span class="dot in-room"></span> ' + (c.group ? '3 z 5 w pokoju' : 'w pokoju') + ' · <span class="roomid" style="padding:1px 7px">' + c.room + '</span>'
+        : '<span class="dot away"></span> poza pokojem') +
+      '</div></div>' +
+      '<div class="badges">' + (tr ? transportBadge(tr) : '') +
+      '<span class="badge rotate" title="Deterministyczna rotacja pokoju (UTC)">↻ rotacja za <span id="rot">–:–:–</span></span></div>'
+  }
+
+  function renderBody() {
+    const c = contacts[current]
+    const body = $('chat-body')
+
+    if (!c.inRoom) {
+      body.innerHTML =
+        '<div class="empty"><div class="big">🌳</div>' +
+        '<h3>' + c.name + ' nie jest w pokoju</h3>' +
+        '<p>Wspólny pokój na dziś jest już wyliczony z Waszych kluczy i daty — nikt inny go nie zna. Wiadomości nie da się zostawić: to spotkanie, nie skrzynka.</p>' +
+        '<span class="roomid">dzisiejszy pokój: ' + c.room + '</span>' +
+        '<p>Czekam na obecność drugiej strony…</p></div>'
+      return
+    }
+
+    let html = '<div class="session-note">Sesja efemeryczna — brak historii. Wiadomości istnieją tylko na ekranach uczestników.</div>'
+    html += '<div class="messages" id="messages">'
+    html += '<div class="sysline">— pokój otwarty · klucz sesji uzgodniony (efemeryczny ECDH) —</div>'
+    for (const m of c.msgs) html += bubbleHTML(m)
+    html += '</div>'
+    html += '<div class="composer">' +
+      '<input type="text" id="msg-input" placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off" aria-label="Wiadomość">' +
+      '<button class="btn-send" id="btn-send">Wyślij ➤</button></div>'
+    body.innerHTML = html
+
+    $('btn-send').addEventListener('click', send)
+    $('msg-input').addEventListener('keydown', e => { if (e.key === 'Enter') send() })
+    const box = $('messages'); box.scrollTop = box.scrollHeight
+  }
+
+  function bubbleHTML(m) {
+    const via = m.dir === 'out'
+      ? ' · ' + ((m.via === 'direct') ? '🟢 direct' : '⚪ relay')
+      : ''
+    return '<div class="row ' + m.dir + '"><div class="bubble">' +
+      '<div class="b-who">' + esc(m.who) + '</div>' +
+      '<div class="b-text">' + esc(m.text) + '</div>' +
+      '<div class="b-meta">🕓 ' + m.t + via + '</div></div></div>'
+  }
+
+  function send() {
+    const inp = $('msg-input')
+    const text = inp.value.trim()
+    if (!text) return
+    inp.value = ''
+    const c = contacts[current]
+    const now = new Date()
+    const t = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0')
+    const via = effectiveTransport(c) === 'relay' ? 'relay' : 'direct'
+    const m = { who: 'Ty', dir: 'out', text, t, via }
+    c.msgs.push(m)
+    const box = $('messages')
+    box.insertAdjacentHTML('beforeend', bubbleHTML(m))
+    box.scrollTop = box.scrollHeight
+  }
+
+  function renderAll() { renderContacts(); renderHead(); renderBody() }
+
+  // ── room rotation countdown (next midnight UTC) ───────────────────────────
+  function tick() {
+    const el = $('rot')
+    if (!el) return
+    const now = new Date()
+    const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1))
+    let s = Math.floor((next - now) / 1000)
+    const h = Math.floor(s / 3600); s -= h * 3600
+    const m = Math.floor(s / 60); s -= m * 60
+    el.textContent = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
+  }
+  setInterval(tick, 1000)
+
+  // ── settings drawer ───────────────────────────────────────────────────────
+  const drawer = $('drawer'), scrim = $('scrim')
+  const openDrawer = () => { drawer.classList.add('open'); scrim.classList.add('open') }
+  const closeDrawer = () => { drawer.classList.remove('open'); scrim.classList.remove('open') }
+  $('btn-settings').addEventListener('click', openDrawer)
+  $('chip-profile').addEventListener('click', openDrawer)
+  $('btn-close-drawer').addEventListener('click', closeDrawer)
+  scrim.addEventListener('click', closeDrawer)
+
+  const profileNames = { P1: 'P1 · prywatny', P2: 'P2 · wrogie otoczenie', P3: 'P3 · sieć własna' }
+  document.querySelectorAll('.opt input').forEach(r => r.addEventListener('change', () => {
+    profile = r.value
+    document.querySelectorAll('.opt').forEach(o => o.classList.toggle('sel', o.dataset.p === profile))
+    $('chip-profile').textContent = profileNames[profile]
+    document.querySelector('#pane-network .pane-label').textContent =
+      profile === 'P3' ? 'Sieć: własna (--network moja-siec)' : 'Sieć: operator (onchato)'
+    renderHead(); renderBody()
+  }))
+
+  renderAll(); tick()
+})()
+</script>
