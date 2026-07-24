@@ -18,10 +18,10 @@ import { onchatoRelay } from './onchato.ts'
 
 const aPriv = rawToPriv(Buffer.alloc(32, 0xa1))
 const bPriv = rawToPriv(Buffer.alloc(32, 0xb2))
-const ss = diffieHellman({ privateKey: aPriv, publicKey: createPublicKey(bPriv) })
+const ss = new Uint8Array(diffieHellman({ privateKey: aPriv, publicKey: createPublicKey(bPriv) }))
 const p = { networkId: 'test', dateUTC: '2026-01-01' }
-const topic = topicFromSecret(ss, p)
-const macKey = announceMacKey(ss, p)
+const topic = await topicFromSecret(ss, p)
+const macKey = await announceMacKey(ss, p)
 
 const { multiaddr: relay } = await onchatoRelay()
 const na = await createPeer()

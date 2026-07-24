@@ -1,15 +1,14 @@
 /**
  * rendezvous.ts — deterministic rendezvous derivation (docs/PROTOCOL.md §5).
  *
- * SHARED, browser+Node engine: @noble/hashes (sync, no Buffer, no node:crypto).
+ * SHARED, browser+Node engine on WebCrypto only (no third-party crypto lib).
  * Both sides compute the same ss = ECDH(IK_a, IK_b) and MUST run this exact
  * derivation so the topic matches. On current HEM firmware the HKDF runs
  * client-side over the raw ECDH output; on newer fw it moves into the device
  * (same inputs/labels/output — only the execution site moves). See CLAUDE.md.
  */
 
-import { hkdf } from '@noble/hashes/hkdf'
-import { sha256 } from '@noble/hashes/sha2'
+import { subtle, hkdfBits } from './wc.ts'
 
 const enc = new TextEncoder()
 
@@ -39,18 +38,16 @@ export function paramsInfo({ networkId, dateUTC }: RvParams): Uint8Array {
   return out
 }
 
-function derive(ss: Uint8Array, salt: string, p: RvParams, len = 32): Uint8Array {
-  return hkdf(sha256, ss, enc.encode(salt), paramsInfo(p), len)
-}
-
 /** Deterministic rendezvous topic (§5.1). ss = raw ECDH(IK_a, IK_b). */
-export function topicFromSecret(ss: Uint8Array, p: RvParams): string {
-  return base32(derive(ss, 'encedo-chat-rendezvous-v1', p)).slice(0, 52)
+export async function topicFromSecret(ss: Uint8Array, p: RvParams): Promise<string> {
+  const mat = await hkdfBits(ss, enc.encode('encedo-chat-rendezvous-v1'), paramsInfo(p), 32)
+  return base32(mat).slice(0, 52)
 }
 
-/** Announce MAC key (§5.5) — 32-byte Uint8Array. */
-export function announceMacKey(ss: Uint8Array, p: RvParams): Uint8Array {
-  return derive(ss, 'encedo-chat-announce-mac-v1', p)
+/** Announce MAC key as a non-extractable HMAC CryptoKey (§5.5). */
+export async function announceMacKey(ss: Uint8Array, p: RvParams): Promise<CryptoKey> {
+  const raw = await hkdfBits(ss, enc.encode('encedo-chat-announce-mac-v1'), paramsInfo(p), 32)
+  return subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
 }
 
 export function todayUTC(): string {

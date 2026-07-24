@@ -1,39 +1,38 @@
 /**
- * msgcrypto.ts — INTERIM message encryption for the CLI/GUI (pre-EH-2).
+ * msgcrypto.ts — INTERIM message encryption for the CLI/GUI (pre-EH-2). WebCrypto only.
  *
  * ⚠️ PLACEHOLDER. Real scheme is EH-2 + Double Ratchet (docs/PROTOCOL.md §6–7),
  * held for the cryptographer. Static AES-256-GCM key from the pair secret ss
  * (same ss as topic/macKey): real E2E vs the relay, but NO forward secrecy / no
- * ratchet. Interim only. Browser+Node: @noble/ciphers, no Buffer.
+ * ratchet. Interim only. Key is a non-extractable AES-GCM CryptoKey.
  */
 
-import { hkdf } from '@noble/hashes/hkdf'
-import { sha256 } from '@noble/hashes/sha2'
-import { randomBytes } from '@noble/hashes/utils'
-import { gcm } from '@noble/ciphers/aes'
-import { fromString, toString } from 'uint8arrays'
+import { subtle, randomBytes, b64, unb64 } from './wc.ts'
 import { paramsInfo, type RvParams } from './rendezvous.ts'
+import { hkdfBits } from './wc.ts'
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
 
-export function msgKeyFromSecret(ss: Uint8Array, p: RvParams): Uint8Array {
-  return hkdf(sha256, ss, enc.encode('encedo-chat-msg-v0-INTERIM'), paramsInfo(p), 32)
+export async function msgKeyFromSecret(ss: Uint8Array, p: RvParams): Promise<CryptoKey> {
+  const raw = await hkdfBits(ss, enc.encode('encedo-chat-msg-v0-INTERIM'), paramsInfo(p), 32)
+  return subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
 }
 
-/** AES-256-GCM (nonce 12B, tag appended to ct by @noble). Wire: {"k":"m","iv":b64,"ct":b64}. */
-export function encryptMsg(text: string, key: Uint8Array): Uint8Array {
+/** AES-256-GCM (12B iv, tag appended by WebCrypto). Wire: {"k":"m","iv":b64,"ct":b64}. */
+export async function encryptMsg(text: string, key: CryptoKey): Promise<Uint8Array> {
   const iv = randomBytes(12)
-  const ct = gcm(key, iv).encrypt(enc.encode(text))
-  return fromString(JSON.stringify({ k: 'm', iv: toString(iv, 'base64'), ct: toString(ct, 'base64') }), 'utf8')
+  const ct = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(text)))
+  return enc.encode(JSON.stringify({ k: 'm', iv: b64(iv), ct: b64(ct) }))
 }
 
 /** Returns plaintext, or null if this isn't a chat message / wrong key / tampered. */
-export function tryDecryptMsg(data: Uint8Array, key: Uint8Array): string | null {
+export async function tryDecryptMsg(data: Uint8Array, key: CryptoKey): Promise<string | null> {
   let m: any
-  try { m = JSON.parse(toString(data, 'utf8')) } catch { return null }
+  try { m = JSON.parse(dec.decode(data)) } catch { return null }
   if (m?.k !== 'm') return null
   try {
-    return dec.decode(gcm(key, fromString(m.iv, 'base64')).decrypt(fromString(m.ct, 'base64')))
+    const pt = await subtle.decrypt({ name: 'AES-GCM', iv: unb64(m.iv) }, key, unb64(m.ct))
+    return dec.decode(new Uint8Array(pt))
   } catch { return null }
 }

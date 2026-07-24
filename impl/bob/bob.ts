@@ -67,8 +67,7 @@ switch (cmd) {
     const ss = ks.sharedSecret(peer)
     console.log(`peer:    ${peer}`)
     console.log(`network: ${p.networkId}    date: ${p.dateUTC} (UTC)`)
-    console.log(`topic:   ${topicFromSecret(ss, p)}`)
-    console.log(`macKey:  ${[...announceMacKey(ss, p).slice(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join('')}… (announce HMAC key)`)
+    console.log(`topic:   ${await topicFromSecret(ss, p)}`)
     break
   }
   case 'join': {
@@ -77,8 +76,8 @@ switch (cmd) {
     const ks = requireKeystore()
     const pr = { networkId: opt('--network', 'main')!, dateUTC: opt('--date', todayUTC())! }
     const ss = ks.sharedSecret(peer)
-    const topic = topicFromSecret(ss, pr)
-    const keys = { macKey: announceMacKey(ss, pr), msgKey: msgKeyFromSecret(ss, pr) }
+    const topic = await topicFromSecret(ss, pr)
+    const keys = { macKey: await announceMacKey(ss, pr), msgKey: await msgKeyFromSecret(ss, pr) }
     const { multiaddr: relay } = await onchatoRelay()
     const node = await createPeer()
     await dial(node, relay)

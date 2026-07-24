@@ -89,8 +89,7 @@ switch (cmd) {
     const ss = await hem.ecdh(useToken, kid, peerPub)   // Uint8Array, raw 32-byte shared secret
     console.log(`peer:    ${peer}`)
     console.log(`network: ${p.networkId}    date: ${p.dateUTC} (UTC)`)
-    console.log(`topic:   ${topicFromSecret(ss, p)}`)
-    console.log(`macKey:  ${[...announceMacKey(ss, p).slice(0, 12)].map((b) => b.toString(16).padStart(2, '0')).join('')}…`)
+    console.log(`topic:   ${await topicFromSecret(ss, p)}`)
     break
   }
   case 'list': {
@@ -118,8 +117,8 @@ switch (cmd) {
     const pw = await getPassword()
     const useToken = await hem.authorizePassword(pw, `keymgmt:use:${kid}`)
     const ss = await hem.ecdh(useToken, kid, peerPub)   // Uint8Array, raw 32B
-    const topic = topicFromSecret(ss, pr)
-    const keys = { macKey: announceMacKey(ss, pr), msgKey: msgKeyFromSecret(ss, pr) }
+    const topic = await topicFromSecret(ss, pr)
+    const keys = { macKey: await announceMacKey(ss, pr), msgKey: await msgKeyFromSecret(ss, pr) }
     const { multiaddr: relay } = await onchatoRelay()
     const node = await createPeer()
     await dial(node, relay)

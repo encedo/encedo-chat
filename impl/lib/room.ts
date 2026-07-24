@@ -2,18 +2,17 @@
  * room.ts — presence + interim encrypted chat over one rendezvous topic.
  *
  * Combines authenticated presence (Announce, §5.5) and interim encrypted chat
- * messages (msgcrypto) on the same GossipSub topic.
+ * messages (msgcrypto) on the same GossipSub topic. WebCrypto (async).
  *
- * NOTE (interim): message content rides GossipSub through the relay here (the v5
- * model — relay sees ciphertext + timing). The target design moves content to a
- * direct stream / blind circuit-relay data plane (docs/PROTOCOL.md §13); that is
- * a later step, together with EH-2. Fine for the CLI now.
+ * NOTE (interim): message content rides GossipSub through the relay here (v5
+ * model — relay sees ciphertext + timing). Target design moves content to a
+ * direct stream / blind circuit-relay data plane (docs/PROTOCOL.md §13). Later.
  */
 
 import { buildAnnounce, verifyAnnounce } from './announce.ts'
 import { encryptMsg, tryDecryptMsg } from './msgcrypto.ts'
 
-export interface RoomKeys { macKey: Uint8Array; msgKey: Uint8Array }
+export interface RoomKeys { macKey: CryptoKey; msgKey: CryptoKey }
 export interface ChatOpts {
   onMessage?: (fromPeerId: string, text: string) => void
   onPresence?: (peerId: string, event: 'join' | 'leave') => void
@@ -29,14 +28,12 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const seenNonces = new Set<string>()
   const lastSeen = new Map<string, number>()
 
-  const handler = (evt) => {
+  const handler = async (evt) => {
     if (evt.detail.topic !== topic) return
     const from = evt.detail.from.toString()
-    // chat message?
-    const text = tryDecryptMsg(evt.detail.data, keys.msgKey)
+    const text = await tryDecryptMsg(evt.detail.data, keys.msgKey)
     if (text !== null) { if (from !== self) onMessage(from, text); return }
-    // else presence announce
-    const res = verifyAnnounce(evt.detail.data, keys.macKey)
+    const res = await verifyAnnounce(evt.detail.data, keys.macKey)
     if (!res.ok || res.peer === self) return
     if (seenNonces.has(res.nonce!)) return
     seenNonces.add(res.nonce!)
@@ -47,7 +44,9 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   node.services.pubsub.addEventListener('message', handler)
   node.services.pubsub.subscribe(topic)
 
-  const announce = () => node.services.pubsub.publish(topic, buildAnnounce(self, keys.macKey)).catch(() => {})
+  const announce = async () => {
+    try { await node.services.pubsub.publish(topic, await buildAnnounce(self, keys.macKey)) } catch {}
+  }
   const t0 = setTimeout(announce, 1500)
   const hb = setInterval(announce, heartbeatMs)
   const sweep = setInterval(() => {
@@ -56,7 +55,9 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   }, Math.min(heartbeatMs, 15_000))
 
   return {
-    send: (text: string) => node.services.pubsub.publish(topic, encryptMsg(text, keys.msgKey)).catch(() => {}),
+    send: async (text: string) => {
+      try { await node.services.pubsub.publish(topic, await encryptMsg(text, keys.msgKey)) } catch {}
+    },
     who: () => [...lastSeen.keys()],
     stop: () => {
       clearTimeout(t0); clearInterval(hb); clearInterval(sweep)
