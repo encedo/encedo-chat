@@ -24,3 +24,6 @@ Thumbs.db
 
 # test-only software keystores (contain private keys — never commit)
 *.keystore.json
+
+# local per-user CLI config (hsm url / kid pointers)
+*.local.json
