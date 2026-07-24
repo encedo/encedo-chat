@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Encedo Chat</title>
+  <style>
+    :root {
+      --bg:#f8f8fb; --card:#fff; --border:#eff2f7; --text:#343a40; --muted:#74788d;
+      --accent:#556ee6; --accent-ink:#fff; --good:#34c38f; --warn:#f1b44c; --err:#f46a6a; --off:#c8ccd8;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center;
+      font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif; background:var(--bg); color:var(--text); }
+    .card { width:380px; max-width:92vw; background:var(--card); border:1px solid var(--border);
+      border-radius:12px; box-shadow:0 10px 30px rgba(18,38,63,.06); padding:28px; }
+    h1 { margin:0 0 4px; font-size:20px; }
+    .sub { margin:0 0 20px; color:var(--muted); font-size:13px; }
+    label { display:block; font-size:12px; color:var(--muted); margin:14px 0 6px; }
+    .row { display:flex; gap:8px; align-items:center; }
+    input { width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px;
+      background:var(--bg); color:var(--text); font-size:14px; }
+    input:focus { outline:2px solid var(--accent); outline-offset:1px; }
+    .dot { width:12px; height:12px; border-radius:50%; background:var(--off); flex-shrink:0; transition:background .2s; }
+    .dot.ok { background:var(--good); box-shadow:0 0 8px rgba(52,193,143,.6); }
+    .dot.bad { background:var(--err); }
+    .hint { font-size:11px; color:var(--muted); margin-top:4px; min-height:15px; }
+    button { width:100%; margin-top:20px; padding:11px; border:none; border-radius:8px;
+      background:var(--accent); color:var(--accent-ink); font-size:14px; font-weight:600; cursor:pointer; }
+    button:hover { filter:brightness(1.06); }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .toggle { margin-top:14px; text-align:center; font-size:13px; color:var(--muted); }
+    .toggle a { color:var(--accent); cursor:pointer; text-decoration:none; }
+    .msg { margin-top:14px; padding:9px 12px; border-radius:8px; font-size:13px; display:none; }
+    .msg.err { display:block; background:#fdeaea; color:var(--err); }
+    .msg.ok  { display:block; background:#e6f6f0; color:#1a7f5a; }
+    #reg-handle-wrap { display:none; }
+    #main { display:none; }
+    .kv { font-size:13px; color:var(--muted); margin:6px 0; word-break:break-all; }
+    .kv b { color:var(--text); font-weight:600; }
+    .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; background:#eef1fd; color:var(--accent); }
+  </style>
+</head>
+<body>
+  <div class="card" id="login">
+    <h1>⚡ Encedo Chat</h1>
+    <p class="sub">Zaloguj się swoim HEM. Klucz tożsamości nie opuszcza urządzenia.</p>
+
+    <label>Adres HEM</label>
+    <div class="row">
+      <input id="hsm" type="text" value="https://my.ence.do" autocomplete="off" />
+      <span class="dot" id="status-dot" title="status HEM"></span>
+    </div>
+    <div class="hint" id="status-hint"></div>
+
+    <label>Hasło</label>
+    <input id="pass" type="password" autocomplete="off" />
+
+    <div id="reg-handle-wrap">
+      <label>Handle (widoczny dla kontaktów)</label>
+      <input id="handle" type="text" placeholder="np. alice" autocomplete="off" />
+    </div>
+
+    <button id="go">Zaloguj</button>
+    <div class="toggle" id="toggle-line">
+      <span id="toggle-pre">Nie masz konta?</span> <a id="toggle">Zarejestruj tożsamość</a>
+    </div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="card" id="main">
+    <h1>⚡ Encedo Chat</h1>
+    <p class="sub">Zalogowano <span class="badge">tożsamość w HEM</span></p>
+    <div class="kv" id="me-handle"></div>
+    <div class="kv" id="me-kid"></div>
+    <div class="kv" id="me-fp"></div>
+    <p class="sub" style="margin-top:18px">Okno czatu — następny krok. Silnik rendezvous/wiadomości już działa (CLI); tu je wepniemy.</p>
+    <button id="logout" style="background:#eef1fd;color:var(--accent)">Wyloguj</button>
+  </div>
+</body>
+</html>

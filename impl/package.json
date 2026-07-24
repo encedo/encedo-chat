@@ -12,7 +12,9 @@
     "meet": "node net/meet.ts",
     "chat-test": "node net/chat-test.ts",
     "bob": "node bob/bob.ts",
-    "alice": "node alice/alice.ts"
+    "alice": "node alice/alice.ts",
+    "web:build": "webpack --config web/webpack.config.cjs --mode production",
+    "web:dev": "webpack serve --config web/webpack.config.cjs --mode development"
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.2",
@@ -26,5 +28,15 @@
     "@multiformats/multiaddr": "^12.3.4",
     "libp2p": "^2.2.1",
     "uint8arrays": "^5.1.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^8.0.1",
+    "@babel/plugin-transform-block-scoping": "^8.0.1",
+    "@babel/preset-typescript": "^8.0.1",
+    "babel-loader": "^10.1.1",
+    "html-webpack-plugin": "^5.6.7",
+    "webpack": "^5.109.0",
+    "webpack-cli": "^7.2.1",
+    "webpack-dev-server": "^6.0.0"
   }
 }
