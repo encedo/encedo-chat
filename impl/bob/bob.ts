@@ -15,6 +15,9 @@
 
 import { Keystore } from './keystore.ts'
 import { topicFromSecret, announceMacKey, todayUTC } from '../lib/rendezvous.ts'
+import { joinRoom } from '../lib/rendezvous-net.ts'
+import { createPeer, dial } from '../net/peer.ts'
+import { onchatoRelay } from '../net/onchato.ts'
 
 const KS_PATH = new URL('./bob.keystore.json', import.meta.url).pathname
 const [cmd, ...rest] = process.argv.slice(2)
@@ -67,6 +70,27 @@ switch (cmd) {
     console.log(`macKey:  ${announceMacKey(ss, p).toString('hex').slice(0, 24)}… (announce HMAC key)`)
     break
   }
+  case 'join': {
+    const peer = rest[0]
+    if (!peer) { console.error('usage: join <peer> [--network m] [--date d] [--heartbeat ms]'); process.exit(1) }
+    const ks = requireKeystore()
+    const pr = { networkId: opt('--network', 'main')!, dateUTC: opt('--date', todayUTC())! }
+    const ss = ks.sharedSecret(peer)
+    const topic = topicFromSecret(ss, pr)
+    const macKey = announceMacKey(ss, pr)
+    const { multiaddr: relay } = await onchatoRelay()
+    const node = await createPeer()
+    await dial(node, relay)
+    console.log(`[bob] room with "${peer}"  net=${pr.networkId} date=${pr.dateUTC}  topic=${topic.slice(0, 20)}…`)
+    console.log(`[bob] my PeerId ${node.peerId.toString()}  (via onchato relay)`)
+    console.log(`[bob] waiting for ${peer} in the room… (Ctrl-C to quit)`)
+    joinRoom(node, topic, macKey, {
+      heartbeatMs: Number(opt('--heartbeat', '15000')),
+      onPeer: (pid) => console.log(`[bob] 🟢 ${peer} IS IN THE ROOM — ${pid}`),
+      onLeave: (pid) => console.log(`[bob] ⚪ ${peer} left — ${pid}`),
+    })
+    break
+  }
   default:
-    console.log('usage: bob <init|pubkey|add-peer <h> <b64>|peers|topic <peer> [--network m] [--date YYYY-MM-DD]>')
+    console.log('usage: bob <init|pubkey|add-peer <h> <b64>|peers|topic <peer>|join <peer> [--network m] [--date YYYY-MM-DD]>')
 }

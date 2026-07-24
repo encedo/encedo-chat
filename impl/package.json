@@ -4,9 +4,26 @@
   "private": true,
   "type": "module",
   "description": "v6 TS spike — rendezvous spine on the v5 libp2p base. Crypto handshake (EH-2/ratchet) held pending cryptographer review.",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "node --test test/*.test.ts",
-    "bob": "node bob/bob.ts"
+    "meet": "node net/meet.ts",
+    "bob": "node bob/bob.ts",
+    "alice": "node alice/alice.ts"
+  },
+  "dependencies": {
+    "@chainsafe/libp2p-gossipsub": "^14.1.2",
+    "@chainsafe/libp2p-noise": "^16.0.0",
+    "@chainsafe/libp2p-yamux": "^7.0.0",
+    "@libp2p/circuit-relay-v2": "^3.1.0",
+    "@libp2p/crypto": "^5.0.6",
+    "@libp2p/identify": "^3.0.12",
+    "@libp2p/peer-id": "^5.0.9",
+    "@libp2p/websockets": "^9.0.13",
+    "@multiformats/multiaddr": "^12.3.4",
+    "libp2p": "^2.2.1",
+    "uint8arrays": "^5.1.0"
   }
 }
