@@ -109,7 +109,47 @@ Slice order: (0) freeze message shapes; (1) HEM stub + SDK smoke test
 (v5 relay evolved: `--network`, `--key-file`, TTL eviction, rendezvous-only);
 (4) wire the mockup for manual two-window testing.
 
+## Implementation progress (impl/)
+
+Node 24 native TS (run `.ts` directly, no build). `npm test` = offline unit
+tests; live integration scripts hit the real onchato relay.
+
+Working end-to-end, verified live:
+
+- **HEM identity via `hem-sdk-js`** — `alice` CLI: register (CURVE25519 IK,
+  `ETSEIC:self,<h>,ik,<iat>` DESCR), list (searchKeys), pubkey, against a real
+  HEM (my.ence.do). Auth-by-KID pattern from encedo-pgp.
+- **Deterministic rendezvous (§5)** — `lib/rendezvous.ts`: topic + announce MAC
+  key from `ss = ECDH(IK_a, IK_b)` + network + date. **Verified: real HEM (Alice)
+  and software (Bob) derive the identical topic + macKey** → HEM raw `ecdh` ==
+  node X25519, no endianness issue.
+- **Presence + meeting over libp2p** — `net/onchato.ts` (relay multiaddr computed
+  from `--pass bs1.onchato.com` → `12D3KooWP6Sp…cDmp`), `net/peer.ts` (v5 config +
+  http-path ws filter), `lib/announce.ts` (§5.5 HMAC), `lib/rendezvous-net.ts`.
+  `net/meet.ts` PASS: two peers meet via the real relay.
+- **Interactive CLI chat** — `lib/room.ts` (joinChat), `cli/repl.ts` +
+  `cli/chat-session.ts` (IRC-style, /who /me /quit). `bob join` / `alice join`
+  open a live encrypted chat. `net/chat-test.ts` PASS.
+
+### ⚠️ INTERIM (must be replaced before shipping)
+
+- `lib/msgcrypto.ts` — message encryption is a **static AES-256-GCM key from ss**
+  (HKDF). Real E2E vs the relay but **no forward secrecy / no ratchet**.
+  Placeholder until **EH-2 + Double Ratchet** (`docs/PROTOCOL.md` §6–7), held for
+  the cryptographer.
+- **Message transport rides GossipSub through the relay** (v5 model — relay sees
+  ciphertext + metadata). Target is the direct-stream / blind circuit-relay data
+  plane (`docs/PROTOCOL.md` §13). Later step.
+
+## Directions
+
+- **CLI as a full-product client** (a terminal alternative to the web GUI over
+  the same protocol) — noted, **parallel, last step**; do not focus here now.
+- Web GUI (login → register/list → main), engine ported to the browser.
+- Move the message data plane to direct streams (§13).
+
 ## Status
 
-- Specs frozen pending cryptographer feedback — expect changes to EH-2/ratchet.
-- `impl/` holds `package.json` only so far.
+- Specs (`docs/`) frozen pending cryptographer feedback — expect changes to
+  EH-2/ratchet. Everything in `impl/` so far is EH-2-independent.
+- Commits ahead of origin; the user pushes (SSH passphrase).
