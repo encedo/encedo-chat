@@ -8,7 +8,7 @@ import { diffieHellman, createPublicKey, randomBytes } from 'node:crypto'
 import { multiaddr } from '@multiformats/multiaddr'
 import { rawToPriv } from '../bob/keystore.ts'
 import { topicFromSecret, announceMacKey } from '../lib/rendezvous.ts'
-import { msgKeyFromSecret } from '../lib/msgcrypto.ts'
+import { interimSession } from '../lib/session.ts'
 import { joinChat } from '../lib/room.ts'
 import { createPeer } from './peer.ts'
 import { onchatoRelay } from './onchato.ts'
@@ -18,7 +18,7 @@ const bPriv = rawToPriv(Buffer.alloc(32, 0xd2))
 const ss = new Uint8Array(diffieHellman({ privateKey: aPriv, publicKey: createPublicKey(bPriv) }))
 const p = { networkId: 'test', dateUTC: '2026-01-01' }
 const topic = await topicFromSecret(ss, p)
-const keys = { macKey: await announceMacKey(ss, p), msgKey: await msgKeyFromSecret(ss, p) }
+const keys = { macKey: await announceMacKey(ss, p), session: await interimSession(ss, p) }
 const SECRET = 'ping-' + randomBytes(4).toString('hex')
 
 const { multiaddr: relay } = await onchatoRelay()

@@ -15,7 +15,7 @@
 
 import { Keystore } from './keystore.ts'
 import { topicFromSecret, announceMacKey, todayUTC } from '../lib/rendezvous.ts'
-import { msgKeyFromSecret } from '../lib/msgcrypto.ts'
+import { interimSession } from '../lib/session.ts'
 import { runChatSession } from '../cli/chat-session.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { onchatoRelay } from '../net/onchato.ts'
@@ -77,7 +77,7 @@ switch (cmd) {
     const pr = { networkId: opt('--network', 'main')!, dateUTC: opt('--date', todayUTC())! }
     const ss = ks.sharedSecret(peer)
     const topic = await topicFromSecret(ss, pr)
-    const keys = { macKey: await announceMacKey(ss, pr), msgKey: await msgKeyFromSecret(ss, pr) }
+    const keys = { macKey: await announceMacKey(ss, pr), session: await interimSession(ss, pr) }
     const { multiaddr: relay } = await onchatoRelay()
     const node = await createPeer()
     await dial(node, relay)

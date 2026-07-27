@@ -18,14 +18,14 @@
  */
 
 import { buildAnnounce, verifyAnnounce } from './announce.ts'
-import { seal, open } from './msgcrypto.ts'
+import type { Session } from './session.ts'
 import {
   encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile,
   type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta, type TypingState, type PresenceState,
 } from './envelope.ts'
 import { nowMs } from './time.ts'
 
-export interface RoomKeys { macKey: CryptoKey; msgKey: CryptoKey }
+export interface RoomKeys { macKey: CryptoKey; session: Session }
 export type PresenceEvent = 'join' | 'active' | 'away' | 'leave'
 export interface ChatOpts {
   onMessage?: (from: string, m: MsgEnv) => void
@@ -65,8 +65,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     if (evt.detail.topic !== topic) return
     const from = evt.detail.from.toString()
 
-    // sealed envelope? (our encrypted channel)
-    const pt = await open(evt.detail.data, keys.msgKey)
+    // sealed envelope? (our encrypted channel — interim key today, EH-2 ratchet later)
+    const pt = await keys.session.decrypt(evt.detail.data)
     if (pt !== null) {
       if (from === self) return
       const env = decodeEnvelope(pt)
@@ -88,6 +88,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     }
 
     // not sealed → authenticated Announce (presence/discovery, §5.5)
+    // [EH-2 seam] a third frame kind — pre-session handshake frames — will slot
+    // in here (authenticated like Announce), routed to the session establisher.
     const res = await verifyAnnounce(evt.detail.data, keys.macKey)
     if (!res.ok || res.peer === self) return
     if (seenNonces.has(res.nonce!)) return
@@ -109,7 +111,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
 
   let seq = 1
   const emit = async (bytes: Uint8Array) => {
-    try { await node.services.pubsub.publish(topic, await seal(bytes, keys.msgKey)) } catch {}
+    try { await node.services.pubsub.publish(topic, await keys.session.encrypt(bytes)) } catch {}
   }
 
   return {

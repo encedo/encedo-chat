@@ -16,7 +16,7 @@ import { createInterface } from 'node:readline'
 import { hemIdentity, softwareIdentity, type Identity } from './identity.ts'
 import { loadConfig, saveConfig, type EcConfig } from './config.ts'
 import { topicFromSecret, announceMacKey, todayUTC } from '../lib/rendezvous.ts'
-import { msgKeyFromSecret } from '../lib/msgcrypto.ts'
+import { interimSession } from '../lib/session.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { runChatSession } from './chat-session.ts'
 
@@ -100,7 +100,7 @@ switch (cmd) {
     const ss = await id.ecdh(peerPub)
     const p = { networkId: opt('--network', 'main')!, dateUTC: opt('--date', todayUTC())! }
     const topic = await topicFromSecret(ss, p)
-    const keys = { macKey: await announceMacKey(ss, p), msgKey: await msgKeyFromSecret(ss, p) }
+    const keys = { macKey: await announceMacKey(ss, p), session: await interimSession(ss, p) }
     const node = await createPeer()
     await dial(node, RELAY)
     console.log(`[ec] ${id.handle} → ${name}  via onchato relay`)

@@ -19,7 +19,7 @@ import { HEM } from '../../hem-sdk-js/hem-sdk.js'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { topicFromSecret, announceMacKey, todayUTC } from '../lib/rendezvous.ts'
-import { msgKeyFromSecret } from '../lib/msgcrypto.ts'
+import { interimSession } from '../lib/session.ts'
 import { runChatSession } from '../cli/chat-session.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { onchatoRelay } from '../net/onchato.ts'
@@ -118,7 +118,7 @@ switch (cmd) {
     const useToken = await hem.authorizePassword(pw, `keymgmt:use:${kid}`)
     const ss = await hem.ecdh(useToken, kid, peerPub)   // Uint8Array, raw 32B
     const topic = await topicFromSecret(ss, pr)
-    const keys = { macKey: await announceMacKey(ss, pr), msgKey: await msgKeyFromSecret(ss, pr) }
+    const keys = { macKey: await announceMacKey(ss, pr), session: await interimSession(ss, pr) }
     const { multiaddr: relay } = await onchatoRelay()
     const node = await createPeer()
     await dial(node, relay)

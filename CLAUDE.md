@@ -162,6 +162,15 @@ Presence: Announce/HMAC (§5.5) stays for authenticated discovery/liveness;
   now seals **opaque bytes** (the envelope lives inside). Real E2E vs the relay
   but **no forward secrecy / no ratchet**. Placeholder until **EH-2 + Double
   Ratchet** (`docs/PROTOCOL.md` §6–7), held for the cryptographer.
+- `lib/session.ts` — the **crypto seam** (EH-2 prep). The room talks to a
+  `Session` (`encrypt`/`decrypt`), not to a key. `interimSession` wraps the box
+  above; `eh2Session` is a **throwing stub**. When the design is blessed, EH-2
+  drops in behind the SAME interface → room / envelope / transport unchanged.
+  Establishment note: EH-2 handshake frames are a **separate pre-session wire**
+  (NOT a sealed envelope — the session key doesn't exist yet), authenticated
+  like Announce (see the `[EH-2 seam]` marker in `room.ts`); the per-message
+  ratchet header rides INSIDE `Session`'s own wire, invisible to the room.
+  `test/session.test.ts` covers the interim path + that the EH-2 stub throws.
 - **Message transport rides GossipSub through the relay** (v5 model — relay sees
   ciphertext + metadata). Target is the direct-stream / blind circuit-relay data
   plane (`docs/PROTOCOL.md` §13). Later step.

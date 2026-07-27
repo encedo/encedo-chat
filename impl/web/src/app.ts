@@ -8,7 +8,7 @@
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { topicFromSecret, announceMacKey, todayUTC } from '../../lib/rendezvous.ts'
-import { msgKeyFromSecret } from '../../lib/msgcrypto.ts'
+import { interimSession } from '../../lib/session.ts'
 import { joinChat } from '../../lib/room.ts'
 import { createPeer, dial } from '../../net/peer.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
@@ -162,7 +162,7 @@ $('join').addEventListener('click', async () => {
     const ss: Uint8Array = await session.hem.ecdh(useTok, session.kid, peerPub)
     const p = { networkId: 'main', dateUTC: todayUTC() }
     const topic = await topicFromSecret(ss, p)
-    const keys = { macKey: await announceMacKey(ss, p), msgKey: await msgKeyFromSecret(ss, p) }
+    const keys = { macKey: await announceMacKey(ss, p), session: await interimSession(ss, p) }
 
     const node = await createPeer()
     await dial(node, RELAY)
