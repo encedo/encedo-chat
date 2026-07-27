@@ -1,130 +1,228 @@
 <!doctype html>
 <html lang="pl">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Encedo Chat</title>
-  <style>
-    :root {
-      --bg:#f8f8fb; --card:#fff; --border:#eff2f7; --text:#343a40; --muted:#74788d;
-      --accent:#556ee6; --accent-ink:#fff; --good:#34c38f; --warn:#f1b44c; --err:#f46a6a; --off:#c8ccd8;
-    }
-    * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; display:grid; place-items:center;
-      font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif; background:var(--bg); color:var(--text); }
-    .card { width:380px; max-width:92vw; background:var(--card); border:1px solid var(--border);
-      border-radius:12px; box-shadow:0 10px 30px rgba(18,38,63,.06); padding:28px; }
-    h1 { margin:0 0 4px; font-size:20px; }
-    .sub { margin:0 0 20px; color:var(--muted); font-size:13px; }
-    label { display:block; font-size:12px; color:var(--muted); margin:14px 0 6px; }
-    .row { display:flex; gap:8px; align-items:center; }
-    input { width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px;
-      background:var(--bg); color:var(--text); font-size:14px; }
-    input:focus { outline:2px solid var(--accent); outline-offset:1px; }
-    .dot { width:12px; height:12px; border-radius:50%; background:var(--off); flex-shrink:0; transition:background .2s; }
-    .dot.ok { background:var(--good); box-shadow:0 0 8px rgba(52,193,143,.6); }
-    .dot.bad { background:var(--err); }
-    .hint { font-size:11px; color:var(--muted); margin-top:4px; min-height:15px; }
-    button { width:100%; margin-top:20px; padding:11px; border:none; border-radius:8px;
-      background:var(--accent); color:var(--accent-ink); font-size:14px; font-weight:600; cursor:pointer; }
-    button:hover { filter:brightness(1.06); }
-    button:disabled { opacity:.55; cursor:not-allowed; }
-    .toggle { margin-top:14px; text-align:center; font-size:13px; color:var(--muted); }
-    .toggle a { color:var(--accent); cursor:pointer; text-decoration:none; }
-    .msg { margin-top:14px; padding:9px 12px; border-radius:8px; font-size:13px; display:none; }
-    .msg.err { display:block; background:#fdeaea; color:var(--err); }
-    .msg.ok  { display:block; background:#e6f6f0; color:#1a7f5a; }
-    #reg-handle-wrap { display:none; }
-    #main { display:none; }
-    .kv { font-size:13px; color:var(--muted); margin:6px 0; word-break:break-all; }
-    .kv b { color:var(--text); font-weight:600; }
-    .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:10px; background:#eef1fd; color:var(--accent); }
-    #main { width:560px; }
-    .idbar { display:flex; gap:10px; align-items:center; justify-content:space-between; padding-bottom:14px; border-bottom:1px solid var(--border); margin-bottom:14px; }
-    .idbar .who { font-size:13px; color:var(--muted); }
-    .idbar .who b { color:var(--text); }
-    textarea { width:100%; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg); color:var(--text); font-size:13px; font-family:ui-monospace,"Cascadia Code",monospace; resize:vertical; min-height:54px; }
-    textarea:focus { outline:2px solid var(--accent); outline-offset:1px; }
-    #chat { display:none; }
-    .chat-head { display:flex; align-items:center; gap:8px; font-size:14px; margin-bottom:8px; }
-    .chat-head b { color:var(--text); }
-    .transport { font-size:11px; color:var(--muted); margin-left:auto; }
-    #messages { height:300px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; background:var(--bg); padding:10px; font-size:14px; display:flex; flex-direction:column; gap:6px; }
-    .m { padding:6px 10px; border-radius:8px; max-width:80%; word-break:break-word; }
-    .m.me { align-self:flex-end; background:#eef1fd; }
-    .m.peer { align-self:flex-start; background:#eff2f7; }
-    .m.sys { align-self:center; color:var(--muted); font-size:12px; }
-    .composer { display:flex; gap:8px; margin-top:10px; }
-    .composer input { flex:1; }
-    .composer button { width:auto; margin:0; padding:10px 18px; }
-    #contacts { display:flex; flex-wrap:wrap; gap:6px; min-height:24px; margin-bottom:4px; }
-    .contact { padding:5px 12px; border:1px solid var(--border); border-radius:20px; font-size:13px; cursor:pointer; background:var(--bg); }
-    .contact:hover { border-color:var(--accent); color:var(--accent); }
-    .contact .x { color:var(--muted); margin-left:6px; }
-    .contact.empty { color:var(--muted); border:none; cursor:default; }
-    .row2 { display:flex; gap:8px; margin-top:14px; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Encedo Chat</title>
+<style>
+  :root{
+    --bg:#f8f8fb;--card:#fff;--border:#eff2f7;--text:#343a40;--body:#495057;--muted:#74788d;
+    --accent:#556ee6;--accent-ink:#fff;--accent-soft:#eef1fd;--bubble-in:#eef1fd;--bubble-out:#eff2f7;
+    --good:#34c38f;--good-soft:#e2f6ef;--warn:#f1b44c;--warn-soft:#fdf3e0;--err:#f46a6a;--off:#c8ccd8;
+    --shadow:0 10px 20px rgba(18,38,63,.03);--radius:10px;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --bg:#222736;--card:#2a3042;--border:#32394e;--text:#d7dcf1;--body:#a6b0cf;--muted:#79829c;
+    --accent:#6579e0;--accent-soft:#2e3552;--bubble-in:#2e3552;--bubble-out:#32394e;
+    --good-soft:#263f42;--warn-soft:#3e3a33;--off:#4a5170;--shadow:0 10px 20px rgba(0,0,0,.15);
+  }}
+  :root[data-theme="dark"]{
+    --bg:#222736;--card:#2a3042;--border:#32394e;--text:#d7dcf1;--body:#a6b0cf;--muted:#79829c;
+    --accent:#6579e0;--accent-soft:#2e3552;--bubble-in:#2e3552;--bubble-out:#32394e;
+    --good-soft:#263f42;--warn-soft:#3e3a33;--off:#4a5170;--shadow:0 10px 20px rgba(0,0,0,.15);
+  }
+  :root[data-theme="light"]{
+    --bg:#f8f8fb;--card:#fff;--border:#eff2f7;--text:#343a40;--body:#495057;--muted:#74788d;
+    --accent:#556ee6;--accent-soft:#eef1fd;--bubble-in:#eef1fd;--bubble-out:#eff2f7;
+    --good-soft:#e2f6ef;--warn-soft:#fdf3e0;--off:#c8ccd8;--shadow:0 10px 20px rgba(18,38,63,.03);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;background:var(--bg);color:var(--body);font-size:14px;line-height:1.5}
+  button{font:inherit;cursor:pointer}
+  input,textarea{font:inherit}
+  button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+  [hidden]{display:none!important}
+
+  /* login */
+  .login-wrap{min-height:100vh;display:grid;place-items:center;padding:16px}
+  .login-card{width:380px;max-width:92vw;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(18,38,63,.06);padding:28px}
+  .login-card h1{margin:0 0 4px;font-size:20px;color:var(--text)}
+  .login-card .sub{margin:0 0 20px;color:var(--muted);font-size:13px}
+  label{display:block;font-size:12px;color:var(--muted);margin:14px 0 6px}
+  .row{display:flex;gap:8px;align-items:center}
+  input,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px}
+  textarea{font-family:ui-monospace,"Cascadia Code",monospace;font-size:13px;resize:vertical;min-height:54px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--off);flex-shrink:0;transition:background .2s}
+  .dot.ok{background:var(--good)}.dot.bad{background:var(--err)}.dot.away{background:var(--warn)}
+  .hint{font-size:11px;color:var(--muted);margin-top:4px;min-height:15px}
+  .btn{width:100%;margin-top:20px;padding:11px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-ink);font-size:14px;font-weight:600}
+  .btn:hover{filter:brightness(1.06)}.btn:disabled{opacity:.55;cursor:not-allowed}
+  .toggle{margin-top:14px;text-align:center;font-size:13px;color:var(--muted)}
+  .toggle a{color:var(--accent);cursor:pointer}
+  .msg{margin-top:14px;padding:9px 12px;border-radius:8px;font-size:13px;display:none}
+  .msg.err{display:block;background:var(--warn-soft);color:var(--err)}
+  .msg.ok{display:block;background:var(--good-soft);color:var(--good)}
+
+  /* app shell */
+  .app{display:flex;gap:16px;max-width:1280px;margin:0 auto;padding:16px;height:100vh;min-height:560px}
+  .sidebar{width:330px;flex-shrink:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  .me{display:flex;align-items:center;gap:10px;padding:16px;border-bottom:1px solid var(--border)}
+  .me .info{flex:1;min-width:0}.me .name{font-weight:600;color:var(--text)}
+  .fp{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .icon-btn{background:none;border:1px solid var(--border);color:var(--muted);width:34px;height:34px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-size:15px}
+  .icon-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .avatar{width:38px;height:38px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-weight:600;font-size:13px;color:var(--accent);background:var(--accent-soft)}
+  .search-wrap{padding:12px 16px 4px}
+  .tabs{display:flex;gap:6px;padding:12px 16px}
+  .tab{flex:1;padding:8px 0;text-align:center;background:none;border:none;border-radius:8px;color:var(--muted);font-weight:500}
+  .tab:hover{background:var(--bg)}.tab.active{background:var(--accent);color:var(--accent-ink)}
+  .tab.ph{opacity:.45}
+  .pane{flex:1;overflow-y:auto;padding:4px 8px 8px}
+  .pane-label{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:10px 12px 4px}
+  .contact{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:none;background:none;text-align:left;border-radius:8px;color:var(--body)}
+  .contact:hover{background:var(--bg)}.contact.active{background:var(--accent-soft)}
+  .contact .c-name{font-weight:600;color:var(--text)}
+  .contact .c-sub{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .contact .c-info{flex:1;min-width:0}
+  .contact .c-x{color:var(--muted);opacity:0;font-size:16px;padding:0 4px}
+  .contact:hover .c-x{opacity:.7}
+  .add-row{padding:8px 12px}
+  .add-btn{width:100%;padding:9px;border:1px dashed var(--border);border-radius:8px;background:none;color:var(--muted);font-weight:500}
+  .add-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .profile-strip{border-top:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .profile-strip .lbl{font-size:12px;color:var(--muted)}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:20px;background:var(--accent-soft);color:var(--accent);border:none}
+
+  .chat{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  .chat-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--border)}
+  .chat-head .who{flex:1;min-width:160px}
+  .chat-head .who .name{font-weight:600;font-size:15.5px;color:var(--text);display:flex;align-items:center;gap:8px}
+  .chat-head .who .sub{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .badge{font-size:11.5px;font-weight:600;padding:4px 12px;border-radius:20px;display:inline-flex;align-items:center;gap:6px}
+  .badge.relay{background:var(--bubble-out);color:var(--muted)}
+  .badge.e2e{background:var(--warn-soft);color:var(--warn)}
+  .badge.rotate{background:var(--bg);color:var(--muted);font-variant-numeric:tabular-nums;border:1px solid var(--border)}
+  .messages{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
+  .mrow{display:flex}.mrow.out{justify-content:flex-end}
+  .bubble{max-width:62%;padding:10px 14px;border-radius:10px;box-shadow:var(--shadow)}
+  .mrow.in .bubble{background:var(--bubble-in);border-bottom-left-radius:2px}
+  .mrow.out .bubble{background:var(--bubble-out);border-bottom-right-radius:2px}
+  .bubble .b-text{color:var(--text);overflow-wrap:break-word;white-space:pre-wrap}
+  .bubble .b-meta{font-size:11px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums}
+  .mrow.out .b-meta{text-align:right}
+  .sysline{text-align:center;font-size:12px;color:var(--muted)}
+  .typing{font-size:12px;color:var(--muted);font-style:italic;min-height:16px;padding:0 20px 4px}
+  .composer{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--border)}
+  .composer input{flex:1}
+  .btn-send{background:var(--accent);color:var(--accent-ink);border:none;padding:0 22px;border-radius:8px;font-weight:600}
+  .btn-send:hover{filter:brightness(1.08)}
+  .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:32px;text-align:center}
+  .empty .big{font-size:34px}.empty h3{margin:0;color:var(--text);font-size:16px}
+  .empty p{margin:0;max-width:44ch;font-size:13px;color:var(--muted)}
+
+  .scrim{position:fixed;inset:0;background:rgba(18,38,63,.35);display:none;z-index:10}
+  .scrim.open{display:block}
+  .modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;max-width:92vw;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.2);padding:22px;z-index:11;display:none}
+  .modal.open{display:block}
+  .modal h2{margin:0 0 4px;font-size:16px;color:var(--text)}
+  .modal .msub{font-size:12px;color:var(--muted);margin-bottom:8px}
+  .modal-actions{display:flex;gap:8px;margin-top:16px}
+  .btn-ghost{background:var(--accent-soft);color:var(--accent);border:none;border-radius:8px;padding:0 18px;font-weight:600}
+  .drawer{position:fixed;top:0;right:0;bottom:0;width:360px;max-width:92vw;background:var(--card);border-left:1px solid var(--border);z-index:11;padding:20px;overflow-y:auto;transform:translateX(100%);transition:transform .2s ease}
+  .drawer.open{transform:translateX(0)}
+  .drawer h2{margin:0 0 4px;font-size:16px;color:var(--text)}
+  .d-sub{font-size:12px;color:var(--muted);margin-bottom:18px}
+  .d-head{display:flex;align-items:start;justify-content:space-between}
+  .d-section{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px}
+  .opt{display:flex;gap:10px;padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px}
+  .opt.ph{opacity:.5}
+  .opt .o-name{font-weight:600;color:var(--text);font-size:13.5px}
+  .opt .o-desc{font-size:12px;color:var(--muted)}
+  .kv{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;gap:12px}
+  .kv .k{color:var(--muted);flex-shrink:0}
+  .kv .v{color:var(--text);font-weight:500;font-variant-numeric:tabular-nums;word-break:break-all;text-align:right}
+  @media (max-width:860px){.app{flex-direction:column;height:auto}.sidebar{width:100%}.chat{min-height:70vh}}
+</style>
 </head>
 <body>
-  <div class="card" id="login">
-    <h1>⚡ Encedo Chat</h1>
-    <p class="sub">Zaloguj się swoim HEM. Klucz tożsamości nie opuszcza urządzenia.</p>
-
-    <label>Adres HEM</label>
-    <div class="row">
-      <input id="hsm" type="text" value="https://my.ence.do" autocomplete="off" />
-      <span class="dot" id="status-dot" title="status HEM"></span>
-    </div>
-    <div class="hint" id="status-hint"></div>
-
-    <label>Hasło</label>
-    <input id="pass" type="password" autocomplete="off" />
-
-    <div id="reg-handle-wrap">
-      <label>Handle (widoczny dla kontaktów)</label>
-      <input id="handle" type="text" placeholder="np. alice" autocomplete="off" />
-    </div>
-
-    <button id="go">Zaloguj</button>
-    <div class="toggle" id="toggle-line">
-      <span id="toggle-pre">Nie masz konta?</span> <a id="toggle">Zarejestruj tożsamość</a>
-    </div>
-    <div class="msg" id="msg"></div>
-  </div>
-
-  <div class="card" id="main">
-    <div class="idbar">
-      <div class="who">Ja: <b id="me-handle"></b> <span class="badge" id="me-fp"></span></div>
-      <button id="logout" style="width:auto;margin:0;padding:7px 14px;background:#eef1fd;color:var(--accent)">Wyloguj</button>
-    </div>
-
-    <div id="join-form">
-      <label>Kontakty</label>
-      <div id="contacts"></div>
-
-      <label style="margin-top:16px">Rozmówca — nazwa</label>
-      <input id="peer-name" type="text" placeholder="np. bob" autocomplete="off" />
-      <label>Klucz publiczny rozmówcy (base64)</label>
-      <textarea id="peer-pub" placeholder="wklej pubkey kontaktu…"></textarea>
-      <div class="row2">
-        <button id="join" style="flex:1;margin:0">Wejdź do pokoju</button>
-        <button id="save-contact" style="width:auto;margin:0;padding:11px 14px;background:#eef1fd;color:var(--accent)">Zapisz kontakt</button>
-      </div>
-      <div class="msg" id="join-msg"></div>
-    </div>
-
-    <div id="chat">
-      <div class="chat-head">
-        <span class="dot" id="peer-dot"></span>
-        <b id="peer-title"></b>
-        <span class="transport">⚪ przez relay onchato · E2E (interim)</span>
-      </div>
-      <div id="messages"></div>
-      <div class="composer">
-        <input id="msg-input" type="text" placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off" />
-        <button id="send">Wyślij</button>
-      </div>
+  <div class="login-wrap" id="login">
+    <div class="login-card">
+      <h1>⚡ Encedo Chat</h1>
+      <p class="sub">Zaloguj się swoim HEM. Klucz tożsamości nie opuszcza urządzenia.</p>
+      <label>Adres HEM</label>
+      <div class="row"><input id="hsm" type="text" value="https://my.ence.do" autocomplete="off"><span class="dot" id="status-dot" title="status HEM"></span></div>
+      <div class="hint" id="status-hint"></div>
+      <label>Hasło</label>
+      <input id="pass" type="password" autocomplete="off">
+      <div id="reg-handle-wrap" hidden><label>Handle (widoczny dla kontaktów)</label><input id="handle" type="text" placeholder="np. alice" autocomplete="off"></div>
+      <button class="btn" id="go">Zaloguj</button>
+      <div class="toggle"><span id="toggle-pre">Nie masz konta?</span> <a id="toggle">Zarejestruj tożsamość</a></div>
+      <div class="msg" id="msg"></div>
     </div>
   </div>
+
+  <div class="app" id="app" hidden>
+    <aside class="sidebar">
+      <div class="me">
+        <div class="avatar" id="me-avatar">··</div>
+        <div class="info"><div class="name" id="me-handle">—</div><div class="fp" id="me-fp"></div></div>
+        <button class="icon-btn" id="btn-settings" title="Ustawienia">⚙</button>
+      </div>
+      <div class="search-wrap"><input id="contact-search" type="text" placeholder="Szukaj kontaktu…" autocomplete="off"></div>
+      <div class="tabs">
+        <button class="tab active" id="tab-contacts">Kontakty</button>
+        <button class="tab ph" id="tab-groups" title="Wkrótce">Grupy</button>
+        <button class="tab ph" id="tab-network" title="Wkrótce">Sieć</button>
+      </div>
+      <div class="pane" id="pane-contacts"></div>
+      <div class="pane" id="pane-groups" hidden><div class="pane-label">Grupy — wkrótce</div></div>
+      <div class="pane" id="pane-network" hidden><div class="pane-label">Sieć — wkrótce (lista węzłów, latencje)</div></div>
+      <div class="add-row"><button class="add-btn" id="btn-add">+ Dodaj peera</button></div>
+      <div class="profile-strip"><span class="lbl">Profil bezpieczeństwa</span><button class="chip" id="chip-profile" title="Profil — wkrótce">P1 · prywatny</button></div>
+    </aside>
+
+    <main class="chat">
+      <div class="empty" id="chat-empty">
+        <div class="big">🌳</div>
+        <h3>Wybierz kontakt</h3>
+        <p>Wspólny pokój na dziś wyliczamy z Waszych kluczy i daty — nikt inny go nie zna. To spotkanie, nie skrzynka: wiadomości żyją tylko na ekranach uczestników.</p>
+      </div>
+      <div id="chat-view" hidden style="display:flex;flex-direction:column;flex:1;min-height:0">
+        <div class="chat-head">
+          <div class="avatar" id="peer-avatar">··</div>
+          <div class="who">
+            <div class="name"><span id="peer-name">—</span></div>
+            <div class="sub"><span class="dot" id="peer-dot"></span> <span id="peer-status">poza pokojem</span></div>
+          </div>
+          <div class="badges">
+            <span class="badge relay" title="Treść przez relay onchato (interim GossipSub)">⚪ Relay</span>
+            <span class="badge e2e" title="Szyfrowane E2E — interim, EH-2 w drodze">🔒 E2E interim</span>
+            <span class="badge rotate" title="Deterministyczna rotacja pokoju (00:00 UTC)">↻ <span id="rot">–:–:–</span></span>
+          </div>
+        </div>
+        <div class="messages" id="messages"></div>
+        <div class="typing" id="typing-ind"></div>
+        <div class="composer"><input id="msg-input" type="text" placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off"><button class="btn-send" id="send">Wyślij ➤</button></div>
+      </div>
+    </main>
+  </div>
+
+  <div class="scrim" id="scrim"></div>
+
+  <div class="modal" id="add-modal">
+    <h2>Dodaj peera</h2>
+    <div class="msub">Nazwa lokalna + jego klucz publiczny (base64, X25519).</div>
+    <label>Nazwa</label><input id="add-name" type="text" placeholder="np. bob" autocomplete="off">
+    <label>Klucz publiczny</label><textarea id="add-pub" placeholder="wklej pubkey kontaktu…"></textarea>
+    <div class="msg" id="add-msg"></div>
+    <div class="modal-actions"><button class="btn-send" id="add-save" style="flex:1;border-radius:8px">Zapisz</button><button class="btn-ghost" id="add-cancel">Anuluj</button></div>
+  </div>
+
+  <aside class="drawer" id="drawer" aria-label="Ustawienia">
+    <div class="d-head"><div><h2>Ustawienia</h2><div class="d-sub">Sesja + profil bezpieczeństwa</div></div><button class="icon-btn" id="btn-close-drawer" title="Zamknij">✕</button></div>
+    <div class="d-section">Profil bezpieczeństwa — wkrótce</div>
+    <div class="opt ph"><div><div class="o-name">P1 · Prywatny</div><div class="o-desc">WebRTC direct dozwolone. Rozmówca widzi Twoje IP.</div></div></div>
+    <div class="opt ph"><div><div class="o-name">P2 · Wrogie otoczenie</div><div class="o-desc">Wyłącznie relay — IP niewidoczne. (czeka na data plane §13)</div></div></div>
+    <div class="opt ph"><div><div class="o-name">P3 · Sieć własna</div><div class="o-desc">Relay-only na własnych węzłach z własnym kluczem podpisu.</div></div></div>
+    <div class="d-section">Sesja</div>
+    <div class="kv"><span class="k">Tożsamość</span><span class="v" id="sess-id">—</span></div>
+    <div class="kv"><span class="k">PeerId (efemeryczny)</span><span class="v" id="sess-peerid">—</span></div>
+    <div class="kv"><span class="k">Rotacja pokoju</span><span class="v">codziennie 00:00 UTC</span></div>
+    <div class="kv"><span class="k">Historia</span><span class="v">brak — sesja efemeryczna</span></div>
+    <button class="btn" id="btn-logout" style="margin-top:18px;background:var(--accent-soft);color:var(--accent)">Wyloguj</button>
+  </aside>
 </body>
 </html>

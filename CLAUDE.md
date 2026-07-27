@@ -179,8 +179,25 @@ Presence: Announce/HMAC (§5.5) stays for authenticated discovery/liveness;
 
 - **CLI as a full-product client** (a terminal alternative to the web GUI over
   the same protocol) — noted, **parallel, last step**; do not focus here now.
-- Web GUI (login → register/list → main), engine ported to the browser.
-- Move the message data plane to direct streams (§13).
+- **Web GUI (mockup skin)** — `web/index.html` is the dashboard skin from
+  `skin/ui-mockup.html` (sidebar + chat panel + settings drawer, light/dark),
+  wired to the engine: HEM login, contacts (localStorage) + **peer import**
+  (add-peer modal: name + pubkey), envelope chat (typing/away/leave/reactions),
+  UTC times, live room-rotation countdown. Unbacked mockup bits (Groups/Network
+  tabs, P1–P3 profiles, direct/relay modes) are visual placeholders.
+- **Data plane §13 — parked, blocked on the libp2p ecosystem.** Investigation
+  (`net/circuit-probe.ts`, `net/circuit-two.ts`): the onchato relay **does**
+  support circuit-relay-v2 (reservations + HOP CONNECT verified live). But on the
+  pinned **libp2p 2.2.x** generation circuit-relay-v2's **destination-side STOP
+  handling is broken** (relay "could not read response from B" → CONNECTION_FAILED;
+  reproduced locally + in separate processes, full debug). A clean **v3 upgrade is
+  impossible**: `@chainsafe/libp2p-gossipsub` (latest 14.1.2) is still on
+  `@libp2p/interface ^2` while circuit-relay-v2 4.x needs interface ^3 — gossipsub
+  hasn't migrated to libp2p v3, and we need gossipsub for rendezvous. **Revisit
+  when gossipsub ships a v3 release** (then circuit-relay-v2 4.x should give the
+  relay-blind / relay-only plane). Meanwhile content rides GossipSub (interim).
+  v5's WebRTC-direct is the proven alternative if a direct-mode plane is wanted
+  sooner (peers see IPs).
 
 ## Status
 
