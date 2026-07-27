@@ -11,6 +11,7 @@ import { topicFromSecret, announceMacKey, todayUTC } from '../../lib/rendezvous.
 import { msgKeyFromSecret } from '../../lib/msgcrypto.ts'
 import { joinChat } from '../../lib/room.ts'
 import { createPeer, dial } from '../../net/peer.ts'
+import { nowMs, utcHHMM } from '../../lib/time.ts'
 
 // onchato relay — deterministic PeerId from --pass "bs1.onchato.com" (see net/onchato.ts)
 const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
@@ -134,11 +135,18 @@ $('save-contact').addEventListener('click', () => {
 $('pass').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') ($('go') as HTMLButtonElement).click() })
 
 // ---- join room + chat ----
-function appendMsg(kind: 'me' | 'peer' | 'sys', text: string) {
+function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number) {
   const box = $('messages')
   const d = document.createElement('div')
   d.className = 'm ' + kind
-  d.textContent = text
+  if (ts !== undefined && kind !== 'sys') {
+    const t = document.createElement('span')
+    t.textContent = utcHHMM(ts) + ' '            // UTC always
+    t.style.opacity = '0.5'; t.style.fontVariantNumeric = 'tabular-nums'
+    d.appendChild(t); d.appendChild(document.createTextNode(text))
+  } else {
+    d.textContent = text
+  }
   box.appendChild(d)
   box.scrollTop = box.scrollHeight
 }
@@ -165,22 +173,49 @@ $('join').addEventListener('click', async () => {
     $('peer-title').textContent = peerName
     appendMsg('sys', `Pokój otwarty (${topic.slice(0, 10)}…) — czekam na ${peerName}…`)
 
+    let typingEl: HTMLElement | null = null
+    const setPeerTyping = (on: boolean) => {
+      if (on && !typingEl) {
+        typingEl = document.createElement('div'); typingEl.className = 'm sys'; typingEl.textContent = `${peerName} pisze…`
+        const box = $('messages'); box.appendChild(typingEl); box.scrollTop = box.scrollHeight
+      } else if (!on && typingEl) { typingEl.remove(); typingEl = null }
+    }
+
     const room = joinChat(node, topic, keys, {
-      onMessage: (_from, text) => appendMsg('peer', text),
+      onMessage: (_from, m) => { setPeerTyping(false); appendMsg('peer', m.body, m.ts) },
+      onTyping: (_from, state) => setPeerTyping(state === 'start'),
+      onReaction: (_from, r) => appendMsg('sys', `${peerName}: ${r.emoji}`),
+      onFile: (_from, f) => appendMsg('sys', `${peerName} udostępnił plik: ${f.name} — interim (IPFS TODO)`),
       onPresence: (_peer, ev) => {
-        appendMsg('sys', `${peerName} ${ev === 'join' ? 'jest w pokoju' : 'wyszedł/wyszła'}`)
-        $('peer-dot').className = 'dot ' + (ev === 'join' ? 'ok' : '')
+        const label = ev === 'join' ? 'jest w pokoju' : ev === 'active' ? 'wrócił/a' : ev === 'away' ? 'jest nieobecny/a' : 'wyszedł/wyszła'
+        appendMsg('sys', `${peerName} ${label}`)
+        $('peer-dot').className = 'dot ' + (ev === 'join' || ev === 'active' ? 'ok' : ev === 'away' ? 'warn' : '')
+        if (ev === 'leave') setPeerTyping(false)
       },
     })
+
+    // local activity → typing / away meta
+    let typingSent = false, away = false, typingTimer: any, awayTimer: any
+    const stopTyping = () => { clearTimeout(typingTimer); if (typingSent) { typingSent = false; room.sendTyping('stop') } }
+    const armAway = () => { clearTimeout(awayTimer); awayTimer = setTimeout(() => { away = true; stopTyping(); room.sendPresence('away') }, 60_000) }
+    const activity = () => {
+      if (away) { away = false; room.sendPresence('active') }
+      if (!typingSent) { typingSent = true; room.sendTyping('start') }
+      clearTimeout(typingTimer); typingTimer = setTimeout(stopTyping, 4_000)
+      armAway()
+    }
 
     const send = () => {
       const inp = $('msg-input') as HTMLInputElement
       const t = inp.value.trim()
       if (!t) return
-      room.send(t); appendMsg('me', t); inp.value = ''
+      room.sendText(t); appendMsg('me', t, nowMs()); inp.value = ''; stopTyping()
     }
     $('send').addEventListener('click', send)
+    $('msg-input').addEventListener('input', activity)
     $('msg-input').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') send() })
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { away = true; stopTyping(); room.sendPresence('away') } })
+    window.addEventListener('beforeunload', () => { try { room.sendPresence('leave') } catch {} ; try { (node as any).stop() } catch {} })
   } catch (e: any) {
     setMsg('join-msg', 'Błąd: ' + (e?.message ?? e), 'err')
     btn.disabled = false; btn.textContent = 'Wejdź do pokoju'

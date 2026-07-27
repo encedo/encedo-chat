@@ -128,15 +128,40 @@ Working end-to-end, verified live:
   http-path ws filter), `lib/announce.ts` (§5.5 HMAC), `lib/rendezvous-net.ts`.
   `net/meet.ts` PASS: two peers meet via the real relay.
 - **Interactive CLI chat** — `lib/room.ts` (joinChat), `cli/repl.ts` +
-  `cli/chat-session.ts` (IRC-style, /who /me /quit). `bob join` / `alice join`
-  open a live encrypted chat. `net/chat-test.ts` PASS.
+  `cli/chat-session.ts` (IRC-style, /who /me /react /quit). `bob join` /
+  `alice join` open a live encrypted chat with typing / away / graceful-leave
+  presence. `net/chat-test.ts` PASS.
+
+### Message envelope (codec layer) — `lib/envelope.ts`
+
+The plaintext inside the interim seal is a **versioned JSON envelope**, not a
+raw string. One shape: `{ v, t, id, ts, seq, …payload }` — `t` is the type
+discriminator, `id` a short per-message id (reactions/replies), `ts` Unix epoch
+**ms (UTC)**, `seq` per-sender monotonic (dedup/order, **UX only, not
+security**). Types: `msg` (text, `format:'plain'` — **never raw HTML**; `md`
+safe-subset reserved), `typing`, `presence` (`active|away|leave`), `reaction`
+(live), `file` (**reserved** — content encrypted BEFORE IPFS upload, envelope
+carries CID + content key; own mini-design, TBD, cryptographer-relevant).
+Unknown `t` decodes to `UnknownEnv` and is ignored → **forward-compat**.
+
+Strict layering: `msgcrypto` seals/opens **opaque bytes** (type-agnostic),
+`envelope` does Envelope⇄bytes, `room` orchestrates (build→encode→seal→publish;
+open→decode→dispatch-by-type). The envelope is **EH-2-independent** — the same
+bytes get sealed by the ratchet later, codec unchanged. All time via
+`lib/time.ts` (**UTC only**). `test/envelope.test.ts` covers roundtrip +
+validation + forward-compat.
+
+Presence: Announce/HMAC (§5.5) stays for authenticated discovery/liveness;
+`presence` / `typing` / `away` / `leave` travel as **encrypted meta-messages**
+(relay blind). Ctrl+C and `/quit` → `presence:leave` last-will + clean
+`node.stop()`.
 
 ### ⚠️ INTERIM (must be replaced before shipping)
 
-- `lib/msgcrypto.ts` — message encryption is a **static AES-256-GCM key from ss**
-  (HKDF). Real E2E vs the relay but **no forward secrecy / no ratchet**.
-  Placeholder until **EH-2 + Double Ratchet** (`docs/PROTOCOL.md` §6–7), held for
-  the cryptographer.
+- `lib/msgcrypto.ts` — a **static AES-256-GCM sealed box** keyed from ss (HKDF);
+  now seals **opaque bytes** (the envelope lives inside). Real E2E vs the relay
+  but **no forward secrecy / no ratchet**. Placeholder until **EH-2 + Double
+  Ratchet** (`docs/PROTOCOL.md` §6–7), held for the cryptographer.
 - **Message transport rides GossipSub through the relay** (v5 model — relay sees
   ciphertext + metadata). Target is the direct-stream / blind circuit-relay data
   plane (`docs/PROTOCOL.md` §13). Later step.

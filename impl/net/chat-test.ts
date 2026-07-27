@@ -29,10 +29,10 @@ console.log(`dialed onchato relay; topic=${topic.slice(0, 14)}…  sending "${SE
 
 let ra, rb
 const received = new Promise<string>((resolve) => {
-  rb = joinChat(nb, topic, keys, { onMessage: (_from, text) => resolve(text) })
+  rb = joinChat(nb, topic, keys, { onMessage: (_from, m) => resolve(m.body) })
   ra = joinChat(na, topic, keys, {})
 })
-const sender = setInterval(() => ra.send(SECRET), 3000)   // resend until the mesh forms
+const sender = setInterval(() => ra.sendText(SECRET), 3000)   // resend until the mesh forms
 const got = await Promise.race([received, new Promise<null>((r) => setTimeout(() => r(null), 45_000))])
 
 clearInterval(sender)
