@@ -12,10 +12,7 @@
  */
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
-import { topicFromSecret, announceMacKey, todayUTC } from '../../lib/rendezvous.ts'
-import { interimSession } from '../../lib/session.ts'
-import { joinChat } from '../../lib/room.ts'
-import { createPeer, dial } from '../../net/peer.ts'
+import { hemIdentityFrom, openConversation, type Conversation, type Identity } from '../../lib/core.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 
 const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
@@ -24,8 +21,8 @@ const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
 
 let mode: 'login' | 'register' = 'login'
-let session: { hem: any; kid: string; handle: string; pub: string } | null = null
-let active: { name: string; pub: string; inRoom: boolean; room: any; node: any } | null = null
+let session: { id: Identity; handle: string; pub: string } | null = null
+let active: { name: string; pub: string; inRoom: boolean; conv: Conversation | null } | null = null
 let rotTimer: any = null
 
 const setMsg = (id: string, text: string, kind: 'err' | 'ok') => { const m = $(id); m.textContent = text; m.className = 'msg ' + kind }
@@ -93,7 +90,7 @@ $('go').addEventListener('click', async () => {
 $('pass').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') ($('go') as HTMLButtonElement).click() })
 
 async function enterApp(hem: any, handle: string, kid: string, pub: string) {
-  session = { hem, kid, handle, pub }
+  session = { id: hemIdentityFrom(hem, kid, handle, pub), handle, pub }
   $('login').hidden = true; $('app').hidden = false
   $('me-avatar').textContent = initials(handle)
   $('me-handle').textContent = handle
@@ -176,8 +173,8 @@ const setTyping = (on: boolean, name = '') => { $('typing-ind').textContent = on
 
 async function openChat(contact: Contact) {
   if (!session) return
-  if (active) { try { active.room?.stop() } catch {} ; try { await active.node?.stop() } catch {} }
-  active = { name: contact.name, pub: contact.pub, inRoom: false, room: null, node: null }
+  if (active?.conv) { try { await active.conv.leave() } catch {} }
+  active = { name: contact.name, pub: contact.pub, inRoom: false, conv: null }
   renderContacts()
   $('chat-empty').hidden = true; $('chat-view').hidden = false
   $('peer-avatar').textContent = initials(contact.name)
@@ -188,17 +185,9 @@ async function openChat(contact: Contact) {
   startRotation()
 
   try {
-    const useTok = await session.hem.authorizePassword(null, `keymgmt:use:${session.kid}`)
-    const ss: Uint8Array = await session.hem.ecdh(useTok, session.kid, contact.pub)
-    const p = { networkId: 'main', dateUTC: todayUTC() }
-    const topic = await topicFromSecret(ss, p)
-    const keys = { macKey: await announceMacKey(ss, p), session: await interimSession(ss, p) }
-    const node = await createPeer(); await dial(node, RELAY)
-    if (active?.name !== contact.name) { try { await node.stop() } catch {} ; return } // switched away mid-connect
-    $('sess-peerid').textContent = node.peerId.toString().slice(0, 16) + '…'
-
     let peerTyping = false
-    const room = joinChat(node, topic, keys, {
+    const conv = await openConversation(session.id, contact.pub, {
+      relay: RELAY,
       onMessage: (_from, msg) => { peerTyping = false; setTyping(false); appendMsg('peer', msg.body, msg.ts) },
       onTyping: (_from, state) => { peerTyping = state === 'start'; setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => appendMsg('sys', `${contact.name}: ${r.emoji}`),
@@ -213,16 +202,13 @@ async function openChat(contact: Contact) {
         renderContacts()
       },
     })
-    active.room = room; active.node = node
-    $('peer-status').textContent = 'w pokoju? — czekam…'
+    if (active?.name !== contact.name) { await conv.leave(); return } // switched away mid-connect
+    active.conv = conv
+    $('sess-peerid').textContent = conv.peerId.slice(0, 16) + '…'
 
-    let typingSent = false, away = false, tT: any, aT: any
-    const stopTyping = () => { clearTimeout(tT); if (typingSent) { typingSent = false; room.sendTyping('stop') } }
-    const armAway = () => { clearTimeout(aT); aT = setTimeout(() => { away = true; stopTyping(); room.sendPresence('away') }, 60_000) }
-    const activity = () => { if (away) { away = false; room.sendPresence('active') } if (!typingSent) { typingSent = true; room.sendTyping('start') } clearTimeout(tT); tT = setTimeout(stopTyping, 4_000); armAway() }
-    const send = () => { const inp = $('msg-input') as HTMLInputElement; const t = inp.value.trim(); if (!t) return; room.sendText(t); appendMsg('me', t, nowMs()); inp.value = ''; stopTyping() }
+    const send = () => { const inp = $('msg-input') as HTMLInputElement; const t = inp.value.trim(); if (!t) return; conv.sendText(t); appendMsg('me', t, nowMs()); inp.value = '' }
     ;($('send') as HTMLButtonElement).onclick = send
-    ;($('msg-input') as HTMLInputElement).oninput = activity
+    ;($('msg-input') as HTMLInputElement).oninput = () => conv.noteActivity()
     ;($('msg-input') as HTMLInputElement).onkeydown = (e: any) => { if (e.key === 'Enter') send() }
   } catch (e: any) {
     appendMsg('sys', 'Błąd: ' + (e?.message ?? e))
@@ -230,8 +216,8 @@ async function openChat(contact: Contact) {
   }
 }
 
-document.addEventListener('visibilitychange', () => { if (document.hidden && active?.room) { try { active.room.sendPresence('away') } catch {} } })
-window.addEventListener('beforeunload', () => { if (active?.room) { try { active.room.sendPresence('leave') } catch {} ; try { active.node?.stop() } catch {} } })
+document.addEventListener('visibilitychange', () => { if (document.hidden) active?.conv?.noteAway() })
+window.addEventListener('beforeunload', () => { active?.conv?.leave() })
 
 // ---- room rotation countdown (next UTC midnight) ----
 function startRotation() {

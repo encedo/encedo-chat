@@ -15,9 +15,7 @@
 import { createInterface } from 'node:readline'
 import { hemIdentity, softwareIdentity, type Identity } from './identity.ts'
 import { loadConfig, saveConfig, type EcConfig } from './config.ts'
-import { topicFromSecret, announceMacKey, todayUTC } from '../lib/rendezvous.ts'
-import { interimSession } from '../lib/session.ts'
-import { createPeer, dial } from '../net/peer.ts'
+import { todayUTC } from '../lib/rendezvous.ts'
 import { runChatSession } from './chat-session.ts'
 
 const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
@@ -97,14 +95,9 @@ switch (cmd) {
     const peerPub = cfg.contacts[name]
     if (!peerPub) { console.error(`unknown contact: ${name} (ec add ${name} <pubB64>)`); process.exit(1) }
     const id = await connect(cfg)
-    const ss = await id.ecdh(peerPub)
     const p = { networkId: opt('--network', 'main')!, dateUTC: opt('--date', todayUTC())! }
-    const topic = await topicFromSecret(ss, p)
-    const keys = { macKey: await announceMacKey(ss, p), session: await interimSession(ss, p) }
-    const node = await createPeer()
-    await dial(node, RELAY)
     console.log(`[ec] ${id.handle} → ${name}  via onchato relay`)
-    runChatSession(node, topic, keys, id.handle, name)
+    await runChatSession(id, peerPub, id.handle, name, RELAY, p)
     break
   }
   default:

@@ -1,19 +1,16 @@
 /**
- * identity.ts — one identity abstraction for the `ec` CLI, two backends:
- *   - hemIdentity: key in the HEM (real product), ECDH on the device.
- *   - softwareIdentity: key in a local file (dev/test), ECDH via node X25519.
- * Both expose { handle, pub, ecdh(peerPubB64) }.
+ * identity.ts — Identity factories for the CLIs (node-only backends):
+ *   - hemIdentity: key in the HEM (real product), login-or-register, ECDH on device.
+ *   - softwareIdentity: key in a local keystore file (dev/test), ECDH via node X25519.
+ * The Identity interface + the browser-safe HEM constructor live in lib/core.ts.
  */
 
 import { HEM } from '../../hem-sdk-js/hem-sdk.js'
 import { diffieHellman } from 'node:crypto'
 import { Keystore, rawToPriv, rawToPub } from '../bob/keystore.ts'
+import { hemIdentityFrom, type Identity } from '../lib/core.ts'
 
-export interface Identity {
-  handle: string
-  pub: string                                        // base64
-  ecdh(peerPubB64: string): Promise<Uint8Array>      // raw 32-byte shared secret
-}
+export type { Identity }
 
 const dec = new TextDecoder()
 const parseHandle = (d: Uint8Array | null) => (d ? dec.decode(d).split('\0')[0].split(',')[1] : undefined) ?? '(?)'
@@ -37,15 +34,7 @@ export async function hemIdentity(url: string, password: string, handleHint = 'm
   }
   const useTok = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
   const { pubkey } = await hem.getPubKey(useTok, kid)
-
-  return {
-    handle,
-    pub: pubkey,
-    async ecdh(peerPubB64: string) {
-      const t = await hem.authorizePassword(null, `keymgmt:use:${kid}`)   // cached derived key → no re-prompt
-      return hem.ecdh(t, kid, peerPubB64)
-    },
-  }
+  return hemIdentityFrom(hem, kid, handle, pubkey)
 }
 
 /** Software identity (dev/test). Creates the keystore if missing. */

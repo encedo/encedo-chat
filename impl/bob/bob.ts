@@ -14,10 +14,9 @@
  */
 
 import { Keystore } from './keystore.ts'
-import { topicFromSecret, announceMacKey, todayUTC } from '../lib/rendezvous.ts'
-import { interimSession } from '../lib/session.ts'
+import { topicFromSecret, todayUTC } from '../lib/rendezvous.ts'
+import { softwareIdentity } from '../cli/identity.ts'
 import { runChatSession } from '../cli/chat-session.ts'
-import { createPeer, dial } from '../net/peer.ts'
 import { onchatoRelay } from '../net/onchato.ts'
 
 const KS_PATH = new URL('./bob.keystore.json', import.meta.url).pathname
@@ -74,15 +73,11 @@ switch (cmd) {
     const peer = rest[0]
     if (!peer) { console.error('usage: join <peer> [--network m] [--date d] [--heartbeat ms]'); process.exit(1) }
     const ks = requireKeystore()
+    const peerPub = ks.data.peers[peer]
+    if (!peerPub) { console.error(`unknown peer: ${peer} — run: node bob/bob.ts add-peer ${peer} <pubB64>`); process.exit(1) }
     const pr = { networkId: opt('--network', 'main')!, dateUTC: opt('--date', todayUTC())! }
-    const ss = ks.sharedSecret(peer)
-    const topic = await topicFromSecret(ss, pr)
-    const keys = { macKey: await announceMacKey(ss, pr), session: await interimSession(ss, pr) }
     const { multiaddr: relay } = await onchatoRelay()
-    const node = await createPeer()
-    await dial(node, relay)
-    console.log(`[bob] joined via onchato relay as ${node.peerId.toString().slice(0, 12)}…`)
-    runChatSession(node, topic, keys, ks.data.handle, peer)
+    await runChatSession(softwareIdentity(KS_PATH, ks.data.handle), peerPub, ks.data.handle, peer, relay, pr)
     break
   }
   default:

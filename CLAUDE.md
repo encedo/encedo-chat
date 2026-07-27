@@ -156,6 +156,19 @@ Presence: Announce/HMAC (§5.5) stays for authenticated discovery/liveness;
 (relay blind). Ctrl+C and `/quit` → `presence:leave` last-will + clean
 `node.stop()`.
 
+### Core facade — `lib/core.ts`
+
+The single **headless API both front-ends consume** (the "backend↔GUI" seam):
+`Identity` (HEM or software, `ecdh`), `deriveRoom(id, peerPub, params) →
+{topic, keys}`, and `openConversation(id, peerPub, {relay, …events}) →
+Conversation` — which packs transport (peer + relay dial) + join + the
+typing/away/leave presence machine behind `sendText / sendReaction /
+noteActivity / noteAway / who / leave`. Web `app.ts` and the CLI
+`chat-session.ts` (via bob/alice/ec) are now **pure UI** over this — no
+duplicated key derivation or presence state machine. EH-2 / the §13 data plane
+slot into `openConversation` without touching a UI. `test/core.test.ts` pins
+`deriveRoom` == the direct rendezvous derivation (no drift).
+
 ### ⚠️ INTERIM (must be replaced before shipping)
 
 - `lib/msgcrypto.ts` — a **static AES-256-GCM sealed box** keyed from ss (HKDF);

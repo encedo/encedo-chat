@@ -18,10 +18,9 @@
 import { HEM } from '../../hem-sdk-js/hem-sdk.js'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { createInterface } from 'node:readline'
-import { topicFromSecret, announceMacKey, todayUTC } from '../lib/rendezvous.ts'
-import { interimSession } from '../lib/session.ts'
+import { topicFromSecret, todayUTC } from '../lib/rendezvous.ts'
+import { hemIdentity } from '../cli/identity.ts'
 import { runChatSession } from '../cli/chat-session.ts'
-import { createPeer, dial } from '../net/peer.ts'
 import { onchatoRelay } from '../net/onchato.ts'
 
 const LOCAL = new URL('./alice.local.json', import.meta.url).pathname
@@ -111,19 +110,13 @@ switch (cmd) {
   case 'join': {
     const peer = rest[0]; const peerPub = opt('--peer-pub')
     if (!peer || !peerPub) { console.error('usage: join <peer> --peer-pub <b64> [--network m] [--date d] [--heartbeat ms]'); process.exit(1) }
-    const { hsmUrl, kid, handle } = loadLocal()
+    const { hsmUrl } = loadLocal()
     const pr = { networkId: opt('--network', 'main'), dateUTC: opt('--date', todayUTC()) }
-    const hem = await connect(hsmUrl)
     const pw = await getPassword()
-    const useToken = await hem.authorizePassword(pw, `keymgmt:use:${kid}`)
-    const ss = await hem.ecdh(useToken, kid, peerPub)   // Uint8Array, raw 32B
-    const topic = await topicFromSecret(ss, pr)
-    const keys = { macKey: await announceMacKey(ss, pr), session: await interimSession(ss, pr) }
+    const id = await hemIdentity(hsmUrl, pw, 'alice')
     const { multiaddr: relay } = await onchatoRelay()
-    const node = await createPeer()
-    await dial(node, relay)
-    console.log(`[alice] joined via onchato relay as ${node.peerId.toString().slice(0, 12)}… (identity in HEM)`)
-    runChatSession(node, topic, keys, handle, peer)
+    console.log(`[alice] connecting via onchato relay (identity in HEM)…`)
+    await runChatSession(id, peerPub, id.handle, peer, relay, pr)
     break
   }
   default:
