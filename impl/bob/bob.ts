@@ -19,11 +19,17 @@ import { softwareIdentity } from '../cli/identity.ts'
 import { runChatSession } from '../cli/chat-session.ts'
 import { onchatoRelay } from '../net/onchato.ts'
 
-const KS_PATH = new URL('./bob.keystore.json', import.meta.url).pathname
 const [cmd, ...rest] = process.argv.slice(2)
 const opt = (name: string, def?: string): string | undefined => {
   const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : def
 }
+// keystore: --store <file> | $KEYSTORE | default bob.keystore.json (Bob unchanged).
+// a relative name resolves next to bob.keystore.json (impl/bob/), e.g. carl.keystore.json →
+// second profile:  KEYSTORE=carl.keystore.json node bob/bob.ts init --handle carl
+const storeArg = opt('--store') ?? process.env.KEYSTORE
+const KS_PATH = storeArg
+  ? (storeArg.startsWith('/') ? storeArg : new URL('./' + storeArg, import.meta.url).pathname)
+  : new URL('./bob.keystore.json', import.meta.url).pathname
 
 function requireKeystore(): Keystore {
   if (!Keystore.exists(KS_PATH)) { console.error('No keystore — run: node bob/bob.ts init'); process.exit(1) }
@@ -81,5 +87,5 @@ switch (cmd) {
     break
   }
   default:
-    console.log('usage: bob <init|pubkey|add-peer <h> <b64>|peers|topic <peer>|join <peer> [--network m] [--date YYYY-MM-DD]>')
+    console.log('usage: bob <init|pubkey|add-peer <h> <b64>|peers|topic <peer>|join <peer> [--network m] [--date YYYY-MM-DD]>  [--store file | $KEYSTORE]')
 }

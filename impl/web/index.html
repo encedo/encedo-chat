@@ -134,6 +134,8 @@
   .kv{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;gap:12px}
   .kv .k{color:var(--muted);flex-shrink:0}
   .kv .v{color:var(--text);font-weight:500;font-variant-numeric:tabular-nums;word-break:break-all;text-align:right}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(8px);background:var(--text);color:var(--card);padding:9px 16px;border-radius:20px;font-size:13px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:20}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   @media (max-width:860px){.app{flex-direction:column;height:auto}.sidebar{width:100%}.chat{min-height:70vh}}
 </style>
 </head>
@@ -158,7 +160,8 @@
     <aside class="sidebar">
       <div class="me">
         <div class="avatar" id="me-avatar">··</div>
-        <div class="info"><div class="name" id="me-handle">—</div><div class="fp" id="me-fp"></div></div>
+        <div class="info"><div class="name" id="me-handle">—</div><div class="fp" id="me-fp" title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer"></div></div>
+        <button class="icon-btn" id="btn-copy-key" title="Kopiuj mój klucz publiczny">📋</button>
         <button class="icon-btn" id="btn-settings" title="Ustawienia">⚙</button>
       </div>
       <div class="search-wrap"><input id="contact-search" type="text" placeholder="Szukaj kontaktu…" autocomplete="off"></div>
@@ -201,6 +204,7 @@
   </div>
 
   <div class="scrim" id="scrim"></div>
+  <div class="toast" id="toast"></div>
 
   <div class="modal" id="add-modal">
     <h2>Dodaj peera</h2>
@@ -218,7 +222,7 @@
     <div class="opt ph"><div><div class="o-name">P2 · Wrogie otoczenie</div><div class="o-desc">Wyłącznie relay — IP niewidoczne. (czeka na data plane §13)</div></div></div>
     <div class="opt ph"><div><div class="o-name">P3 · Sieć własna</div><div class="o-desc">Relay-only na własnych węzłach z własnym kluczem podpisu.</div></div></div>
     <div class="d-section">Sesja</div>
-    <div class="kv"><span class="k">Tożsamość</span><span class="v" id="sess-id">—</span></div>
+    <div class="kv"><span class="k">Tożsamość</span><span class="v" id="sess-id" title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer">—</span></div>
     <div class="kv"><span class="k">PeerId (efemeryczny)</span><span class="v" id="sess-peerid">—</span></div>
     <div class="kv"><span class="k">Rotacja pokoju</span><span class="v">codziennie 00:00 UTC</span></div>
     <div class="kv"><span class="k">Historia</span><span class="v">brak — sesja efemeryczna</span></div>

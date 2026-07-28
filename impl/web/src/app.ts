@@ -148,6 +148,26 @@ $('btn-close-drawer').addEventListener('click', closeDrawer)
 $('scrim').addEventListener('click', () => { closeModal(); closeDrawer() })
 $('btn-logout').addEventListener('click', () => location.reload())
 
+// ---- copy my pubkey ----
+let toastT: any
+function toast(msg: string) {
+  const el = $('toast'); el.textContent = msg; el.classList.add('show')
+  clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 1500)
+}
+async function copyPub() {
+  if (!session) return
+  try {
+    await navigator.clipboard.writeText(session.pub)
+  } catch {
+    const ta = document.createElement('textarea'); ta.value = session.pub; ta.style.position = 'fixed'; ta.style.opacity = '0'
+    document.body.appendChild(ta); ta.select(); try { document.execCommand('copy') } catch {} ta.remove()
+  }
+  toast('Skopiowano klucz publiczny ✓')
+}
+$('btn-copy-key').addEventListener('click', copyPub)
+$('me-fp').addEventListener('dblclick', copyPub)
+$('sess-id').addEventListener('dblclick', copyPub)
+
 // ---- placeholder tabs ----
 for (const [tab, pane] of [['tab-contacts', 'contacts'], ['tab-groups', 'groups'], ['tab-network', 'network']]) {
   $(tab).addEventListener('click', () => {

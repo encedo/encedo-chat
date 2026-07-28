@@ -40,9 +40,15 @@ export function startRepl(prompt: string, onLine: (line: string) => void, opts: 
   rl.on('SIGINT', () => { if (opts.onSigint) opts.onSigint(); else rl.close() })
   rl.on('close', () => { process.stdout.write('\n'); process.exit(0) })
 
-  if (opts.onActivity && (process.stdin as any).isTTY) {
+  // Ctrl+Z → graceful leave, not suspend (belt-and-braces for the non-raw case)
+  if (opts.onSigint) process.on('SIGTSTP', () => opts.onSigint!())
+  if ((opts.onActivity || opts.onSigint) && (process.stdin as any).isTTY) {
     emitKeypressEvents(process.stdin)
-    process.stdin.on('keypress', () => opts.onActivity!())
+    process.stdin.on('keypress', (_str: string, key: any) => {
+      if (key?.ctrl && key.name === 'z') { opts.onSigint?.(); return } // Ctrl+Z arrives here in raw mode
+      if (key?.ctrl || key?.meta) return                               // control combos aren't "typing"
+      opts.onActivity?.()
+    })
   }
 
   rl.prompt()
