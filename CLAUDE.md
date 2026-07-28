@@ -175,6 +175,26 @@ duplicated key derivation or presence state machine. EH-2 / the §13 data plane
 slot into `openConversation` without touching a UI. `test/core.test.ts` pins
 `deriveRoom` == the direct rendezvous derivation (no drift).
 
+### WebRTC direct data plane (§13 direct / P1)
+
+Content moves off the relay onto a **direct WebRTC DataChannel** when two peers
+are in the room; GossipSub carries only presence + the encrypted WebRTC signaling
+(`t:'rtc'` envelopes) and is the content **fallback**. `room.ts` splits control
+vs content (`setContentSend` / `injectContent`); `net/webrtc.ts` (`webrtcLink` —
+RTCPeerConnection + DataChannel + STUN) and `net/webrtc-plane.ts` (`attachWebRTC`:
+lower PeerId initiates, signaling rides the room) wire it;
+`openConversation({webrtc:true, onWebrtcState})` enables it and reports the
+transport for the UI badge (⚪ Relay → 🟢 WebRTC Direct). **Verified live**: two
+browsers, DataChannel content both ways, badge flips. Browser-only — Node/CLI
+stays on GossipSub. This is the **direct (P1)** profile (peers see IPs); the
+relay-blind plane is still parked (Directions).
+
+**Software identity (`browserSoftwareIdentity`)** — a WebCrypto X25519 keypair in
+the browser (localStorage, no HEM), same `Identity` contract, for dev / no-HEM /
+two-browser testing. ECDH via `crypto.subtle` (no 3rd-party crypto), byte-for-byte
+== node/HEM raw X25519, so it interoperates with HEM identities. `localOnlyManager`
+gives it a local-only contact book.
+
 ### ⚠️ INTERIM (must be replaced before shipping)
 
 - `lib/msgcrypto.ts` — a **static AES-256-GCM sealed box** keyed from ss (HKDF);
@@ -190,9 +210,13 @@ slot into `openConversation` without touching a UI. `test/core.test.ts` pins
   like Announce (see the `[EH-2 seam]` marker in `room.ts`); the per-message
   ratchet header rides INSIDE `Session`'s own wire, invisible to the room.
   `test/session.test.ts` covers the interim path + that the EH-2 stub throws.
-- **Message transport rides GossipSub through the relay** (v5 model — relay sees
-  ciphertext + metadata). Target is the direct-stream / blind circuit-relay data
-  plane (`docs/PROTOCOL.md` §13). Later step.
+- **Content prefers a direct WebRTC DataChannel** once two peers are in the room
+  — content goes P2P (relay-blind); GossipSub through the relay carries presence
+  + WebRTC signaling and is the content **fallback**. This is the **direct (P1)**
+  profile: peers see each other's IPs. Everything still on GossipSub (presence,
+  signaling, fallback content) is ciphertext + metadata to the relay. The
+  **relay-blind / anonymous** plane (blind circuit-relay, no IP exposure —
+  `docs/PROTOCOL.md` §13) is still the later step (see Directions).
 
 ## Directions
 
@@ -214,12 +238,16 @@ slot into `openConversation` without touching a UI. `test/core.test.ts` pins
   `@libp2p/interface ^2` while circuit-relay-v2 4.x needs interface ^3 — gossipsub
   hasn't migrated to libp2p v3, and we need gossipsub for rendezvous. **Revisit
   when gossipsub ships a v3 release** (then circuit-relay-v2 4.x should give the
-  relay-blind / relay-only plane). Meanwhile content rides GossipSub (interim).
-  v5's WebRTC-direct is the proven alternative if a direct-mode plane is wanted
-  sooner (peers see IPs).
+  relay-blind / relay-only plane). **The WebRTC-direct plane (P1) is now built +
+  verified in v6** (see "WebRTC direct data plane" above): content goes P2P over a
+  DataChannel, GossipSub is the fallback — that covers the direct profile (peers
+  see IPs). What stays parked is specifically the **relay-blind / anonymous**
+  plane (no IP exposure).
 
 ## Status
 
 - Specs (`docs/`) frozen pending cryptographer feedback — expect changes to
   EH-2/ratchet. Everything in `impl/` so far is EH-2-independent.
+- **WebRTC direct data plane (P1) done + verified live** (two browsers,
+  DataChannel both ways, badge ⚪ Relay → 🟢 WebRTC Direct). Ready to deploy.
 - Commits ahead of origin; the user pushes (SSH passphrase).
