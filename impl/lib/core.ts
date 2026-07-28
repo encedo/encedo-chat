@@ -16,6 +16,7 @@ import { topicFromSecret, announceMacKey, todayUTC, type RvParams } from './rend
 import { interimSession } from './session.ts'
 import { joinChat, type RoomKeys, type ChatOpts } from './room.ts'
 import { createPeer, dial } from '../net/peer.ts'
+import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
 import { b64, unb64 } from './wc.ts'
 
 export interface Identity {
@@ -136,6 +137,8 @@ const FLUSH_MS = 250 // let the leave reach the relay before teardown
 export interface OpenOpts extends ChatOpts {
   relay: string
   params?: RoomParams
+  webrtc?: boolean // enable the WebRTC direct data plane (browser only)
+  onWebrtcState?: (s: string) => void // WebRTC conn/ICE state (for a UI badge)
 }
 export interface Conversation {
   peerId: string
@@ -159,14 +162,18 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
   const node = await createPeer()
   await dial(node, opts.relay)
 
+  const self = node.peerId.toString()
+  let plane: WebRTCPlane | null = null
   const room = joinChat(node, topic, keys, {
     onMessage: opts.onMessage,
     onTyping: opts.onTyping,
-    onPresence: opts.onPresence,
+    onPresence: (p, ev) => { opts.onPresence?.(p, ev); if (ev === 'join') plane?.onPeer(p) },
     onReaction: opts.onReaction,
     onFile: opts.onFile,
+    onSignal: (from, env) => plane?.onSignal(from, env),
     heartbeatMs: opts.heartbeatMs,
   })
+  if (opts.webrtc) plane = attachWebRTC(room, self, { onState: opts.onWebrtcState })
 
   let typingSent = false
   let away = false
@@ -194,6 +201,7 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
       clearTimeout(tT); clearTimeout(aT)
       try { room.sendPresence('leave') } catch {}
       await new Promise((r) => setTimeout(r, FLUSH_MS))
+      try { plane?.stop() } catch {}
       try { room.stop() } catch {}
       try { await node.stop() } catch {}
     },

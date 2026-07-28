@@ -210,6 +210,11 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number) {
   box.scrollTop = box.scrollHeight
 }
 const setTyping = (on: boolean, name = '') => { $('typing-ind').textContent = on ? `${name} pisze…` : '' }
+function setTransport(state: string) {
+  const b = $('transport-badge')
+  if (state.startsWith('conn=connected')) { b.className = 'badge direct'; b.textContent = '🟢 WebRTC Direct'; b.title = 'Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing' }
+  else if (state.startsWith('conn=failed') || state.startsWith('conn=disconnected') || state.startsWith('conn=closed')) { b.className = 'badge relay'; b.textContent = '⚪ Relay'; b.title = 'Treść przez relay (GossipSub)' }
+}
 
 async function openChat(contact: Contact) {
   if (!session) return
@@ -221,6 +226,7 @@ async function openChat(contact: Contact) {
   $('peer-name').textContent = contact.name
   $('peer-dot').className = 'dot'; $('peer-status').textContent = 'łączę…'
   $('messages').innerHTML = ''; setTyping(false)
+  $('transport-badge').className = 'badge relay'; $('transport-badge').textContent = '⚪ Relay'
   appendMsg('sys', `Pokój otwarty — czekam na ${contact.name}…`)
   startRotation()
 
@@ -228,6 +234,8 @@ async function openChat(contact: Contact) {
     let peerTyping = false
     const conv = await openConversation(session.id, { pub: contact.pub, kid: contact.kid }, {
       relay: RELAY,
+      webrtc: true,
+      onWebrtcState: setTransport,
       onMessage: (_from, msg) => { peerTyping = false; setTyping(false); appendMsg('peer', msg.body, msg.ts) },
       onTyping: (_from, state) => { peerTyping = state === 'start'; setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => appendMsg('sys', `${contact.name}: ${r.emoji}`),

@@ -46,10 +46,12 @@ export interface FileEnv extends BaseEnv {
   exp?: number // expiry (epoch ms, UTC) — IPFS auto-drops after N hours
   key?: string // content key to decrypt the fetched blob (reserved; design TBD)
 }
+/** WebRTC signaling (SDP/ICE) relayed over the control plane (GossipSub), encrypted. */
+export interface RtcEnv extends BaseEnv { t: 'rtc'; to: string; sig: any }
 /** A valid envelope whose `t` this build doesn't know — carried for forward-compat. */
 export interface UnknownEnv extends BaseEnv { [k: string]: unknown }
 
-export type KnownEnv = MsgEnv | TypingEnv | PresenceEnv | ReactionEnv | FileEnv
+export type KnownEnv = MsgEnv | TypingEnv | PresenceEnv | ReactionEnv | FileEnv | RtcEnv
 export type Envelope = KnownEnv | UnknownEnv
 export type FileMeta = Omit<FileEnv, keyof BaseEnv>
 
@@ -67,6 +69,7 @@ export const envTyping = (seq: number, state: TypingState): TypingEnv => ({ ...b
 export const envPresence = (seq: number, state: PresenceState): PresenceEnv => ({ ...base('presence', seq), state })
 export const envReaction = (seq: number, to: string, emoji: string): ReactionEnv => ({ ...base('reaction', seq), to, emoji })
 export const envFile = (seq: number, f: FileMeta): FileEnv => ({ ...base('file', seq), ...f })
+export const envRtc = (seq: number, to: string, sig: any): RtcEnv => ({ ...base('rtc', seq), to, sig })
 
 export const encodeEnvelope = (e: Envelope): Uint8Array => te.encode(JSON.stringify(e))
 
@@ -90,6 +93,7 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
     case 'presence': return PRESENCE.has(m.state) ? (m as PresenceEnv) : null
     case 'reaction': return (typeof m.to === 'string' && typeof m.emoji === 'string') ? (m as ReactionEnv) : null
     case 'file': return (typeof m.cid === 'string' && typeof m.name === 'string' && typeof m.size === 'number' && typeof m.mime === 'string') ? (m as FileEnv) : null
+    case 'rtc': return (typeof m.to === 'string' && m.sig != null) ? (m as RtcEnv) : null
     default: return m as UnknownEnv // forward-compat: dispatcher ignores unknown types
   }
 }

@@ -93,6 +93,7 @@
   .badges{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   .badge{font-size:11.5px;font-weight:600;padding:4px 12px;border-radius:20px;display:inline-flex;align-items:center;gap:6px}
   .badge.relay{background:var(--bubble-out);color:var(--muted)}
+  .badge.direct{background:var(--good-soft);color:var(--good)}
   .badge.e2e{background:var(--warn-soft);color:var(--warn)}
   .badge.rotate{background:var(--bg);color:var(--muted);font-variant-numeric:tabular-nums;border:1px solid var(--border)}
   .messages{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
@@ -195,7 +196,7 @@
             <div class="sub"><span class="dot" id="peer-dot"></span> <span id="peer-status">poza pokojem</span></div>
           </div>
           <div class="badges">
-            <span class="badge relay" title="Treść przez relay onchato (interim GossipSub)">⚪ Relay</span>
+            <span class="badge relay" id="transport-badge" title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi">⚪ Relay</span>
             <span class="badge e2e" title="Szyfrowane E2E — interim, EH-2 w drodze">🔒 E2E interim</span>
             <span class="badge rotate" title="Deterministyczna rotacja pokoju (00:00 UTC)">↻ <span id="rot">–:–:–</span></span>
           </div>
