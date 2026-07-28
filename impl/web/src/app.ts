@@ -153,7 +153,7 @@ function renderContacts() {
 $('contact-search').addEventListener('input', renderContacts)
 
 // ---- add-peer modal ----
-const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; $('add-name').focus() }
+const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; ;(document.querySelector('input[name="store"][value="hem"]') as HTMLInputElement).checked = true; $('add-name').focus() }
 const closeModal = () => { $('scrim').classList.remove('open'); $('add-modal').classList.remove('open') }
 $('btn-add').addEventListener('click', openModal)
 $('add-cancel').addEventListener('click', closeModal)
@@ -163,7 +163,9 @@ $('add-save').addEventListener('click', async () => {
   if (!name || !pub) { setMsg('add-msg', 'Podaj nazwę i klucz.', 'err'); return }
   try { if (Uint8Array.from(atob(pub), (c) => c.charCodeAt(0)).length !== 32) { setMsg('add-msg', 'Klucz nie wygląda na 32-bajtowy X25519 (base64).', 'err'); return } }
   catch { setMsg('add-msg', 'Klucz nie jest poprawnym base64.', 'err'); return }
-  const persistent = ((document.querySelector('input[name="store"]:checked') as HTMLInputElement | null)?.value ?? 'hem') !== 'local'
+  const store = (document.querySelector('input[name="store"]:checked') as HTMLInputElement | null)?.value ?? 'hem'
+  if (store === 'none') { closeModal(); openChat({ name, pub, source: 'local' }); return } // ephemeral — nothing saved (HEM nor localStorage)
+  const persistent = store !== 'local'
   const btn = $('add-save') as HTMLButtonElement; btn.disabled = true; btn.textContent = 'Zapisuję…'
   try {
     const dup = contactsCache.find((c) => c.name === name)
@@ -212,17 +214,36 @@ for (const [tab, pane] of [['tab-contacts', 'contacts'], ['tab-groups', 'groups'
 }
 
 // ---- chat ----
-function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number) {
+const msgEls = new Map<string, HTMLElement>() // msg id → its reactions container (both directions share the id)
+const QUICK_EMOJI = ['👍', '❤️', '😂', '😮']
+function addReaction(msgId: string, emoji: string) {
+  const rx = msgEls.get(msgId); if (!rx) return
+  const chip = document.createElement('span'); chip.className = 'rchip'; chip.textContent = emoji
+  rx.appendChild(chip)
+}
+function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string) {
   const box = $('messages')
-  if (kind === 'sys') { const s = document.createElement('div'); s.className = 'sysline'; s.textContent = text; box.appendChild(s) }
-  else {
-    const row = document.createElement('div'); row.className = 'mrow ' + (kind === 'me' ? 'out' : 'in')
-    const bub = document.createElement('div'); bub.className = 'bubble'
-    const t = document.createElement('div'); t.className = 'b-text'; t.textContent = text
-    const m = document.createElement('div'); m.className = 'b-meta'; m.textContent = utcHHMM(ts ?? nowMs()) + ' UTC'
-    bub.appendChild(t); bub.appendChild(m); row.appendChild(bub); box.appendChild(row)
+  if (kind === 'sys') {
+    const s = document.createElement('div'); s.className = 'sysline'; s.textContent = text; box.appendChild(s)
+    box.scrollTop = box.scrollHeight; return
   }
-  box.scrollTop = box.scrollHeight
+  const row = document.createElement('div'); row.className = 'mrow ' + (kind === 'me' ? 'out' : 'in')
+  const bub = document.createElement('div'); bub.className = 'bubble'
+  const t = document.createElement('div'); t.className = 'b-text'; t.textContent = text
+  const m = document.createElement('div'); m.className = 'b-meta'; m.textContent = utcHHMM(ts ?? nowMs()) + ' UTC'
+  const rx = document.createElement('div'); rx.className = 'b-reactions'
+  bub.append(t, m, rx); row.appendChild(bub)
+  if (id) {
+    msgEls.set(id, rx)
+    const bar = document.createElement('div'); bar.className = 'b-react'
+    for (const e of QUICK_EMOJI) {
+      const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = e
+      btn.addEventListener('click', () => { active?.conv?.sendReaction(id, e); addReaction(id, e) })
+      bar.appendChild(btn)
+    }
+    row.appendChild(bar)
+  }
+  box.appendChild(row); box.scrollTop = box.scrollHeight
 }
 const setTyping = (on: boolean, name = '') => { $('typing-ind').textContent = on ? `${name} pisze…` : '' }
 function setTransport(state: string) {
@@ -240,7 +261,7 @@ async function openChat(contact: Contact) {
   $('peer-avatar').textContent = initials(contact.name)
   $('peer-name').textContent = contact.name
   $('peer-dot').className = 'dot'; $('peer-status').textContent = 'łączę…'
-  $('messages').innerHTML = ''; setTyping(false)
+  $('messages').innerHTML = ''; msgEls.clear(); setTyping(false)
   $('transport-badge').className = 'badge relay'; $('transport-badge').textContent = '⚪ Relay'
   appendMsg('sys', `Pokój otwarty — czekam na ${contact.name}…`)
   startRotation()
@@ -251,9 +272,9 @@ async function openChat(contact: Contact) {
       relay: RELAY,
       webrtc: true,
       onWebrtcState: setTransport,
-      onMessage: (_from, msg) => { peerTyping = false; setTyping(false); appendMsg('peer', msg.body, msg.ts) },
+      onMessage: (_from, msg) => { peerTyping = false; setTyping(false); appendMsg('peer', msg.body, msg.ts, msg.id) },
       onTyping: (_from, state) => { peerTyping = state === 'start'; setTyping(peerTyping, contact.name) },
-      onReaction: (_from, r) => appendMsg('sys', `${contact.name}: ${r.emoji}`),
+      onReaction: (_from, r) => addReaction(r.to, r.emoji),
       onFile: (_from, f) => appendMsg('sys', `${contact.name} udostępnił plik: ${f.name} — interim (IPFS TODO)`),
       onPresence: (_peer, ev) => {
         if (active) active.inRoom = ev !== 'leave'
@@ -269,7 +290,7 @@ async function openChat(contact: Contact) {
     active.conv = conv
     $('sess-peerid').textContent = conv.peerId.slice(0, 16) + '…'
 
-    const send = () => { const inp = $('msg-input') as HTMLInputElement; const t = inp.value.trim(); if (!t) return; conv.sendText(t); appendMsg('me', t, nowMs()); inp.value = '' }
+    const send = () => { const inp = $('msg-input') as HTMLInputElement; const t = inp.value.trim(); if (!t) return; const id = conv.sendText(t); appendMsg('me', t, nowMs(), id); inp.value = '' }
     ;($('send') as HTMLButtonElement).onclick = send
     ;($('msg-input') as HTMLInputElement).oninput = () => conv.noteActivity()
     ;($('msg-input') as HTMLInputElement).onkeydown = (e: any) => { if (e.key === 'Enter') send() }

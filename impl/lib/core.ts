@@ -182,7 +182,7 @@ export interface OpenOpts extends ChatOpts {
 export interface Conversation {
   peerId: string
   topic: string
-  sendText(body: string): void
+  sendText(body: string): string // returns the sent message id (for reactions)
   sendReaction(toId: string, emoji: string): void
   noteActivity(): void // UI calls on user input → drives "typing" + resets "away"
   noteAway(): void // UI calls on blur/tab-hidden → "away" now
@@ -231,7 +231,7 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
   return {
     peerId: node.peerId.toString(),
     topic,
-    sendText: (body) => { room.sendText(body); stopTyping() },
+    sendText: (body) => { const id = room.sendText(body); stopTyping(); return id },
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),
     noteActivity,
     noteAway,

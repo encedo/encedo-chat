@@ -116,7 +116,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const emitGossip = async (bytes: Uint8Array) => { try { gossip(await keys.session.encrypt(bytes)) } catch {} }
 
   return {
-    sendText: (body: string) => emitContent(encodeEnvelope(envMsg(seq++, body))),
+    sendText: (body: string) => { const e = envMsg(seq++, body); void emitContent(encodeEnvelope(e)); return e.id }, // returns msg id (for reactions)
     sendTyping: (state: TypingState) => emitContent(encodeEnvelope(envTyping(seq++, state))),
     sendPresence: (state: PresenceState) => emitContent(encodeEnvelope(envPresence(seq++, state))),
     sendReaction: (to: string, emoji: string) => emitContent(encodeEnvelope(envReaction(seq++, to, emoji))),
