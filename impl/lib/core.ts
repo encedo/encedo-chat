@@ -42,6 +42,36 @@ export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: stri
   }
 }
 
+/**
+ * Software identity in the browser (dev / no-HEM): a WebCrypto X25519 keypair
+ * persisted via injected load/save (per-tab sessionStorage for testing). Same
+ * Identity contract; ECDH via crypto.subtle X25519. Not HSM-anchored — for
+ * testing and users without a HEM. Interoperates with HEM identities (X25519).
+ */
+export async function browserSoftwareIdentity(handleHint: string, load: () => string | null, save: (v: string) => void): Promise<Identity> {
+  const subtle = globalThis.crypto.subtle
+  let handle: string, pub: string, privJwk: JsonWebKey
+  const saved = load()
+  if (saved) {
+    const d = JSON.parse(saved); handle = d.handle; pub = d.pub; privJwk = d.priv
+  } else {
+    const kp = (await subtle.generateKey({ name: 'X25519' }, true, ['deriveBits'])) as CryptoKeyPair
+    pub = b64(new Uint8Array(await subtle.exportKey('raw', kp.publicKey)))
+    privJwk = await subtle.exportKey('jwk', kp.privateKey)
+    handle = handleHint
+    save(JSON.stringify({ handle, pub, priv: privJwk }))
+  }
+  const priv = await subtle.importKey('jwk', privJwk, { name: 'X25519' }, false, ['deriveBits'])
+  return {
+    handle,
+    pub,
+    async ecdh(peerPubB64: string) {
+      const peerPub = await subtle.importKey('raw', unb64(peerPubB64), { name: 'X25519' }, false, [])
+      return new Uint8Array(await subtle.deriveBits({ name: 'X25519', public: peerPub }, priv, 256))
+    },
+  }
+}
+
 // ---- contact book (peer pubkeys) ----------------------------------------
 export interface Contact { name: string; pub: string; kid?: string; source: 'hem' | 'local' }
 export interface ContactBook {
@@ -119,6 +149,15 @@ export function mergedContactBook(hem: ContactBook, local: ContactBook): Contact
     async list() { return [...(await hem.list()), ...(await local.list())] },
     add(name: string, pubB64: string, persistent: boolean) { return (persistent ? hem : local).add(name, pubB64) },
     remove(c: Contact) { return (c.source === 'hem' ? hem : local).remove(c) },
+  }
+}
+
+/** A ContactManager with only a local backend (software identities have no HEM). */
+export function localOnlyManager(local: ContactBook): ContactManager {
+  return {
+    list: () => local.list(),
+    add: (name: string, pubB64: string, _persistent: boolean) => local.add(name, pubB64),
+    remove: (c: Contact) => local.remove(c),
   }
 }
 

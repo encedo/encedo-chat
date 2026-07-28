@@ -12,7 +12,7 @@
  */
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
-import { hemIdentityFrom, openConversation, hemContactBook, localContactBook, mergedContactBook, type Conversation, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
+import { hemIdentityFrom, browserSoftwareIdentity, openConversation, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, type Conversation, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 
 const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
@@ -74,7 +74,7 @@ $('go').addEventListener('click', async () => {
       const { kid } = await hem.createKeyPair(gen, `chat-ik-${handle}`, 'CURVE25519', btoa(`ETSEIC:self,${handle},ik,${iat}`))
       const use = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
       const { pubkey } = await hem.getPubKey(use, kid)
-      await enterApp(hem, handle, kid, pubkey)
+      await enterApp(hemIdentityFrom(hem, kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM')
     } else {
       const listTok = await hem.authorizePassword(pass, 'keymgmt:list')
       const keys: any[] = await hem.searchKeys(listTok, 'ETSEIC:self,')
@@ -82,26 +82,41 @@ $('go').addEventListener('click', async () => {
       const key = keys[0]; const handle = parseHandle(key.description)
       const use = await hem.authorizePassword(null, `keymgmt:use:${key.kid}`)
       const { pubkey } = await hem.getPubKey(use, key.kid)
-      await enterApp(hem, handle, key.kid, pubkey)
+      await enterApp(hemIdentityFrom(hem, key.kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM')
     }
   } catch (e: any) { setMsg('msg', 'Błąd: ' + (e?.message ?? e), 'err') }
   finally { const b = $('go') as HTMLButtonElement; b.disabled = false; b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj' }
 })
 $('pass').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') ($('go') as HTMLButtonElement).click() })
 
-async function enterApp(hem: any, handle: string, kid: string, pub: string) {
+// dev / no-HEM: a persistent software X25519 identity (localStorage — one per
+// browser). For two peers, open two DIFFERENT browsers (or profiles).
+$('go-soft').addEventListener('click', async () => {
+  const handle = (val('handle') || prompt('Handle (software / dev):', 'dev1') || '').trim()
+  if (!handle) return
+  clr('msg')
+  try {
+    const id = await browserSoftwareIdentity(handle, () => localStorage.getItem('ec-soft-id'), (v) => localStorage.setItem('ec-soft-id', v))
+    await enterApp(id, localOnlyManager(makeLocalBook(id.handle, localStorage)), 'Software · dev')
+  } catch (e: any) { setMsg('msg', 'Błąd tożsamości software: ' + (e?.message ?? e), 'err') }
+})
+
+function makeLocalBook(handle: string, storage: Storage) {
   const lsKey = 'ec-local-contacts-' + handle
-  const local = localContactBook(
-    () => { try { return JSON.parse(localStorage.getItem(lsKey) || '[]') } catch { return [] } },
-    (l) => localStorage.setItem(lsKey, JSON.stringify(l)),
+  return localContactBook(
+    () => { try { return JSON.parse(storage.getItem(lsKey) || '[]') } catch { return [] } },
+    (l) => storage.setItem(lsKey, JSON.stringify(l)),
   )
-  session = { id: hemIdentityFrom(hem, kid, handle, pub), handle, pub, book: mergedContactBook(hemContactBook(hem), local) }
+}
+
+async function enterApp(id: Identity, book: ContactManager, sourceLabel: string) {
+  session = { id, handle: id.handle, pub: id.pub, book }
   $('login').hidden = true; $('app').hidden = false
-  $('me-avatar').textContent = initials(handle)
-  $('me-handle').textContent = handle
-  const fp = await fingerprint(pub)
+  $('me-avatar').textContent = initials(id.handle)
+  $('me-handle').textContent = id.handle
+  const fp = await fingerprint(id.pub)
   $('me-fp').textContent = '🔑 ' + fp
-  $('sess-id').textContent = 'HEM · ' + fp
+  $('sess-id').textContent = sourceLabel + ' · ' + fp
   refreshContacts()
 }
 
