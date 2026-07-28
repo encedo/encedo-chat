@@ -75,12 +75,16 @@ const relay = await createLibp2p({
   }
 })
 
-// Hard cap: once MAX_TOPICS distinct topics are live the relay refuses NEW ones
-// (rendezvous rooms beyond the cap won't be forwarded). No eviction yet.
-// TODO(eviction): make the cap soft — drop a topic when its last subscriber
-// unsubscribes (subscription-change), and/or TTL-evict idle topics. Tracked as
-// a follow-up; kept as-is here so this move is behaviour-neutral vs the live relay.
+// Soft topic cap. MAX_TOPICS bounds CONCURRENT topics (a DoS guard); abandoned
+// topics are EVICTED, so the cap counts LIVE rooms, not every room ever seen.
+// Liveness = activity on the topic: clients publish an Announce heartbeat every
+// ~15 s, so any room with a live subscriber is refreshed continuously. When all
+// clients leave or die the heartbeats stop and the topic is evicted after
+// IDLE_TTL — so we never evict a room someone is actually in (no silent kill).
 const MAX_TOPICS = 50
+const IDLE_TTL = 120_000 // evict a topic after this much silence (>> 15 s heartbeat)
+const SWEEP_MS = 30_000
+const lastSeen = new Map() // topic -> last activity (ms); drives eviction
 
 relay.services.pubsub.addEventListener('subscription-change', (evt) => {
   for (const { topic, subscribe } of evt.detail.subscriptions) {
@@ -90,15 +94,30 @@ relay.services.pubsub.addEventListener('subscription-change', (evt) => {
         continue
       }
       relay.services.pubsub.subscribe(topic)
+      lastSeen.set(topic, Date.now())
       console.log(`[+topic] "${topic}"`)
     }
   }
 })
 
 relay.services.pubsub.addEventListener('message', (evt) => {
+  lastSeen.set(evt.detail.topic, Date.now()) // heartbeat announces count → live rooms stay
   const from = evt.detail.from.toString().slice(0, 12)
   console.log(`[msg:${evt.detail.topic}] ${from}...: ${new TextDecoder().decode(evt.detail.data)}`)
 })
+
+// evict abandoned topics: no activity (not even a heartbeat) for IDLE_TTL → all
+// clients gone → free the slot so the cap counts live rooms, not historical ones.
+setInterval(() => {
+  const now = Date.now()
+  for (const topic of relay.services.pubsub.getTopics()) {
+    if (now - (lastSeen.get(topic) ?? 0) > IDLE_TTL) {
+      relay.services.pubsub.unsubscribe(topic)
+      lastSeen.delete(topic)
+      console.log(`[-topic] evicted "${topic}" (idle > ${IDLE_TTL / 1000}s)`)
+    }
+  }
+}, SWEEP_MS)
 
 relay.addEventListener('peer:connect', (evt) => console.log('[+]', evt.detail.toString().slice(0, 16) + '...'))
 relay.addEventListener('peer:disconnect', (evt) => console.log('[-]', evt.detail.toString().slice(0, 16) + '...'))
