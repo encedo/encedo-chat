@@ -16,6 +16,7 @@ import { topicFromSecret, announceMacKey, todayUTC, type RvParams } from './rend
 import { interimSession } from './session.ts'
 import { joinChat, type RoomKeys, type ChatOpts } from './room.ts'
 import { createPeer, dial } from '../net/peer.ts'
+import { b64, unb64 } from './wc.ts'
 
 export interface Identity {
   handle: string
@@ -32,6 +33,48 @@ export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: stri
     async ecdh(peerPubB64: string) {
       const t = await hem.authorizePassword(null, `keymgmt:use:${kid}`) // cached derived key → no re-prompt
       return hem.ecdh(t, kid, peerPubB64)
+    },
+  }
+}
+
+// ---- contact book (peer pubkeys) ----------------------------------------
+export interface Contact { name: string; pub: string; kid?: string }
+export interface ContactBook {
+  list(): Promise<Contact[]>
+  add(name: string, pubB64: string): Promise<void>
+  remove(c: Contact): Promise<void>
+}
+
+const td = new TextDecoder()
+const peerNameFromDescr = (d: Uint8Array | null) => (d ? td.decode(d).split('\0')[0].split(',')[1] : undefined) ?? '(?)'
+
+/**
+ * HEM-backed contact book: peers live in the HSM as CURVE25519 public keys with
+ * DESCR `ETSEIC:peer,<name>,ik` — HSM-anchored + portable (same HEM elsewhere =
+ * same contacts). The pubkey isn't returned by search, so it's fetched per kid.
+ */
+export function hemContactBook(hem: any): ContactBook {
+  return {
+    async list() {
+      const listTok = await hem.authorizePassword(null, 'keymgmt:list')
+      const keys: any[] = await hem.searchKeys(listTok, 'ETSEIC:peer,')
+      const out: Contact[] = []
+      for (const k of keys) {
+        const useTok = await hem.authorizePassword(null, `keymgmt:use:${k.kid}`)
+        const { pubkey } = await hem.getPubKey(useTok, k.kid)
+        out.push({ name: peerNameFromDescr(k.description), pub: pubkey, kid: k.kid })
+      }
+      return out
+    },
+    async add(name: string, pubB64: string) {
+      const impTok = await hem.authorizePassword(null, 'keymgmt:imp')
+      const descrB64 = b64(new TextEncoder().encode(`ETSEIC:peer,${name},ik`))
+      await hem.importPublicKey(impTok, `chat-peer-${name}`, 'CURVE25519', unb64(pubB64), descrB64)
+    },
+    async remove(c: Contact) {
+      if (!c.kid) return
+      const delTok = await hem.authorizePassword(null, 'keymgmt:del')
+      await hem.deleteKey(delTok, c.kid)
     },
   }
 }

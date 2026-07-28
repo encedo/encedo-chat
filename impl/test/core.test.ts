@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { deriveRoom, hemIdentityFrom, type Identity } from '../lib/core.ts'
+import { deriveRoom, hemIdentityFrom, hemContactBook, type Identity } from '../lib/core.ts'
 import { topicFromSecret, announceMacKey } from '../lib/rendezvous.ts'
 import { msgKeyFromSecret, seal, open } from '../lib/msgcrypto.ts'
 
@@ -33,4 +33,28 @@ test('hemIdentityFrom exposes handle/pub and an ecdh that calls the HEM', async 
   const ss = await id.ecdh('peerpub')
   assert.equal(ss.length, 32)
   assert.deepEqual(called, { t: 'tok', kid: 'kid7', pub: 'peerpub' })
+})
+
+test('hemContactBook: add imports ETSEIC:peer descr + 32B pub; list parses name/pub; remove deletes', async () => {
+  const PUB = 'UC88Dc7X8pxWQvcjUQDKAWXZqYycmJjnoZABKmwwnAM=' // a real 32-byte X25519 pub (base64)
+  const calls: any = {}
+  const hem = {
+    authorizePassword: async (_pw: any, scope: string) => 'tok:' + scope,
+    importPublicKey: async (_t: string, label: string, type: string, bytes: Uint8Array, descrB64: string) => {
+      calls.import = { label, type, len: bytes.length, descr: new TextDecoder().decode(Uint8Array.from(atob(descrB64), (c) => c.charCodeAt(0))) }
+      return { kid: 'K1' }
+    },
+    searchKeys: async (_t: string, pat: string) => { calls.search = pat; return [{ kid: 'K1', description: new TextEncoder().encode('ETSEIC:peer,bob,ik') }] },
+    getPubKey: async (_t: string, _kid: string) => ({ pubkey: PUB }),
+    deleteKey: async (_t: string, kid: string) => { calls.del = kid },
+  }
+  const book = hemContactBook(hem)
+  await book.add('bob', PUB)
+  assert.equal(calls.import.label, 'chat-peer-bob'); assert.equal(calls.import.type, 'CURVE25519')
+  assert.equal(calls.import.len, 32); assert.equal(calls.import.descr, 'ETSEIC:peer,bob,ik')
+  const list = await book.list()
+  assert.equal(calls.search, 'ETSEIC:peer,')
+  assert.equal(list.length, 1); assert.equal(list[0].name, 'bob'); assert.equal(list[0].pub, PUB); assert.equal(list[0].kid, 'K1')
+  await book.remove(list[0])
+  assert.equal(calls.del, 'K1')
 })
