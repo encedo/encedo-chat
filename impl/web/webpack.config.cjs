@@ -9,7 +9,9 @@ module.exports = (_env, argv) => {
   return {
     context: path.resolve(__dirname),
     entry: { app: './src/app.ts', 'webrtc-test': './src/webrtc-test.ts' },
-    output: { filename: '[name].bundle.js', path: path.resolve(__dirname, 'dist'), clean: true },
+    // content-hash in prod so every deploy busts the browser cache (index.html,
+    // served fresh, points at the new name); stable name in dev for clean HMR.
+    output: { filename: prod ? '[name].[contenthash].bundle.js' : '[name].bundle.js', path: path.resolve(__dirname, 'dist'), clean: true },
     resolve: {
       extensions: ['.ts', '.js', '.mjs'],
       // The HEM SDK dynamically imports node:https/http/url only in its Node path
