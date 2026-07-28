@@ -638,24 +638,24 @@ sequenceDiagram
     participant R as Responder
     participant HR as HSM (R)
 
-    I->>I: gen EK_i; (sk_i, pk_i) = ML-KEM-768.keygen()
+    I->>I: gen EK_i, (sk_i, pk_i) = ML-KEM-768.keygen()
     I->>R: msg1 {ek_i_pub, pq_pub, ts_i, initiator_id}
-    R->>R: check |ts_i - now| < 5 min; resolve IK_i_pub from contacts
-    R->>R: gen EK_r; (ct, ss) = encap(pk_i)
+    R->>R: check |ts_i - now| < 5 min, resolve IK_i_pub from contacts
+    R->>R: gen EK_r, (ct, ss) = encap(pk_i)
     R->>HR: ecdh(IK_r, EK_i_pub)
     HR-->>R: dh1
-    R->>R: dh2, dh3 local; SK = HKDF(dh1 || dh2 || dh3 || ss, salt=h1)
+    R->>R: dh2, dh3 local, SK = HKDF(dh1 || dh2 || dh3 || ss, salt=h1)
     R->>R: mac_r = HMAC(SK, "responder" || h2_partial)
     R->>R: zeroize dh*, ss, EK_r_priv
     R->>I: msg2 {ek_r_pub, pq_ct, ts_r, mac_r}
     I->>I: ss = decap(sk_i, pq_ct)
     I->>HI: ecdh(IK_i, EK_r_pub)
     HI-->>I: dh2
-    I->>I: dh1, dh3 local; SK; verify mac_r [R authenticated]
+    I->>I: dh1, dh3 local, SK, verify mac_r [R authenticated]
     I->>R: msg3 {mac_i = HMAC(SK, "initiator" || h3)}
     Note right of R: R rejects ALL data until mac_i verifies
     R->>R: verify mac_i [I authenticated]
-    Note over I,R: RK_0 = SK; I keeps EK_i_priv as its initial ratchet key (zeroized at first DH step)
+    Note over I,R: RK_0 = SK, I keeps EK_i_priv as its initial ratchet key (zeroized at first DH step)
 ```
 
 ### 20.3 Key schedule — from handshake to message keys (§6.2, §7.2)
@@ -730,7 +730,7 @@ sequenceDiagram
     participant H as HSM
 
     New->>H: login / HSM auth
-    New->>ST: subscribe; wait 2 s (collect announces)
+    New->>ST: subscribe, wait 2 s (collect announces)
     New->>H: ecdh+hkdf(IK, IK_pub) → announce_mac_key
     New->>ST: Announce{peer_id_new, ts_new, MAC}
     ST-->>Old: Announce (newer ts, foreign peer_id)
@@ -758,8 +758,8 @@ sequenceDiagram
     A->>A: new chain_key + per-epoch Ed25519 pair
     A->>B: SenderKeyDistribution (via 1:1 ratchet)
     A->>C: SenderKeyDistribution (via 1:1 ratchet)
-    Note over A,C: B and C do the same; nobody distributes to Dave
-    A->>A: MK = HKDF(chain_key); ct = AES-GCM; sig = Ed25519(hash(header || ct))
+    Note over A,C: B and C do the same, nobody distributes to Dave
+    A->>A: MK = HKDF(chain_key), ct = AES-GCM, sig = Ed25519(hash(header || ct))
     A->>G: {sender_id, epoch: n+1, header, ct, sig}
     G-->>B: message
     G-->>C: message
