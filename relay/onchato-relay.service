@@ -1,0 +1,24 @@
+# systemd — onchato libp2p relay (encedo-chat/relay)
+# Install:  sudo cp onchato-relay.service /etc/systemd/system/
+#           sudo systemctl daemon-reload && sudo systemctl enable --now onchato-relay
+# Logs:     sudo journalctl -u onchato-relay -f
+#
+# ⚠️ Keep --pass bs1.onchato.com — it seeds the relay PeerId that every client
+#    has hardcoded. Adjust WorkingDirectory to your encedo-chat checkout.
+
+[Unit]
+Description=onchato libp2p relay (encedo-chat)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/encedo-chat/relay
+ExecStart=/usr/bin/node relay.mjs --port 9001 --pass bs1.onchato.com --host bs1.onchato.com
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

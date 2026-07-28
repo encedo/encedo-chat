@@ -18,6 +18,10 @@ firmware.
 - `docs/` — the three audit specs (PROTOCOL, ARCHITECTURE, THREAT-MODELS).
 - `skin/` — UI mockups (replaceable skins; `ui-mockup.html`, `ui-mockup-hacker.html`).
 - `impl/` — the TS spike (grows toward the §17 monorepo).
+- `relay/` — the onchato **bs1 relay** (libp2p GossipSub + circuit-relay-v2),
+  self-contained + deployable (pull → `npm ci` → systemd `onchato-relay`).
+  Transport-only; v5 + v6 share it. `--pass bs1.onchato.com` seeds the fixed
+  PeerId (`12D3KooWP6Sp…cDmp`) — never change it or every client breaks.
 - `hem-sdk-js/` — the Encedo HEM SDK as a **git submodule** (→ `encedo/hem-sdk-js`).
   Our HEM client — do not fork; update via `git submodule update --remote`.
 - `CLAUDE.md` (this file), `README.md`, `LICENSE` at root.
