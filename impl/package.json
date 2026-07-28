@@ -12,7 +12,7 @@
     "meet": "node net/meet.ts",
     "chat-test": "node net/chat-test.ts",
     "bob": "node bob/bob.ts",
-    "carl": "KEYSTORE=carl.keystore.json node bob/bob.ts",
+    "carl": "node carl/carl.ts",
     "alice": "node alice/alice.ts",
     "ec": "node cli/ec.ts",
     "web:build": "webpack --config web/webpack.config.cjs --mode production",
