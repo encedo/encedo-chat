@@ -21,18 +21,22 @@ import { b64, unb64 } from './wc.ts'
 export interface Identity {
   handle: string
   pub: string // base64
-  ecdh(peerPubB64: string): Promise<Uint8Array> // raw 32-byte shared secret
+  ecdh(peerPubB64: string, peerKid?: string): Promise<Uint8Array> // raw 32-byte shared secret; peerKid → in-HSM two-KID ECDH
 }
 export type RoomParams = RvParams
+/** A chat peer: raw pubkey, plus an in-HSM `kid` when it's a HEM (imported) contact. */
+export interface Peer { pub: string; kid?: string }
 
 /** Build an Identity from an already-authenticated HEM session (browser-safe — no fs). */
 export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: string): Identity {
   return {
     handle,
     pub,
-    async ecdh(peerPubB64: string) {
+    async ecdh(peerPubB64: string, peerKid?: string) {
       const t = await hem.authorizePassword(null, `keymgmt:use:${kid}`) // cached derived key → no re-prompt
-      return hem.ecdh(t, kid, peerPubB64)
+      // HEM contact (imported → has a kid): two-KID ECDH, both operands in-device.
+      // Local / one-off contact (no kid): raw peer pubkey.
+      return peerKid ? hem.ecdhKid(t, kid, peerKid) : hem.ecdh(t, kid, peerPubB64)
     },
   }
 }
@@ -118,8 +122,8 @@ export function mergedContactBook(hem: ContactBook, local: ContactBook): Contact
 }
 
 /** Derive the day's room for a pair: topic + interim keys (macKey + Session). */
-export async function deriveRoom(id: Identity, peerPubB64: string, p: RoomParams): Promise<{ topic: string; keys: RoomKeys }> {
-  const ss = await id.ecdh(peerPubB64)
+export async function deriveRoom(id: Identity, peer: Peer, p: RoomParams): Promise<{ topic: string; keys: RoomKeys }> {
+  const ss = await id.ecdh(peer.pub, peer.kid)
   const topic = await topicFromSecret(ss, p)
   const keys = { macKey: await announceMacKey(ss, p), session: await interimSession(ss, p) }
   return { topic, keys }
@@ -149,9 +153,9 @@ export interface Conversation {
  * run the typing/away/leave presence machine. The UI only renders (via the
  * on* callbacks) and feeds intent (sendText / noteActivity / leave).
  */
-export async function openConversation(id: Identity, peerPubB64: string, opts: OpenOpts): Promise<Conversation> {
+export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts): Promise<Conversation> {
   const params = opts.params ?? { networkId: 'main', dateUTC: todayUTC() }
-  const { topic, keys } = await deriveRoom(id, peerPubB64, params)
+  const { topic, keys } = await deriveRoom(id, peer, params)
   const node = await createPeer()
   await dial(node, opts.relay)
 

@@ -226,7 +226,7 @@ async function openChat(contact: Contact) {
 
   try {
     let peerTyping = false
-    const conv = await openConversation(session.id, contact.pub, {
+    const conv = await openConversation(session.id, { pub: contact.pub, kid: contact.kid }, {
       relay: RELAY,
       onMessage: (_from, msg) => { peerTyping = false; setTyping(false); appendMsg('peer', msg.body, msg.ts) },
       onTyping: (_from, state) => { peerTyping = state === 'start'; setTyping(peerTyping, contact.name) },

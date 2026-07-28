@@ -9,13 +9,13 @@ const fakeId = (ss: Uint8Array): Identity => ({ handle: 'x', pub: '', ecdh: asyn
 
 test('deriveRoom topic == the direct rendezvous derivation (no drift)', async () => {
   const ss = new Uint8Array(32).fill(9)
-  const { topic } = await deriveRoom(fakeId(ss), 'ignored', P)
+  const { topic } = await deriveRoom(fakeId(ss), { pub: 'ignored' }, P)
   assert.equal(topic, await topicFromSecret(ss, P))
 })
 
 test('deriveRoom keys work: macKey verifies, session seals the same as the primitives', async () => {
   const ss = new Uint8Array(32).fill(5)
-  const { keys } = await deriveRoom(fakeId(ss), 'ignored', P)
+  const { keys } = await deriveRoom(fakeId(ss), { pub: 'ignored' }, P)
   // macKey is the same HMAC key (an announce built with the primitive verifies)
   const { buildAnnounce, verifyAnnounce } = await import('../lib/announce.ts')
   const ann = await buildAnnounce('12D3KooPeer', await announceMacKey(ss, P))
@@ -25,14 +25,19 @@ test('deriveRoom keys work: macKey verifies, session seals the same as the primi
   assert.deepEqual(await keys.session.decrypt(box), new TextEncoder().encode('hi'))
 })
 
-test('hemIdentityFrom exposes handle/pub and an ecdh that calls the HEM', async () => {
-  let called: any = null
-  const hem = { authorizePassword: async () => 'tok', ecdh: async (t: string, kid: string, pub: string) => { called = { t, kid, pub }; return new Uint8Array(32).fill(1) } }
+test('hemIdentityFrom: ecdh uses base64 pubkey, or ecdhKid when a peer kid is given', async () => {
+  let base: any = null, ext: any = null
+  const hem = {
+    authorizePassword: async () => 'tok',
+    ecdh: async (t: string, kid: string, pub: string) => { base = { t, kid, pub }; return new Uint8Array(32).fill(1) },
+    ecdhKid: async (t: string, kid: string, extKid: string) => { ext = { t, kid, extKid }; return new Uint8Array(32).fill(2) },
+  }
   const id = hemIdentityFrom(hem, 'kid7', 'alice', 'PUBB64')
   assert.equal(id.handle, 'alice'); assert.equal(id.pub, 'PUBB64')
-  const ss = await id.ecdh('peerpub')
-  assert.equal(ss.length, 32)
-  assert.deepEqual(called, { t: 'tok', kid: 'kid7', pub: 'peerpub' })
+  await id.ecdh('peerpub')                      // no kid → base64 ecdh
+  assert.deepEqual(base, { t: 'tok', kid: 'kid7', pub: 'peerpub' }); assert.equal(ext, null)
+  await id.ecdh('peerpub', 'peerKid9')          // kid present → two-KID ecdhKid
+  assert.deepEqual(ext, { t: 'tok', kid: 'kid7', extKid: 'peerKid9' })
 })
 
 test('hemContactBook: add imports ETSEIC:peer descr + 32B pub; list parses name/pub; remove deletes', async () => {

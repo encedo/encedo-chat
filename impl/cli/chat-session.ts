@@ -53,7 +53,7 @@ export async function runChatSession(id: Identity, peerPub: string, meName: stri
   }, { onSigint: shutdown, onActivity: () => conv?.noteActivity() })
 
   try {
-    conv = await openConversation(id, peerPub, {
+    conv = await openConversation(id, { pub: peerPub }, {
       relay,
       params,
       onMessage: (_from, m) => {
