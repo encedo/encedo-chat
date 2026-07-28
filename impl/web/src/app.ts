@@ -185,9 +185,8 @@ async function copyPub() {
   }
   toast('Skopiowano klucz publiczny ✓')
 }
-$('btn-copy-key').addEventListener('click', copyPub)
-$('me-fp').addEventListener('dblclick', copyPub)
-$('sess-id').addEventListener('dblclick', copyPub)
+$('me-fp').addEventListener('dblclick', copyPub)       // double-click fingerprint → copy pubkey
+$('sess-id').addEventListener('dblclick', copyPub)     // double-click Tożsamość → copy pubkey
 
 // ---- placeholder tabs ----
 for (const [tab, pane] of [['tab-contacts', 'contacts'], ['tab-groups', 'groups'], ['tab-network', 'network']]) {

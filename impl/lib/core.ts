@@ -59,6 +59,9 @@ export function hemContactBook(hem: any): ContactBook {
       const listTok = await hem.authorizePassword(null, 'keymgmt:list')
       const keys: any[] = await hem.searchKeys(listTok, 'ETSEIC:peer,')
       const out: Contact[] = []
+      // one getPubKey per contact — current FW's api/search doesn't return pubkeys.
+      // TODO(newer FW): api/search returns the public keys directly → drop this loop
+      // and read `pub` straight off the search entry (one call for the whole list).
       for (const k of keys) {
         const useTok = await hem.authorizePassword(null, `keymgmt:use:${k.kid}`)
         const { pubkey } = await hem.getPubKey(useTok, k.kid)

@@ -50,6 +50,12 @@ FW lands, move the derivation in-device and the gap closes.
 EH-2 needs raw `ecdh` regardless (it concatenates the DH outputs client-side),
 so the handshake path is unaffected by the firmware phase.
 
+**Newer FW — `api/search` returns public keys** (per operator). Today
+`searchKeys` returns only `{kid,label,type,description}`, so the HEM contact book
+(`lib/core.ts` `hemContactBook.list`) does one `getPubKey` per contact to fetch
+each `pub`. When that FW ships, `api/search` returns the public data in a single
+call — drop the per-kid loop and read `pub` straight off the search entry.
+
 ## SDK facts (from `hem-sdk-js`: `.d.ts`, `EXAMPLES.md`, `CLAUDE.md`)
 
 The SDK **is** our HEM client — `new HEM(url)` points at a real device or, in
