@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { deriveRoom, hemIdentityFrom, hemContactBook, type Identity } from '../lib/core.ts'
+import { deriveRoom, hemIdentityFrom, hemContactBook, localContactBook, mergedContactBook, type Identity } from '../lib/core.ts'
 import { topicFromSecret, announceMacKey } from '../lib/rendezvous.ts'
 import { msgKeyFromSecret, seal, open } from '../lib/msgcrypto.ts'
 
@@ -54,7 +54,31 @@ test('hemContactBook: add imports ETSEIC:peer descr + 32B pub; list parses name/
   assert.equal(calls.import.len, 32); assert.equal(calls.import.descr, 'ETSEIC:peer,bob,ik')
   const list = await book.list()
   assert.equal(calls.search, 'ETSEIC:peer,')
-  assert.equal(list.length, 1); assert.equal(list[0].name, 'bob'); assert.equal(list[0].pub, PUB); assert.equal(list[0].kid, 'K1')
+  assert.equal(list.length, 1); assert.equal(list[0].name, 'bob'); assert.equal(list[0].pub, PUB); assert.equal(list[0].kid, 'K1'); assert.equal(list[0].source, 'hem')
   await book.remove(list[0])
   assert.equal(calls.del, 'K1')
+})
+
+test('mergedContactBook: add routes by persistent, remove by source, list concatenates', async () => {
+  let store: Array<{ name: string; pub: string }> = []
+  const local = localContactBook(() => store, (l) => { store = l })
+  const hemCalls: any = { added: [], removed: [] }
+  const hem = {
+    async list() { return [{ name: 'perm', pub: 'P', kid: 'K', source: 'hem' as const }] },
+    async add(n: string, p: string) { hemCalls.added.push([n, p]) },
+    async remove(c: any) { hemCalls.removed.push(c.kid) },
+  }
+  const book = mergedContactBook(hem, local)
+  await book.add('carl', 'CARLPUB', false) // → local
+  await book.add('perm', 'PERMPUB', true)  // → hem
+  assert.deepEqual(hemCalls.added, [['perm', 'PERMPUB']])
+  assert.equal(store.length, 1); assert.equal(store[0].name, 'carl')
+  const list = await book.list()
+  assert.equal(list.length, 2)
+  assert.ok(list.find((c) => c.name === 'carl' && c.source === 'local'))
+  assert.ok(list.find((c) => c.name === 'perm' && c.source === 'hem'))
+  await book.remove({ name: 'carl', pub: 'CARLPUB', source: 'local' })
+  assert.equal(store.length, 0)
+  await book.remove({ name: 'perm', pub: 'P', kid: 'K', source: 'hem' })
+  assert.deepEqual(hemCalls.removed, ['K'])
 })

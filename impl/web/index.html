@@ -119,6 +119,11 @@
   .modal.open{display:block}
   .modal h2{margin:0 0 4px;font-size:16px;color:var(--text)}
   .modal .msub{font-size:12px;color:var(--muted);margin-bottom:8px}
+  .store-opts{display:flex;flex-direction:column;gap:6px;margin-top:4px}
+  .store-opt{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);cursor:pointer;padding:7px 10px;border:1px solid var(--border);border-radius:8px}
+  .store-opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+  .store-opt input{width:auto;margin:0;accent-color:var(--accent)}
+  .src{font-size:11px;opacity:.75}
   .modal-actions{display:flex;gap:8px;margin-top:16px}
   .btn-ghost{background:var(--accent-soft);color:var(--accent);border:none;border-radius:8px;padding:0 18px;font-weight:600}
   .drawer{position:fixed;top:0;right:0;bottom:0;width:360px;max-width:92vw;background:var(--card);border-left:1px solid var(--border);z-index:11;padding:20px;overflow-y:auto;transform:translateX(100%);transition:transform .2s ease}
@@ -211,6 +216,11 @@
     <div class="msub">Nazwa lokalna + jego klucz publiczny (base64, X25519).</div>
     <label>Nazwa</label><input id="add-name" type="text" placeholder="np. bob" autocomplete="off">
     <label>Klucz publiczny</label><textarea id="add-pub" placeholder="wklej pubkey kontaktu…"></textarea>
+    <label>Zapis</label>
+    <div class="store-opts">
+      <label class="store-opt"><input type="radio" name="store" value="hem" checked> 🔒 W HEM — trwałe, przenośne między urządzeniami</label>
+      <label class="store-opt"><input type="radio" name="store" value="local"> 💻 Tylko lokalnie — ta przeglądarka, nic nie trafia do HEM</label>
+    </div>
     <div class="msg" id="add-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="add-save" style="flex:1;border-radius:8px">Zapisz</button><button class="btn-ghost" id="add-cancel">Anuluj</button></div>
   </div>

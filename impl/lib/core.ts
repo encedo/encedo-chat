@@ -38,7 +38,7 @@ export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: stri
 }
 
 // ---- contact book (peer pubkeys) ----------------------------------------
-export interface Contact { name: string; pub: string; kid?: string }
+export interface Contact { name: string; pub: string; kid?: string; source: 'hem' | 'local' }
 export interface ContactBook {
   list(): Promise<Contact[]>
   add(name: string, pubB64: string): Promise<void>
@@ -62,7 +62,7 @@ export function hemContactBook(hem: any): ContactBook {
       for (const k of keys) {
         const useTok = await hem.authorizePassword(null, `keymgmt:use:${k.kid}`)
         const { pubkey } = await hem.getPubKey(useTok, k.kid)
-        out.push({ name: peerNameFromDescr(k.description), pub: pubkey, kid: k.kid })
+        out.push({ name: peerNameFromDescr(k.description), pub: pubkey, kid: k.kid, source: 'hem' })
       }
       return out
     },
@@ -76,6 +76,41 @@ export function hemContactBook(hem: any): ContactBook {
       const delTok = await hem.authorizePassword(null, 'keymgmt:del')
       await hem.deleteKey(delTok, c.kid)
     },
+  }
+}
+
+/**
+ * Local contact book (browser-only / one-off): peers kept in injected
+ * load/save storage (e.g. localStorage). Nothing leaves the device, nothing is
+ * written to the HEM. ECDH still works — it only needs the raw peer pubkey.
+ */
+export function localContactBook(load: () => Array<{ name: string; pub: string }>, save: (list: Array<{ name: string; pub: string }>) => void): ContactBook {
+  return {
+    async list() { return load().map((c) => ({ name: c.name, pub: c.pub, source: 'local' as const })) },
+    async add(name: string, pubB64: string) {
+      const l = load().filter((c) => c.name !== name)
+      l.push({ name, pub: pubB64 })
+      save(l)
+    },
+    async remove(c: Contact) { save(load().filter((x) => x.name !== c.name)) },
+  }
+}
+
+export interface ContactManager {
+  list(): Promise<Contact[]>
+  add(name: string, pubB64: string, persistent: boolean): Promise<void>
+  remove(c: Contact): Promise<void>
+}
+
+/**
+ * Merge a permanent (HEM) and a local book into one: `list()` concatenates both,
+ * `add(…, persistent)` routes (HEM vs local), `remove(c)` routes by `c.source`.
+ */
+export function mergedContactBook(hem: ContactBook, local: ContactBook): ContactManager {
+  return {
+    async list() { return [...(await hem.list()), ...(await local.list())] },
+    add(name: string, pubB64: string, persistent: boolean) { return (persistent ? hem : local).add(name, pubB64) },
+    remove(c: Contact) { return (c.source === 'hem' ? hem : local).remove(c) },
   }
 }
 

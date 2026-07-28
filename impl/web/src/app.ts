@@ -12,7 +12,7 @@
  */
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
-import { hemIdentityFrom, openConversation, hemContactBook, type Conversation, type Identity, type ContactBook, type Contact } from '../../lib/core.ts'
+import { hemIdentityFrom, openConversation, hemContactBook, localContactBook, mergedContactBook, type Conversation, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 
 const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
@@ -21,7 +21,7 @@ const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
 
 let mode: 'login' | 'register' = 'login'
-let session: { id: Identity; handle: string; pub: string; book: ContactBook } | null = null
+let session: { id: Identity; handle: string; pub: string; book: ContactManager } | null = null
 let active: { name: string; pub: string; inRoom: boolean; conv: Conversation | null } | null = null
 let rotTimer: any = null
 
@@ -90,7 +90,12 @@ $('go').addEventListener('click', async () => {
 $('pass').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') ($('go') as HTMLButtonElement).click() })
 
 async function enterApp(hem: any, handle: string, kid: string, pub: string) {
-  session = { id: hemIdentityFrom(hem, kid, handle, pub), handle, pub, book: hemContactBook(hem) }
+  const lsKey = 'ec-local-contacts-' + handle
+  const local = localContactBook(
+    () => { try { return JSON.parse(localStorage.getItem(lsKey) || '[]') } catch { return [] } },
+    (l) => localStorage.setItem(lsKey, JSON.stringify(l)),
+  )
+  session = { id: hemIdentityFrom(hem, kid, handle, pub), handle, pub, book: mergedContactBook(hemContactBook(hem), local) }
   $('login').hidden = true; $('app').hidden = false
   $('me-avatar').textContent = initials(handle)
   $('me-handle').textContent = handle
@@ -115,9 +120,10 @@ function renderContacts() {
   if (!list.length) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = filter ? '(brak dopasowań)' : '(brak kontaktów — dodaj peera)'; pane.appendChild(e); return }
   for (const c of list) {
     const inRoom = active?.name === c.name && active?.inRoom
+    const src = c.source === 'hem' ? { i: '🔒', t: 'W HEM (trwałe, przenośne)' } : { i: '💻', t: 'Lokalnie (ta przeglądarka)' }
     const b = document.createElement('button'); b.className = 'contact' + (active?.name === c.name ? ' active' : '')
     b.innerHTML = `<span class="dot ${inRoom ? 'ok' : ''}"></span><div class="avatar">${escapeHtml(initials(c.name))}</div>`
-      + `<div class="c-info"><div class="c-name">${escapeHtml(c.name)}</div><div class="c-sub">${escapeHtml(c.pub.slice(0, 24))}…</div></div><span class="c-x" title="Usuń z HEM">×</span>`
+      + `<div class="c-info"><div class="c-name">${escapeHtml(c.name)} <span class="src" title="${src.t}">${src.i}</span></div><div class="c-sub">${escapeHtml(c.pub.slice(0, 24))}…</div></div><span class="c-x" title="Usuń">×</span>`
     b.addEventListener('click', async (e: any) => {
       if (e.target.classList.contains('c-x')) {
         e.stopPropagation()
@@ -142,14 +148,15 @@ $('add-save').addEventListener('click', async () => {
   if (!name || !pub) { setMsg('add-msg', 'Podaj nazwę i klucz.', 'err'); return }
   try { if (Uint8Array.from(atob(pub), (c) => c.charCodeAt(0)).length !== 32) { setMsg('add-msg', 'Klucz nie wygląda na 32-bajtowy X25519 (base64).', 'err'); return } }
   catch { setMsg('add-msg', 'Klucz nie jest poprawnym base64.', 'err'); return }
+  const persistent = ((document.querySelector('input[name="store"]:checked') as HTMLInputElement | null)?.value ?? 'hem') !== 'local'
   const btn = $('add-save') as HTMLButtonElement; btn.disabled = true; btn.textContent = 'Zapisuję…'
   try {
     const dup = contactsCache.find((c) => c.name === name)
-    if (dup) await session.book.remove(dup)   // upsert: replace an existing peer of the same name
-    await session.book.add(name, pub)
+    if (dup) await session.book.remove(dup)   // upsert: replace an existing peer of the same name (any source)
+    await session.book.add(name, pub, persistent)
     await refreshContacts()
     closeModal()
-  } catch (e: any) { setMsg('add-msg', 'Błąd HEM: ' + (e?.message ?? e), 'err') }
+  } catch (e: any) { setMsg('add-msg', 'Błąd zapisu: ' + (e?.message ?? e), 'err') }
   finally { btn.disabled = false; btn.textContent = 'Zapisz' }
 })
 
