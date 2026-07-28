@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebRTC test — Encedo v6</title>
+<style>
+  body { font-family: ui-monospace, "Cascadia Code", monospace; background: #12141c; color: #c8ccd8; margin: 0; padding: 16px; }
+  h1 { font-size: 15px; color: #6579e0; margin: 0 0 8px; }
+  .hint { color: #79829c; font-size: 12px; margin: 0 0 12px; max-width: 70ch; line-height: 1.5; }
+  #log { white-space: pre-wrap; font-size: 12px; line-height: 1.55; background: #1a1d28; border: 1px solid #32394e; border-radius: 8px; padding: 12px; height: 78vh; overflow: auto; }
+</style>
+</head>
+<body>
+  <h1>⚡ WebRTC direct — probe (bez HEM)</h1>
+  <div class="hint">Otwórz tę stronę w <b>dwóch kartach</b>. Każda karta to peer libp2p na relayu onchato, na wspólnym topicu. Wymienią signaling (SDP/ICE) przez GossipSub i zestawią bezpośredni <b>DataChannel</b>, po czym wyślą „hello". Linia <b>„DataChannel OPEN"</b> = WebRTC direct działa na naszym relayu.</div>
+  <div id="log"></div>
+</body>
+</html>

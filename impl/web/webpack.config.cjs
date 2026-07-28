@@ -8,8 +8,8 @@ module.exports = (_env, argv) => {
   const prod = argv.mode === 'production'
   return {
     context: path.resolve(__dirname),
-    entry: './src/app.ts',
-    output: { filename: 'bundle.js', path: path.resolve(__dirname, 'dist'), clean: true },
+    entry: { app: './src/app.ts', 'webrtc-test': './src/webrtc-test.ts' },
+    output: { filename: '[name].bundle.js', path: path.resolve(__dirname, 'dist'), clean: true },
     resolve: {
       extensions: ['.ts', '.js', '.mjs'],
       // The HEM SDK dynamically imports node:https/http/url only in its Node path
@@ -35,7 +35,8 @@ module.exports = (_env, argv) => {
     },
     plugins: [
       new webpack.NormalModuleReplacementPlugin(/^node:/, (r) => { r.request = r.request.replace(/^node:/, '') }),
-      new HtmlWebpackPlugin({ template: './index.html' }),
+      new HtmlWebpackPlugin({ template: './index.html', filename: 'index.html', chunks: ['app'] }),
+      new HtmlWebpackPlugin({ template: './webrtc-test.html', filename: 'webrtc-test.html', chunks: ['webrtc-test'] }),
     ],
     optimization: { minimize: prod },
     performance: { hints: false },
