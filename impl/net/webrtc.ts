@@ -27,6 +27,7 @@ export interface WebRTCOpts {
   onData: (bytes: Uint8Array) => void // incoming DataChannel bytes
   onOpen?: () => void
   onClose?: () => void
+  onState?: (s: string) => void // connection/ICE state transitions (diagnostics)
   iceServers?: RTCIceServer[]
 }
 
@@ -52,10 +53,12 @@ export function webrtcLink(opts: WebRTCOpts): WebRTCLink {
 
   pc.onicecandidate = (e) => { if (e.candidate) opts.sendSignal({ kind: 'ice', candidate: e.candidate.toJSON() }) }
   pc.onconnectionstatechange = () => {
+    opts.onState?.('conn=' + pc.connectionState)
     if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') {
       if (ready) { ready = false; opts.onClose?.() }
     }
   }
+  pc.oniceconnectionstatechange = () => opts.onState?.('ice=' + pc.iceConnectionState)
 
   if (opts.initiator) {
     wire(pc.createDataChannel('encedo'))
