@@ -615,16 +615,16 @@ sequenceDiagram
     A->>N: subscribe(topic), Announce{peer_id_A, nonce, ts, MAC}
     B->>N: subscribe(topic), Announce{peer_id_B, nonce, ts, MAC}
     N-->>A: Bob's Announce
-    A->>A: verify MAC -> map contact to peer_id_B
+    A->>A: verify MAC → map contact to peer_id_B
     A->>B: open direct stream (direct mode or circuit-relay)
-    Note over A,B: EH-2 handshake (20.2) -> SK
+    Note over A,B: EH-2 handshake (20.2) → SK
     loop until re-key timer (4-8 h) or session end
         A->>B: ratchet message (AES-256-GCM)
         B->>A: ratchet message
         A->>N: Announce heartbeat (60 s)
         B->>N: Announce heartbeat (60 s)
     end
-    Note over HA,HB: timer -> background EH-2 re-handshake (needs both HSMs)
+    Note over HA,HB: timer → background EH-2 re-handshake (needs both HSMs)
 ```
 
 ### 20.2 EH-2 handshake — message by message (§6)
@@ -731,7 +731,7 @@ sequenceDiagram
 
     New->>H: login / HSM auth
     New->>ST: subscribe; wait 2 s (collect announces)
-    New->>H: ecdh+hkdf(IK, IK_pub) -> announce_mac_key
+    New->>H: ecdh+hkdf(IK, IK_pub) → announce_mac_key
     New->>ST: Announce{peer_id_new, ts_new, MAC}
     ST-->>Old: Announce (newer ts, foreign peer_id)
     alt honest client
@@ -754,7 +754,7 @@ sequenceDiagram
     participant D as Dave (removed)
     participant G as Group topic
 
-    Note over A,D: membership change: remove Dave -> epoch n+1
+    Note over A,D: membership change: remove Dave → epoch n+1
     A->>A: new chain_key + per-epoch Ed25519 pair
     A->>B: SenderKeyDistribution (via 1:1 ratchet)
     A->>C: SenderKeyDistribution (via 1:1 ratchet)
@@ -763,7 +763,7 @@ sequenceDiagram
     A->>G: {sender_id, epoch: n+1, header, ct, sig}
     G-->>B: message
     G-->>C: message
-    B->>B: verify sig (epoch key) -> decrypt
+    B->>B: verify sig (epoch key) → decrypt
     Note over D: Dave holds keys for epoch <= n only - cannot read
 ```
 
