@@ -133,11 +133,16 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    * abandoned after this long and started over, rather than pending forever.
    */
   const attemptTimeoutMs = eh2?.attemptTimeoutMs ?? 6_000
+  /** How often the opening frame is repeated while an attempt waits for a reply. */
+  const resendMs = Math.max(100, Math.min(700, Math.floor(attemptTimeoutMs / 4)))
   const attemptTimers = new Map<string, any>()
+  const resendTimers = new Map<string, any>()
 
   const clearAttempt = (peer: string) => {
     clearTimeout(attemptTimers.get(peer))
+    clearInterval(resendTimers.get(peer))
     attemptTimers.delete(peer)
+    resendTimers.delete(peer)
     handshakes.delete(peer)
   }
 
@@ -184,6 +189,21 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       ;(timer as any).unref?.()
       attemptTimers.set(peer, timer)
       for (const f of h.initial) gossip(f)
+
+      // The first frames often go out while the peer's GossipSub mesh is still
+      // grafting, so they reach nobody — visible as a handshake that only
+      // completes on the next full attempt seconds later. Re-send the opening
+      // frame a few times instead: it is cheap, and a msg1 that arrives twice
+      // simply restarts the responder, which is already the defined behaviour.
+      if (h.initial.length) {
+        let resends = 0
+        const resend = setInterval(() => {
+          if (handshakes.get(peer) !== attempt || ++resends > 3) { clearInterval(resend); return }
+          for (const f of h.initial) gossip(f)
+        }, resendMs)
+        ;(resend as any).unref?.()
+        resendTimers.set(peer, resend)
+      }
       return attempt
     } catch {
       if (handshakes.get(peer) === attempt) clearAttempt(peer)
@@ -271,7 +291,37 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
 
   const gossip = (bytes: Uint8Array) => { node.services.pubsub.publish(topic, bytes).catch(() => {}) }
   const announce = async () => { try { gossip(await buildAnnounce(self, keys.macKey)) } catch {} }
-  const t0 = setTimeout(announce, opts.firstAnnounceMs ?? 1500)
+
+  // The first Announce cannot go out before the relay has joined our topic —
+  // published earlier it reaches nobody. Rather than guess a delay (the old
+  // fixed 1.5 s, while the relay actually shows up in ~0.5 s), watch for it and
+  // announce the moment it is there. Everything downstream — presence, and with
+  // it the EH-2 handshake — starts a full second sooner. The timeout stays as a
+  // floor for transports that cannot report subscribers (e.g. test doubles).
+  const firstAnnounceMs = opts.firstAnnounceMs ?? 1500
+  let announced = false
+  const announceFirst = () => {
+    if (announced) return
+    announced = true
+    clearInterval(t0)
+    void announce()
+    // A single announce is easy to miss: a peer that joins a moment later never
+    // sees it, and one sent while that peer's mesh is still grafting is simply
+    // dropped — either way discovery stalls until the next 15 s heartbeat.
+    // A few early repeats (tiny frames) close that window.
+    for (const delay of [1_000, 3_000, 7_000]) {
+      const t = setTimeout(() => void announce(), delay)
+      ;(t as any).unref?.()
+      earlyBeacons.push(t)
+    }
+  }
+  const earlyBeacons: any[] = []
+  const startedAt = nowMs()
+  const t0 = setInterval(() => {
+    let meshReady = false
+    try { meshReady = node.services.pubsub.getSubscribers(topic).length > 0 } catch {}
+    if (meshReady || nowMs() - startedAt >= firstAnnounceMs) announceFirst()
+  }, Math.max(10, Math.min(50, firstAnnounceMs)))
   const hb = setInterval(announce, heartbeatMs)
   const sweep = setInterval(() => {
     const now = nowMs()
@@ -321,7 +371,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     secured: () => (eh2 ? [...sessions.keys()] : []),
     stop: () => {
       sessions.clear(); handshakes.clear(); queued.length = 0
-      clearTimeout(t0); clearInterval(hb); clearInterval(sweep)
+      clearInterval(t0); clearInterval(hb); clearInterval(sweep)
+      for (const t of earlyBeacons) clearTimeout(t)
       node.services.pubsub.removeEventListener('message', handler)
       try { node.services.pubsub.unsubscribe(topic) } catch {}
     },
