@@ -21,6 +21,7 @@ import { yamux } from '@chainsafe/libp2p-yamux'
 import { circuitRelayServer } from '@libp2p/circuit-relay-v2'
 import { identify } from '@libp2p/identify'
 import { gossipsub } from '@chainsafe/libp2p-gossipsub'
+import { createPeerScoreParams } from '@chainsafe/libp2p-gossipsub/score'
 import { generateKeyPairFromSeed } from '@libp2p/crypto/keys'
 import { peerIdFromPrivateKey } from '@libp2p/peer-id'
 import { multiaddr } from '@multiformats/multiaddr'
@@ -76,7 +77,19 @@ const relay = await createLibp2p({
       D: 8, Dlo: 6, Dhi: 12, Dout: 0,
       maxMessageSize: 65536,  // 64 KB — enough for encrypted text, prevents flood abuse
       historyLength: 2,       // keep last 2 windows (~2 min) instead of default 5
-      historyGossip: 1        // advertise only last window in gossip announcements
+      historyGossip: 1,       // advertise only last window in gossip announcements
+      // ⚠️ Turn OFF the IP-colocation penalty. GossipSub's default punishes
+      // peers sharing an IP (-5 per peer above 10, squared) because in a public
+      // blockchain mesh that pattern means a sybil. Here it means a household,
+      // an office or a VPN — normal users. Worse: a peer whose score is not
+      // POSITIVE keeps its stats AND its IP for retainScore (1 h) after
+      // disconnecting, and our clients sit at exactly 0 (no per-topic score
+      // params), so an IP accumulates slots as people come and go. Past ~14
+      // clients per hour behind one address the next arrival is graylisted:
+      // the relay still accepts the connection and the meshsub streams, then
+      // silently ignores its RPCs — subscriptions included. The room simply
+      // never forms, with nothing in the log to say why.
+      scoreParams: createPeerScoreParams({ IPColocationFactorWeight: 0 })
     })
   }
 })

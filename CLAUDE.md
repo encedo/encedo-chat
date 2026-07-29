@@ -318,6 +318,18 @@ relay first when "rooms don't work". And a missing log line means the deploy
 is unverified, not that the feature is missing: confirm with `git log` +
 `grep` on the host, not by eye on the log.
 
+**The relay can be healthy and still ignore you.** Same day, second cause with
+the same symptom: GossipSub graylisted clients by IP colocation. Behind nginx
+that is fatal rather than merely wrong — the proxy makes **every** client
+arrive from `127.0.0.1`, so the penalty counts all users as one address, and a
+non-positive score keeps a peer's IP reserved for an hour after it disconnects
+(page reloads during testing are enough to fill it). Connections and meshsub streams looked fine, the log said nothing.
+Scoring is now configured with `IPColocationFactorWeight: 0`; the reproduction
+lives in `impl/net/relay-colocation-test.ts`. When rooms do not form, the
+question to ask is not "is the relay up" but **"does the relay act on our
+subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
+`[+topic]` in the relay log confirms it.
+
 ## Directions
 
 - **CLI as a full-product client** (a terminal alternative to the web GUI over

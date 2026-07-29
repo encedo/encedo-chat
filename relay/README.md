@@ -110,6 +110,36 @@ server {
 }
 ```
 
+## Peer scoring — why IP colocation is OFF
+
+GossipSub scores peers, and by default penalises several peers sharing one IP:
+in a public blockchain mesh that is a sybil signal. Here it is a household, an
+office or a VPN — ordinary users.
+
+**And behind nginx it is not even per-user: every client arrives from
+`127.0.0.1`.** The proxy terminates TLS and opens its own TCP connection to the
+relay, so libp2p sees one address for the entire world (`X-Forwarded-For` is an
+HTTP header — the libp2p peer store never sees it). The colocation counter is
+therefore global, and two further details turn that into an outage:
+
+- a peer whose score is **not positive** keeps its stats *and its IP* for
+  `retainScore` (**1 h**) after it disconnects, and our clients sit at exactly
+  0 (no per-topic score params), so one address accumulates slots as people
+  come and go — a tester reloading the page a dozen times does it alone;
+- once past the threshold the newcomer is **graylisted**: the relay still
+  accepts the connection and the meshsub streams, then silently drops its RPCs,
+  subscriptions included. Nothing appears in the log. The room simply never
+  forms, which is indistinguishable from a broken client.
+
+Hence `scoreParams: createPeerScoreParams({ IPColocationFactorWeight: 0 })` —
+mandatory, not a preference, for any relay behind a reverse proxy. (Preserving
+real client IPs would need PROXY protocol between nginx and libp2p, which the
+WebSockets transport does not speak; and even then the penalty would be wrong
+for our topology.)
+Reproduce and verify with `node net/relay-colocation-test.ts <relay-multiaddr>`
+(from `impl/`): it churns 14 peers from one IP and then checks whether a fresh
+subscription is still accepted.
+
 ## Tunables (relay.mjs)
 
 - `maxConnections: 520`, `maxReservations: 256`, `maxMessageSize: 65536` (64 KB).
