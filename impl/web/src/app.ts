@@ -264,6 +264,24 @@ const setTyping = (on: boolean, name = '') => { $('typing-ind').textContent = on
  * other (different content crypto entirely).
  */
 const EH2 = new URLSearchParams(location.search).has('eh2')
+/** `?debug=1` adds per-frame lines (every handshake frame, every sealed payload). */
+const DEBUG = new URLSearchParams(location.search).has('debug')
+
+/**
+ * The engine narrates itself here (lib/room.ts, lib/core.ts) — everything that
+ * decides whether a room forms: when the relay picked up our topic, when a peer
+ * became visible, every handshake attempt and its outcome, presence timeouts,
+ * queued frames. This is the log to paste when "it does not work": the badge
+ * only ever shows the last state, while the sequence is what explains it.
+ */
+const t0 = Date.now()
+function ecLog(msg: string, level: 'info' | 'debug' = 'info') {
+  if (level === 'debug' && !DEBUG) return
+  const t = ((Date.now() - t0) / 1000).toFixed(2).padStart(6)
+  const style = level === 'debug' ? 'color:#79829c' : 'color:#6579e0;font-weight:600'
+  console.log(`%c[ec ${t}s] %c${msg}`, 'color:#74788d', style)
+}
+ecLog(`app start — eh2=${EH2} debug=${DEBUG}; add ?eh2=1&debug=1 for the full trace`)
 
 function setSecurity(_peer: string, state: 'handshaking' | 'established' | 'failed') {
   const b = $('e2e-badge')
@@ -308,7 +326,11 @@ async function openChat(contact: Contact) {
       onWebrtcState: setTransport,
       eh2: EH2,
       onSecurity: setSecurity,
-      onMessage: (_from, msg) => { peerTyping = false; setTyping(false); appendMsg('peer', msg.body, msg.ts, msg.id) },
+      onLog: ecLog,
+      onMessage: (from, msg) => {
+        ecLog(`message from ${from.slice(0, 12)}…: "${msg.body.slice(0, 40)}"`)
+        peerTyping = false; setTyping(false); appendMsg('peer', msg.body, msg.ts, msg.id)
+      },
       onTyping: (_from, state) => { peerTyping = state === 'start'; setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => addReaction(r.to, r.emoji),
       onFile: (_from, f) => appendMsg('sys', `${contact.name} udostępnił plik: ${f.name} — interim (IPFS TODO)`),
@@ -326,7 +348,12 @@ async function openChat(contact: Contact) {
     active.conv = conv
     $('sess-peerid').textContent = conv.peerId.slice(0, 16) + '…'
 
-    const send = () => { const inp = $('msg-input') as HTMLInputElement; const t = inp.value.trim(); if (!t) return; const id = conv.sendText(t); appendMsg('me', t, nowMs(), id); inp.value = '' }
+    const send = () => {
+      const inp = $('msg-input') as HTMLInputElement; const t = inp.value.trim(); if (!t) return
+      const id = conv.sendText(t)
+      ecLog(`sent "${t.slice(0, 40)}" (id ${id}); secured peers: ${conv.secured().length}`)
+      appendMsg('me', t, nowMs(), id); inp.value = ''
+    }
     ;($('send') as HTMLButtonElement).onclick = send
     ;($('msg-input') as HTMLInputElement).oninput = () => conv.noteActivity()
     ;($('msg-input') as HTMLInputElement).onkeydown = (e: any) => { if (e.key === 'Enter') send() }
@@ -336,7 +363,14 @@ async function openChat(contact: Contact) {
   }
 }
 
-document.addEventListener('visibilitychange', () => { if (document.hidden) active?.conv?.noteAway() })
+document.addEventListener('visibilitychange', () => {
+  ecLog(document.hidden ? 'tab hidden — browser will throttle our timers' : 'tab visible — re-announcing')
+  if (document.hidden) active?.conv?.noteAway()
+  // Coming back: the tab's timers were throttled while hidden, so our Announce
+  // heartbeat went quiet and the peer may already have written us off. Speak up
+  // immediately instead of waiting for the next tick.
+  else active?.conv?.refresh()
+})
 window.addEventListener('beforeunload', () => { active?.conv?.leave() })
 
 // ---- room rotation countdown (next UTC midnight) ----

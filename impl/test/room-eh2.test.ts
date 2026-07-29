@@ -23,7 +23,7 @@ const P = { networkId: 'test', dateUTC: '2026-07-29' }
  * `drop` can swallow chosen frames — the real relay does exactly that while the
  * mesh forms, and a handshake that cannot survive it stalls forever.
  */
-function hub(drop?: (data: Uint8Array, from: string) => boolean) {
+function hub(drop?: (data: Uint8Array, from: string) => boolean, duplicate?: (data: Uint8Array) => boolean) {
   const nodes = new Map<string, (topic: string, data: Uint8Array, from: string) => void>()
   return {
     node(id: string) {
@@ -41,7 +41,10 @@ function hub(drop?: (data: Uint8Array, from: string) => boolean) {
             unsubscribe: () => {},
             publish: async (topic: string, data: Uint8Array) => {
               if (drop?.(data, id)) return
-              for (const [peer, deliver] of nodes) if (peer !== id) deliver(topic, data, id)
+              const times = duplicate?.(data) ? 2 : 1
+              for (let n = 0; n < times; n++) {
+                for (const [peer, deliver] of nodes) if (peer !== id) deliver(topic, data, id)
+              }
             },
           },
         },
@@ -59,8 +62,8 @@ const until = async (cond: () => boolean, ms = 5000) => {
 }
 
 /** Two rooms sharing a topic + Announce key, with EH-2 wired for both peers. */
-async function rooms(opts: { collect: string[]; drop?: (d: Uint8Array, from: string) => boolean; backA?: string[] }) {
-  const net = hub(opts.drop)
+async function rooms(opts: { collect: string[]; drop?: (d: Uint8Array, from: string) => boolean; backA?: string[]; duplicate?: (d: Uint8Array) => boolean }) {
+  const net = hub(opts.drop, opts.duplicate)
   const ss = new Uint8Array(32).fill(0x5e)
   const macKey = await announceMacKey(ss, P)
   const [ikA, ikB] = [await generateX25519(), await generateX25519()]
@@ -177,6 +180,25 @@ test('a peer that reloads re-handshakes and the conversation continues', async (
   A.sendText('po reloadzie')
   await until(() => got2.length === 1)
   assert.deepEqual(got2, ['po reloadzie'])
+})
+
+test('a repeated msg1 is answered, not restarted (no established/handshaking loop)', async (t) => {
+  // The initiator re-sends msg1 while it waits. If that restarted the responder,
+  // the initiator's msg3 would arrive against a transcript the responder had
+  // already thrown away — mac_i fails, both sides retry, and the badge flips
+  // between green and orange forever. Seen live; this pins the fix.
+  const got: string[] = []
+  const { A, B, states } = await rooms({ collect: got, duplicate: (d) => d[0] === 0x01 })
+  t.after(() => { A.stop(); B.stop() })
+
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+  await new Promise((r) => setTimeout(r, 1500)) // let any loop show itself
+  assert.equal(states.filter((s) => s.endsWith(':failed')).length, 0, `no failures: ${states.join(' ')}`)
+  assert.equal(states.filter((s) => s.endsWith(':established')).length, 2, `one establish per side: ${states.join(' ')}`)
+  assert.ok(A.secured().length === 1 && B.secured().length === 1, 'both still hold a session')
+
+  A.sendText('po duplikacie')
+  await until(() => got.length === 1)
 })
 
 test('interim mode is untouched (no eh2 → static key, no handshake frames)', async (t) => {

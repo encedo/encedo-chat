@@ -201,6 +201,8 @@ export interface OpenOpts extends ChatOpts {
   eh2?: boolean
   /** EH-2 handshake progress per peer (for a UI badge). */
   onSecurity?: Eh2Options['onState']
+  /** Narration for a UI console (the engine never writes to one itself). */
+  onLog?: ChatOpts['onLog']
 }
 export interface Conversation {
   peerId: string
@@ -209,6 +211,7 @@ export interface Conversation {
   sendReaction(toId: string, emoji: string): void
   noteActivity(): void // UI calls on user input → drives "typing" + resets "away"
   noteAway(): void // UI calls on blur/tab-hidden → "away" now
+  refresh(): void // UI calls when the tab becomes visible again (timers were throttled)
   who(): string[]
   secured(): string[] // peers with a live EH-2 ratchet (empty in interim mode)
   leave(): Promise<void> // presence:leave last-will + clean transport stop
@@ -220,18 +223,24 @@ export interface Conversation {
  * on* callbacks) and feeds intent (sendText / noteActivity / leave).
  */
 export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts): Promise<Conversation> {
+  const log = opts.onLog ?? (() => {})
   const params = opts.params ?? { networkId: 'main', dateUTC: todayUTC() }
+  log(`opening conversation: network=${params.networkId} date=${params.dateUTC} eh2=${!!opts.eh2} webrtc=${!!opts.webrtc}`)
   // In EH-2 mode the WebRTC offer cannot go out before the session exists —
   // signaling rides the room encrypted. So the plane is kicked when the
   // handshake completes, not (only) when presence says the peer joined.
   let plane: WebRTCPlane | null = null
   const onSecurity: Eh2Options['onState'] = (p, state) => {
+    log(`security: ${state} with ${p.slice(0, 12)}…`)
     opts.onSecurity?.(p, state)
     if (state === 'established') plane?.onPeer(p)
   }
   const { topic, keys } = await deriveRoom(id, peer, params, opts.eh2 ? { onState: onSecurity } : false)
+  log(`room derived: topic ${topic.slice(0, 16)}…`)
   const node = await createPeer()
+  const dialT0 = Date.now()
   await dial(node, opts.relay)
+  log(`relay dialed in ${Date.now() - dialT0} ms as ${node.peerId.toString().slice(0, 12)}…`)
 
   const self = node.peerId.toString()
   const room = joinChat(node, topic, keys, {
@@ -244,8 +253,9 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     onFile: opts.onFile,
     onSignal: (from, env) => plane?.onSignal(from, env),
     heartbeatMs: opts.heartbeatMs,
+    onLog: opts.onLog,
   })
-  if (opts.webrtc) plane = attachWebRTC(room, self, { onState: opts.onWebrtcState })
+  if (opts.webrtc) plane = attachWebRTC(room, self, { onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
 
   let typingSent = false
   let away = false
@@ -268,6 +278,7 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),
     noteActivity,
     noteAway,
+    refresh: () => { room.refresh(); if (away) { away = false; room.sendPresence('active') } },
     who: () => room.who(),
     secured: () => room.secured(),
     leave: async () => {

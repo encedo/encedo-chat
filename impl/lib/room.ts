@@ -61,9 +61,18 @@ export interface ChatOpts {
   heartbeatMs?: number
   /** Delay before the first Announce (tests shorten it; the mesh needs a moment). */
   firstAnnounceMs?: number
+  /**
+   * Where this room narrates itself. The engine has no console of its own —
+   * the web app sends this to the browser console, the CLI ignores it. `debug`
+   * lines are per-frame and only interesting when something is wrong.
+   */
+  onLog?: (msg: string, level?: 'info' | 'debug') => void
 }
 
 export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {}) {
+  const log = opts.onLog ?? (() => {})
+  const dbg = (m: string) => log(m, 'debug')
+  const short = (s: string) => s.slice(0, 12) + '…'
   const onMessage = opts.onMessage ?? (() => {})
   const onTyping = opts.onTyping ?? (() => {})
   const onPresence = opts.onPresence ?? (() => {})
@@ -71,7 +80,10 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const onFile = opts.onFile ?? (() => {})
   const onSignal = opts.onSignal ?? (() => {})
   const heartbeatMs = opts.heartbeatMs ?? 15_000
-  const ttlMs = Math.max(heartbeatMs * 3, 30_000)
+  // Be generous: a browser throttles timers in a hidden tab (Firefox to about
+  // once a minute), so a peer that is merely in a background window must not
+  // look dead. This is a presence heuristic, nothing security-relevant.
+  const ttlMs = Math.max(heartbeatMs * 6, 90_000)
   const self = node.peerId.toString()
   const seenNonces = new Set<string>()
   const seenSeq = new Set<string>() // dedup msg/reaction/file by `${from}:${seq}` (both planes)
@@ -81,6 +93,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     const fresh = !lastSeen.has(peer)
     lastSeen.set(peer, nowMs())
     if (fresh) {
+      log(`peer visible: ${short(peer)}`)
       onPresence(peer, 'join')
       // Answer a newcomer at once instead of making it wait for our heartbeat:
       // discovery has to be mutual before the lower id can open the handshake.
@@ -117,7 +130,16 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   // without it the room keeps using the interim static key (`keys.session`).
   const sessions = new Map<string, Session>()
   /** `h` is null only for the moment between reserving the slot and having keys. */
-  interface Attempt { h: Eh2Handshake | null; role: 'initiator' | 'responder'; startedAt: number }
+  interface Attempt {
+    h: Eh2Handshake | null
+    role: 'initiator' | 'responder'
+    startedAt: number
+    /** Responder: the msg1 this attempt answers, and the msg2 it answered with. */
+    msg1?: Uint8Array
+    reply?: Uint8Array
+  }
+  const sameBytes = (a?: Uint8Array, b?: Uint8Array) =>
+    !!a && !!b && a.length === b.length && a.every((v, i) => v === b[i])
   const handshakes = new Map<string, Attempt>()
   /** Peers whose attempt died: we may open the next one even if we are the higher id. */
   const stuck = new Set<string>()
@@ -153,18 +175,19 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     stuck.delete(peer)
   }
 
-  const beginHandshake = async (peer: string, role: 'initiator' | 'responder'): Promise<Attempt | null> => {
+  const beginHandshake = async (peer: string, role: 'initiator' | 'responder', msg1?: Uint8Array): Promise<Attempt | null> => {
     if (!eh2) return null
     clearAttempt(peer) // a fresh attempt always replaces the previous one
     // Reserve the slot BEFORE the first await: generating the ephemerals takes
     // a tick, and two Announces arriving back to back would otherwise both pass
     // the "already handshaking?" check and start two handshakes.
-    const attempt: Attempt = { h: null, role, startedAt: nowMs() }
+    const attempt: Attempt = { h: null, role, startedAt: nowMs(), msg1 }
     handshakes.set(peer, attempt)
     try {
       const h = await startHandshake({ role, ik: eh2.ik, peerIkPub: eh2.peerIkPub, ratchet: eh2.ratchet })
       if (handshakes.get(peer) !== attempt) return null // superseded while we generated keys
       attempt.h = h
+      log(`EH-2 ${role} attempt → ${short(peer)}`)
       eh2.onState?.(peer, 'handshaking')
       h.session.then(
         (s) => {
@@ -172,6 +195,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
           clearAttempt(peer)
           stuck.delete(peer)
           sessions.set(peer, s)
+          log(`EH-2 established with ${short(peer)} (${role}) — ratchet live, ${queued.length} queued frame(s) to flush`)
           eh2.onState?.(peer, 'established')
           void flushQueued()
         },
@@ -224,6 +248,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    */
   const giveUp = (peer: string) => {
     if (!eh2 || sessions.has(peer)) return
+    log(`EH-2 attempt with ${short(peer)} gave up — will retry`)
     eh2.onState?.(peer, 'failed')
     stuck.add(peer)
     if (!lastSeen.has(peer)) return
@@ -241,20 +266,30 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     if (!eh2 || from === self) return
     let attempt = handshakes.get(from)
     if (data[0] === T_MSG1) {
+      // A REPEAT of the msg1 we are already answering (the initiator re-sends
+      // it while waiting). Restarting here would be a bug with a very visible
+      // symptom: the initiator completes against our first msg2, we would have
+      // moved to a new EK_r, and its msg3 would fail mac_i — the pair loops
+      // "established → handshaking" forever. Answer with the SAME msg2 instead.
+      if (attempt?.role === 'responder' && sameBytes(attempt.msg1, data)) {
+        dbg(`msg1 repeat from ${short(from)} → re-sending the same msg2`)
+        if (attempt.reply) gossip(attempt.reply)
+        return
+      }
       // Their msg1 crossed our fresh one: the lower id holds its ground, the
       // higher yields — deterministic, so exactly one side backs down.
       const mine = attempt
       if (mine?.role === 'initiator' && self < from && nowMs() - mine.startedAt < 2_000) return
-      // Otherwise a msg1 always starts a fresh responder attempt: the peer may
+      // Otherwise a NEW msg1 starts a fresh responder attempt: the peer may
       // have reloaded, retried after a lost frame, or rotated its PeerId.
       // Accepting it is safe even with a live session — the session is only
       // replaced once msg3 verifies, which needs the peer's real IK.
-      attempt = (await beginHandshake(from, 'responder')) ?? undefined
+      attempt = (await beginHandshake(from, 'responder', data)) ?? undefined
     } else if (!attempt) return // stray msg2/msg3 with no attempt of ours → ignore
     if (!attempt?.h) return
     try {
       const reply = await attempt.h.feed(data)
-      if (reply) gossip(reply)
+      if (reply) { attempt.reply = reply; gossip(reply) }
     } catch { /* the attempt is already gone; giveUp() schedules the next one */ }
   }
 
@@ -270,14 +305,22 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     if (!s) return false
     const pt = await s.decrypt(data)
     if (pt === null) return false
-    if (from !== self) { const env = decodeEnvelope(pt); if (env) dispatch(from, env) }
+    if (from !== self) {
+      const env = decodeEnvelope(pt)
+      dbg(`← content ${data.length} B from ${short(from)} → ${env ? (env as any).t : 'undecodable'}`)
+      if (env) dispatch(from, env)
+    }
     return true
   }
 
   const handler = async (evt) => {
     if (evt.detail.topic !== topic) return
     const from = evt.detail.from.toString()
-    if (eh2 && isHandshakeFrame(evt.detail.data)) { await onHandshakeFrame(evt.detail.data, from); return }
+    if (eh2 && isHandshakeFrame(evt.detail.data)) {
+      dbg(`← msg${evt.detail.data[0]} from ${short(from)} (${evt.detail.data.length} B)`)
+      await onHandshakeFrame(evt.detail.data, from)
+      return
+    }
     if (await processSealed(evt.detail.data, from)) return
     // not sealed → authenticated Announce (presence/discovery, §5.5)
     const res = await verifyAnnounce(evt.detail.data, keys.macKey)
@@ -288,6 +331,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   }
   node.services.pubsub.addEventListener('message', handler)
   node.services.pubsub.subscribe(topic)
+  log(`joined topic ${topic.slice(0, 12)}… as ${short(self)} (${eh2 ? 'EH-2' : 'interim key'})`)
 
   const gossip = (bytes: Uint8Array) => { node.services.pubsub.publish(topic, bytes).catch(() => {}) }
   const announce = async () => { try { gossip(await buildAnnounce(self, keys.macKey)) } catch {} }
@@ -320,12 +364,25 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const t0 = setInterval(() => {
     let meshReady = false
     try { meshReady = node.services.pubsub.getSubscribers(topic).length > 0 } catch {}
-    if (meshReady || nowMs() - startedAt >= firstAnnounceMs) announceFirst()
+    if (meshReady || nowMs() - startedAt >= firstAnnounceMs) {
+      log(meshReady
+        ? `relay joined the topic after ${nowMs() - startedAt} ms → announcing`
+        : `no subscriber report after ${firstAnnounceMs} ms → announcing anyway`)
+      announceFirst()
+    }
   }, Math.max(10, Math.min(50, firstAnnounceMs)))
   const hb = setInterval(announce, heartbeatMs)
   const sweep = setInterval(() => {
     const now = nowMs()
-    for (const [peer, t] of lastSeen) if (now - t > ttlMs) { lastSeen.delete(peer); forgetPeer(peer); onPresence(peer, 'leave') }
+    // NOTE: silence drops presence, NOT the ratchet. Tearing the session down
+    // on a guess is how a throttled background tab turned into "the badge is
+    // green but nothing sends" — the peer was still there, we had thrown its
+    // keys away. An actual leave (below) does clear it; so does a new handshake.
+    for (const [peer, t] of lastSeen) if (now - t > ttlMs) {
+      lastSeen.delete(peer)
+      log(`no Announce from ${short(peer)} for ${Math.round((now - t) / 1000)}s → presence off (ratchet kept)`)
+      onPresence(peer, 'leave')
+    }
   }, Math.min(heartbeatMs, 15_000))
 
   // data plane: content is sealed then sent here — GossipSub by default, or a
@@ -341,8 +398,15 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    */
   const emitContent = async (bytes: Uint8Array) => {
     if (eh2) {
-      if (!sessions.size) { if (queued.length < maxQueued) queued.push(bytes); return }
-      for (const s of sessions.values()) { try { contentSend(await s.encrypt(bytes)) } catch {} }
+      if (!sessions.size) {
+        if (queued.length < maxQueued) { queued.push(bytes); dbg(`no session yet → queued (${queued.length})`) }
+        else log('queue full — dropping outgoing frame')
+        return
+      }
+      for (const s of sessions.values()) {
+        try { const sealed = await s.encrypt(bytes); dbg(`→ content ${sealed.length} B via ${contentSend === gossipContent ? 'relay' : 'WebRTC'}`); contentSend(sealed) }
+        catch (e: any) { log(`send failed: ${e?.message ?? e}`) }
+      }
       return
     }
     try { contentSend(await keys.session!.encrypt(bytes)) } catch {}
@@ -367,6 +431,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     setContentSend: (fn: ((sealed: Uint8Array) => void) | null) => { contentSend = fn ?? gossipContent },
     injectContent: (sealed: Uint8Array, from: string) => { void processSealed(sealed, from) },
     who: () => [...lastSeen.keys()],
+    /** Announce now — e.g. when a tab becomes visible after being throttled. */
+    refresh: () => { void announce() },
     /** Peers with a live EH-2 ratchet (empty in interim mode) — for the UI badge. */
     secured: () => (eh2 ? [...sessions.keys()] : []),
     stop: () => {
