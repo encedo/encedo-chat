@@ -6,6 +6,7 @@
  * it never sees plaintext or keys. Both v5 and v6 clients use it unchanged.
  *
  *   node relay.mjs --pass <secret> --port 9001 [--host bs1.onchato.com] [--peers <ma>...]
+ *                  [--max-topics 250] [--idle-ttl 120]
  *
  * ⚠️ --pass is the Ed25519 seed → the relay's PeerId. Production MUST keep
  *    --pass bs1.onchato.com so the PeerId stays 12D3KooWP6Sp…cDmp — clients
@@ -43,6 +44,11 @@ const PASS  = get('--pass', 'default-relay-pass')
 const PORT  = parseInt(get('--port', '9001'))
 const HOST  = get('--host', null)   // e.g. onchato.com — used to print the production WSS multiaddr
 const PEERS = getPeers()
+// Topic budget. Both are operational knobs, not protocol: raise MAX_TOPICS on a
+// busier node, shorten IDLE_TTL only if you are sure it stays well above the
+// clients' ~15 s Announce heartbeat (below it, live rooms would be evicted).
+const MAX_TOPICS = parseInt(get('--max-topics', '250'))
+const IDLE_TTL = parseInt(get('--idle-ttl', '120')) * 1000
 
 const seed    = createHash('sha256').update(PASS).digest()
 const privKey = await generateKeyPairFromSeed('Ed25519', seed)
@@ -81,16 +87,23 @@ const relay = await createLibp2p({
 // ~15 s, so any room with a live subscriber is refreshed continuously. When all
 // clients leave or die the heartbeats stop and the topic is evicted after
 // IDLE_TTL — so we never evict a room someone is actually in (no silent kill).
-const MAX_TOPICS = 50
-const IDLE_TTL = 120_000 // evict a topic after this much silence (>> 15 s heartbeat)
-const SWEEP_MS = 30_000
+//
+// Sizing: a room is one topic and (today) two clients, so the ceiling that
+// binds first is maxConnections (520) — 250 topics leaves headroom rather than
+// turning "the node is busy" into "new rooms silently do not work".
+// Sweep often enough that IDLE_TTL means what it says: with the production
+// 120 s TTL a topic goes at 120–150 s, and a short TTL (tests, a busy node)
+// does not silently wait a full 30 s sweep.
+const SWEEP_MS = Math.max(2_000, Math.min(30_000, Math.floor(IDLE_TTL / 2)))
 const lastSeen = new Map() // topic -> last activity (ms); drives eviction
 
 relay.services.pubsub.addEventListener('subscription-change', (evt) => {
   for (const { topic, subscribe } of evt.detail.subscriptions) {
     if (subscribe && !relay.services.pubsub.getTopics().includes(topic)) {
       if (relay.services.pubsub.getTopics().length >= MAX_TOPICS) {
-        console.log(`[!topic] limit reached (${MAX_TOPICS}), ignoring "${topic}"`)
+        // The client gets no error for this — it just never sees anyone in the
+        // room. Loud in the log, because it looks like "the app is broken".
+        console.log(`[!topic] LIMIT ${MAX_TOPICS} reached — REFUSING "${topic}" (raise --max-topics)`)
         continue
       }
       relay.services.pubsub.subscribe(topic)
@@ -102,8 +115,11 @@ relay.services.pubsub.addEventListener('subscription-change', (evt) => {
 
 relay.services.pubsub.addEventListener('message', (evt) => {
   lastSeen.set(evt.detail.topic, Date.now()) // heartbeat announces count → live rooms stay
+  // Metadata only. The payload is ciphertext (and with EH-2 it is binary, so
+  // decoding it printed garbage anyway) — logging it just parked user metadata
+  // in journald for no operational benefit.
   const from = evt.detail.from.toString().slice(0, 12)
-  console.log(`[msg:${evt.detail.topic}] ${from}...: ${new TextDecoder().decode(evt.detail.data)}`)
+  console.log(`[msg:${evt.detail.topic.slice(0, 12)}…] ${from}… ${evt.detail.data.length} B`)
 })
 
 // evict abandoned topics: no activity (not even a heartbeat) for IDLE_TTL → all

@@ -34,26 +34,29 @@ Change the pass → new PeerId → **every client breaks**. Keep it exactly `bs1
 
 ## Deploy (host build, like the web)
 
-On the onchato host, in the `encedo-chat` checkout:
+On the onchato host (`/opt/github/encedo-chat`):
 
 ```bash
+cd /opt/github/encedo-chat
 git pull
-cd relay
-npm ci
+cd relay && npm ci
 sudo systemctl restart onchato-relay
+sudo journalctl -u onchato-relay -f    # PeerId 12D3KooWP6Sp… + the topic budget line
 ```
 
 First-time systemd install:
 
 ```bash
-# set WorkingDirectory in onchato-relay.service to your clone path, then:
+# the unit ships with WorkingDirectory=/opt/github/encedo-chat/relay — change it
+# if your clone lives elsewhere, then:
 sudo cp onchato-relay.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now onchato-relay
 sudo journalctl -u onchato-relay -f      # confirm PeerId 12D3KooWP6Sp… on startup
 ```
 
-Node 18+ (plain ESM). Runs as `www-data` by default — the clone dir must be readable by it.
+Node 18+ (plain ESM). Runs as `www-data` by default — the clone dir must be readable
+by it (`sudo chgrp -R www-data /opt/github/encedo-chat && sudo chmod -R g+rX` if not).
 
 ## nginx (bs1.onchato.com)
 
@@ -86,8 +89,17 @@ server {
 
 - `maxConnections: 520`, `maxReservations: 256`, `maxMessageSize: 65536` (64 KB).
 - GossipSub mesh `D:8, Dlo:6, Dhi:12` (tuned for ~25 clients/topic).
-- `MAX_TOPICS = 50` — **hard cap**: beyond 50 live topics new rooms are refused.
-  No eviction yet — see the `TODO(eviction)` in `relay.mjs` (drop a topic on
-  last-unsubscribe / TTL-evict idle ones to make the cap soft). Follow-up.
-- The per-message `console.log` is debug output (ciphertext) — candidate to trim
-  in production to reduce log volume + metadata in journald.
+- `--max-topics` (default **250**) — cap on **concurrent live** topics. It is soft
+  in time: a topic with no activity for `--idle-ttl` (default **120 s**) is
+  evicted, so the slot returns. Clients heartbeat an Announce every ~15 s, so a
+  room anyone is actually in is refreshed continuously and never evicted — keep
+  `--idle-ttl` well above 15 s.
+  **When the cap does bite, the client sees nothing** — no error, just an empty
+  room, which looks like a broken app. The relay logs
+  `[!topic] LIMIT … REFUSING` for exactly that case; watch for it.
+  (This is what bit us on 2026-07-29: the deployed relay still ran the
+  pre-eviction build with a hard cap of 50, had refused every new topic for a
+  while, and only a restart cleared it.)
+- The per-message log is **metadata only** (truncated topic, sender prefix, byte
+  count) — the payload is ciphertext and logging it only parked user metadata in
+  journald.

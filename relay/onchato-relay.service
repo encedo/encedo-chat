@@ -4,7 +4,8 @@
 # Logs:     sudo journalctl -u onchato-relay -f
 #
 # ⚠️ Keep --pass bs1.onchato.com — it seeds the relay PeerId that every client
-#    has hardcoded. Adjust WorkingDirectory to your encedo-chat checkout.
+#    has hardcoded. WorkingDirectory below is the onchato host layout —
+#    adjust it if your encedo-chat checkout lives elsewhere.
 
 [Unit]
 Description=onchato libp2p relay (encedo-chat)
@@ -13,7 +14,7 @@ After=network.target
 [Service]
 Type=simple
 User=www-data
-WorkingDirectory=/opt/encedo-chat/relay
+WorkingDirectory=/opt/github/encedo-chat/relay
 ExecStart=/usr/bin/node relay.mjs --port 9001 --pass bs1.onchato.com --host bs1.onchato.com
 Restart=always
 RestartSec=5
