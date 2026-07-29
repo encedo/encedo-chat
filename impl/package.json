@@ -12,6 +12,7 @@
     "meet": "node net/meet.ts",
     "chat-test": "node net/chat-test.ts",
     "eh2-test": "node net/eh2-chat-test.ts",
+    "gui-sim": "node net/gui-sim.ts",
     "bob": "node bob/bob.ts",
     "carl": "node carl/carl.ts",
     "alice": "node alice/alice.ts",
