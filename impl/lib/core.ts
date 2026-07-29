@@ -221,16 +221,25 @@ export interface Conversation {
  */
 export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts): Promise<Conversation> {
   const params = opts.params ?? { networkId: 'main', dateUTC: todayUTC() }
-  const { topic, keys } = await deriveRoom(id, peer, params, opts.eh2 ? { onState: opts.onSecurity } : false)
+  // In EH-2 mode the WebRTC offer cannot go out before the session exists —
+  // signaling rides the room encrypted. So the plane is kicked when the
+  // handshake completes, not (only) when presence says the peer joined.
+  let plane: WebRTCPlane | null = null
+  const onSecurity: Eh2Options['onState'] = (p, state) => {
+    opts.onSecurity?.(p, state)
+    if (state === 'established') plane?.onPeer(p)
+  }
+  const { topic, keys } = await deriveRoom(id, peer, params, opts.eh2 ? { onState: onSecurity } : false)
   const node = await createPeer()
   await dial(node, opts.relay)
 
   const self = node.peerId.toString()
-  let plane: WebRTCPlane | null = null
   const room = joinChat(node, topic, keys, {
     onMessage: opts.onMessage,
     onTyping: opts.onTyping,
-    onPresence: (p, ev) => { opts.onPresence?.(p, ev); if (ev === 'join') plane?.onPeer(p) },
+    // In EH-2 mode the plane is kicked from onSecurity instead (see above) —
+    // signaling needs a session, which presence 'join' does not imply.
+    onPresence: (p, ev) => { opts.onPresence?.(p, ev); if (ev === 'join' && !opts.eh2) plane?.onPeer(p) },
     onReaction: opts.onReaction,
     onFile: opts.onFile,
     onSignal: (from, env) => plane?.onSignal(from, env),

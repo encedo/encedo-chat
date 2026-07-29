@@ -44,6 +44,8 @@ export interface Eh2Options {
   ratchet?: RatchetOpts
   /** Max plaintext frames held while the handshake runs. */
   maxQueued?: number
+  /** Give up on a silent attempt and start a new one after this long. */
+  attemptTimeoutMs?: number
 }
 
 /** Exactly one of `session` (interim static key) or `eh2` is used for content. */
@@ -78,7 +80,12 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const touch = (peer: string) => {
     const fresh = !lastSeen.has(peer)
     lastSeen.set(peer, nowMs())
-    if (fresh) onPresence(peer, 'join')
+    if (fresh) {
+      onPresence(peer, 'join')
+      // Answer a newcomer at once instead of making it wait for our heartbeat:
+      // discovery has to be mutual before the lower id can open the handshake.
+      void announce()
+    }
     maybeHandshake(peer) // [EH-2 seam] — no-op unless keys.eh2 is set
   }
   const firstSeq = (from: string, seq: number): boolean => {
@@ -96,7 +103,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       case 'typing': touch(from); onTyping(from, env.state as TypingState); break
       case 'presence': {
         const st = env.state as PresenceState
-        if (st === 'leave') { lastSeen.delete(from); onPresence(from, 'leave') }
+        if (st === 'leave') { lastSeen.delete(from); forgetPeer(from); onPresence(from, 'leave') }
         else { touch(from); onPresence(from, st) } // 'active' | 'away'
         break
       }
@@ -109,51 +116,126 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   // With `keys.eh2` set, each peer gets its own handshake and its own ratchet;
   // without it the room keeps using the interim static key (`keys.session`).
   const sessions = new Map<string, Session>()
-  const handshakes = new Map<string, Eh2Handshake>()
+  /** `h` is null only for the moment between reserving the slot and having keys. */
+  interface Attempt { h: Eh2Handshake | null; role: 'initiator' | 'responder'; startedAt: number }
+  const handshakes = new Map<string, Attempt>()
+  /** Peers whose attempt died: we may open the next one even if we are the higher id. */
+  const stuck = new Set<string>()
   const queued: Uint8Array[] = []
   const eh2 = keys.eh2
   const maxQueued = eh2?.maxQueued ?? 32
 
   const sessionFor = (peer: string): Session | undefined => (eh2 ? sessions.get(peer) : keys.session)
 
-  const beginHandshake = async (peer: string, role: 'initiator' | 'responder'): Promise<Eh2Handshake | null> => {
+  /**
+   * An attempt can simply be lost — the GossipSub mesh takes seconds to form
+   * and the frames are fire-and-forget. So an attempt that produces nothing is
+   * abandoned after this long and started over, rather than pending forever.
+   */
+  const attemptTimeoutMs = eh2?.attemptTimeoutMs ?? 6_000
+  const attemptTimers = new Map<string, any>()
+
+  const clearAttempt = (peer: string) => {
+    clearTimeout(attemptTimers.get(peer))
+    attemptTimers.delete(peer)
+    handshakes.delete(peer)
+  }
+
+  /** A peer that left takes its ratchet with it — a new visit re-handshakes. */
+  const forgetPeer = (peer: string) => {
+    clearAttempt(peer)
+    sessions.delete(peer)
+    stuck.delete(peer)
+  }
+
+  const beginHandshake = async (peer: string, role: 'initiator' | 'responder'): Promise<Attempt | null> => {
     if (!eh2) return null
+    clearAttempt(peer) // a fresh attempt always replaces the previous one
+    // Reserve the slot BEFORE the first await: generating the ephemerals takes
+    // a tick, and two Announces arriving back to back would otherwise both pass
+    // the "already handshaking?" check and start two handshakes.
+    const attempt: Attempt = { h: null, role, startedAt: nowMs() }
+    handshakes.set(peer, attempt)
     try {
       const h = await startHandshake({ role, ik: eh2.ik, peerIkPub: eh2.peerIkPub, ratchet: eh2.ratchet })
-      handshakes.set(peer, h)
+      if (handshakes.get(peer) !== attempt) return null // superseded while we generated keys
+      attempt.h = h
       eh2.onState?.(peer, 'handshaking')
       h.session.then(
         (s) => {
+          if (handshakes.get(peer) !== attempt) return // superseded by a newer attempt
+          clearAttempt(peer)
+          stuck.delete(peer)
           sessions.set(peer, s)
-          handshakes.delete(peer)
           eh2.onState?.(peer, 'established')
           void flushQueued()
         },
-        () => { handshakes.delete(peer); eh2.onState?.(peer, 'failed') }, // retried on the next Announce
+        () => {
+          if (handshakes.get(peer) !== attempt) return
+          clearAttempt(peer)
+          giveUp(peer)
+        },
       )
+      const timer = setTimeout(() => {
+        if (handshakes.get(peer) !== attempt) return
+        clearAttempt(peer)
+        giveUp(peer)
+      }, attemptTimeoutMs)
+      ;(timer as any).unref?.()
+      attemptTimers.set(peer, timer)
       for (const f of h.initial) gossip(f)
-      return h
-    } catch { return null }
+      return attempt
+    } catch {
+      if (handshakes.get(peer) === attempt) clearAttempt(peer)
+      return null
+    }
   }
 
-  /** Seen a peer: if we are the lower id, open the handshake (idempotent). */
+  /**
+   * An attempt died (timed out or a frame failed to verify). If the peer is
+   * still around and we have no session, try again — and from now on we are
+   * willing to be the initiator regardless of the id tie-break.
+   *
+   * That last part matters for the one case the tie-break cannot fix: a lost
+   * msg3 leaves the INITIATOR with a session and the responder with nothing,
+   * so the responder is the only side that knows something is wrong, and it is
+   * the higher id. The jitter keeps two simultaneously-stuck peers from
+   * retrying in lockstep.
+   */
+  const giveUp = (peer: string) => {
+    if (!eh2 || sessions.has(peer)) return
+    eh2.onState?.(peer, 'failed')
+    stuck.add(peer)
+    if (!lastSeen.has(peer)) return
+    const t = setTimeout(() => maybeHandshake(peer), 200 + Math.floor(Math.random() * 1200))
+    ;(t as any).unref?.()
+  }
+
+  /** Seen a peer: open the handshake if it is our turn (idempotent). */
   const maybeHandshake = (peer: string) => {
     if (!eh2 || peer === self || sessions.has(peer) || handshakes.has(peer)) return
-    if (self < peer) void beginHandshake(peer, 'initiator')
+    if (self < peer || stuck.has(peer)) void beginHandshake(peer, 'initiator')
   }
 
   const onHandshakeFrame = async (data: Uint8Array, from: string): Promise<void> => {
     if (!eh2 || from === self) return
-    let h = handshakes.get(from)
-    if (!h) {
-      if (data[0] !== T_MSG1 || sessions.has(from)) return // stray frame, or a peer racing us
-      h = await beginHandshake(from, 'responder')
-      if (!h) return
-    }
+    let attempt = handshakes.get(from)
+    if (data[0] === T_MSG1) {
+      // Their msg1 crossed our fresh one: the lower id holds its ground, the
+      // higher yields — deterministic, so exactly one side backs down.
+      const mine = attempt
+      if (mine?.role === 'initiator' && self < from && nowMs() - mine.startedAt < 2_000) return
+      // Otherwise a msg1 always starts a fresh responder attempt: the peer may
+      // have reloaded, retried after a lost frame, or rotated its PeerId.
+      // Accepting it is safe even with a live session — the session is only
+      // replaced once msg3 verifies, which needs the peer's real IK.
+      attempt = (await beginHandshake(from, 'responder')) ?? undefined
+    } else if (!attempt) return // stray msg2/msg3 with no attempt of ours → ignore
+    if (!attempt?.h) return
     try {
-      const reply = await h.feed(data)
+      const reply = await attempt.h.feed(data)
       if (reply) gossip(reply)
-    } catch { /* the failure already moved the state; a retry starts on the next Announce */ }
+    } catch { /* the attempt is already gone; giveUp() schedules the next one */ }
   }
 
   const flushQueued = async () => {
@@ -193,7 +275,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const hb = setInterval(announce, heartbeatMs)
   const sweep = setInterval(() => {
     const now = nowMs()
-    for (const [peer, t] of lastSeen) if (now - t > ttlMs) { lastSeen.delete(peer); onPresence(peer, 'leave') }
+    for (const [peer, t] of lastSeen) if (now - t > ttlMs) { lastSeen.delete(peer); forgetPeer(peer); onPresence(peer, 'leave') }
   }, Math.min(heartbeatMs, 15_000))
 
   // data plane: content is sealed then sent here — GossipSub by default, or a
