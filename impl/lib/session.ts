@@ -7,8 +7,9 @@
  * (docs/PROTOCOL.md §6–7) drop in behind the SAME interface once the
  * cryptographer signs off, with zero change to room / envelope / transport.
  *
- *   today:    interimSession — static AES-GCM key from ss (no forward secrecy)
- *   tomorrow: eh2Session     — X3DH-style handshake + Double Ratchet (stubbed)
+ *   interimSession — static AES-GCM key from ss (no forward secrecy); still the
+ *                    scheme the live room uses until the EH-2 path is wired in
+ *   eh2Session     — EH-2 handshake + Double Ratchet (eh2/), the real thing
  *
  * The application payload (the JSON envelope, lib/envelope.ts) is what gets
  * sealed; the Session owns its own wire format (for EH-2 that includes the
@@ -17,6 +18,8 @@
 
 import { msgKeyFromSecret, seal, open } from './msgcrypto.ts'
 import type { RvParams } from './rendezvous.ts'
+import { ratchetFrom, type RatchetOpts } from '../eh2/ratchet.ts'
+import type { HandshakeResult } from '../eh2/handshake.ts'
 
 export interface Session {
   /** Seal an outgoing plaintext → wire bytes. May advance ratchet state (EH-2). */
@@ -39,18 +42,18 @@ export async function interimSession(ss: Uint8Array, p: RvParams): Promise<Sessi
 }
 
 /**
- * EH-2 session — X3DH-style handshake + Double Ratchet (docs/PROTOCOL.md §6–7).
- * NOT IMPLEMENTED — held for the cryptographer's review of the design. Left as a
- * throwing stub so nothing depends on an un-reviewed scheme.
+ * EH-2 session — the handshake (§6) + Double Ratchet (§7), behind this exact
+ * interface. Forward secrecy per message, post-compromise recovery on every
+ * turn of the conversation, PQ-hybrid session key.
  *
- * When blessed, establishment is INTERACTIVE (unlike the interim's immediate key
- * derivation): it exchanges handshake frames over the room — a SEPARATE
- * pre-session wire (NOT a sealed envelope; the session key doesn't exist yet),
- * authenticated like Announce. After the handshake each message carries a
- * ratchet header (DH pub + PN + N) INSIDE this Session's own wire. So the EH-2
- * factory will need transport access + the peer's IK; the `Session` it returns
- * exposes exactly the encrypt/decrypt above — room/envelope/transport unchanged.
+ * Unlike the interim box, establishment is INTERACTIVE: three handshake frames
+ * travel as a SEPARATE pre-session wire (not sealed envelopes — the session key
+ * does not exist yet), and only then does a Session exist. That flow lives in
+ * `eh2/establish.ts` (`startHandshake`), which hands back this Session with the
+ * ratchet already wired; the per-message ratchet header rides inside this
+ * Session's own wire, invisible to the room.
  */
-export function eh2Session(): Promise<Session> {
-  throw new Error('EH-2 not implemented — held for cryptographer review (docs/PROTOCOL.md §6–7)')
+export async function eh2Session(result: HandshakeResult, opts?: RatchetOpts): Promise<Session> {
+  const r = await ratchetFrom(result, opts)
+  return { encrypt: (plaintext) => r.encrypt(plaintext), decrypt: (data) => r.decrypt(data) }
 }
