@@ -6,7 +6,8 @@
  *   node cli/ec.ts pubkey                                 print my pubkey (give it to a contact)
  *   node cli/ec.ts add <name> <pubB64>                    save a contact
  *   node cli/ec.ts contacts                               list contacts
- *   node cli/ec.ts chat <name> [--network m] [--date d]   open an interactive encrypted chat
+ *   node cli/ec.ts chat <name> [--network m] [--date d] [--eh2]   open an interactive encrypted chat
+ *                                        (--eh2: EH-2 handshake + ratchet instead of the interim key)
  *
  * Password: --password, EC_PASSWORD env, or interactive prompt (masked).
  * Identity in the HEM (real) or a local keystore (dev). Same engine as the web GUI.
@@ -96,8 +97,9 @@ switch (cmd) {
     if (!peerPub) { console.error(`unknown contact: ${name} (ec add ${name} <pubB64>)`); process.exit(1) }
     const id = await connect(cfg)
     const p = { networkId: opt('--network', 'main')!, dateUTC: opt('--date', todayUTC())! }
-    console.log(`[ec] ${id.handle} → ${name}  via onchato relay`)
-    await runChatSession(id, peerPub, id.handle, name, RELAY, p)
+    const eh2 = rest.includes('--eh2')
+    console.log(`[ec] ${id.handle} → ${name}  via onchato relay${eh2 ? '  [EH-2]' : ''}`)
+    await runChatSession(id, peerPub, id.handle, name, RELAY, p, eh2)
     break
   }
   default:

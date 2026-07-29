@@ -13,7 +13,12 @@ const C = { peer: '\x1b[36m', me: '\x1b[33m', sys: '\x1b[90m', warn: '\x1b[31m',
 const short = (id: string) => id.slice(0, 10) + '…'
 const time = (ts: number) => `${C.sys}${utcHHMM(ts)}${C.reset}`
 
-export async function runChatSession(id: Identity, peerPub: string, meName: string, peerName: string, relay: string, params?: RoomParams) {
+export async function runChatSession(
+  id: Identity, peerPub: string, meName: string, peerName: string, relay: string,
+  params?: RoomParams,
+  /** Seal content with EH-2 + ratchet (§6–7) instead of the interim key. Both sides must agree. */
+  eh2 = false,
+) {
   console.log(`${C.sys}— connecting via relay…${C.reset}`)
 
   let conv: Awaited<ReturnType<typeof openConversation>> | null = null
@@ -56,6 +61,12 @@ export async function runChatSession(id: Identity, peerPub: string, meName: stri
     conv = await openConversation(id, { pub: peerPub }, {
       relay,
       params,
+      eh2,
+      onSecurity: (peer, state) => ui.print(
+        state === 'established'
+          ? `${C.sys}* EH-2 established with ${short(peer)} — ratchet active (PQ hybrid)${C.reset}`
+          : `${C.sys}* EH-2 ${state} with ${short(peer)}${C.reset}`,
+      ),
       onMessage: (_from, m) => {
         lastRecvId = m.id; peerTyping = false
         if (m.body.startsWith('ACTION ')) ui.print(`${time(m.ts)} ${C.peer}* ${peerName} ${m.body.slice(7)}${C.reset}`)

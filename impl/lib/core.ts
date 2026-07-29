@@ -14,7 +14,8 @@
 
 import { topicFromSecret, announceMacKey, todayUTC, type RvParams } from './rendezvous.ts'
 import { interimSession } from './session.ts'
-import { joinChat, type RoomKeys, type ChatOpts } from './room.ts'
+import { joinChat, type RoomKeys, type ChatOpts, type Eh2Options } from './room.ts'
+import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
 import { b64, unb64 } from './wc.ts'
@@ -161,12 +162,30 @@ export function localOnlyManager(local: ContactBook): ContactManager {
   }
 }
 
-/** Derive the day's room for a pair: topic + interim keys (macKey + Session). */
-export async function deriveRoom(id: Identity, peer: Peer, p: RoomParams): Promise<{ topic: string; keys: RoomKeys }> {
+/**
+ * Derive the day's room for a pair: the topic (§5) plus the content keys.
+ *
+ * Rendezvous is unchanged either way — topic and Announce MAC key come from
+ * `ss = ECDH(IK_a, IK_b)`. What changes is how content is sealed: `eh2` swaps
+ * the interim static key for a per-peer EH-2 handshake + ratchet negotiated
+ * inside the room (§6–7). The pair secret is then used ONLY for rendezvous.
+ */
+export async function deriveRoom(
+  id: Identity,
+  peer: Peer,
+  p: RoomParams,
+  eh2?: { onState?: Eh2Options['onState']; ratchet?: Eh2Options['ratchet'] } | false,
+): Promise<{ topic: string; keys: RoomKeys }> {
   const ss = await id.ecdh(peer.pub, peer.kid)
   const topic = await topicFromSecret(ss, p)
-  const keys = { macKey: await announceMacKey(ss, p), session: await interimSession(ss, p) }
-  return { topic, keys }
+  const macKey = await announceMacKey(ss, p)
+  if (eh2) {
+    // The EH-2 DHs run against the peer's EPHEMERAL keys, so no contact `kid`
+    // here — just our IK against raw public keys (HEM raw ecdh, §4.3).
+    const ik = dhFromEcdh(id.pub, (peerPubB64) => id.ecdh(peerPubB64))
+    return { topic, keys: { macKey, eh2: { ik, peerIkPub: unb64(peer.pub), ...eh2 } } }
+  }
+  return { topic, keys: { macKey, session: await interimSession(ss, p) } }
 }
 
 const TYPING_STOP_MS = 4_000 // stop "typing" after this idle gap
@@ -178,6 +197,10 @@ export interface OpenOpts extends ChatOpts {
   params?: RoomParams
   webrtc?: boolean // enable the WebRTC direct data plane (browser only)
   onWebrtcState?: (s: string) => void // WebRTC conn/ICE state (for a UI badge)
+  /** Seal content with EH-2 + Double Ratchet (§6–7) instead of the interim key. */
+  eh2?: boolean
+  /** EH-2 handshake progress per peer (for a UI badge). */
+  onSecurity?: Eh2Options['onState']
 }
 export interface Conversation {
   peerId: string
@@ -187,6 +210,7 @@ export interface Conversation {
   noteActivity(): void // UI calls on user input → drives "typing" + resets "away"
   noteAway(): void // UI calls on blur/tab-hidden → "away" now
   who(): string[]
+  secured(): string[] // peers with a live EH-2 ratchet (empty in interim mode)
   leave(): Promise<void> // presence:leave last-will + clean transport stop
 }
 
@@ -197,7 +221,7 @@ export interface Conversation {
  */
 export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts): Promise<Conversation> {
   const params = opts.params ?? { networkId: 'main', dateUTC: todayUTC() }
-  const { topic, keys } = await deriveRoom(id, peer, params)
+  const { topic, keys } = await deriveRoom(id, peer, params, opts.eh2 ? { onState: opts.onSecurity } : false)
   const node = await createPeer()
   await dial(node, opts.relay)
 
@@ -236,6 +260,7 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     noteActivity,
     noteAway,
     who: () => room.who(),
+    secured: () => room.secured(),
     leave: async () => {
       clearTimeout(tT); clearTimeout(aT)
       try { room.sendPresence('leave') } catch {}

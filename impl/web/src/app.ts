@@ -246,6 +246,20 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   box.appendChild(row); box.scrollTop = box.scrollHeight
 }
 const setTyping = (on: boolean, name = '') => { $('typing-ind').textContent = on ? `${name} pisze…` : '' }
+/**
+ * EH-2 (§6–7) instead of the interim static key. Opt-in for now — open the app
+ * with `?eh2=1` on BOTH sides; mixing modes means the peers cannot read each
+ * other (different content crypto entirely).
+ */
+const EH2 = new URLSearchParams(location.search).has('eh2')
+
+function setSecurity(_peer: string, state: 'handshaking' | 'established' | 'failed') {
+  const b = $('e2e-badge')
+  if (state === 'established') { b.className = 'badge direct'; b.textContent = '🔐 EH-2 + ratchet'; b.title = 'Handshake EH-2 uzgodniony — forward secrecy per wiadomość, hybryda PQ (ML-KEM-768)' }
+  else if (state === 'handshaking') { b.className = 'badge e2e'; b.textContent = '🤝 EH-2 handshake…'; b.title = 'Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)' }
+  else { b.className = 'badge e2e'; b.textContent = '⚠️ EH-2 nieudany'; b.title = 'Handshake nie doszedł do skutku — ponowi się przy następnym Announce' }
+}
+
 function setTransport(state: string) {
   const b = $('transport-badge')
   if (state.startsWith('conn=connected')) { b.className = 'badge direct'; b.textContent = '🟢 WebRTC Direct'; b.title = 'Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing' }
@@ -263,6 +277,7 @@ async function openChat(contact: Contact) {
   $('peer-dot').className = 'dot'; $('peer-status').textContent = 'łączę…'
   $('messages').innerHTML = ''; msgEls.clear(); setTyping(false)
   $('transport-badge').className = 'badge relay'; $('transport-badge').textContent = '⚪ Relay'
+  if (EH2) setSecurity('', 'handshaking')
   appendMsg('sys', `Pokój otwarty — czekam na ${contact.name}…`)
   startRotation()
 
@@ -272,6 +287,8 @@ async function openChat(contact: Contact) {
       relay: RELAY,
       webrtc: true,
       onWebrtcState: setTransport,
+      eh2: EH2,
+      onSecurity: setSecurity,
       onMessage: (_from, msg) => { peerTyping = false; setTyping(false); appendMsg('peer', msg.body, msg.ts, msg.id) },
       onTyping: (_from, state) => { peerTyping = state === 'start'; setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => addReaction(r.to, r.emoji),
