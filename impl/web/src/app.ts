@@ -233,6 +233,20 @@ function addReaction(msgId: string, emoji: string) {
   const chip = document.createElement('span'); chip.className = 'rchip'; chip.textContent = emoji
   rx.appendChild(chip)
 }
+/** msg id → the little delivery marker under our own bubble. */
+const stateEls = new Map<string, HTMLElement>()
+function setDelivery(id: string, state: 'ok' | 'lost', ms?: number) {
+  const el = stateEls.get(id)
+  if (!el) return
+  if (state === 'ok') {
+    el.textContent = ' · ✓ dostarczone'
+    el.title = `Klient rozmówcy potwierdził odbiór${ms !== undefined ? ` po ${ms} ms` : ''} — to nie jest „przeczytane"`
+  } else {
+    el.textContent = ' · ⚠ niedostarczone'
+    el.title = 'Brak potwierdzenia mimo ponowień — rozmówca prawdopodobnie tego nie dostał'
+  }
+}
+
 function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string) {
   const box = $('messages')
   if (kind === 'sys') {
@@ -243,6 +257,14 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   const bub = document.createElement('div'); bub.className = 'bubble'
   const t = document.createElement('div'); t.className = 'b-text'; t.textContent = text
   const m = document.createElement('div'); m.className = 'b-meta'; m.textContent = utcHHMM(ts ?? nowMs()) + ' UTC'
+  if (kind === 'me' && id) {
+    // Delivery state for our own messages. Instant-only: this says the peer's
+    // client holds it, never that anyone read it.
+    const st = document.createElement('span'); st.className = 'b-state'; st.textContent = ' · wysyłam…'
+    st.title = 'Czekam na potwierdzenie od klienta rozmówcy'
+    m.appendChild(st)
+    stateEls.set(id, st)
+  }
   const rx = document.createElement('div'); rx.className = 'b-reactions'
   bub.append(t, m, rx); row.appendChild(bub)
   if (id) {
@@ -327,6 +349,8 @@ async function openChat(contact: Contact) {
       eh2: EH2,
       onSecurity: setSecurity,
       onLog: ecLog,
+      onDelivered: (id, ms) => setDelivery(id, 'ok', ms),
+      onUndelivered: (id) => setDelivery(id, 'lost'),
       onMessage: (from, msg) => {
         ecLog(`message from ${from.slice(0, 12)}…: "${msg.body.slice(0, 40)}"`)
         peerTyping = false; setTyping(false); appendMsg('peer', msg.body, msg.ts, msg.id)

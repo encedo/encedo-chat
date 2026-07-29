@@ -46,12 +46,19 @@ export interface FileEnv extends BaseEnv {
   exp?: number // expiry (epoch ms, UTC) — IPFS auto-drops after N hours
   key?: string // content key to decrypt the fetched blob (reserved; design TBD)
 }
+/**
+ * Delivery confirmation. Instant-only product: this says "it reached the other
+ * client", nothing about reading it — there are no read receipts by design.
+ * `ref` is the id of the message being confirmed, `rts` the receiver's clock at
+ * the moment it arrived (so the sender can show how long it took).
+ */
+export interface AckEnv extends BaseEnv { t: 'ack'; ref: string; rts: number }
 /** WebRTC signaling (SDP/ICE) relayed over the control plane (GossipSub), encrypted. */
 export interface RtcEnv extends BaseEnv { t: 'rtc'; to: string; sig: any }
 /** A valid envelope whose `t` this build doesn't know — carried for forward-compat. */
 export interface UnknownEnv extends BaseEnv { [k: string]: unknown }
 
-export type KnownEnv = MsgEnv | TypingEnv | PresenceEnv | ReactionEnv | FileEnv | RtcEnv
+export type KnownEnv = MsgEnv | TypingEnv | PresenceEnv | ReactionEnv | FileEnv | RtcEnv | AckEnv
 export type Envelope = KnownEnv | UnknownEnv
 export type FileMeta = Omit<FileEnv, keyof BaseEnv>
 
@@ -70,6 +77,7 @@ export const envPresence = (seq: number, state: PresenceState): PresenceEnv => (
 export const envReaction = (seq: number, to: string, emoji: string): ReactionEnv => ({ ...base('reaction', seq), to, emoji })
 export const envFile = (seq: number, f: FileMeta): FileEnv => ({ ...base('file', seq), ...f })
 export const envRtc = (seq: number, to: string, sig: any): RtcEnv => ({ ...base('rtc', seq), to, sig })
+export const envAck = (seq: number, ref: string, rts: number = nowMs()): AckEnv => ({ ...base('ack', seq), ref, rts })
 
 export const encodeEnvelope = (e: Envelope): Uint8Array => te.encode(JSON.stringify(e))
 
@@ -94,6 +102,7 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
     case 'reaction': return (typeof m.to === 'string' && typeof m.emoji === 'string') ? (m as ReactionEnv) : null
     case 'file': return (typeof m.cid === 'string' && typeof m.name === 'string' && typeof m.size === 'number' && typeof m.mime === 'string') ? (m as FileEnv) : null
     case 'rtc': return (typeof m.to === 'string' && m.sig != null) ? (m as RtcEnv) : null
+    case 'ack': return (typeof m.ref === 'string' && typeof m.rts === 'number') ? (m as AckEnv) : null
     default: return m as UnknownEnv // forward-compat: dispatcher ignores unknown types
   }
 }

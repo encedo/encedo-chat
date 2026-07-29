@@ -203,6 +203,9 @@ export interface OpenOpts extends ChatOpts {
   onSecurity?: Eh2Options['onState']
   /** Narration for a UI console (the engine never writes to one itself). */
   onLog?: ChatOpts['onLog']
+  /** Delivery confirmations for the message status in the UI. */
+  onDelivered?: ChatOpts['onDelivered']
+  onUndelivered?: ChatOpts['onUndelivered']
 }
 export interface Conversation {
   peerId: string
@@ -254,6 +257,8 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     onSignal: (from, env) => plane?.onSignal(from, env),
     heartbeatMs: opts.heartbeatMs,
     onLog: opts.onLog,
+    onDelivered: (id, ms) => { log(`delivered ${id} in ${ms} ms`); opts.onDelivered?.(id, ms) },
+    onUndelivered: (id) => { log(`UNDELIVERED ${id} — peer never confirmed`); opts.onUndelivered?.(id) },
   })
   if (opts.webrtc) plane = attachWebRTC(room, self, { onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
 

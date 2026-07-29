@@ -19,8 +19,8 @@ import type { RatchetOpts } from '../eh2/ratchet.ts'
 import { startHandshake, isHandshakeFrame, type Eh2Handshake } from '../eh2/establish.ts'
 import { T_MSG1 } from '../eh2/wire.ts'
 import {
-  encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile, envRtc,
-  type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta, type TypingState, type PresenceState, type RtcEnv,
+  encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile, envRtc, envAck,
+  type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta, type TypingState, type PresenceState, type RtcEnv, type AckEnv,
 } from './envelope.ts'
 import { nowMs } from './time.ts'
 
@@ -58,6 +58,10 @@ export interface ChatOpts {
   onReaction?: (from: string, r: ReactionEnv) => void
   onFile?: (from: string, f: FileEnv) => void
   onSignal?: (from: string, env: RtcEnv) => void // WebRTC signaling (control plane)
+  /** The peer's client confirmed it holds this message (`ms` = time in flight). */
+  onDelivered?: (id: string, ms: number) => void
+  /** Gave up after retrying: the peer very likely never got it. */
+  onUndelivered?: (id: string) => void
   heartbeatMs?: number
   /** Delay before the first Announce (tests shorten it; the mesh needs a moment). */
   firstAnnounceMs?: number
@@ -79,6 +83,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const onReaction = opts.onReaction ?? (() => {})
   const onFile = opts.onFile ?? (() => {})
   const onSignal = opts.onSignal ?? (() => {})
+  const onDelivered = opts.onDelivered ?? (() => {})
+  const onUndelivered = opts.onUndelivered ?? (() => {})
   const heartbeatMs = opts.heartbeatMs ?? 15_000
   // Be generous: a browser throttles timers in a hidden tab (Firefox to about
   // once a minute), so a peer that is merely in a background window must not
@@ -101,6 +107,67 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     }
     maybeHandshake(peer) // [EH-2 seam] — no-op unless keys.eh2 is set
   }
+  /**
+   * Delivery confirmation (§ envelope `ack`). Content rides GossipSub once and
+   * is not retransmitted by the transport, so a dropped frame is a message that
+   * silently never happened. The receiver acks what it hands to the UI; the
+   * sender re-sends the SAME envelope (same id and seq, so the peer's dedup
+   * makes a duplicate invisible) and gives up after the last try.
+   *
+   * Instant-only product: this is "arrived", never "read".
+   */
+  const RETRIES = [1_500, 4_000] // delays before each RE-send
+  const GIVE_UP_MS = 4_000       // …then this long for the confirmation to arrive
+  interface Pending { bytes: Uint8Array; sentAt: number; tries: number; timer: any }
+  const pending = new Map<string, Pending>()
+  /** Peers known to send acks. A client that predates them must not be marked ⚠. */
+  const acking = new Set<string>()
+
+  const clearPending = (id: string) => {
+    const p = pending.get(id)
+    if (p) { clearTimeout(p.timer); pending.delete(id) }
+  }
+
+  const armRetry = (id: string) => {
+    const p = pending.get(id)
+    if (!p) return
+    const delay = RETRIES[p.tries]
+    if (delay === undefined) {
+      // Out of re-sends. Keep waiting a little longer before judging: the last
+      // copy is still in flight, and the confirmation for it arrives after it,
+      // not with it.
+      p.timer = setTimeout(() => {
+        if (!pending.has(id)) return
+        pending.delete(id)
+        // Only complain about peers we know DO confirm; silence from a client
+        // that predates acks means "old build", not "lost message".
+        if ([...lastSeen.keys()].some((peer) => acking.has(peer))) {
+          log(`no confirmation for message ${id} after ${RETRIES.length + 1} sends → marking undelivered`)
+          onUndelivered(id)
+        }
+      }, GIVE_UP_MS)
+      ;(p.timer as any).unref?.()
+      return
+    }
+    p.timer = setTimeout(() => {
+      if (!pending.has(id)) return
+      p.tries++
+      dbg(`no ack for ${id} in ${delay} ms → re-sending (try ${p.tries + 1})`)
+      void emitContent(p.bytes)
+      armRetry(id)
+    }, delay)
+    ;(p.timer as any).unref?.()
+  }
+
+  /** Confirm a piece of content we just handed to the UI. */
+  const confirm = (ref: string) => emitContent(encodeEnvelope(envAck(seq++, ref)))
+
+  /** Track an outgoing content envelope until the peer confirms it. */
+  const trackDelivery = (id: string, bytes: Uint8Array) => {
+    pending.set(id, { bytes, sentAt: nowMs(), tries: 0, timer: null })
+    armRetry(id)
+  }
+
   const firstSeq = (from: string, seq: number): boolean => {
     const k = `${from}:${seq}`
     if (seenSeq.has(k)) return false
@@ -110,9 +177,17 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
 
   const dispatch = (from: string, env: any) => {
     switch (env.t) {
-      case 'msg': touch(from); if (firstSeq(from, env.seq)) onMessage(from, env as MsgEnv); break
+      case 'msg':
+        touch(from)
+        void confirm(env.id) // even for a duplicate: the first ack may be what got lost
+        if (firstSeq(from, env.seq)) onMessage(from, env as MsgEnv)
+        break
       case 'reaction': touch(from); if (firstSeq(from, env.seq)) onReaction(from, env as ReactionEnv); break
-      case 'file': touch(from); if (firstSeq(from, env.seq)) onFile(from, env as FileEnv); break
+      case 'file':
+        touch(from)
+        void confirm(env.id)
+        if (firstSeq(from, env.seq)) onFile(from, env as FileEnv)
+        break
       case 'typing': touch(from); onTyping(from, env.state as TypingState); break
       case 'presence': {
         const st = env.state as PresenceState
@@ -121,6 +196,14 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         break
       }
       case 'rtc': onSignal(from, env as RtcEnv); break
+      case 'ack': {
+        touch(from)
+        acking.add(from)
+        const a = env as AckEnv
+        const p = pending.get(a.ref)
+        if (p) { clearPending(a.ref); onDelivered(a.ref, nowMs() - p.sentAt) }
+        break
+      }
       default: break // unknown type → ignore (forward-compat)
     }
   }
@@ -420,11 +503,23 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   }
 
   return {
-    sendText: (body: string) => { const e = envMsg(seq++, body); void emitContent(encodeEnvelope(e)); return e.id }, // returns msg id (for reactions)
+    sendText: (body: string) => {
+      const e = envMsg(seq++, body)
+      const bytes = encodeEnvelope(e)
+      void emitContent(bytes)
+      trackDelivery(e.id, bytes) // resend until the peer confirms, then mark it
+      return e.id // the UI keys its ✓ / ⚠ off this
+    },
     sendTyping: (state: TypingState) => emitContent(encodeEnvelope(envTyping(seq++, state))),
     sendPresence: (state: PresenceState) => emitContent(encodeEnvelope(envPresence(seq++, state))),
     sendReaction: (to: string, emoji: string) => emitContent(encodeEnvelope(envReaction(seq++, to, emoji))),
-    sendFile: (f: FileMeta) => emitContent(encodeEnvelope(envFile(seq++, f))),
+    sendFile: (f: FileMeta) => {
+      const e = envFile(seq++, f)
+      const bytes = encodeEnvelope(e)
+      void emitContent(bytes)
+      trackDelivery(e.id, bytes)
+      return e.id
+    },
     // WebRTC signaling — always over GossipSub (the DataChannel isn't up yet)
     sendSignal: (to: string, sig: any) => emitGossip(encodeEnvelope(envRtc(seq++, to, sig))),
     // data-plane hooks used by the browser WebRTC upgrader
@@ -439,6 +534,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       sessions.clear(); handshakes.clear(); queued.length = 0
       clearInterval(t0); clearInterval(hb); clearInterval(sweep)
       for (const t of earlyBeacons) clearTimeout(t)
+      for (const id of [...pending.keys()]) clearPending(id)
       node.services.pubsub.removeEventListener('message', handler)
       try { node.services.pubsub.unsubscribe(topic) } catch {}
     },

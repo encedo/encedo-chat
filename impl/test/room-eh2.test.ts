@@ -62,7 +62,14 @@ const until = async (cond: () => boolean, ms = 5000) => {
 }
 
 /** Two rooms sharing a topic + Announce key, with EH-2 wired for both peers. */
-async function rooms(opts: { collect: string[]; drop?: (d: Uint8Array, from: string) => boolean; backA?: string[]; duplicate?: (d: Uint8Array) => boolean }) {
+async function rooms(opts: {
+  collect: string[]
+  drop?: (d: Uint8Array, from: string) => boolean
+  backA?: string[]
+  duplicate?: (d: Uint8Array) => boolean
+  onDeliveredA?: (id: string, ms: number) => void
+  onUndeliveredA?: (id: string) => void
+}) {
   const net = hub(opts.drop, opts.duplicate)
   const ss = new Uint8Array(32).fill(0x5e)
   const macKey = await announceMacKey(ss, P)
@@ -79,6 +86,8 @@ async function rooms(opts: { collect: string[]; drop?: (d: Uint8Array, from: str
   const A = joinChat(nodeA, TOPIC, { macKey, eh2: eh2(ikA, ikB.pub) }, {
     firstAnnounceMs: 5,
     onMessage: (_from, m) => opts.backA?.push(m.body),
+    onDelivered: opts.onDeliveredA,
+    onUndelivered: opts.onUndeliveredA,
   })
   const B = joinChat(nodeB, TOPIC, { macKey, eh2: eh2(ikB, ikA.pub) }, {
     firstAnnounceMs: 5,
@@ -199,6 +208,49 @@ test('a repeated msg1 is answered, not restarted (no established/handshaking loo
 
   A.sendText('po duplikacie')
   await until(() => got.length === 1)
+})
+
+test('a lost message is re-sent until the peer confirms it', async (t) => {
+  const got: string[] = []
+  const delivered: Array<[string, number]> = []
+  const undelivered: string[] = []
+  let contentSeen = 0
+  const { A, B } = await rooms({
+    collect: got,
+    // swallow the first two content frames (0x10 = ratchet data) after the
+    // handshake — i.e. the message and its first retry
+    drop: (d) => d[0] === 0x10 && ++contentSeen <= 2,
+    onDeliveredA: (id, ms) => delivered.push([id, ms]),
+    onUndeliveredA: (id) => undelivered.push(id),
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+
+  const id = A.sendText('musi dojść mimo strat')
+  await until(() => got.length === 1, 10_000)
+  assert.deepEqual(got, ['musi dojść mimo strat'], 'exactly one copy reached the UI (duplicates deduped)')
+  await until(() => delivered.length === 1, 5000)
+  assert.equal(delivered[0][0], id, 'the confirmation carries the message id')
+  assert.equal(undelivered.length, 0)
+})
+
+test('a peer that never confirms is not reported as a failure (old client)', async (t) => {
+  // Forward-compat: an older build ignores the ack type. Silence from such a
+  // peer must not paint every message with a warning.
+  const got: string[] = []
+  const undelivered: string[] = []
+  const { A, B } = await rooms({
+    collect: got,
+    drop: (d, from) => d[0] === 0x10 && from === 'peer-b', // B's acks never make it out
+    onUndeliveredA: (id) => undelivered.push(id),
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+
+  A.sendText('do klienta bez potwierdzeń')
+  await until(() => got.length === 1, 8000)
+  await new Promise((r) => setTimeout(r, 6500)) // past both retries
+  assert.deepEqual(undelivered, [], 'no false alarm')
 })
 
 test('interim mode is untouched (no eh2 → static key, no handshake frames)', async (t) => {
