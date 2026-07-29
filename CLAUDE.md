@@ -240,7 +240,22 @@ the control plane unsealed (told apart by their type byte), the lower peer id
 initiates, and content typed before the handshake completes is queued. Enable
 with `openConversation({eh2: true, onSecurity})` — web: `?eh2=1` (the E2E badge
 goes 🤝 → 🔐), CLI: `ec chat <name> --eh2`. **Verified live** on the onchato
-relay: `npm run eh2-test` (`net/eh2-chat-test.ts`).
+relay: `npm run eh2-test` (`net/eh2-chat-test.ts`), and `npm run gui-sim` drives
+the same facade the GUI buttons use, printing a timeline.
+
+**Handshake frames get dropped — treat that as normal, not exceptional.**
+GossipSub is fire-and-forget and a joining peer's mesh grafts over hundreds of
+ms, so the opening frames of a handshake routinely reach nobody. Three
+mechanisms cover it, and removing any one of them brings back a hang that looks
+like broken crypto: the opening frame is **re-sent** a few times while an
+attempt waits; an attempt that stays silent **times out and is retried**; and
+after a failure **either side may initiate**, because a lost msg3 leaves the
+responder — the side that never initiates — as the only one that knows anything
+is wrong. A msg1 also restarts a responder that already holds a session (peer
+reloaded / rotated its PeerId); the session is replaced only once msg3 verifies.
+Discovery itself is gated on the relay joining the topic (~0.5 s), which is why
+the room announces as soon as `getSubscribers(topic)` is non-empty rather than
+after a fixed delay.
 
 ### ⚠️ INTERIM (still the default path)
 
@@ -259,6 +274,49 @@ relay: `npm run eh2-test` (`net/eh2-chat-test.ts`).
   signaling, fallback content) is ciphertext + metadata to the relay. The
   **relay-blind / anonymous** plane (blind circuit-relay, no IP exposure —
   `docs/PROTOCOL.md` §13) is still the later step (see Directions).
+
+## Deploy (onchato.com) — two parts, one host
+
+The host builds; nothing is uploaded. Clone lives at **`/opt/github/encedo-chat`**.
+The two halves are independent — deploy either alone.
+
+**Relay (`bs1.onchato.com`) — a service, so it MUST be restarted:**
+
+```bash
+cd /opt/github/encedo-chat && git pull
+cd relay && npm ci
+sudo systemctl restart onchato-relay
+journalctl -u onchato-relay -n 12 --no-pager
+```
+
+Three startup lines say it worked: the PeerId (**must** stay
+`12D3KooWP6Sp…cDmp` — clients have it hardcoded), the port, and the topic
+budget (`📦 Tematy: limit … eviction …`). If the log looks like the previous
+build, check in this order: `git log --oneline -1` (did the pull land, and in
+*this* clone?), `grep -c "max-topics" relay/relay.mjs` (is the code on disk?),
+`systemctl show onchato-relay -p ExecMainStartTimestamp` (did it actually
+restart?), `systemctl cat onchato-relay | grep -E 'WorkingDirectory|ExecStart'`
+(is systemd running this directory at all?).
+
+**Web — static files, so there is NO service to restart:**
+
+```bash
+cd /opt/github/encedo-chat && git pull
+git submodule update --init --recursive     # hem-sdk-js: the build imports it directly
+cd impl && npm ci && npm run web:build      # → impl/web/dist (what nginx serves)
+```
+
+`sudo systemctl reload nginx` only if you changed nginx config. Verify with
+`curl -s https://onchato.com/ | grep -o 'app\.[a-z0-9]*\.bundle\.js'` — the
+content hash must change; if it did not, the build did not land where nginx
+serves from. Bundle names are hashed but `index.html` is not, so keep its
+cache short (users otherwise keep requesting the previous hash).
+
+**Deploy lessons paid for once (2026-07-29):** a stale relay silently refused
+every new topic and looked exactly like a broken client — always check the
+relay first when "rooms don't work". And a missing log line means the deploy
+is unverified, not that the feature is missing: confirm with `git log` +
+`grep` on the host, not by eye on the log.
 
 ## Directions
 

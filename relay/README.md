@@ -58,6 +58,31 @@ sudo journalctl -u onchato-relay -f      # confirm PeerId 12D3KooWP6Sp… on sta
 Node 18+ (plain ESM). Runs as `www-data` by default — the clone dir must be readable
 by it (`sudo chgrp -R www-data /opt/github/encedo-chat && sudo chmod -R g+rX` if not).
 
+### Did it actually take? (check, don't assume)
+
+`git pull` changes nothing until the service restarts — the code is in the
+running process's memory. Startup prints exactly three things worth reading:
+
+```
+🔑 Pass: "bs1.onchato.com" → PeerId: 12D3KooWP6Sp…cDmp   ← unchanged, or every client breaks
+✅ Relay uruchomiony na porcie 9001
+📦 Tematy: limit 250 równoczesnych, eviction po 120s ciszy (sweep 30s)
+```
+
+If that does not match the build you expect, walk these in order — each rules
+out a different cause:
+
+| check | what a bad answer means |
+|---|---|
+| `git log --oneline -1` | the pull went to a different clone, or you are on another branch |
+| `grep -c "max-topics" relay.mjs` | the pull did not land (local changes blocking the merge?) |
+| `systemctl show onchato-relay -p ExecMainStartTimestamp` | it never restarted |
+| `systemctl cat onchato-relay \| grep -E 'WorkingDirectory\|ExecStart'` | systemd runs a different directory (e.g. an old v5 checkout) |
+| `ss -ltnp \| grep :9001` | a stale process still holds the port, so the new one cannot bind |
+
+A missing log line proves the deploy is unverified — not that the code is
+absent. Confirm on disk (`git log`, `grep`) before concluding anything.
+
 ## nginx (bs1.onchato.com)
 
 Relay listens on `127.0.0.1:9001` (WS); nginx terminates TLS and proxies `/relay` (WSS):
