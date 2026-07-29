@@ -175,9 +175,10 @@ Conversation` — which packs transport (peer + relay dial) + join + the
 typing/away/leave presence machine behind `sendText / sendReaction /
 noteActivity / noteAway / who / leave`. Web `app.ts` and the CLI
 `chat-session.ts` (via bob/alice/ec) are now **pure UI** over this — no
-duplicated key derivation or presence state machine. EH-2 / the §13 data plane
-slot into `openConversation` without touching a UI. `test/core.test.ts` pins
-`deriveRoom` == the direct rendezvous derivation (no drift).
+duplicated key derivation or presence state machine. That paid off: **EH-2
+slotted in as two options** (`eh2`, `onSecurity`) with no UI surgery, and the
+§13 data plane will too. `test/core.test.ts` pins `deriveRoom` == the direct
+rendezvous derivation (no drift).
 
 ### WebRTC direct data plane (§13 direct / P1)
 
@@ -199,21 +200,58 @@ two-browser testing. ECDH via `crypto.subtle` (no 3rd-party crypto), byte-for-by
 == node/HEM raw X25519, so it interoperates with HEM identities. `localOnlyManager`
 gives it a local-only contact book.
 
-### ⚠️ INTERIM (must be replaced before shipping)
+### EH-2 + Double Ratchet — `impl/eh2/` (built, opt-in)
+
+The cryptographer green-lit implementing §6–7 as written (fix-forward if the
+review turns something up), so the real scheme now exists next to the interim
+box. Built in six stages, each with automatic tests and its own commit:
+
+| file | what |
+|---|---|
+| `eh2/wire.ts` | canonical msg1/2/3 + the `h1` / `h2_partial` / `h3` transcript (§6.1–6.2) |
+| `eh2/handshake.ts` | the two state machines, `ikm` in **responder perspective** (§6.3), `SK`, `mac_r` / `mac_i` |
+| `eh2/mlkem.ts` | ML-KEM-768 (`@noble/post-quantum`) filling the `ss` slot of the hybrid |
+| `eh2/ratchet.ts` | Double Ratchet (§7): DH step, MK/CK chains, HKDF nonces, AES-GCM with the header as AAD, bounded skipped keys |
+| `eh2/establish.ts` | drives the three frames (`startHandshake`), hands back a `Session` |
+| `lib/x25519.ts` | X25519 as a `Dh` capability — a local ephemeral or the HEM's IK behind one interface |
+
+Notes that matter for anyone touching this:
+
+- **Serialization must stay canonical.** `h1` hashes `serialize(msg1)` and salts
+  `SK`; two encodings of one frame = two different session keys.
+- **One HSM call per side.** Each party does exactly one DH with its own IK
+  (raw `ecdh`, §4.3) — the other two DHs are local ephemerals. `Dh` hides which
+  is which, so a HEM identity and a software identity are interchangeable.
+- **`decrypt` is transactional.** Keys are derived on the side and the state
+  advances only after the AEAD verifies. The naive version (found in testing)
+  let a forged frame burn the live chain key, and a forged `dh_pub` step the
+  **root key** — an unauthenticated desync. Do not "simplify" this back.
+- **The msg3 gate is structural**: on the responder the `Session` does not exist
+  until `mac_i` verifies, so early data from the initiator has nothing to open it.
+- **KATs** (`test/eh2-handshake.test.ts`, `test/eh2-mlkem.test.ts`) pin the
+  schedule with fixed keys — re-record deliberately, and use them when porting
+  to `core-rs`.
+- ML-KEM is the **one** third-party crypto dependency (WebCrypto has no ML-KEM);
+  everything else is `crypto.subtle`.
+
+**Wiring (opt-in, both sides must agree):** `room.ts`'s `[EH-2 seam]` gives each
+peer its own handshake + ratchet when `keys.eh2` is set; handshake frames ride
+the control plane unsealed (told apart by their type byte), the lower peer id
+initiates, and content typed before the handshake completes is queued. Enable
+with `openConversation({eh2: true, onSecurity})` — web: `?eh2=1` (the E2E badge
+goes 🤝 → 🔐), CLI: `ec chat <name> --eh2`. **Verified live** on the onchato
+relay: `npm run eh2-test` (`net/eh2-chat-test.ts`).
+
+### ⚠️ INTERIM (still the default path)
 
 - `lib/msgcrypto.ts` — a **static AES-256-GCM sealed box** keyed from ss (HKDF);
-  now seals **opaque bytes** (the envelope lives inside). Real E2E vs the relay
-  but **no forward secrecy / no ratchet**. Placeholder until **EH-2 + Double
-  Ratchet** (`docs/PROTOCOL.md` §6–7), held for the cryptographer.
-- `lib/session.ts` — the **crypto seam** (EH-2 prep). The room talks to a
-  `Session` (`encrypt`/`decrypt`), not to a key. `interimSession` wraps the box
-  above; `eh2Session` is a **throwing stub**. When the design is blessed, EH-2
-  drops in behind the SAME interface → room / envelope / transport unchanged.
-  Establishment note: EH-2 handshake frames are a **separate pre-session wire**
-  (NOT a sealed envelope — the session key doesn't exist yet), authenticated
-  like Announce (see the `[EH-2 seam]` marker in `room.ts`); the per-message
-  ratchet header rides INSIDE `Session`'s own wire, invisible to the room.
-  `test/session.test.ts` covers the interim path + that the EH-2 stub throws.
+  seals **opaque bytes** (the envelope lives inside). Real E2E vs the relay but
+  **no forward secrecy / no ratchet**. Still what a conversation uses unless EH-2
+  is switched on; remove once EH-2 is the default.
+- `lib/session.ts` — the **crypto seam**. The room talks to a `Session`
+  (`encrypt`/`decrypt`), not to a key: `interimSession` wraps the box above,
+  `eh2Session` wraps the ratchet. Same interface, so room / envelope / transport
+  never learned which scheme is in use. `test/session.test.ts` covers both.
 - **Content prefers a direct WebRTC DataChannel** once two peers are in the room
   — content goes P2P (relay-blind); GossipSub through the relay carries presence
   + WebRTC signaling and is the content **fallback**. This is the **direct (P1)**
@@ -250,8 +288,15 @@ gives it a local-only contact book.
 
 ## Status
 
-- Specs (`docs/`) frozen pending cryptographer feedback — expect changes to
-  EH-2/ratchet. Everything in `impl/` so far is EH-2-independent.
+- Specs (`docs/`) still the audit target — **do not edit them here**. The
+  cryptographer cleared implementation of §6–7 as written; if the review lands
+  changes, they go into `docs/` by the user and into `impl/eh2/` as fixes.
+- **EH-2 + Double Ratchet built and live-verified** (`impl/eh2/`, opt-in via
+  `?eh2=1` / `--eh2`; `npm run eh2-test` passes against the onchato relay).
+  Default content crypto is **still the interim box** until the two-browser
+  validation says otherwise.
 - **WebRTC direct data plane (P1) done + verified live** (two browsers,
   DataChannel both ways, badge ⚪ Relay → 🟢 WebRTC Direct). Ready to deploy.
+- Known follow-ups in the EH-2 area: bounded session lifetime / re-handshake
+  (§7.3, "stage 7"), skipped-key persistence across restarts, and §9 takeover.
 - Commits ahead of origin; the user pushes (SSH passphrase).
