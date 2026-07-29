@@ -21,7 +21,7 @@ const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
 
 let mode: 'login' | 'register' = 'login'
-let session: { id: Identity; handle: string; pub: string; book: ContactManager } | null = null
+let session: { id: Identity; handle: string; pub: string; kid?: string; book: ContactManager } | null = null
 let active: { name: string; pub: string; inRoom: boolean; conv: Conversation | null } | null = null
 let rotTimer: any = null
 
@@ -74,7 +74,7 @@ $('go').addEventListener('click', async () => {
       const { kid } = await hem.createKeyPair(gen, `chat-ik-${handle}`, 'CURVE25519', btoa(`ETSEIC:self,${handle},ik,${iat}`))
       const use = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
       const { pubkey } = await hem.getPubKey(use, kid)
-      await enterApp(hemIdentityFrom(hem, kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM')
+      await enterApp(hemIdentityFrom(hem, kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM', kid)
     } else {
       const listTok = await hem.authorizePassword(pass, 'keymgmt:list')
       const keys: any[] = await hem.searchKeys(listTok, 'ETSEIC:self,')
@@ -82,7 +82,7 @@ $('go').addEventListener('click', async () => {
       const key = keys[0]; const handle = parseHandle(key.description)
       const use = await hem.authorizePassword(null, `keymgmt:use:${key.kid}`)
       const { pubkey } = await hem.getPubKey(use, key.kid)
-      await enterApp(hemIdentityFrom(hem, key.kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM')
+      await enterApp(hemIdentityFrom(hem, key.kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM', key.kid)
     }
   } catch (e: any) { setMsg('msg', 'Błąd: ' + (e?.message ?? e), 'err') }
   finally { const b = $('go') as HTMLButtonElement; b.disabled = false; b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj' }
@@ -109,23 +109,33 @@ function makeLocalBook(handle: string, storage: Storage) {
   )
 }
 
-async function enterApp(id: Identity, book: ContactManager, sourceLabel: string) {
-  session = { id, handle: id.handle, pub: id.pub, book }
+/** Short form of an HSM key id — the full one is long and adds no meaning here. */
+const shortKid = (kid?: string) => (kid ? kid.slice(0, 8) + '…' : '')
+
+async function enterApp(id: Identity, book: ContactManager, sourceLabel: string, kid?: string) {
+  session = { id, handle: id.handle, pub: id.pub, kid, book }
   $('login').hidden = true; $('app').hidden = false
   $('me-avatar').textContent = initials(id.handle)
   $('me-handle').textContent = id.handle
   const fp = await fingerprint(id.pub)
   $('me-fp').textContent = '🔑 ' + fp
+  $('me-fp').title = kid ? `KID ${kid} · dwuklik = kopiuj klucz publiczny` : 'Dwuklik = kopiuj klucz publiczny'
   $('sess-id').textContent = sourceLabel + ' · ' + fp
+  $('sess-kid').textContent = kid ?? '— (klucz w przeglądarce)'
+  $('sess-kid').title = kid ?? 'Tożsamość programowa — brak klucza w HSM'
   refreshContacts()
 }
 
 // ---- contacts (HEM-backed book; in-memory cache keeps re-renders cheap) ----
 let contactsCache: Contact[] = []
+/** pub → fingerprint. Peers are shown exactly like our own identity: the
+ *  8-byte SHA-256 of the key, not the raw base64 nobody can compare by eye. */
+const fpCache = new Map<string, string>()
 async function refreshContacts() {
   if (!session) return
   try { contactsCache = await session.book.list() }
   catch (e: any) { toast('Błąd listy kontaktów: ' + (e?.message ?? e)) }
+  for (const c of contactsCache) if (!fpCache.has(c.pub)) fpCache.set(c.pub, await fingerprint(c.pub))
   renderContacts()
 }
 function renderContacts() {
@@ -138,7 +148,9 @@ function renderContacts() {
     const src = c.source === 'hem' ? { i: '🔒', t: 'W HEM (trwałe, przenośne)' } : { i: '💻', t: 'Lokalnie (ta przeglądarka)' }
     const b = document.createElement('button'); b.className = 'contact' + (active?.name === c.name ? ' active' : '')
     b.innerHTML = `<span class="dot ${inRoom ? 'ok' : ''}"></span><div class="avatar">${escapeHtml(initials(c.name))}</div>`
-      + `<div class="c-info"><div class="c-name">${escapeHtml(c.name)} <span class="src" title="${src.t}">${src.i}</span></div><div class="c-sub">${escapeHtml(c.pub.slice(0, 24))}…</div></div><span class="c-x" title="Usuń">×</span>`
+      + `<div class="c-info"><div class="c-name">${escapeHtml(c.name)} <span class="src" title="${src.t}">${src.i}</span></div>`
+      + `<div class="c-sub" title="${escapeHtml(c.kid ? `KID ${c.kid}` : c.pub)}">🔑 ${escapeHtml(fpCache.get(c.pub) ?? '…')}${c.kid ? ' · KID ' + escapeHtml(shortKid(c.kid)) : ''}</div></div>`
+      + `<span class="c-x" title="Usuń">×</span>`
     b.addEventListener('click', async (e: any) => {
       if (e.target.classList.contains('c-x')) {
         e.stopPropagation()
@@ -274,6 +286,13 @@ async function openChat(contact: Contact) {
   $('chat-empty').hidden = true; $('chat-view').hidden = false
   $('peer-avatar').textContent = initials(contact.name)
   $('peer-name').textContent = contact.name
+  // The peer is identified the same way we identify ourselves: 8-byte
+  // fingerprint (comparable out of band) plus the HSM key id when it has one.
+  const peerFp = fpCache.get(contact.pub) ?? await fingerprint(contact.pub)
+  fpCache.set(contact.pub, peerFp)
+  $('sess-peer').textContent = '🔑 ' + peerFp + (contact.kid ? ' · KID ' + shortKid(contact.kid) : '')
+  $('sess-peer').title = contact.kid ? `KID ${contact.kid}` : contact.pub
+  $('peer-name').title = '🔑 ' + peerFp + (contact.kid ? ` · KID ${contact.kid}` : '')
   $('peer-dot').className = 'dot'; $('peer-status').textContent = 'łączę…'
   $('messages').innerHTML = ''; msgEls.clear(); setTyping(false)
   $('transport-badge').className = 'badge relay'; $('transport-badge').textContent = '⚪ Relay'
