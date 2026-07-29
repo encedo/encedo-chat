@@ -151,6 +151,9 @@ if (PEERS.length > 0) {
 }
 
 console.log(`\n✅ Relay uruchomiony na porcie ${PORT}`)
+// Print the topic budget: it is the setting that decides whether a room forms
+// at all, and after a deploy it is the one line that proves which build is up.
+console.log(`📦 Tematy: limit ${MAX_TOPICS} równoczesnych, eviction po ${IDLE_TTL / 1000}s ciszy (sweep ${SWEEP_MS / 1000}s)`)
 if (HOST) {
   console.log(`📋 Adres produkcyjny (WSS przez nginx):`)
   console.log(`   /dns4/${HOST}/tcp/443/wss/http-path/%2Frelay/p2p/${peerId.toString()}`)
