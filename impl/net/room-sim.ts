@@ -21,6 +21,10 @@ import { generateX25519 } from '../lib/x25519.ts'
 
 const RUNS = Number(process.argv[2] ?? 24)
 const SEED = Number(process.argv[3] ?? 20260729)
+/** Optional profile filter, so a failing run replays the profile it failed on. */
+const ONLY = process.argv[4]
+/** `LOG=1` narrates both peers — how a failing replay gets diagnosed. */
+const LOG = process.env.LOG === '1'
 
 /** mulberry32 — small, seeded, good enough to replay a scenario exactly. */
 function rngFrom(seed: number) {
@@ -122,10 +126,14 @@ async function runOnce(p: NetProfile, seed: number): Promise<Result> {
 
   const A = joinChat(net.node('peer-a'), 'sim', { macKey, eh2: eh2(ikA, ikB.pub) }, {
     firstAnnounceMs: 50, heartbeatMs: 1_000, onMessage: (_f, m) => aGot.push(m.body),
+    onLog: LOG ? (m, lvl) => console.log(`    A${lvl === 'debug' ? '·' : ' '} ${m}`) : undefined,
+    onUndelivered: LOG ? (id) => console.log(`    A  UNDELIVERED ${id}`) : undefined,
   })
   await new Promise((r) => setTimeout(r, p.joinGapMs))
   const B = joinChat(net.node('peer-b'), 'sim', { macKey, eh2: eh2(ikB, ikA.pub) }, {
     firstAnnounceMs: 50, heartbeatMs: 1_000, onMessage: (_f, m) => bGot.push(m.body),
+    onLog: LOG ? (m, lvl) => console.log(`    B${lvl === 'debug' ? '·' : ' '} ${m}`) : undefined,
+    onUndelivered: LOG ? (id) => console.log(`    B  UNDELIVERED ${id}`) : undefined,
   })
 
   const established = await until(() => A.secured().length === 1 && B.secured().length === 1, 15_000)
@@ -171,10 +179,12 @@ const PROFILES: NetProfile[] = [
   { name: 'awful',            minMs: 30,  maxMs: 500, lossPct: 30, dupPct: 25, joinGapMs: 2000, quietMs: 5000 },
 ]
 
-console.log(`room-sim — ${RUNS} runs, base seed ${SEED}\n`)
+const POOL = ONLY ? PROFILES.filter((p) => p.name.startsWith(ONLY)) : PROFILES
+if (!POOL.length) { console.error(`no profile matches "${ONLY}"`); process.exit(2) }
+console.log(`room-sim — ${RUNS} runs, base seed ${SEED}${ONLY ? `, profile "${ONLY}"` : ''}\n`)
 const results: Array<Result & { seed: number }> = []
 for (let i = 0; i < RUNS; i++) {
-  const p = PROFILES[i % PROFILES.length]
+  const p = POOL[i % POOL.length]
   const seed = SEED + i
   const r = await runOnce(p, seed)
   results.push({ ...r, seed })
@@ -196,5 +206,5 @@ console.log(`content delivery across all profiles (incl. deliberately lossy ones
 const times = results.filter((r) => r.established).map((r) => r.msEstablished).sort((a, b) => a - b)
 console.log(`\nestablished: median ${times[Math.floor(times.length / 2)]} ms, worst ${times[times.length - 1]} ms`)
 if (bad.length === 0) { console.log(`PASS — ${results.length}/${results.length} runs`); process.exit(0) }
-console.log(`FAIL — ${bad.length}/${results.length} runs; replay one with: node net/room-sim.ts 1 ${bad[0].seed}`)
+console.log(`FAIL — ${bad.length}/${results.length} runs; replay it with: node net/room-sim.ts 1 ${bad[0].seed} "${bad[0].profile}"`)
 process.exit(1)
