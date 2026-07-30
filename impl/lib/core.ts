@@ -206,6 +206,7 @@ export interface OpenOpts extends ChatOpts {
   /** Delivery confirmations for the message status in the UI. */
   onDelivered?: ChatOpts['onDelivered']
   onUndelivered?: ChatOpts['onUndelivered']
+  onLateDelivered?: ChatOpts['onLateDelivered']
 }
 export interface Conversation {
   peerId: string
@@ -263,6 +264,7 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     onLog: opts.onLog,
     onDelivered: (id, ms) => { log(`delivered ${id} in ${ms} ms`); opts.onDelivered?.(id, ms) },
     onUndelivered: (id) => { log(`UNDELIVERED ${id} — peer never confirmed`); opts.onUndelivered?.(id) },
+    onLateDelivered: (id, ms) => { log(`late: ${id} arrived after all, ${Math.round(ms / 1000)}s`); opts.onLateDelivered?.(id, ms) },
     onStall: () => plane?.demote(),
   })
   if (opts.webrtc) plane = attachWebRTC(room, self, { onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })

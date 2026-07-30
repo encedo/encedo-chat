@@ -67,10 +67,13 @@ export async function runChatSession(
           ? `${C.sys}* EH-2 established with ${short(peer)} — ratchet active (PQ hybrid)${C.reset}`
           : `${C.sys}* EH-2 ${state} with ${short(peer)}${C.reset}`,
       ),
-      onMessage: (_from, m) => {
+      onMessage: (_from, m, meta) => {
         lastRecvId = m.id; peerTyping = false
-        if (m.body.startsWith('ACTION ')) ui.print(`${time(m.ts)} ${C.peer}* ${peerName} ${m.body.slice(7)}${C.reset}`)
-        else ui.print(`${time(m.ts)} ${C.peer}[${peerName}]${C.reset} ${m.body}`)
+        // A terminal cannot re-thread what it has already printed, so it says so
+        // instead: the timestamp is the sender's, and ⏱ marks the jump backwards.
+        const late = meta.outOfOrder ? `${C.warn} ⏱ spóźniona${C.reset}` : ''
+        if (m.body.startsWith('ACTION ')) ui.print(`${time(m.ts)} ${C.peer}* ${peerName} ${m.body.slice(7)}${C.reset}${late}`)
+        else ui.print(`${time(m.ts)} ${C.peer}[${peerName}]${C.reset} ${m.body}${late}`)
       },
       onTyping: (_from, state) => {
         if (state === 'start' && !peerTyping) { peerTyping = true; ui.print(`${C.sys}* ${peerName} is typing…${C.reset}`) }

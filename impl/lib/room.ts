@@ -52,7 +52,12 @@ export interface Eh2Options {
 export interface RoomKeys { macKey: CryptoKey; session?: Session; eh2?: Eh2Options }
 export type PresenceEvent = 'join' | 'active' | 'away' | 'leave'
 export interface ChatOpts {
-  onMessage?: (from: string, m: MsgEnv) => void
+  /**
+   * `meta.outOfOrder` marks a message that belongs behind one already shown —
+   * the gap it left was filled after the fact. Front-ends that can place it
+   * (the web transcript) should; the terminal just says so.
+   */
+  onMessage?: (from: string, m: MsgEnv, meta: { outOfOrder: boolean }) => void
   onTyping?: (from: string, state: TypingState) => void
   onPresence?: (from: string, ev: PresenceEvent) => void
   onReaction?: (from: string, r: ReactionEnv) => void
@@ -68,6 +73,12 @@ export interface ChatOpts {
   onDelivered?: (id: string, ms: number) => void
   /** Gave up after retrying: the peer very likely never got it. */
   onUndelivered?: (id: string) => void
+  /**
+   * A message already marked ⚠ turns out to have arrived after all — the
+   * confirmation came back once the peer woke up. `ms` is how long it took,
+   * counted from the first send, so the UI can say how late it was.
+   */
+  onLateDelivered?: (id: string, ms: number) => void
   /**
    * A message went unconfirmed long enough to be re-sent. The transport we are
    * using may be the problem, so this is the moment to stop trusting it — the
@@ -103,6 +114,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const onSignal = opts.onSignal ?? (() => {})
   const onDelivered = opts.onDelivered ?? (() => {})
   const onUndelivered = opts.onUndelivered ?? (() => {})
+  const onLateDelivered = opts.onLateDelivered ?? (() => {})
   const onStall = opts.onStall ?? (() => {})
   const onPeerReplaced = opts.onPeerReplaced ?? (() => {})
   const heartbeatMs = opts.heartbeatMs ?? 15_000
@@ -163,9 +175,16 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    */
   const MAX_RESENDABLE = 50
   const resendable = new Map<string, Uint8Array>()
-  const keepForResend = (id: string, bytes: Uint8Array) => {
+  /** When each of those was first sent — so a confirmation that finally shows up can say how late it is. */
+  const firstSentAt = new Map<string, number>()
+  const keepForResend = (id: string, bytes: Uint8Array, sentAt: number) => {
     resendable.set(id, bytes)
-    if (resendable.size > MAX_RESENDABLE) resendable.delete(resendable.keys().next().value as string)
+    firstSentAt.set(id, firstSentAt.get(id) ?? sentAt)
+    if (resendable.size > MAX_RESENDABLE) {
+      const oldest = resendable.keys().next().value as string
+      resendable.delete(oldest)
+      firstSentAt.delete(oldest)
+    }
   }
 
   const clearPending = (id: string) => {
@@ -193,7 +212,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         // that predates acks means "old build", not "lost message".
         if ([...lastSeen.keys()].some((peer) => acking.has(peer))) {
           log(`no confirmation for message ${id} after ${p.tries + 1} sends over ${Math.round((nowMs() - p.sentAt) / 1000)}s → marking undelivered`)
-          keepForResend(id, p.bytes)
+          keepForResend(id, p.bytes, p.sentAt)
           onUndelivered(id)
         }
       }, GIVE_UP_MS)
@@ -231,12 +250,34 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     return true
   }
 
+  /**
+   * Highest `seq` handed to the UI per sender, so we can say whether what just
+   * arrived belongs BEHIND something already on screen.
+   *
+   * Nothing is held back waiting for a gap to close: a message that is here is
+   * shown now. But arriving late and arriving last are different facts, and only
+   * the sender's `seq` can tell them apart — the transport re-sends, and a
+   * DataChannel and the relay can deliver the same conversation out of step. The
+   * UI uses this to slot the straggler where it was written instead of pretending
+   * it was typed last.
+   */
+  const topSeq = new Map<string, number>()
+  const outOfOrder = (from: string, seq: number): boolean => {
+    const top = topSeq.get(from)
+    if (top === undefined || seq > top) { topSeq.set(from, seq); return false }
+    return true
+  }
+
   const dispatch = (from: string, env: any) => {
     switch (env.t) {
       case 'msg':
         touch(from)
         void confirm(env.id) // even for a duplicate: the first ack may be what got lost
-        if (firstSeq(from, env.seq)) onMessage(from, env as MsgEnv)
+        if (firstSeq(from, env.seq)) {
+          const late = outOfOrder(from, env.seq)
+          if (late) log(`message ${env.id} from ${short(from)} arrived out of order (seq ${env.seq} after ${topSeq.get(from)})`)
+          onMessage(from, env as MsgEnv, { outOfOrder: late })
+        }
         break
       case 'reaction': touch(from); if (firstSeq(from, env.seq)) onReaction(from, env as ReactionEnv); break
       case 'file':
@@ -257,7 +298,25 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         acking.add(from)
         const a = env as AckEnv
         const p = pending.get(a.ref)
-        if (p) { clearPending(a.ref); resendable.delete(a.ref); onDelivered(a.ref, nowMs() - p.sentAt) }
+        if (p) {
+          clearPending(a.ref)
+          resendable.delete(a.ref)
+          firstSentAt.delete(a.ref)
+          onDelivered(a.ref, nowMs() - p.sentAt)
+          break
+        }
+        // A confirmation for something we already gave up on. It happens: the
+        // peer was asleep, or in a tunnel, and answered after the budget ran
+        // out. Dropping it here (which is what this code used to do) left a ⚠
+        // on a message that HAD arrived — the worst of the two possible lies.
+        const sentAt = firstSentAt.get(a.ref)
+        if (sentAt !== undefined) {
+          resendable.delete(a.ref)
+          firstSentAt.delete(a.ref)
+          const late = nowMs() - sentAt
+          log(`late confirmation for ${a.ref} — it did arrive, ${Math.round(late / 1000)}s after it was sent`)
+          onLateDelivered(a.ref, late)
+        }
         break
       }
       default: break // unknown type → ignore (forward-compat)
@@ -652,7 +711,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       // the re-sender publishing into a room nobody is listening to any more —
       // a stopped conversation still shouting msg1 at its old topic.
       for (const p of new Set([...handshakes.keys(), ...attemptTimers.keys(), ...resendTimers.keys()])) clearAttempt(p)
-      sessions.clear(); handshakes.clear(); queued.length = 0; resendable.clear()
+      sessions.clear(); handshakes.clear(); queued.length = 0; resendable.clear(); firstSentAt.clear()
       clearInterval(t0); clearInterval(hb); clearInterval(sweep)
       for (const t of earlyBeacons) clearTimeout(t)
       for (const id of [...pending.keys()]) clearPending(id)

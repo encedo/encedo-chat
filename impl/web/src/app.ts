@@ -278,12 +278,19 @@ $('to-bottom').addEventListener('click', jumpToLatest)
 
 /** msg id → the little delivery marker under our own bubble. */
 const stateEls = new Map<string, HTMLElement>()
-function setDelivery(id: string, state: 'ok' | 'lost', ms?: number) {
+function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
   const el = stateEls.get(id)
   if (!el) return
   if (state === 'ok') {
     el.textContent = ' · ✓ dostarczone'
     el.title = `Klient rozmówcy potwierdził odbiór${ms !== undefined ? ` po ${ms} ms` : ''} — to nie jest „przeczytane"`
+  } else if (state === 'late') {
+    // It said ⚠, and it was wrong: the confirmation came in after we had given
+    // up. Say so plainly rather than quietly flipping it to a clean ✓ — the
+    // long gap is exactly the thing worth noticing.
+    el.textContent = ` · ⏱ dostarczone z opóźnieniem${ms !== undefined ? ` (${Math.round(ms / 1000)}s)` : ''}`
+    el.title = 'Potwierdzenie przyszło już po tym, jak przestaliśmy ponawiać — wiadomość jednak dotarła'
+    el.classList.add('late')
   } else {
     el.textContent = ' · ⚠ niedostarczone'
     el.title = 'Brak potwierdzenia mimo ponowień — rozmówca prawdopodobnie tego nie dostał'
@@ -303,7 +310,31 @@ function setDelivery(id: string, state: 'ok' | 'lost', ms?: number) {
   }
 }
 
-function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string) {
+/**
+ * Put a straggler where it was written. The transcript is otherwise strictly
+ * append-order, which is a lie the moment the transport reorders: the message
+ * the peer typed first shows up under two that came after it, and a reader
+ * following a conversation reads the answer before the question.
+ *
+ * Placement is by the sender's own clock (`ts` on the envelope), scanning back
+ * from the end — recent messages are where a straggler lands, and an unbounded
+ * walk over a long transcript is not worth it for a rare event.
+ */
+const REORDER_LOOKBACK = 60
+function insertByTime(box: HTMLElement, row: HTMLElement, ts: number) {
+  const rows = box.children
+  let at: Element | null = null
+  for (let i = rows.length - 1, seen = 0; i >= 0 && seen < REORDER_LOOKBACK; i--, seen++) {
+    const prev = rows[i] as HTMLElement
+    const prevTs = Number(prev.dataset?.ts ?? 0)
+    if (!prevTs) continue // sysline or something without a clock — skip over it
+    if (prevTs <= ts) break // everything from here back is older: we go after it
+    at = prev
+  }
+  box.insertBefore(row, at)
+}
+
+function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string, outOfOrder = false) {
   const box = $('messages')
   if (kind === 'sys') {
     const stick = atBottom()
@@ -311,11 +342,19 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
     if (stick) box.scrollTop = box.scrollHeight
     return
   }
-  const stick = atBottom() || kind === 'me' // sending always follows your own message
+  const stick = (atBottom() && !outOfOrder) || kind === 'me' // sending always follows your own message
   const row = document.createElement('div'); row.className = 'mrow ' + (kind === 'me' ? 'out' : 'in')
+  row.dataset.ts = String(ts ?? nowMs())
   const bub = document.createElement('div'); bub.className = 'bubble'
   const t = document.createElement('div'); t.className = 'b-text'; t.textContent = text
   const m = document.createElement('div'); m.className = 'b-meta'; m.textContent = utcHHMM(ts ?? nowMs()) + ' UTC'
+  if (outOfOrder) {
+    // Same ⏱ as a late confirmation on our own side: one mark, one meaning —
+    // "this one did not travel normally".
+    const late = document.createElement('span'); late.className = 'late-mark'; late.textContent = ' ⏱ spóźniona'
+    late.title = 'Dotarła po nowszych wiadomościach — wstawiona w miejscu, w którym została napisana'
+    m.appendChild(late)
+  }
   if (kind === 'me' && id) {
     // Delivery state for our own messages. Instant-only: this says the peer's
     // client holds it, never that anyone read it.
@@ -336,7 +375,8 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
     }
     row.appendChild(bar)
   }
-  box.appendChild(row)
+  if (outOfOrder) insertByTime(box, row, Number(row.dataset.ts))
+  else box.appendChild(row)
   if (stick) { box.scrollTop = box.scrollHeight; unread = 0 }
   else if (kind === 'peer') unread++
   refreshJump()
@@ -415,9 +455,10 @@ async function openChat(contact: Contact) {
       onLog: ecLog,
       onDelivered: (id, ms) => setDelivery(id, 'ok', ms),
       onUndelivered: (id) => setDelivery(id, 'lost'),
-      onMessage: (from, msg) => {
-        ecLog(`message from ${from.slice(0, 12)}…: "${msg.body.slice(0, 40)}"`)
-        peerTyping = false; setTyping(false); appendMsg('peer', msg.body, msg.ts, msg.id)
+      onLateDelivered: (id, ms) => setDelivery(id, 'late', ms),
+      onMessage: (from, msg, meta) => {
+        ecLog(`message from ${from.slice(0, 12)}…: "${msg.body.slice(0, 40)}"${meta.outOfOrder ? ' (out of order)' : ''}`)
+        peerTyping = false; setTyping(false); appendMsg('peer', msg.body, msg.ts, msg.id, meta.outOfOrder)
       },
       onTyping: (_from, state) => { peerTyping = state === 'start'; setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => addReaction(r.to, r.emoji),

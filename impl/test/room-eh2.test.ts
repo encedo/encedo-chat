@@ -23,7 +23,12 @@ const P = { networkId: 'test', dateUTC: '2026-07-29' }
  * `drop` can swallow chosen frames — the real relay does exactly that while the
  * mesh forms, and a handshake that cannot survive it stalls forever.
  */
-function hub(drop?: (data: Uint8Array, from: string) => boolean, duplicate?: (data: Uint8Array) => boolean) {
+function hub(
+  drop?: (data: Uint8Array, from: string) => boolean,
+  duplicate?: (data: Uint8Array) => boolean,
+  /** Hold a frame back instead of dropping it — how a sleeping peer answers late. */
+  delayMs?: (data: Uint8Array, from: string) => number,
+) {
   const nodes = new Map<string, (topic: string, data: Uint8Array, from: string) => void>()
   return {
     node(id: string) {
@@ -48,9 +53,13 @@ function hub(drop?: (data: Uint8Array, from: string) => boolean, duplicate?: (da
             publish: async (topic: string, data: Uint8Array) => {
               if (drop?.(data, id)) return
               const times = duplicate?.(data) ? 2 : 1
-              for (let n = 0; n < times; n++) {
-                for (const [peer, deliver] of nodes) if (peer !== id) deliver(topic, data, id)
+              const held = delayMs?.(data, id) ?? 0
+              const fanOut = () => {
+                for (let n = 0; n < times; n++) {
+                  for (const [peer, deliver] of nodes) if (peer !== id) deliver(topic, data, id)
+                }
               }
+              if (held > 0) { const t = setTimeout(fanOut, held); (t as any).unref?.() } else fanOut()
             },
           },
         },
@@ -75,7 +84,10 @@ async function rooms(opts: {
   duplicate?: (d: Uint8Array) => boolean
   onDeliveredA?: (id: string, ms: number) => void
   onUndeliveredA?: (id: string) => void
+  onLateDeliveredA?: (id: string, ms: number) => void
   onStallA?: () => void
+  onMessageB?: (from: string, m: any, meta: { outOfOrder: boolean }) => void
+  delayMs?: (d: Uint8Array, from: string) => number
   /**
    * A's re-send schedule. The production one runs for the better part of a
    * minute (deliberately — see room.ts), so tests state their own rather than
@@ -84,7 +96,7 @@ async function rooms(opts: {
    */
   retry?: { retryMs?: number[]; giveUpMs?: number; maxInflightMs?: number }
 }) {
-  const net = hub(opts.drop, opts.duplicate)
+  const net = hub(opts.drop, opts.duplicate, opts.delayMs)
   const ss = new Uint8Array(32).fill(0x5e)
   const macKey = await announceMacKey(ss, P)
   const [ikA, ikB] = [await generateX25519(), await generateX25519()]
@@ -104,13 +116,14 @@ async function rooms(opts: {
     onMessage: (_from, m) => opts.backA?.push(m.body),
     onDelivered: opts.onDeliveredA,
     onUndelivered: opts.onUndeliveredA,
+    onLateDelivered: opts.onLateDeliveredA,
     onStall: opts.onStallA,
     onPeerReplaced: (old, now) => replaced.push(`${old}→${now}`),
     ...retry,
   })
   const B = joinChat(nodeB, TOPIC, { macKey, eh2: eh2(ikB, ikA.pub) }, {
     firstAnnounceMs: 5,
-    onMessage: (_from, m) => opts.collect.push(m.body),
+    onMessage: (from, m, meta) => { opts.collect.push(m.body); opts.onMessageB?.(from, m, meta) },
   })
   /** A second window for B's identity — same keys, new PeerId (a page reload). */
   const rejoinB = (id: string, collect: string[], logs?: string[]) =>
@@ -406,6 +419,72 @@ test('a message given up on can be sent again by hand', async (t) => {
   await until(() => delivered.length === 2, 5000)
   assert.equal(delivered[1][0], id, 'the ack carries the ORIGINAL id, so the ⚠ the user is looking at turns ✓')
   assert.equal(A.resend('nie-było-takiej'), false, 'nothing to resend → false, not a throw')
+})
+
+test('a confirmation that arrives after we gave up corrects the ⚠', async (t) => {
+  // The peer was asleep, not gone: it answers once it wakes. Ignoring that ack
+  // (which is what the code used to do) leaves a ⚠ on a message that arrived —
+  // the user is told a lie that no retry will ever clear.
+  const got: string[] = []
+  const lost: string[] = []
+  const late: Array<[string, number]> = []
+  let holdAcks = false
+  const { A, B } = await rooms({
+    collect: got,
+    // Hold B's answers back, but only once the conversation is running: the
+    // handshake and the first exchange have to get through for A to know that
+    // this peer confirms at all.
+    delayMs: (d, from) => (holdAcks && from === 'peer-b' && d[0] !== 0x01 && d[0] !== 0x02 && d[0] !== 0x03 ? 900 : 0),
+    retry: { retryMs: [60], giveUpMs: 200, maxInflightMs: 5_000 },
+    onUndeliveredA: (id) => lost.push(id),
+    onLateDeliveredA: (id, ms) => late.push([id, ms]),
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+
+  A.sendText('pierwsza')
+  await until(() => got.length === 1)
+
+  holdAcks = true
+  const second = A.sendText('druga — potwierdzenie utknie')
+  await until(() => lost.includes(second), 3000)
+  assert.deepEqual(late, [], 'nothing is late yet — it is still ⚠')
+
+  await until(() => late.length === 1, 4000)
+  assert.equal(late[0][0], second, 'the late confirmation lands on the message it belongs to')
+  assert.ok(late[0][1] >= 200, 'and it reports how long that took')
+  assert.equal(got.length, 2, 'the peer did have it all along')
+})
+
+test('a message that arrives behind newer ones is delivered marked, not silently last', async (t) => {
+  // The receiver cannot re-thread what it was never told about: without this
+  // flag a straggler looks exactly like a message typed just now, and the
+  // transcript reads answer-before-question with nothing to explain it.
+  const got: string[] = []
+  const seen: Array<{ body: string; outOfOrder: boolean }> = []
+  // Armed just before the send, so the hold lands on the message and not on an
+  // Announce that happens to go out first.
+  let armed = false
+  const { A, B } = await rooms({
+    collect: got,
+    onMessageB: (_from, m, meta) => seen.push({ body: m.body, outOfOrder: meta.outOfOrder }),
+    // Hold the first frame A sends once armed — the classic shape of this
+    // failure: one frame takes the slow path, the next does not.
+    delayMs: (_d, from) => {
+      if (from !== 'peer-a' || !armed) return 0
+      armed = false
+      return 400
+    },
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+
+  armed = true
+  A.sendText('jeden')
+  A.sendText('dwa')
+  await until(() => seen.length === 2, 4_000)
+  assert.deepEqual(seen.map((s) => s.body), ['dwa', 'jeden'], 'the transport really did reorder them')
+  assert.deepEqual(seen.map((s) => s.outOfOrder), [false, true], 'only the straggler is marked')
 })
 
 test('interim mode is untouched (no eh2 → static key, no handshake frames)', async (t) => {
