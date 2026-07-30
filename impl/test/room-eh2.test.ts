@@ -36,7 +36,13 @@ function hub(drop?: (data: Uint8Array, from: string) => boolean, duplicate?: (da
         services: {
           pubsub: {
             addEventListener: (_e: string, h: (evt: any) => void) => listeners.push(h),
-            removeEventListener: () => {},
+            // Honour it. A no-op here left a stopped room still receiving, so a
+            // "reloaded" peer went on handshaking as its own ghost — the mock
+            // was kinder to a dead node than a real transport ever is.
+            removeEventListener: (_e: string, h: (evt: any) => void) => {
+              const i = listeners.indexOf(h)
+              if (i >= 0) listeners.splice(i, 1)
+            },
             subscribe: () => {},
             unsubscribe: () => {},
             publish: async (topic: string, data: Uint8Array) => {
@@ -92,12 +98,14 @@ async function rooms(opts: {
   })
 
   const retry = opts.retry ?? { retryMs: [1_500, 4_000], giveUpMs: 4_000 }
+  const replaced: string[] = []
   const A = joinChat(nodeA, TOPIC, { macKey, eh2: eh2(ikA, ikB.pub) }, {
     firstAnnounceMs: 5,
     onMessage: (_from, m) => opts.backA?.push(m.body),
     onDelivered: opts.onDeliveredA,
     onUndelivered: opts.onUndeliveredA,
     onStall: opts.onStallA,
+    onPeerReplaced: (old, now) => replaced.push(`${old}→${now}`),
     ...retry,
   })
   const B = joinChat(nodeB, TOPIC, { macKey, eh2: eh2(ikB, ikA.pub) }, {
@@ -105,12 +113,13 @@ async function rooms(opts: {
     onMessage: (_from, m) => opts.collect.push(m.body),
   })
   /** A second window for B's identity — same keys, new PeerId (a page reload). */
-  const rejoinB = (id: string, collect: string[]) =>
+  const rejoinB = (id: string, collect: string[], logs?: string[]) =>
     joinChat(net.node(id), TOPIC, { macKey, eh2: eh2(ikB, ikA.pub) }, {
       firstAnnounceMs: 5,
       onMessage: (_from, m) => collect.push(m.body),
+      onLog: logs ? (m) => logs.push(m) : undefined,
     })
-  return { A, B, states, rejoinB }
+  return { A, B, states, rejoinB, replaced }
 }
 
 test('the handshake runs on discovery and content rides the ratchet', async (t) => {
@@ -189,8 +198,7 @@ test('a peer that reloads re-handshakes and the conversation continues', async (
   await until(() => got.length === 1)
 
   // B reloads: same identity key, fresh room state and a new ephemeral PeerId
-  // ('peer-c' > 'peer-a', so A initiates again). A must accept the new peer
-  // while still holding the old session.
+  // ('peer-c' > 'peer-a', so A initiates again).
   B.stop()
   const got2: string[] = []
   const B2 = rejoinB('peer-c', got2)
@@ -200,6 +208,31 @@ test('a peer that reloads re-handshakes and the conversation continues', async (
   A.sendText('po reloadzie')
   await until(() => got2.length === 1)
   assert.deepEqual(got2, ['po reloadzie'])
+})
+
+test('the PeerId a reloaded peer left behind is retired, not kept alive', async (t) => {
+  // The bug this pins cost a live session its direct channel: A kept the
+  // pre-reload session, so every frame went out twice — once under a ratchet B
+  // could no longer open (B logged it as an undecodable frame) — and anything
+  // keyed by the old PeerId, the WebRTC plane above all, kept addressing a peer
+  // that no longer existed.
+  const got: string[] = []
+  const { A, B, rejoinB, replaced } = await rooms({ collect: got })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+
+  B.stop()
+  const got2: string[] = []
+  const logs: string[] = []
+  const B2 = rejoinB('peer-c', got2, logs)
+  t.after(() => { A.stop(); B2.stop() })
+
+  await until(() => A.secured().includes('peer-c'), 8000)
+  assert.deepEqual(A.secured(), ['peer-c'], 'the old PeerId must not keep a session')
+  assert.deepEqual(replaced, ['peer-b→peer-c'], 'the data plane has to be told the peer moved')
+
+  A.sendText('po reloadzie')
+  await until(() => got2.length === 1)
+  assert.deepEqual(logs.filter((l) => l.includes('undecodable')), [], 'no second copy under a dead ratchet')
 })
 
 test('a repeated msg1 is answered, not restarted (no established/handshaking loop)', async (t) => {

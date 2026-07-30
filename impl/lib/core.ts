@@ -257,6 +257,8 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     onReaction: opts.onReaction,
     onFile: opts.onFile,
     onSignal: (from, env) => plane?.onSignal(from, env),
+    // The peer reloaded: rebind the data plane onto the PeerId that is alive.
+    onPeerReplaced: (old, now) => { log(`peer ${old.slice(0, 12)}… is now ${now.slice(0, 12)}… — rebinding the data plane`); plane?.onPeer(now) },
     heartbeatMs: opts.heartbeatMs,
     onLog: opts.onLog,
     onDelivered: (id, ms) => { log(`delivered ${id} in ${ms} ms`); opts.onDelivered?.(id, ms) },

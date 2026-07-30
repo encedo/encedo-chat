@@ -58,6 +58,12 @@ export interface ChatOpts {
   onReaction?: (from: string, r: ReactionEnv) => void
   onFile?: (from: string, f: FileEnv) => void
   onSignal?: (from: string, env: RtcEnv) => void // WebRTC signaling (control plane)
+  /**
+   * The one peer in this pair room now answers to a different PeerId (it
+   * reloaded, or its transport restarted) — `old` is dead, `now` is live.
+   * Anything holding per-PeerId state, the WebRTC plane above all, has to move.
+   */
+  onPeerReplaced?: (old: string, now: string) => void
   /** The peer's client confirmed it holds this message (`ms` = time in flight). */
   onDelivered?: (id: string, ms: number) => void
   /** Gave up after retrying: the peer very likely never got it. */
@@ -98,6 +104,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const onDelivered = opts.onDelivered ?? (() => {})
   const onUndelivered = opts.onUndelivered ?? (() => {})
   const onStall = opts.onStall ?? (() => {})
+  const onPeerReplaced = opts.onPeerReplaced ?? (() => {})
   const heartbeatMs = opts.heartbeatMs ?? 15_000
   // Be generous: a browser throttles timers in a hidden tab (Firefox to about
   // once a minute), so a peer that is merely in a background window must not
@@ -305,6 +312,30 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     clearAttempt(peer)
     sessions.delete(peer)
     stuck.delete(peer)
+    acking.delete(peer)
+  }
+
+  /**
+   * A pair topic has exactly one other person in it, so a second live session
+   * means the same person came back under a new PeerId — a page reload, or a
+   * transport that restarted. The previous identity is then a corpse that still
+   * costs us: `emitContent` seals for **every** session, so each message goes out
+   * twice and the copy under the dead ratchet is garbage the peer logs as an
+   * "undecodable frame". Its presence entry is worse than useless too — the
+   * delivery budget reads it as "the peer is still announcing".
+   *
+   * Retire it the moment the replacement is live. No `leave` event goes to the
+   * UI: the person did not leave, their PeerId changed, and telling the UI
+   * otherwise would flip the badge to "gone" exactly when they came back.
+   */
+  const retireOtherPeers = (keep: string) => {
+    for (const old of [...sessions.keys()]) {
+      if (old === keep) continue
+      log(`${short(old)} came back as ${short(keep)} → retiring the old session (reload or transport restart)`)
+      forgetPeer(old)
+      lastSeen.delete(old)
+      onPeerReplaced(old, keep)
+    }
   }
 
   const beginHandshake = async (peer: string, role: 'initiator' | 'responder', msg1?: Uint8Array): Promise<Attempt | null> => {
@@ -327,6 +358,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
           clearAttempt(peer)
           stuck.delete(peer)
           sessions.set(peer, s)
+          retireOtherPeers(peer)
           log(`EH-2 established with ${short(peer)} (${role}) — ratchet live, ${queued.length} queued frame(s) to flush`)
           eh2.onState?.(peer, 'established')
           void flushQueued()
@@ -615,6 +647,11 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     /** Peers with a live EH-2 ratchet (empty in interim mode) — for the UI badge. */
     secured: () => (eh2 ? [...sessions.keys()] : []),
     stop: () => {
+      // Handshake timers first, and by peer: `clearAttempt` owns both the
+      // timeout and the msg1 re-sender, and clearing the maps without it left
+      // the re-sender publishing into a room nobody is listening to any more —
+      // a stopped conversation still shouting msg1 at its old topic.
+      for (const p of new Set([...handshakes.keys(), ...attemptTimers.keys(), ...resendTimers.keys()])) clearAttempt(p)
       sessions.clear(); handshakes.clear(); queued.length = 0; resendable.clear()
       clearInterval(t0); clearInterval(hb); clearInterval(sweep)
       for (const t of earlyBeacons) clearTimeout(t)
