@@ -200,6 +200,35 @@ two-browser testing. ECDH via `crypto.subtle` (no 3rd-party crypto), byte-for-by
 == node/HEM raw X25519, so it interoperates with HEM identities. `localOnlyManager`
 gives it a local-only contact book.
 
+### Delivery contract — acks, backoff, and the ⚠ marker
+
+**Nothing under us retransmits.** GossipSub is fire-and-forget and a DataChannel
+can look open while swallowing everything, so the room does its own delivery
+tracking: `msg` and `file` envelopes carry an `id`, the receiver replies with an
+`ack` envelope, and an unconfirmed message is re-sent on a widening backoff —
+**1.5 s, 4 s, 8 s, 15 s, 15 s, capped at 60 s** total. The budget only keeps
+running **while the peer is still announcing**; the clock is about a lost frame,
+not an absent peer, and a peer that went quiet stops the retries rather than
+burning them. Silence from a peer that has never sent an `ack` at all is read as
+"old build", not as loss, and is never reported.
+
+**Running out of budget does not throw the message away.** The bytes stay in
+`resendable`, the bubble gets a ⚠ marker with a **↻** button, and
+`conversation.resend(id)` sends them again **under the same id** — so the marker
+the user is looking at is the one that turns into ✓. This replaced the earlier
+contract where a message was declared lost after a few seconds and silently
+dropped; a laptop that sleeps for a minute now costs a click, not a retype.
+
+**The first unconfirmed re-send demotes the direct path — but only if content is
+actually riding it.** A DataChannel that goes deaf mid-conversation is worse than
+the relay, so one stall hands content back to GossipSub for the rest of the
+conversation (`onStall` → `plane.demote()`, no second chance). The narrower
+condition is the point: an ordinary GossipSub drop used to trigger the same ban
+and permanently punish WebRTC for the relay's hiccup. Both halves are pinned by
+tests. Relatedly, a channel is trusted only after a `0x00`-prefixed ping/pong
+round trip proves both directions — `onopen` alone has lied in testing, with both
+badges reading "Direct" while content vanished.
+
 ### EH-2 + Double Ratchet — `impl/eh2/` (built, opt-in)
 
 The cryptographer green-lit implementing §6–7 as written (fix-forward if the
