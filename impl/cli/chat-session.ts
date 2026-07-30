@@ -86,6 +86,13 @@ export async function runChatSession(
           : ev === 'quiet' ? 'has gone quiet — no heartbeat' : 'left'
         ui.print(`${C.sys}* ${peerName} ${what} (${short(peer)})${C.reset}`)
       },
+      onSessionTakenOver: (byPeer) => {
+        // §9.1 is identity-wide, not a browser feature: a terminal session and a
+        // tab on the same identity are the same duplicate. Both close.
+        ui.print(`${C.warn}— a second session of this identity appeared (${short(byPeer)}); both are closing (§9.1).`
+          + ` Start ${meName} again in one place only.${C.reset}`)
+        setTimeout(() => process.exit(0), 500).unref?.()
+      },
       onLink: (state) => ui.print(
         state === 'online' ? `${C.sys}— relay connection is back${C.reset}`
           : state === 'reconnecting' ? `${C.warn}— lost the relay, reconnecting…${C.reset}`

@@ -398,9 +398,44 @@ What settles it:
   peer ids; rendering whichever fired last made it flicker while a good session
   was carrying messages.
 
-The proper fix is §9.1 — single active session per identity, resolved on the
-self-topic, where the older window shuts itself down. That is still to build;
-the above stops the damage without a wire change.
+### One identity, one session — the self-topic (§9.1) — `lib/selfsession.ts`
+
+Each client subscribes to a topic derived from its **own** identity key
+(`deriveSelfRoom`: `ss = ECDH(IK, IK_pub)`, then the ordinary §5 derivation). Only
+the holder of that IK can derive the topic or produce a valid Announce on it, so
+anything valid arriving there is another window of *us*.
+
+**Both duplicates stand down** (the user's call, 2026-07-30). The spec hands the
+session to the newer window; we close **both** and make the user re-enter one
+deliberately. Fail-closed: nothing in the client can tell which window the user
+meant, and if one of them is not the user at all, letting it win by arriving
+second is the wrong default. A page **reload is unaffected** — that window is
+gone before the new one starts, so it never announces.
+
+Details that are load-bearing:
+
+- **The window that steps down publishes one last Announce on its way out.**
+  Without it the rule half-fires: the settled window hears the newcomer and goes
+  silent immediately, so the newcomer — still inside its own opening window —
+  may never hear anything and carries on alone. (Caught by the test, not by
+  reasoning.)
+- **The mechanism diverges from the spec's, deliberately.** §9.1 compares the
+  announce timestamp with the local session start, which assumes the announce
+  carries the *session start*; §5.5's carries the *send* time, so a literal
+  implementation has every newcomer evict itself on the first heartbeat. A
+  `since` field would fix it — §5.5 is frozen for the audit, so the decision is
+  made from local knowledge instead. **If the spec is ever reopened, adding
+  `since` to the Announce is the change to make.**
+- Wired in `openConversation` (it owns the libp2p node) and **best effort**: if
+  the self-topic cannot be derived — a HEM that refuses an ECDH against its own
+  public key, say — the conversation runs on without the rule rather than
+  failing. When the app grows to several conversations at once this belongs in an
+  app-level session manager, one watch per identity rather than per room.
+- Both front-ends honour it: the web clears the transcript and says what to do,
+  the CLI prints and exits.
+- **Capacity note:** every client now holds **two** relay topics (pair + self).
+  The relay's topic budget and eviction are sized per topic — halve the client
+  estimate.
 
 ### ⚠️ INTERIM (fallback only — on its way out)
 

@@ -498,6 +498,21 @@ async function openChat(contact: Contact) {
       onTyping: (_from, state) => { peerTyping = state === 'start'; setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => addReaction(r.to, r.emoji),
       onFile: (_from, f) => appendMsg('sys', `${contact.name} udostępnił plik: ${f.name} — interim (IPFS TODO)`),
+      onSessionTakenOver: () => {
+        // §9.1/§9.2: a second window of this identity showed up, so BOTH stand
+        // down — the other one is doing exactly this too. The transport is
+        // already gone by now; clear the transcript, because this window cannot
+        // decrypt anything any more, and say plainly what to do about it.
+        if (active) { active.conv = null; active.inRoom = false }
+        $('messages').innerHTML = ''
+        msgEls.clear(); stateEls.clear(); setTyping(false)
+        appendMsg('sys', 'Wykryto drugie okno zalogowane na tę samą tożsamość.'
+          + ' Obie sesje zostały zamknięte — jedna tożsamość, jedna aktywna sesja.'
+          + ' Zamknij nadmiarową kartę i odśwież tę, w której chcesz rozmawiać.')
+        linkState = 'offline'
+        peerLabel = 'sesja zamknięta (duplikat)'
+        paintStatus()
+      },
       onForeign: () => {
         // The user is the only one who can fix this, so say it in the transcript
         // rather than in a console nobody has open. Two windows on one identity

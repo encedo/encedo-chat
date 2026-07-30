@@ -18,6 +18,7 @@ import { joinChat, type RoomKeys, type ChatOpts, type Eh2Options } from './room.
 import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
+import { watchSelfSession, type SelfWatch } from './selfsession.ts'
 import { b64, unb64 } from './wc.ts'
 
 export interface Identity {
@@ -188,6 +189,17 @@ export async function deriveRoom(
   return { topic, keys: { macKey, session: await interimSession(ss, p) } }
 }
 
+/**
+ * The self-topic (§5.2): the same derivation as a pair topic, with ourselves as
+ * the peer. `ss = ECDH(IK, IK_pub)` is computable only by the holder of that IK,
+ * so the topic and its Announce key are ours alone — which is what makes
+ * anything valid on it another window of *us* (§9.1).
+ */
+export async function deriveSelfRoom(id: Identity, p: RoomParams): Promise<{ topic: string; macKey: CryptoKey }> {
+  const ss = await id.ecdh(id.pub)
+  return { topic: await topicFromSecret(ss, p), macKey: await announceMacKey(ss, p) }
+}
+
 const TYPING_STOP_MS = 4_000 // stop "typing" after this idle gap
 const AWAY_MS = 60_000 // go "away" after this much no activity
 const FLUSH_MS = 250 // let the leave reach the relay before teardown
@@ -215,6 +227,13 @@ export interface OpenOpts extends ChatOpts {
   onLink?: (state: LinkState) => void
   /** Someone in the room is not this contact — usually a second tab on the same identity. */
   onForeign?: ChatOpts['onForeign']
+  /**
+   * Another window of THIS identity took the session over (§9.1). The transport
+   * is already down and the ratchets are gone by the time this fires; the UI
+   * should clear what it is showing and say where the session went (§9.2).
+   * Omit it and the self-topic watch is not started at all.
+   */
+  onSessionTakenOver?: (byPeer: string) => void
 }
 export type LinkState = 'online' | 'reconnecting' | 'offline'
 export interface Conversation {
@@ -349,6 +368,35 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
   }, 10_000)
   ;(linkWatch as any).unref?.()
 
+  // ---- §9.1: one active session per identity -------------------------------
+  // Best effort by design: if the self-topic cannot be derived (a HEM that
+  // refuses an ECDH against our own public key, say) the conversation carries on
+  // without it. Losing the takeover rule is a nuisance; losing the chat is not
+  // an acceptable trade for it.
+  let selfWatch: SelfWatch | null = null
+  if (opts.onSessionTakenOver) {
+    try {
+      const selfRoom = await deriveSelfRoom(id, params)
+      selfWatch = watchSelfSession(node, selfRoom.topic, selfRoom.macKey, self, {
+        onLog: opts.onLog,
+        onTakenOver: (byPeer) => {
+          log(`session taken over by ${byPeer.slice(0, 12)}… — shutting this one down (§9.1/§9.2)`)
+          // §9.2 graceful shutdown: say goodbye, drop the ratchets and the
+          // transport, then let the UI clear what it is showing.
+          void (async () => {
+            try { room.sendPresence('leave') } catch {}
+            try { plane?.stop() } catch {}
+            try { room.stop() } catch {}
+            try { await node.stop() } catch {}
+            opts.onSessionTakenOver?.(byPeer)
+          })()
+        },
+      })
+    } catch (e: any) {
+      log(`self-topic unavailable (${e?.message ?? e}) — running without the §9.1 takeover rule`)
+    }
+  }
+
   let typingSent = false
   let away = false
   let tT: any
@@ -389,6 +437,7 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     secured: () => room.secured(),
     leave: async () => {
       closed = true
+      selfWatch?.stop()
       clearInterval(linkWatch)
       clearTimeout(tT); clearTimeout(aT)
       try { room.sendPresence('leave') } catch {}
