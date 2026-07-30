@@ -148,6 +148,11 @@ class Browser {
     }
   }
 
+  /** Send a command we do not expect an answer to (the browser dies mid-reply). */
+  private fire(method: string, params: any = {}) {
+    try { this.ws?.send(JSON.stringify({ id: this.next++, method, params })) } catch {}
+  }
+
   send(method: string, params: any = {}, session = false): Promise<any> {
     const id = this.next++
     const payload: any = { id, method, params }
@@ -179,18 +184,52 @@ class Browser {
     }
   }
 
+  /** Resize the viewport — layout rules that only apply at some widths need it. */
+  async resize(width: number, height: number) {
+    await this.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }, true)
+    await sleep(200)
+  }
+
   async reload(url: string) {
     await this.send('Page.navigate', { url }, true)
     await sleep(1200)
   }
 
   async stop() {
-    // Close the CDP socket first: an open WebSocket keeps Node's event loop
+    // ASK the browser to quit before signalling it. `proc.kill()` cannot be
+    // relied on: a snap-confined Chromium refuses signals from a confined
+    // parent with EPERM, and the old `try { … } catch {}` turned that refusal
+    // into silence — every run leaked a whole browser tree (two browsers, their
+    // zygotes and renderers, well over half a gigabyte) that outlived the
+    // harness, until enough runs had accumulated to take the machine down.
+    // `Browser.close` travels the socket we have been driving all along, so it
+    // needs no permission at all; the signal stays as the fallback, and if that
+    // is refused too we SAY so instead of leaving it to be discovered in `free`.
+    this.fire('Browser.close')
+    const quit = await this.exited(3_000)
+    // Close the CDP socket after: an open WebSocket keeps Node's event loop
     // alive, so without this the run printed PASS and then hung forever —
     // which in CI is a green result inside a timed-out job.
     try { this.ws?.close() } catch {}
-    try { this.proc.kill('SIGKILL') } catch {}
+    if (!quit) {
+      try { this.proc.kill('SIGKILL') } catch (e: any) {
+        console.log(`⚠ ${this.name}: cannot signal Chromium (${e?.code ?? e})`)
+      }
+      if (!(await this.exited(2_000))) {
+        console.log(`⚠ ${this.name}: Chromium (pid ${this.proc.pid}) is STILL RUNNING — kill it by hand,`
+          + ' leaked browsers from repeated runs are what exhausts this machine')
+      }
+    }
     try { rmSync(this.dir, { recursive: true, force: true }) } catch {}
+  }
+
+  /** True once the process is gone; false if it is still there after `ms`. */
+  private exited(ms: number): Promise<boolean> {
+    if (this.proc.exitCode !== null || this.proc.signalCode !== null) return Promise.resolve(true)
+    return new Promise((res) => {
+      const t = setTimeout(() => res(false), ms)
+      this.proc.once('exit', () => { clearTimeout(t); res(true) })
+    })
   }
 }
 
@@ -319,6 +358,55 @@ async function main() {
     await A.waitFor('EH-2 after switching back', BADGE_GREEN, 45_000)
     await roundTrip(A, B, 'after-switch')
     step('the original conversation resumed after switching away')
+
+    scenario('reading older messages is not interrupted by new ones')
+    // Fill past one screen so the transcript can actually scroll, then read
+    // from the top while the peer keeps talking.
+    for (let i = 0; i < 15; i++) await send(A, `wypełniacz ${i}`)
+    await B.waitFor('the filler arrived', seen('wypełniacz 14'), 40_000)
+    // Both layouts, because the narrow one has its own rules and it is the one
+    // that was broken: under 860px the chat panel grew with the transcript, so
+    // the messages box never overflowed. Nothing scrolled inside it, the ⬇
+    // button could never appear, and the whole page scrolled instead — two
+    // browser windows side by side are enough to land in that layout.
+    for (const [w, h, label] of [[780, 620, 'narrow'], [1200, 800, 'wide']] as const) {
+      await B.resize(w, h)
+      await B.eval(`
+        const m = document.getElementById('messages');
+        if (m.scrollHeight <= m.clientHeight) throw new Error(
+          'transcript does not scroll at ${w}px — the page scrolls instead'
+          + ' (messages ' + m.scrollHeight + '/' + m.clientHeight
+          + ', chat panel ' + document.querySelector('.chat').clientHeight + 'px)');
+        m.scrollTop = 0; m.dispatchEvent(new Event('scroll')); return 1;
+      `)
+      await B.waitFor(`the ⬇ button (${label})`, `return document.getElementById('to-bottom').hidden === false`, 10_000)
+      const tail = `ogon-${label}-${Date.now().toString(36)}`
+      await send(A, tail)
+      await B.waitFor(`an unread count (${label})`, `return document.getElementById('unread').hidden === false`, 25_000)
+      if (!(await B.eval<boolean>(`return document.getElementById('messages').scrollTop < 40`)))
+        throw new Error(`the view scrolled away from the reader (${label})`)
+      const beforeClick = await B.eval<any>(`
+        const m = document.getElementById('messages');
+        return { top: m.scrollTop, unreadHidden: document.getElementById('unread').hidden, unread: document.getElementById('unread').textContent };
+      `)
+      await B.eval(`document.getElementById('to-bottom').click(); return 1`)
+      const afterClick = await B.eval<any>(`
+        const m = document.getElementById('messages');
+        return new Promise((r) => setTimeout(() => r({
+          top: m.scrollTop, unreadHidden: document.getElementById('unread').hidden,
+          unread: document.getElementById('unread').textContent,
+          gap: m.scrollHeight - m.scrollTop - m.clientHeight,
+          toBottomHidden: document.getElementById('to-bottom').hidden,
+        }), 1200));
+      `)
+      console.log('   before:', JSON.stringify(beforeClick), 'after:', JSON.stringify(afterClick))
+      await B.waitFor(`back at the newest message (${label})`, `
+        const m = document.getElementById('messages');
+        return m.scrollHeight - m.scrollTop - m.clientHeight < 80 && document.getElementById('to-bottom').hidden;
+      `, 10_000)
+      if (!(await B.eval<boolean>(seen(tail)))) throw new Error(`the newest message is missing (${label})`)
+      step(`${label} layout: the view stays put, counts what arrived, and ⬇ returns to it`)
+    }
 
     console.log(`\nPASS — all scenarios${direct ? ' (content over WebRTC Direct)' : ' — but WebRTC never came up, see above'}`)
     process.exitCode = direct ? 0 : 1
