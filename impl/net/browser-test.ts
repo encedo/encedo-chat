@@ -80,10 +80,8 @@ class Browser {
     this.dir = mkdtempSync(join(tmpdir(), `ec-${this.name}-`))
     this.proc = spawn(CHROME, [
       HEADFUL ? '--headless=false' : '--headless=new',
-      // Port 0 = let Chromium pick and report it in DevToolsActivePort. A fixed
-      // port silently attaches to a LEFTOVER browser from an earlier run — which
-      // cost one confusing failure here: a stale profile, stale state, and a
-      // "bug" that was only the previous test still running.
+      // Let Chromium pick the port (see discover() for how we learn it): a
+      // fixed one silently attaches us to a LEFTOVER browser from an earlier run.
       '--remote-debugging-port=0',
       `--user-data-dir=${this.dir}`,
       '--no-first-run', '--no-default-browser-check', '--disable-gpu',
@@ -187,6 +185,10 @@ class Browser {
   }
 
   async stop() {
+    // Close the CDP socket first: an open WebSocket keeps Node's event loop
+    // alive, so without this the run printed PASS and then hung forever —
+    // which in CI is a green result inside a timed-out job.
+    try { this.ws?.close() } catch {}
     try { this.proc.kill('SIGKILL') } catch {}
     try { rmSync(this.dir, { recursive: true, force: true }) } catch {}
   }
@@ -334,3 +336,14 @@ async function main() {
 }
 
 await main()
+
+// A test harness must not outlive its own verdict. This one did: it printed
+// PASS and then sat there for as long as it was left running, which in CI is a
+// green result inside a job that eventually gets killed for timing out.
+// Closing the CDP socket and the local server was not enough — by the time we
+// get here the process holds no sockets at all — so the exit is explicit, and
+// whatever is still registered gets named rather than silently forced away.
+const held = [...new Set(process.getActiveResourcesInfo())].filter((r) => r !== 'TTYWrap' && r !== 'FileHandle')
+if (held.length) console.log(`(forced exit — event loop still held by: ${held.join(', ')})`)
+await new Promise((r) => process.stdout.write('', r)) // let the verdict reach a pipe first
+process.exit(process.exitCode ?? 0)
