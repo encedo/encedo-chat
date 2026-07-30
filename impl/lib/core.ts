@@ -214,7 +214,7 @@ export interface Conversation {
   sendReaction(toId: string, emoji: string): void
   noteActivity(): void // UI calls on user input → drives "typing" + resets "away"
   noteAway(): void // UI calls on blur/tab-hidden → "away" now
-  refresh(): void // UI calls when the tab becomes visible again (timers were throttled)
+  refresh(): void | Promise<void> // UI calls when the tab becomes visible again (throttled/frozen)
   who(): string[]
   secured(): string[] // peers with a live EH-2 ratchet (empty in interim mode)
   leave(): Promise<void> // presence:leave last-will + clean transport stop
@@ -284,7 +284,19 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),
     noteActivity,
     noteAway,
-    refresh: () => { room.refresh(); if (away) { away = false; room.sendPresence('active') } },
+    refresh: async () => {
+      // A tab that was hidden for a while may come back with its transport
+      // dead: throttling turns into freezing (laptop asleep, mobile app in the
+      // background) and the relay connection goes with it. Nothing downstream
+      // notices, so the room looks alive while nothing can leave it. Re-dial
+      // first, then speak up.
+      if (node.getConnections().length === 0) {
+        log('back with no relay connection — re-dialing')
+        try { await dial(node, opts.relay) } catch (e: any) { log(`re-dial failed: ${e?.message ?? e}`) }
+      }
+      room.refresh()
+      if (away) { away = false; room.sendPresence('active') }
+    },
     who: () => room.who(),
     secured: () => room.secured(),
     leave: async () => {
