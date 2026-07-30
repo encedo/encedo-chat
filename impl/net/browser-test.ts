@@ -87,6 +87,12 @@ abstract class Page {
   abstract stop(): Promise<void>
   /** Put the tab into the frozen lifecycle state. CDP only; a no-op elsewhere. */
   async freeze(_frozen: boolean): Promise<void> {}
+  /**
+   * Cut this browser off the network. Returns false where the protocol cannot do
+   * it (BiDi has no equivalent), so the caller can skip the scenario out loud
+   * instead of asserting against something that never happened.
+   */
+  async offline(_cut: boolean): Promise<boolean> { return false }
 
   async waitFor<T>(what: string, expression: string, ms = 30_000): Promise<T> {
     const t0 = Date.now()
@@ -212,6 +218,17 @@ class Browser extends Page {
   /** Freeze/thaw the tab (best effort: not every build allows it). */
   async freeze(frozen: boolean) {
     try { await this.send('Page.setWebLifecycleState', { state: frozen ? 'frozen' : 'active' }, true) } catch {}
+  }
+
+  /** Pull the network out from under the page — closes its relay socket for real. */
+  async offline(cut: boolean): Promise<boolean> {
+    try {
+      await this.send('Network.enable', {}, true)
+      await this.send('Network.emulateNetworkConditions', {
+        offline: cut, latency: 0, downloadThroughput: -1, uploadThroughput: -1,
+      }, true)
+      return true
+    } catch { return false }
   }
 
   /** Resize the viewport — layout rules that only apply at some widths need it. */
@@ -549,6 +566,41 @@ async function main() {
     await hide(B, false)
     await roundTrip(A, B, 'after-background')
     step('messages flow after 12 s in the background')
+
+    scenario('the relay connection dies and comes back on its own')
+    // The failure this comes from: a laptop that slept, or a network blip, left
+    // the room looking healthy — green badge, peer "present" for another 90 s —
+    // while nothing could leave the tab. Recovery waited for the user to focus
+    // the tab. What must happen instead: the client notices by itself, says so,
+    // re-dials, and the backlog arrives IN ORDER once it is back.
+    if (await B.offline(true)) {
+      await B.waitFor('B admits it is not connected',
+        `return /wznawiam|brak połączenia/.test(document.getElementById('peer-status').textContent)`, 30_000)
+      step('B noticed the relay was gone without being touched — no tab focus, no user action')
+
+      // CDP's offline emulation kills sockets, but NOT WebRTC — its traffic does
+      // not go through the emulated stack. That is worth asserting rather than
+      // working around: with the direct plane up, losing the relay must not stop
+      // the conversation. It is the whole point of §13.
+      const direktMsg = `bez-przekaźnika-${Date.now().toString(36)}`
+      await send(A, direktMsg)
+      let survived = true
+      try { await B.waitFor('content over the direct channel', seen(direktMsg), 15_000) } catch { survived = false }
+      step(survived
+        ? 'the relay is gone and messages still flow — content is genuinely P2P'
+        : '⚠ content stopped with the relay (was the direct channel up?)')
+
+      await B.offline(false)
+      await B.waitFor('B is back on its feet',
+        `return !/wznawiam|brak połączenia/.test(document.getElementById('peer-status').textContent)`, 40_000)
+      await roundTrip(A, B, 'after-outage')
+      step('re-dialled by itself and the conversation resumed')
+      // The ordered backlog after an outage is pinned at the room level instead
+      // (test/room-eh2.test.ts) — reproducing a relay-only outage in a browser
+      // would mean tearing down a working DataChannel to prove a point.
+    } else {
+      step('⚠ skipped — this driver cannot cut the network (BiDi has no equivalent)')
+    }
 
     scenario('switching to another contact and back')
     await openContact(A, 'ghost')          // a peer that will never answer

@@ -74,6 +74,12 @@ export interface ChatOpts {
    * Anything holding per-PeerId state, the WebRTC plane above all, has to move.
    */
   onPeerReplaced?: (old: string, now: string) => void
+  /**
+   * Our heartbeats are reaching nobody, so whatever the transport claims about
+   * its connections, it is not carrying anything. Whoever owns the transport
+   * (core) should re-dial.
+   */
+  onIsolated?: () => void
   /** The peer's client confirmed it holds this message (`ms` = time in flight). */
   onDelivered?: (id: string, ms: number) => void
   /** Gave up after retrying: the peer very likely never got it. */
@@ -122,6 +128,9 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const onLateDelivered = opts.onLateDelivered ?? (() => {})
   const onStall = opts.onStall ?? (() => {})
   const onPeerReplaced = opts.onPeerReplaced ?? (() => {})
+  const onIsolated = opts.onIsolated ?? (() => {})
+  /** Heartbeats that must reach nobody before we call the transport dead. */
+  const ISOLATED_AFTER = 2
   const heartbeatMs = opts.heartbeatMs ?? 15_000
   // Be generous: a browser throttles timers in a hidden tab (Firefox to about
   // once a minute), so a peer that is merely in a background window must not
@@ -601,7 +610,36 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   log(`joined topic ${topic.slice(0, 12)}… as ${short(self)} (${eh2 ? 'EH-2' : 'interim key'})`)
 
   const gossip = (bytes: Uint8Array) => { node.services.pubsub.publish(topic, bytes).catch(() => {}) }
-  const announce = async () => { try { gossip(await buildAnnounce(self, keys.macKey)) } catch {} }
+
+  /**
+   * Consecutive heartbeats that reached nobody.
+   *
+   * `getConnections()` is not a health check: a machine that goes offline (lid
+   * closed, network dropped, a tab whose sockets were cut) keeps a connection
+   * object that nothing has yet tried to write to, so the client sits there
+   * looking connected. What cannot be faked is delivery — GossipSub tells us how
+   * many peers a publish actually went to, and a heartbeat that reaches zero of
+   * them twice running means we are talking to ourselves.
+   */
+  let unheard = 0
+  const announce = async () => {
+    try {
+      const bytes = await buildAnnounce(self, keys.macKey)
+      const res: any = await node.services.pubsub.publish(topic, bytes).catch(() => null)
+      // Test doubles do not report recipients; absence is not evidence.
+      const reach = res?.recipients?.length
+      if (typeof reach !== 'number') return
+      if (reach > 0) {
+        if (unheard >= ISOLATED_AFTER) log('heartbeat is reaching the relay again')
+        unheard = 0
+        return
+      }
+      if (++unheard === ISOLATED_AFTER) {
+        log(`${unheard} heartbeats reached nobody — the transport looks dead`)
+        onIsolated()
+      }
+    } catch {}
+  }
 
   // The first Announce cannot go out before the relay has joined our topic —
   // published earlier it reaches nobody. Rather than guess a delay (the old

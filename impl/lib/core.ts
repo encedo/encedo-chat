@@ -273,6 +273,10 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     onUndelivered: (id) => { log(`UNDELIVERED ${id} — peer never confirmed`); opts.onUndelivered?.(id) },
     onLateDelivered: (id, ms) => { log(`late: ${id} arrived after all, ${Math.round(ms / 1000)}s`); opts.onLateDelivered?.(id, ms) },
     onStall: () => plane?.demote(),
+    // Heartbeats reaching nobody is the honest signal that the transport is
+    // dead — `getConnections()` still reports a connection nothing has tried to
+    // write to, which is why an offline tab used to look perfectly healthy.
+    onIsolated: () => { setLink('reconnecting'); void reconnect(true) },
   })
   if (opts.webrtc) plane = attachWebRTC(room, self, { onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
 
@@ -295,10 +299,19 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
   const connected = () => {
     try { return node.getConnections().length > 0 } catch { return false }
   }
-  const reconnect = async () => {
+  /**
+   * `force` is for the case where the transport SAYS it is connected and is not:
+   * the connection object is there, nothing has written to it since the network
+   * went away, and waiting for `connected()` to turn false would mean waiting
+   * for a TCP timeout. Hang up first, then dial.
+   */
+  const reconnect = async (force = false) => {
     if (redialing || closed) return
     redialing = true
     setLink('reconnecting')
+    if (force) {
+      for (const c of node.getConnections()) { try { await c.close() } catch {} }
+    }
     for (let i = 0; !closed && !connected(); i++) {
       try {
         await dial(node, opts.relay)
