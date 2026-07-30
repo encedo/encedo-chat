@@ -160,7 +160,11 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       if (!pending.has(id)) return
       p.tries++
       dbg(`no ack for ${id} in ${delay} ms → re-sending (try ${p.tries + 1})`)
-      if (p.tries === 1) { log('unconfirmed message — distrusting the current content path'); onStall() }
+      // Only the DIRECT path loses its turn. A frame dropped on GossipSub is
+      // ordinary (it is fire-and-forget, and that is what the retry is for) —
+      // banning WebRTC for the rest of the conversation because the relay
+      // hiccuped would punish the wrong transport.
+      if (p.tries === 1 && contentSend !== gossipContent) { log('unconfirmed on the direct path — falling back to the relay'); onStall() }
       void emitContent(p.bytes)
       armRetry(id)
     }, delay)

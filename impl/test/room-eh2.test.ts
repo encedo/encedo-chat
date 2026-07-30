@@ -69,6 +69,7 @@ async function rooms(opts: {
   duplicate?: (d: Uint8Array) => boolean
   onDeliveredA?: (id: string, ms: number) => void
   onUndeliveredA?: (id: string) => void
+  onStallA?: () => void
 }) {
   const net = hub(opts.drop, opts.duplicate)
   const ss = new Uint8Array(32).fill(0x5e)
@@ -88,6 +89,7 @@ async function rooms(opts: {
     onMessage: (_from, m) => opts.backA?.push(m.body),
     onDelivered: opts.onDeliveredA,
     onUndelivered: opts.onUndeliveredA,
+    onStall: opts.onStallA,
   })
   const B = joinChat(nodeB, TOPIC, { macKey, eh2: eh2(ikB, ikA.pub) }, {
     firstAnnounceMs: 5,
@@ -232,6 +234,49 @@ test('a lost message is re-sent until the peer confirms it', async (t) => {
   await until(() => delivered.length === 1, 5000)
   assert.equal(delivered[0][0], id, 'the confirmation carries the message id')
   assert.equal(undelivered.length, 0)
+})
+
+test('a frame the relay drops does not cost the direct path its turn', async (t) => {
+  // The stall signal exists to abandon a DIRECT channel that looks open and
+  // silently eats content. GossipSub dropping a frame is ordinary — that is
+  // what the retry is for — and must not ban WebRTC for the rest of the
+  // conversation.
+  const got: string[] = []
+  let stalls = 0
+  let contentSeen = 0
+  const { A, B } = await rooms({
+    collect: got,
+    drop: (d) => d[0] === 0x10 && ++contentSeen <= 2, // the message and its first retry
+    onStallA: () => { stalls++ },
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+
+  A.sendText('relay gubi, ale to nie wina WebRTC')
+  await until(() => got.length === 1, 10_000)
+  assert.equal(stalls, 0, 'a relay loss is not a reason to distrust the direct path')
+})
+
+test('content that goes unconfirmed on a direct channel falls back to the relay', async (t) => {
+  // The failure this comes from: both sides showed "WebRTC Direct" while the
+  // DataChannel delivered nothing. The message must still arrive — over the
+  // relay, after the room stops trusting the direct path.
+  const got: string[] = []
+  let stalls = 0
+  let roomA: { setContentSend: (fn: null) => void } | null = null
+  const { A, B } = await rooms({
+    collect: got,
+    onStallA: () => { stalls++; roomA?.setContentSend(null) }, // what core's plane.demote() does
+  })
+  roomA = A
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+
+  A.setContentSend(() => {}) // a channel that is "open" and swallows everything
+  A.sendText('przez martwy kanał')
+  await until(() => stalls === 1, 8000)
+  await until(() => got.length === 1, 10_000)
+  assert.deepEqual(got, ['przez martwy kanał'], 'the relay carried what the direct channel ate')
 })
 
 test('a peer that never confirms is not reported as a failure (old client)', async (t) => {
