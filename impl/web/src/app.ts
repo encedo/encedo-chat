@@ -233,6 +233,35 @@ function addReaction(msgId: string, emoji: string) {
   const chip = document.createElement('span'); chip.className = 'rchip'; chip.textContent = emoji
   rx.appendChild(chip)
 }
+/**
+ * Reading older messages must not be interrupted by new ones. If the view is
+ * scrolled up we leave it where it is, show a jump-to-latest button (with a
+ * count of what arrived meanwhile) and only follow along when the reader is
+ * already at the bottom.
+ */
+const NEAR_BOTTOM_PX = 80
+let unread = 0
+const atBottom = () => {
+  const box = $('messages')
+  return box.scrollHeight - box.scrollTop - box.clientHeight < NEAR_BOTTOM_PX
+}
+function refreshJump() {
+  const show = !atBottom()
+  $('to-bottom').hidden = !show
+  if (!show) { unread = 0 }
+  const badge = $('unread')
+  badge.hidden = unread === 0
+  badge.textContent = String(unread)
+}
+function jumpToLatest() {
+  const box = $('messages')
+  box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' })
+  unread = 0
+  refreshJump()
+}
+$('messages').addEventListener('scroll', refreshJump)
+$('to-bottom').addEventListener('click', jumpToLatest)
+
 /** msg id → the little delivery marker under our own bubble. */
 const stateEls = new Map<string, HTMLElement>()
 function setDelivery(id: string, state: 'ok' | 'lost', ms?: number) {
@@ -250,9 +279,12 @@ function setDelivery(id: string, state: 'ok' | 'lost', ms?: number) {
 function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string) {
   const box = $('messages')
   if (kind === 'sys') {
+    const stick = atBottom()
     const s = document.createElement('div'); s.className = 'sysline'; s.textContent = text; box.appendChild(s)
-    box.scrollTop = box.scrollHeight; return
+    if (stick) box.scrollTop = box.scrollHeight
+    return
   }
+  const stick = atBottom() || kind === 'me' // sending always follows your own message
   const row = document.createElement('div'); row.className = 'mrow ' + (kind === 'me' ? 'out' : 'in')
   const bub = document.createElement('div'); bub.className = 'bubble'
   const t = document.createElement('div'); t.className = 'b-text'; t.textContent = text
@@ -277,7 +309,10 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
     }
     row.appendChild(bar)
   }
-  box.appendChild(row); box.scrollTop = box.scrollHeight
+  box.appendChild(row)
+  if (stick) { box.scrollTop = box.scrollHeight; unread = 0 }
+  else if (kind === 'peer') unread++
+  refreshJump()
 }
 const setTyping = (on: boolean, name = '') => { $('typing-ind').textContent = on ? `${name} pisze…` : '' }
 /**
@@ -342,6 +377,7 @@ async function openChat(contact: Contact) {
 
   try {
     let peerTyping = false
+    let lastPresence: string | null = null
     const conv = await openConversation(session.id, { pub: contact.pub, kid: contact.kid }, {
       relay: RELAY,
       webrtc: true,
@@ -361,7 +397,13 @@ async function openChat(contact: Contact) {
       onPresence: (_peer, ev) => {
         if (active) active.inRoom = ev !== 'leave'
         const label = ev === 'join' ? 'w pokoju' : ev === 'active' ? 'wrócił/a' : ev === 'away' ? 'nieobecny/a' : 'wyszedł/wyszła'
-        appendMsg('sys', `${contact.name} ${label}`)
+        // Presence belongs in the header, not in the transcript. Every tab
+        // switch flips away→active, and writing each one into the conversation
+        // buried the actual messages under "nieobecny/a · wrócił/a" noise.
+        // Only entering and leaving the room are worth a line, and only when
+        // the state really changed.
+        if ((ev === 'join' || ev === 'leave') && lastPresence !== ev) appendMsg('sys', `${contact.name} ${label}`)
+        lastPresence = ev
         $('peer-dot').className = 'dot ' + (ev === 'join' || ev === 'active' ? 'ok' : ev === 'away' ? 'away' : '')
         $('peer-status').textContent = ev === 'leave' ? 'poza pokojem' : label
         if (ev === 'leave') { peerTyping = false; setTyping(false) }
