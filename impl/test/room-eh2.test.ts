@@ -70,6 +70,13 @@ async function rooms(opts: {
   onDeliveredA?: (id: string, ms: number) => void
   onUndeliveredA?: (id: string) => void
   onStallA?: () => void
+  /**
+   * A's re-send schedule. The production one runs for the better part of a
+   * minute (deliberately — see room.ts), so tests state their own rather than
+   * waiting it out. The default below is the schedule these tests were written
+   * against, which keeps them pinning the retry *mechanism*, not the constants.
+   */
+  retry?: { retryMs?: number[]; giveUpMs?: number; maxInflightMs?: number }
 }) {
   const net = hub(opts.drop, opts.duplicate)
   const ss = new Uint8Array(32).fill(0x5e)
@@ -84,12 +91,14 @@ async function rooms(opts: {
     onState: (p: string, s: string) => states.push(`${p}:${s}`),
   })
 
+  const retry = opts.retry ?? { retryMs: [1_500, 4_000], giveUpMs: 4_000 }
   const A = joinChat(nodeA, TOPIC, { macKey, eh2: eh2(ikA, ikB.pub) }, {
     firstAnnounceMs: 5,
     onMessage: (_from, m) => opts.backA?.push(m.body),
     onDelivered: opts.onDeliveredA,
     onUndelivered: opts.onUndeliveredA,
     onStall: opts.onStallA,
+    ...retry,
   })
   const B = joinChat(nodeB, TOPIC, { macKey, eh2: eh2(ikB, ikA.pub) }, {
     firstAnnounceMs: 5,
@@ -296,6 +305,74 @@ test('a peer that never confirms is not reported as a failure (old client)', asy
   await until(() => got.length === 1, 8000)
   await new Promise((r) => setTimeout(r, 6500)) // past both retries
   assert.deepEqual(undelivered, [], 'no false alarm')
+})
+
+test('an outage longer than the old budget does not kill a message on a live session', async (t) => {
+  // Straight from a two-browser run: the relay went quiet for 9.4 s while both
+  // peers were alive and announcing. The old budget (one re-send at 1.5 s, one
+  // at 4 s, then 4 s to judge = 8.5 s) ran out first, so a healthy conversation
+  // stamped the message ⚠ — and seconds later the peers were chatting again.
+  // Scaled down here: the outage outlasts what the old schedule would have
+  // allowed (100 + 200 + 400 = 700 ms) but not the backoff, which keeps going
+  // while the peer is still present.
+  const got: string[] = []
+  const delivered: Array<[string, number]> = []
+  const undelivered: string[] = []
+  let outage = false
+  const { A, B } = await rooms({
+    collect: got,
+    drop: (d) => d[0] === 0x10 && outage, // content and acks both stop
+    onDeliveredA: (id, ms) => delivered.push([id, ms]),
+    onUndeliveredA: (id) => undelivered.push(id),
+    retry: { retryMs: [100, 200, 400, 800, 800], giveUpMs: 400, maxInflightMs: 10_000 },
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+
+  outage = true
+  const id = A.sendText('przetrwa dziurę w łączu')
+  setTimeout(() => { outage = false }, 1200)
+
+  await until(() => got.length === 1, 8000)
+  assert.deepEqual(got, ['przetrwa dziurę w łączu'], 'it arrived once the transport came back')
+  await until(() => delivered.length === 1, 5000)
+  assert.equal(delivered[0][0], id)
+  assert.deepEqual(undelivered, [], 'a present peer is not declared unreachable mid-gap')
+})
+
+test('a message given up on can be sent again by hand', async (t) => {
+  const got: string[] = []
+  const delivered: Array<[string, number]> = []
+  const undelivered: string[] = []
+  let blackout = false
+  const { A, B } = await rooms({
+    collect: got,
+    drop: (d) => d[0] === 0x10 && blackout,
+    onDeliveredA: (id, ms) => delivered.push([id, ms]),
+    onUndeliveredA: (id) => undelivered.push(id),
+    retry: { retryMs: [50, 80], giveUpMs: 100, maxInflightMs: 5_000 },
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+
+  // One delivered message first: a peer is only judged once we know it acks at
+  // all, so without this the loss below is treated as "old client", not ⚠.
+  A.sendText('pierwsza')
+  await until(() => delivered.length === 1, 5000)
+
+  blackout = true
+  const id = A.sendText('zginęła w dziurze')
+  await until(() => undelivered.length === 1, 5000)
+  assert.equal(undelivered[0], id)
+  assert.equal(got.length, 1, 'the second one never reached the peer')
+
+  blackout = false
+  assert.equal(A.resend(id), true, 'the room still holds the envelope')
+  await until(() => got.length === 2, 5000)
+  assert.deepEqual(got, ['pierwsza', 'zginęła w dziurze'])
+  await until(() => delivered.length === 2, 5000)
+  assert.equal(delivered[1][0], id, 'the ack carries the ORIGINAL id, so the ⚠ the user is looking at turns ✓')
+  assert.equal(A.resend('nie-było-takiej'), false, 'nothing to resend → false, not a throw')
 })
 
 test('interim mode is untouched (no eh2 → static key, no handshake frames)', async (t) => {

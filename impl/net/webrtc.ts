@@ -109,9 +109,11 @@ export function webrtcLink(opts: WebRTCOpts): WebRTCLink {
   if (opts.initiator) {
     wire(pc.createDataChannel('encedo'))
     void (async () => {
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      opts.sendSignal({ kind: 'offer', sdp: offer.sdp! })
+      try {
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        opts.sendSignal({ kind: 'offer', sdp: offer.sdp! })
+      } catch (e: any) { opts.onState?.(`offer-failed: ${e?.message ?? e}`) }
     })()
   } else {
     pc.ondatachannel = (e) => wire(e.channel)
@@ -120,18 +122,27 @@ export function webrtcLink(opts: WebRTCOpts): WebRTCLink {
   return {
     get ready() { return ready },
     async handleSignal(sig: Signal) {
-      if (sig.kind === 'offer') {
-        await pc.setRemoteDescription({ type: 'offer', sdp: sig.sdp })
-        await flushIce()
-        const answer = await pc.createAnswer()
-        await pc.setLocalDescription(answer)
-        opts.sendSignal({ kind: 'answer', sdp: answer.sdp! })
-      } else if (sig.kind === 'answer') {
-        await pc.setRemoteDescription({ type: 'answer', sdp: sig.sdp })
-        await flushIce()
-      } else if (sig.kind === 'ice') {
-        if (remoteSet) { try { await pc.addIceCandidate(sig.candidate) } catch {} }
-        else pendingIce.push(sig.candidate)
+      // A throw in here used to vanish completely: the caller invokes this as
+      // `void handleSignal(...)`, so a failed setRemoteDescription or
+      // createAnswer left NO trace and looked exactly like a peer that never
+      // answered — which is how a two-Firefox session sat on the relay with
+      // nothing in either log to say why.
+      try {
+        if (sig.kind === 'offer') {
+          await pc.setRemoteDescription({ type: 'offer', sdp: sig.sdp })
+          await flushIce()
+          const answer = await pc.createAnswer()
+          await pc.setLocalDescription(answer)
+          opts.sendSignal({ kind: 'answer', sdp: answer.sdp! })
+        } else if (sig.kind === 'answer') {
+          await pc.setRemoteDescription({ type: 'answer', sdp: sig.sdp })
+          await flushIce()
+        } else if (sig.kind === 'ice') {
+          if (remoteSet) { try { await pc.addIceCandidate(sig.candidate) } catch (e: any) { opts.onState?.(`ice-add-failed: ${e?.message ?? e}`) } }
+          else pendingIce.push(sig.candidate)
+        }
+      } catch (e: any) {
+        opts.onState?.(`signal-failed(${sig.kind}): ${e?.message ?? e}`)
       }
     },
     send(bytes: Uint8Array) { if (dc && ready) dc.send(bytes) },

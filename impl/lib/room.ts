@@ -71,6 +71,12 @@ export interface ChatOpts {
   heartbeatMs?: number
   /** Delay before the first Announce (tests shorten it; the mesh needs a moment). */
   firstAnnounceMs?: number
+  /** Delays before each re-send of unconfirmed content (tests shorten these). */
+  retryMs?: number[]
+  /** After the last re-send, how long to wait for a confirmation before ⚠. */
+  giveUpMs?: number
+  /** Hard cap on how long one message may keep being re-sent, however present the peer looks. */
+  maxInflightMs?: number
   /**
    * Where this room narrates itself. The engine has no console of its own —
    * the web app sends this to the browser console, the CLI ignores it. `debug`
@@ -123,12 +129,37 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    *
    * Instant-only product: this is "arrived", never "read".
    */
-  const RETRIES = [1_500, 4_000] // delays before each RE-send
-  const GIVE_UP_MS = 4_000       // …then this long for the confirmation to arrive
+  /**
+   * The first budget here (1.5 s + 4 s, then 4 s to judge) was shorter than the
+   * outages this transport actually produces. A hidden tab's throttled timers,
+   * or a GossipSub mesh re-grafting, go quiet for ~10 s — long enough to burn
+   * every re-send — and a healthy conversation was stamping messages ⚠ while
+   * the peer was merely mid-gap, answering again seconds later. So the backoff
+   * now runs for as long as the peer is still announcing itself; only a peer
+   * that has genuinely gone quiet, or the hard cap, ends it.
+   */
+  const RETRIES = opts.retryMs ?? [1_500, 4_000, 8_000, 15_000, 15_000] // delays before each RE-send
+  const GIVE_UP_MS = opts.giveUpMs ?? 8_000       // …then this long for the confirmation to arrive
+  const MAX_INFLIGHT_MS = opts.maxInflightMs ?? 60_000 // hard cap, however present the peer looks
+  /** Re-sending is pointless with nobody in the room to receive it. */
+  const peerPresent = () => lastSeen.size > 0
   interface Pending { bytes: Uint8Array; sentAt: number; tries: number; timer: any }
   const pending = new Map<string, Pending>()
   /** Peers known to send acks. A client that predates them must not be marked ⚠. */
   const acking = new Set<string>()
+
+  /**
+   * Content we gave up on, kept so the user can send it again by hand (the ↻ in
+   * the UI). The envelope is reused verbatim — same id, same seq — so a peer
+   * that did get the first copy silently dedups it, and an ack lands on the
+   * marker the user is already looking at.
+   */
+  const MAX_RESENDABLE = 50
+  const resendable = new Map<string, Uint8Array>()
+  const keepForResend = (id: string, bytes: Uint8Array) => {
+    resendable.set(id, bytes)
+    if (resendable.size > MAX_RESENDABLE) resendable.delete(resendable.keys().next().value as string)
+  }
 
   const clearPending = (id: string) => {
     const p = pending.get(id)
@@ -138,8 +169,13 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const armRetry = (id: string) => {
     const p = pending.get(id)
     if (!p) return
+    const waited = nowMs() - p.sentAt
     const delay = RETRIES[p.tries]
-    if (delay === undefined) {
+    // The first two tries are unconditional — a peer that vanished mid-sentence
+    // still deserves them. Past that, re-sending only makes sense while someone
+    // is there to receive it, and never beyond the cap.
+    const keepTrying = delay !== undefined && waited + delay <= MAX_INFLIGHT_MS && (p.tries < 2 || peerPresent())
+    if (!keepTrying) {
       // Out of re-sends. Keep waiting a little longer before judging: the last
       // copy is still in flight, and the confirmation for it arrives after it,
       // not with it.
@@ -149,7 +185,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         // Only complain about peers we know DO confirm; silence from a client
         // that predates acks means "old build", not "lost message".
         if ([...lastSeen.keys()].some((peer) => acking.has(peer))) {
-          log(`no confirmation for message ${id} after ${RETRIES.length + 1} sends → marking undelivered`)
+          log(`no confirmation for message ${id} after ${p.tries + 1} sends over ${Math.round((nowMs() - p.sentAt) / 1000)}s → marking undelivered`)
+          keepForResend(id, p.bytes)
           onUndelivered(id)
         }
       }, GIVE_UP_MS)
@@ -213,7 +250,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         acking.add(from)
         const a = env as AckEnv
         const p = pending.get(a.ref)
-        if (p) { clearPending(a.ref); onDelivered(a.ref, nowMs() - p.sentAt) }
+        if (p) { clearPending(a.ref); resendable.delete(a.ref); onDelivered(a.ref, nowMs() - p.sentAt) }
         break
       }
       default: break // unknown type → ignore (forward-compat)
@@ -394,6 +431,23 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     for (const bytes of pending) await emitContent(bytes)
   }
 
+  /**
+   * A frame we could neither open as content nor authenticate as an Announce.
+   * Silence here is what made a two-browser stall impossible to diagnose: an
+   * undecryptable frame left no trace at all, so "the ratchet desynced" and
+   * "the transport died" produced identical logs — nothing in either. Rate
+   * limited, because a real desync makes every frame arrive like this.
+   */
+  let undecodable = 0
+  let undecodableAt = 0
+  const noteUndecodable = (from: string, bytes: number) => {
+    undecodable++
+    const t = nowMs()
+    if (undecodable > 1 && t - undecodableAt < 10_000) return
+    undecodableAt = t
+    log(`undecodable frame from ${short(from)} (${bytes} B) — opens as neither content nor Announce; ${undecodable} so far`)
+  }
+
   // decrypt + decode + dispatch a sealed frame (from GossipSub OR the DataChannel)
   const processSealed = async (data: Uint8Array, from: string): Promise<boolean> => {
     const s = sessionFor(from)
@@ -419,9 +473,14 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     if (await processSealed(evt.detail.data, from)) return
     // not sealed → authenticated Announce (presence/discovery, §5.5)
     const res = await verifyAnnounce(evt.detail.data, keys.macKey)
-    if (!res.ok || res.peer === self) return
+    if (!res.ok) { noteUndecodable(from, evt.detail.data.length); return }
+    if (res.peer === self) return
     if (seenNonces.has(res.nonce!)) return
     seenNonces.add(res.nonce!)
+    // Announces are the one thing that keeps flowing when content stops, so say
+    // so: "the transport is alive but nothing decrypts" and "the transport is
+    // gone" are different failures, and they used to produce the same log.
+    dbg(`← announce from ${short(res.peer!)}`)
     touch(res.peer!)
   }
   node.services.pubsub.addEventListener('message', handler)
@@ -522,6 +581,19 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       trackDelivery(e.id, bytes) // resend until the peer confirms, then mark it
       return e.id // the UI keys its ✓ / ⚠ off this
     },
+    /**
+     * Send a given-up message again, by hand. Keeps the original id, so the ✓/⚠
+     * marker the user is looking at is the one that updates. Returns false if
+     * there is nothing to resend (unknown id) or a try is already in flight.
+     */
+    resend: (id: string) => {
+      const bytes = resendable.get(id)
+      if (!bytes || pending.has(id)) return false
+      log(`resending ${id} by hand`)
+      void emitContent(bytes)
+      trackDelivery(id, bytes)
+      return true
+    },
     sendTyping: (state: TypingState) => emitContent(encodeEnvelope(envTyping(seq++, state))),
     sendPresence: (state: PresenceState) => emitContent(encodeEnvelope(envPresence(seq++, state))),
     sendReaction: (to: string, emoji: string) => emitContent(encodeEnvelope(envReaction(seq++, to, emoji))),
@@ -543,7 +615,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     /** Peers with a live EH-2 ratchet (empty in interim mode) — for the UI badge. */
     secured: () => (eh2 ? [...sessions.keys()] : []),
     stop: () => {
-      sessions.clear(); handshakes.clear(); queued.length = 0
+      sessions.clear(); handshakes.clear(); queued.length = 0; resendable.clear()
       clearInterval(t0); clearInterval(hb); clearInterval(sweep)
       for (const t of earlyBeacons) clearTimeout(t)
       for (const id of [...pending.keys()]) clearPending(id)

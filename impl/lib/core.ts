@@ -211,6 +211,8 @@ export interface Conversation {
   peerId: string
   topic: string
   sendText(body: string): string // returns the sent message id (for reactions)
+  /** Send a message marked undelivered again, keeping its id. False = nothing to resend. */
+  resend(id: string): boolean
   sendReaction(toId: string, emoji: string): void
   noteActivity(): void // UI calls on user input → drives "typing" + resets "away"
   noteAway(): void // UI calls on blur/tab-hidden → "away" now
@@ -281,6 +283,7 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     peerId: node.peerId.toString(),
     topic,
     sendText: (body) => { const id = room.sendText(body); stopTyping(); return id },
+    resend: (id) => room.resend(id),
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),
     noteActivity,
     noteAway,
