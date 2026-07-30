@@ -219,6 +219,24 @@ the user is looking at is the one that turns into ✓. This replaced the earlier
 contract where a message was declared lost after a few seconds and silently
 dropped; a laptop that sleeps for a minute now costs a click, not a retype.
 
+**A backlog leaves in the order it was written.** `room.flushPending()` re-sends
+everything still unconfirmed, oldest first (`pending` is a Map, so insertion
+order *is* send order), and restarts each message's budget — a message deserves
+a full one from a transport that exists, not the remains of one it spent while
+offline. `sentAt` still records when the user pressed enter, so delivery times
+stay honest; `since` carries the budget. Core calls it whenever the relay
+connection comes back and on `refresh()`.
+
+**Two different silences, told apart.** `onLink` (core) reports *our own*
+transport — `online` / `reconnecting` / `offline` — driven by libp2p's
+`connection:close` plus a 10 s poll, because a frozen tab wakes with a socket
+that is dead and never fired a close. Core re-dials by itself with backoff
+instead of waiting for the tab to be focused. Separately, the room now reports a
+peer as `quiet` after ~35 s without an Announce (2.5 missed heartbeats), well
+before the 90 s that count as `leave`: the ratchet is untouched and one Announce
+takes it back to `active`. Before this there was a minute and a half in which a
+green badge and a dead connection looked exactly alike.
+
 **The first unconfirmed re-send demotes the direct path — but only if content is
 actually riding it.** A DataChannel that goes deaf mid-conversation is worse than
 the relay, so one stall hands content back to GossipSub for the rest of the
@@ -255,6 +273,18 @@ Notes that matter for anyone touching this:
   advances only after the AEAD verifies. The naive version (found in testing)
   let a forged frame burn the live chain key, and a forged `dh_pub` step the
   **root key** — an unauthenticated desync. Do not "simplify" this back.
+- **The ratchet serialises its own calls, and must keep doing so.** `encrypt`
+  reads `ckSend`/`nSend`, awaits WebCrypto four times, then writes them back;
+  `decrypt` does the same to the receiving side. Two calls issued in one tick
+  interleave, derive a message key from the *same* chain key, stamp the *same*
+  `n`, and both advance the chain — the peer can open at most one of those
+  frames and its receiving chain stays behind the sender's **permanently**. It
+  presents as "messages stop arriving" with a green badge and nothing in any
+  log. This is not a theoretical race: the room sends content without awaiting
+  it (`void emitContent(...)`), so an ack for an incoming message races a typing
+  notice, and a flush of pending messages races itself. The fix is a promise
+  chain around `encrypt`/`decrypt` in `ratchetFrom`; `test/eh2-ratchet.test.ts`
+  pins it with a same-tick burst.
 - **The msg3 gate is structural**: on the responder the `Session` does not exist
   until `mac_i` verifies, so early data from the initiator has nothing to open it.
 - **KATs** (`test/eh2-handshake.test.ts`, `test/eh2-mlkem.test.ts`) pin the
