@@ -255,7 +255,21 @@ function refreshJump() {
 }
 function jumpToLatest() {
   const box = $('messages')
+  const before = box.scrollTop
   box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' })
+  // Smooth scrolling is an enhancement, not the mechanism. Where it is a no-op
+  // — headless Chromium, Firefox with general.smoothScroll off, reduced-motion
+  // settings — scrollTo moves nothing and the button appears and then does
+  // nothing at all. If the animation has not started by now, land immediately.
+  setTimeout(() => {
+    if (box.scrollTop === before) box.scrollTop = box.scrollHeight
+    // …and re-decide here. The refreshJump() below runs while we are still at
+    // the top, so it leaves the button ON; what turns it off is the scroll
+    // event — and a scroll set from code does not always produce one (headless
+    // Chromium doesn't). Without this the view lands at the newest message and
+    // the ⬇ stays on screen over it, pointing nowhere.
+    refreshJump()
+  }, 300)
   unread = 0
   refreshJump()
 }
@@ -273,6 +287,19 @@ function setDelivery(id: string, state: 'ok' | 'lost', ms?: number) {
   } else {
     el.textContent = ' · ⚠ niedostarczone'
     el.title = 'Brak potwierdzenia mimo ponowień — rozmówca prawdopodobnie tego nie dostał'
+    // The transport gave up; give the decision back to the user instead of
+    // leaving a dead ⚠ that can only be fixed by retyping the message.
+    const again = document.createElement('button')
+    again.type = 'button'
+    again.className = 'b-resend'
+    again.textContent = '↻'
+    again.title = 'Wyślij ponownie'
+    again.addEventListener('click', () => {
+      if (!active?.conv?.resend(id)) return
+      el.textContent = ' · wysyłam ponownie…'
+      el.title = 'Czekam na potwierdzenie od klienta rozmówcy'
+    })
+    el.appendChild(again)
   }
 }
 
