@@ -6,8 +6,8 @@
  *   node cli/ec.ts pubkey                                 print my pubkey (give it to a contact)
  *   node cli/ec.ts add <name> <pubB64>                    save a contact
  *   node cli/ec.ts contacts                               list contacts
- *   node cli/ec.ts chat <name> [--network m] [--date d] [--eh2]   open an interactive encrypted chat
- *                                        (--eh2: EH-2 handshake + ratchet instead of the interim key)
+ *   node cli/ec.ts chat <name> [--network m] [--date d] [--no-eh2]  open an interactive encrypted chat
+ *                              (EH-2 handshake + ratchet by default; --no-eh2 = the old interim key)
  *
  * Password: --password, EC_PASSWORD env, or interactive prompt (masked).
  * Identity in the HEM (real) or a local keystore (dev). Same engine as the web GUI.
@@ -97,8 +97,10 @@ switch (cmd) {
     if (!peerPub) { console.error(`unknown contact: ${name} (ec add ${name} <pubB64>)`); process.exit(1) }
     const id = await connect(cfg)
     const p = { networkId: opt('--network', 'main')!, dateUTC: opt('--date', todayUTC())! }
-    const eh2 = rest.includes('--eh2')
-    console.log(`[ec] ${id.handle} → ${name}  via onchato relay${eh2 ? '  [EH-2]' : ''}`)
+    // EH-2 is the default; `--no-eh2` is the escape hatch for talking to a peer
+    // that still runs the interim key (`--eh2` kept so old habits still work).
+    const eh2 = !rest.includes('--no-eh2')
+    console.log(`[ec] ${id.handle} → ${name}  via onchato relay${eh2 ? '  [EH-2]' : '  [interim key]'}`)
     await runChatSession(id, peerPub, id.handle, name, RELAY, p, eh2)
     break
   }

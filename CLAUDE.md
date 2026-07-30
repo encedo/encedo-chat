@@ -229,7 +229,7 @@ tests. Relatedly, a channel is trusted only after a `0x00`-prefixed ping/pong
 round trip proves both directions — `onopen` alone has lied in testing, with both
 badges reading "Direct" while content vanished.
 
-### EH-2 + Double Ratchet — `impl/eh2/` (built, opt-in)
+### EH-2 + Double Ratchet — `impl/eh2/` (the default since 2026-07-30)
 
 The cryptographer green-lit implementing §6–7 as written (fix-forward if the
 review turns something up), so the real scheme now exists next to the interim
@@ -263,14 +263,17 @@ Notes that matter for anyone touching this:
 - ML-KEM is the **one** third-party crypto dependency (WebCrypto has no ML-KEM);
   everything else is `crypto.subtle`.
 
-**Wiring (opt-in, both sides must agree):** `room.ts`'s `[EH-2 seam]` gives each
-peer its own handshake + ratchet when `keys.eh2` is set; handshake frames ride
-the control plane unsealed (told apart by their type byte), the lower peer id
-initiates, and content typed before the handshake completes is queued. Enable
-with `openConversation({eh2: true, onSecurity})` — web: `?eh2=1` (the E2E badge
-goes 🤝 → 🔐), CLI: `ec chat <name> --eh2`. **Verified live** on the onchato
-relay: `npm run eh2-test` (`net/eh2-chat-test.ts`), and `npm run gui-sim` drives
-the same facade the GUI buttons use, printing a timeline.
+**Wiring (on by default, both sides must agree):** `room.ts`'s `[EH-2 seam]`
+gives each peer its own handshake + ratchet when `keys.eh2` is set; handshake
+frames ride the control plane unsealed (told apart by their type byte), the lower
+peer id initiates, and content typed before the handshake completes is queued.
+`openConversation({eh2, onSecurity})` is the switch and **`core.ts` stays a
+mechanism — it does not default it**; the front-ends set the policy: web is EH-2
+unless `?eh2=0` (the E2E badge goes 🤝 → 🔐), CLI unless `ec chat <name>
+--no-eh2`. Two peers on different settings cannot read each other, so the escape
+hatch is a decision for both ends. **Verified live** on the onchato relay:
+`npm run eh2-test` (`net/eh2-chat-test.ts`), and `npm run gui-sim` drives the
+same facade the GUI buttons use, printing a timeline.
 
 **Handshake frames get dropped — treat that as normal, not exceptional.**
 GossipSub is fire-and-forget and a joining peer's mesh grafts over hundreds of
@@ -286,12 +289,13 @@ Discovery itself is gated on the relay joining the topic (~0.5 s), which is why
 the room announces as soon as `getSubscribers(topic)` is non-empty rather than
 after a fixed delay.
 
-### ⚠️ INTERIM (still the default path)
+### ⚠️ INTERIM (fallback only — on its way out)
 
 - `lib/msgcrypto.ts` — a **static AES-256-GCM sealed box** keyed from ss (HKDF);
   seals **opaque bytes** (the envelope lives inside). Real E2E vs the relay but
-  **no forward secrecy / no ratchet**. Still what a conversation uses unless EH-2
-  is switched on; remove once EH-2 is the default.
+  **no forward secrecy / no ratchet**. Reachable only via `?eh2=0` / `--no-eh2`,
+  kept as an escape hatch while EH-2 settles; **delete it** (with
+  `interimSession`) once nothing needs the fallback.
 - `lib/session.ts` — the **crypto seam**. The room talks to a `Session`
   (`encrypt`/`decrypt`), not to a key: `interimSession` wraps the box above,
   `eh2Session` wraps the ratchet. Same interface, so room / envelope / transport
@@ -390,10 +394,9 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
 - Specs (`docs/`) still the audit target — **do not edit them here**. The
   cryptographer cleared implementation of §6–7 as written; if the review lands
   changes, they go into `docs/` by the user and into `impl/eh2/` as fixes.
-- **EH-2 + Double Ratchet built and live-verified** (`impl/eh2/`, opt-in via
-  `?eh2=1` / `--eh2`; `npm run eh2-test` passes against the onchato relay).
-  Default content crypto is **still the interim box** until the two-browser
-  validation says otherwise.
+- **EH-2 + Double Ratchet is the default content crypto** since the two-browser
+  validation passed (Chromium + Firefox, handshake in ~2 s). The interim box is
+  now only `?eh2=0` / `--no-eh2` and is scheduled for deletion.
 - **WebRTC direct data plane (P1) done + verified live** (two browsers,
   DataChannel both ways, badge ⚪ Relay → 🟢 WebRTC Direct). Ready to deploy.
 - Known follow-ups in the EH-2 area: bounded session lifetime / re-handshake

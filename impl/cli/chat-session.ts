@@ -16,8 +16,8 @@ const time = (ts: number) => `${C.sys}${utcHHMM(ts)}${C.reset}`
 export async function runChatSession(
   id: Identity, peerPub: string, meName: string, peerName: string, relay: string,
   params?: RoomParams,
-  /** Seal content with EH-2 + ratchet (§6–7) instead of the interim key. Both sides must agree. */
-  eh2 = false,
+  /** Seal content with EH-2 + ratchet (§6–7); `false` picks the interim key. Both sides must agree. */
+  eh2 = true,
 ) {
   console.log(`${C.sys}— connecting via relay…${C.reset}`)
 

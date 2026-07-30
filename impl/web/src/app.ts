@@ -343,11 +343,12 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
 }
 const setTyping = (on: boolean, name = '') => { $('typing-ind').textContent = on ? `${name} pisze…` : '' }
 /**
- * EH-2 (§6–7) instead of the interim static key. Opt-in for now — open the app
- * with `?eh2=1` on BOTH sides; mixing modes means the peers cannot read each
- * other (different content crypto entirely).
+ * EH-2 (§6–7) is the default content crypto. `?eh2=0` falls back to the interim
+ * static key, which exists only until the last client that needs it is gone.
+ * Both sides must agree — mixing modes means the peers cannot read each other
+ * (different content crypto entirely), so `eh2=0` is a two-browser decision.
  */
-const EH2 = new URLSearchParams(location.search).has('eh2')
+const EH2 = (new URLSearchParams(location.search).get('eh2') ?? '1') !== '0'
 /** `?debug=1` adds per-frame lines (every handshake frame, every sealed payload). */
 const DEBUG = new URLSearchParams(location.search).has('debug')
 
@@ -365,7 +366,7 @@ function ecLog(msg: string, level: 'info' | 'debug' = 'info') {
   const style = level === 'debug' ? 'color:#79829c' : 'color:#6579e0;font-weight:600'
   console.log(`%c[ec ${t}s] %c${msg}`, 'color:#74788d', style)
 }
-ecLog(`app start — eh2=${EH2} debug=${DEBUG}; add ?eh2=1&debug=1 for the full trace`)
+ecLog(`app start — eh2=${EH2} debug=${DEBUG}; add ?debug=1 for the full trace, ?eh2=0 for the old crypto`)
 
 function setSecurity(_peer: string, state: 'handshaking' | 'established' | 'failed') {
   const b = $('e2e-badge')
