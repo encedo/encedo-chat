@@ -24,7 +24,15 @@ export interface WebRTCPlane {
   stop(): void
 }
 
-export function attachWebRTC(room: RoomDataPlane, self: string, opts: { onState?: (s: string) => void } = {}): WebRTCPlane {
+export interface WebRTCPlaneOpts {
+  onState?: (s: string) => void
+  /** Override the negotiation deadline (tests; production waits the full 10 s). */
+  attemptMs?: number
+  /** Build the link. Only tests replace it — `RTCPeerConnection` is browser-only. */
+  makeLink?: typeof webrtcLink
+}
+
+export function attachWebRTC(room: RoomDataPlane, self: string, opts: WebRTCPlaneOpts = {}): WebRTCPlane {
   let link: WebRTCLink | null = null
   /** Which PeerId `link` was built for. A reload gives the peer a new one. */
   let linkPeer: string | null = null
@@ -34,7 +42,22 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: { onState?
   let demoted = false
 
   /**
-   * Build the link for `peer`, replacing one built for a PeerId that is gone.
+   * How long an attempt gets to prove itself before we start over, and how many
+   * times. Signalling rides GossipSub, which is fire-and-forget: an offer or an
+   * answer that reaches nobody used to end the story, because unlike the EH-2
+   * handshake nothing here ever retried. A conversation then spent its whole
+   * life on the relay for the loss of one frame — and whether that happened was
+   * pure luck, which is exactly how it presented (the same pair of browsers
+   * going direct on one run and not on the next).
+   */
+  const ATTEMPT_MS = opts.attemptMs ?? 10_000
+  const MAX_ATTEMPTS = 3
+  let attempt = 0
+  let attemptTimer: any = null
+  const stopAttemptTimer = () => { clearTimeout(attemptTimer); attemptTimer = null }
+
+  /**
+   * Point the plane at `peer`, replacing a link built for a PeerId that is gone.
    *
    * The replacement is the point. A link is bound to the PeerId it was created
    * for — every signal it sends is addressed to it — so when the peer reloads
@@ -46,6 +69,7 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: { onState?
   const onPeer = (peer: string) => {
     if (peer === self) return
     if (link && linkPeer === peer) return
+    attempt = 0
     if (link) {
       opts.onState?.(`rebind ${linkPeer?.slice(0, 12)}… → ${peer.slice(0, 12)}…`)
       try { link.close() } catch {}
@@ -55,14 +79,34 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: { onState?
       demoted = false
     }
     linkPeer = peer
-    link = webrtcLink({
+    connect(peer)
+  }
+
+  /** One negotiation attempt with `peer`, replacing whatever is there. */
+  const connect = (peer: string) => {
+    stopAttemptTimer()
+    attempt++
+    try { link?.close() } catch {}
+    link = (opts.makeLink ?? webrtcLink)({
       initiator: self < peer, // deterministic: lower PeerId offers
       sendSignal: (sig) => room.sendSignal(peer, sig),
       onData: (bytes) => room.injectContent(bytes, peer),
-      onOpen: () => { if (!demoted && linkPeer === peer) room.setContentSend((sealed) => link!.send(sealed)) }, // content → DataChannel
+      onOpen: () => { // the ping/pong came back: this channel really carries
+        stopAttemptTimer()
+        if (!demoted && linkPeer === peer) room.setContentSend((sealed) => link!.send(sealed))
+      },
       onClose: () => { if (linkPeer === peer) room.setContentSend(null) }, // fall back to GossipSub
       onState: opts.onState,
     })
+    // Only the offering side can restart a negotiation; the answering side has
+    // nothing to re-send and would only fight the retry.
+    if (!(self < peer) || attempt >= MAX_ATTEMPTS) return
+    attemptTimer = setTimeout(() => {
+      if (demoted || linkPeer !== peer || link?.ready) return
+      opts.onState?.(`no channel after ${ATTEMPT_MS} ms — offering again (attempt ${attempt + 1}/${MAX_ATTEMPTS})`)
+      connect(peer)
+    }, ATTEMPT_MS)
+    ;(attemptTimer as any).unref?.()
   }
 
   return {
@@ -70,6 +114,7 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: { onState?
     demote() {
       if (demoted) return
       demoted = true
+      stopAttemptTimer()
       opts.onState?.('demoted=relay')
       room.setContentSend(null)
     },
@@ -85,6 +130,6 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: { onState?
       if (linkPeer !== from) onPeer(from) // first signal, or the peer came back under a new PeerId
       void link?.handleSignal(env.sig)
     },
-    stop() { try { link?.close() } catch {} ; link = null; linkPeer = null; room.setContentSend(null) },
+    stop() { stopAttemptTimer(); try { link?.close() } catch {} ; link = null; linkPeer = null; room.setContentSend(null) },
   }
 }

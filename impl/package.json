@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "v6 TS spike \u2014 rendezvous spine on the v5 libp2p base. Crypto handshake (EH-2/ratchet) held pending cryptographer review.",
+  "description": "v6 TS spike — rendezvous spine on the v5 libp2p base. Crypto handshake (EH-2/ratchet) held pending cryptographer review.",
   "engines": {
     "node": ">=22"
   },
@@ -20,7 +20,8 @@
     "web:build": "webpack --config web/webpack.config.cjs --mode production",
     "web:dev": "webpack serve --config web/webpack.config.cjs --mode development",
     "room-sim": "node net/room-sim.ts",
-    "browser-test": "node net/browser-test.ts"
+    "browser-test": "node net/browser-test.ts",
+    "browser-test:ff": "BROWSERS=chromium,firefox node net/browser-test.ts"
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.2",

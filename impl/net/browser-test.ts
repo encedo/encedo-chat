@@ -1,17 +1,25 @@
 /**
  * browser-test.ts — drive the REAL web app in two headless browsers.
  *
- *   node net/browser-test.ts                       # against production
+ *   node net/browser-test.ts                        # Chromium ×2
+ *   BROWSERS=chromium,firefox node net/browser-test.ts
  *   APP_URL=http://localhost:3000/?eh2=1 node net/browser-test.ts
  *
  * Everything else we run is Node, and Node has no RTCPeerConnection — so the
  * WebRTC data plane, the one that actually carries content in a browser once
  * two peers meet, was covered by nothing but manual clicking. This closes that:
- * two Chromium instances with separate profiles (separate identities), the
- * deployed bundle, the real relay, and the app driven through its own DOM.
+ * two browsers with separate profiles (separate identities), the deployed
+ * bundle, the real relay, and the app driven through its own DOM.
  *
- * Speaks CDP over a WebSocket directly — no Puppeteer, no new dependency; Node
- * 24 has WebSocket built in and Chromium is already on the machine.
+ * **Two protocols, because the browsers do not agree on one.** Chromium speaks
+ * CDP; Firefox removed CDP in 129 and speaks **WebDriver BiDi**. Both are just
+ * JSON over a WebSocket, so both drivers live here behind one `Page` interface
+ * and no dependency is needed — Node 24 has WebSocket built in, and both
+ * browsers are already on the machine.
+ *
+ * The mixed pair is the point: Chromium↔Chromium says nothing about ICE between
+ * two different implementations, and a real session between them is exactly
+ * where "connected, but over the relay" was first noticed.
  *
  * It asserts the things a user would notice: the EH-2 badge turning green on
  * BOTH sides, messages arriving each way, the delivery mark appearing (so the
@@ -23,7 +31,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { join, extname } from 'node:path'
 
 /**
@@ -57,24 +65,51 @@ function serveDist(): Server {
   return srv
 }
 const CHROME = process.env.CHROME ?? '/usr/bin/chromium-browser'
+const FIREFOX = process.env.FIREFOX ?? '/usr/bin/firefox'
 const HEADFUL = process.env.HEADFUL === '1'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * What a scenario needs from a browser, whichever protocol it speaks. Anything
+ * one browser can do and the other cannot (freezing a tab) is optional here and
+ * degrades to nothing rather than failing the run.
+ */
+abstract class Page {
+  readonly console: string[] = []
+  name: string
+  constructor(name: string) { this.name = name }
+
+  abstract start(url: string): Promise<void>
+  abstract eval<T = any>(expression: string): Promise<T>
+  abstract resize(width: number, height: number): Promise<void>
+  abstract reload(url: string): Promise<void>
+  abstract stop(): Promise<void>
+  /** Put the tab into the frozen lifecycle state. CDP only; a no-op elsewhere. */
+  async freeze(_frozen: boolean): Promise<void> {}
+
+  async waitFor<T>(what: string, expression: string, ms = 30_000): Promise<T> {
+    const t0 = Date.now()
+    for (;;) {
+      const v = await this.eval<T>(expression)
+      if (v) return v
+      if (Date.now() - t0 > ms) throw new Error(`${this.name}: timed out waiting for ${what}`)
+      await sleep(250)
+    }
+  }
+}
+
 /** A Chromium instance plus the CDP session for its one page. */
-class Browser {
+class Browser extends Page {
   proc!: ChildProcess
   ws!: WebSocket
   sessionId!: string
   dir!: string
   private next = 1
   private waiting = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>()
-  readonly console: string[] = []
 
   // no parameter properties: Node runs this .ts in strip-only mode
-  name: string
-  port: number
-  constructor(name: string, port: number) { this.name = name; this.port = port }
+  constructor(name: string) { super(name) }
 
   async start(url: string): Promise<void> {
     this.dir = mkdtempSync(join(tmpdir(), `ec-${this.name}-`))
@@ -174,14 +209,9 @@ class Browser {
     return r.result?.value
   }
 
-  async waitFor<T>(what: string, expression: string, ms = 30_000): Promise<T> {
-    const t0 = Date.now()
-    for (;;) {
-      const v = await this.eval<T>(expression)
-      if (v) return v
-      if (Date.now() - t0 > ms) throw new Error(`${this.name}: timed out waiting for ${what}`)
-      await sleep(250)
-    }
+  /** Freeze/thaw the tab (best effort: not every build allows it). */
+  async freeze(frozen: boolean) {
+    try { await this.send('Page.setWebLifecycleState', { state: frozen ? 'frozen' : 'active' }, true) } catch {}
   }
 
   /** Resize the viewport — layout rules that only apply at some widths need it. */
@@ -233,25 +263,194 @@ class Browser {
   }
 }
 
+/**
+ * A Firefox instance driven over **WebDriver BiDi** — Firefox has spoken no CDP
+ * since 129, and BiDi is what replaced it. Same shape as the CDP driver: spawn,
+ * read the endpoint the browser prints on stderr, then JSON over a WebSocket.
+ *
+ * Two things about it are not obvious and both cost a debugging round:
+ *
+ *  - **The profile must live somewhere the snap can see.** Ubuntu's Firefox is a
+ *    snap, and snap confinement hides dot-directories in $HOME, so a profile
+ *    under `~/.cache/…` is silently unusable — Firefox falls back to the user's
+ *    real profile, hits its lock, and prints "Firefox is already running".
+ *    `~/snap/firefox/common` is inside the sandbox and works.
+ *  - **BiDi returns structured values, not JSON.** `script.evaluate` answers with
+ *    a RemoteValue tree ({type:'number', value:…}, objects as entry lists), so
+ *    everything has to be turned back into plain data — see `plain()`.
+ */
+class Firefox extends Page {
+  proc!: ChildProcess
+  ws!: WebSocket
+  dir!: string
+  private context!: string
+  private next = 1
+  private waiting = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>()
+
+  constructor(name: string) { super(name) }
+
+  async start(url: string): Promise<void> {
+    const snapCommon = join(homedir(), 'snap', 'firefox', 'common')
+    const base = existsSync(snapCommon) ? snapCommon : tmpdir()
+    this.dir = mkdtempSync(join(base, `ec-${this.name}-`))
+    this.proc = spawn(FIREFOX, [
+      ...(HEADFUL ? [] : ['--headless']),
+      '--new-instance',
+      '--profile', this.dir,
+      '--remote-debugging-port', '0', // let it choose; we read the port it announces
+      url,
+    ], { stdio: ['ignore', 'ignore', 'pipe'] })
+
+    const endpoint = await this.discover()
+    this.ws = new WebSocket(endpoint)
+    await new Promise<void>((res, rej) => {
+      this.ws.addEventListener('open', () => res(), { once: true })
+      this.ws.addEventListener('error', () => rej(new Error(`${this.name}: BiDi socket failed`)), { once: true })
+    })
+    this.ws.addEventListener('message', (ev: any) => this.onMessage(String(ev.data)))
+
+    await this.send('session.new', { capabilities: {} })
+    await this.send('session.subscribe', { events: ['log.entryAdded'] })
+    // The context exists as soon as the window does, but "as soon as" is not
+    // instant on a cold profile.
+    for (let i = 0; ; i++) {
+      const tree = await this.send('browsingContext.getTree', {})
+      const ctx = tree.contexts?.[0]?.context
+      if (ctx) { this.context = ctx; break }
+      if (i > 40) throw new Error(`${this.name}: Firefox never opened a browsing context`)
+      await sleep(250)
+    }
+  }
+
+  /** Firefox prints `WebDriver BiDi listening on ws://…` on stderr. */
+  private async discover(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      let buf = ''
+      const timer = setTimeout(() => reject(new Error(`${this.name}: Firefox never announced a BiDi endpoint`)), 40_000)
+      this.proc.stderr?.on('data', (chunk: Buffer) => {
+        buf += chunk.toString()
+        const m = buf.match(/WebDriver BiDi listening on (ws:\/\/\S+)/)
+        if (m) { clearTimeout(timer); resolve(`${m[1]}/session`) }
+      })
+      this.proc.on('exit', (code) => { clearTimeout(timer); reject(new Error(`${this.name}: Firefox exited (${code})`)) })
+    })
+  }
+
+  private onMessage(raw: string) {
+    const msg = JSON.parse(raw)
+    if (msg.id && this.waiting.has(msg.id)) {
+      const w = this.waiting.get(msg.id)!
+      this.waiting.delete(msg.id)
+      msg.type === 'error' ? w.reject(new Error(`${this.name}: ${msg.error} ${msg.message ?? ''}`)) : w.resolve(msg.result)
+      return
+    }
+    if (msg.type === 'event' && msg.method === 'log.entryAdded') {
+      const isCss = (v: any) => typeof v === 'string' && /^(color|font|background)\s*:/.test(v)
+      const args = (msg.params.args ?? []).map((a: any) => plain(a)).filter((v: any) => !isCss(v))
+      const text = args.length ? args.join(' ') : (msg.params.text ?? '')
+      if (String(text).trim()) this.console.push(String(text).replace(/%c/g, '').trim())
+    }
+  }
+
+  send(method: string, params: any = {}): Promise<any> {
+    const id = this.next++
+    this.ws.send(JSON.stringify({ id, method, params }))
+    return new Promise((resolve, reject) => {
+      this.waiting.set(id, { resolve, reject })
+      setTimeout(() => { if (this.waiting.delete(id)) reject(new Error(`${this.name}: ${method} timed out`)) }, 30_000)
+    })
+  }
+
+  async eval<T = any>(expression: string): Promise<T> {
+    const r = await this.send('script.evaluate', {
+      expression: `(() => { ${expression} })()`,
+      target: { context: this.context },
+      awaitPromise: true,
+      serializationOptions: { maxObjectDepth: 5, maxDomDepth: 0 },
+    })
+    if (r.type === 'exception') throw new Error(`${this.name}: ${r.exceptionDetails?.text ?? 'eval failed'}`)
+    return plain(r.result) as T
+  }
+
+  async resize(width: number, height: number) {
+    await this.send('browsingContext.setViewport', { context: this.context, viewport: { width, height } })
+    await sleep(200)
+  }
+
+  async reload(url: string) {
+    await this.send('browsingContext.navigate', { context: this.context, url, wait: 'complete' })
+    await sleep(1200)
+  }
+
+  async stop() {
+    // Same lesson as the CDP driver: ask over the socket we already hold, and
+    // say so out loud if the process still refuses to go.
+    try { this.ws?.send(JSON.stringify({ id: this.next++, method: 'browser.close', params: {} })) } catch {}
+    const quit = await this.exited(4_000)
+    try { this.ws?.close() } catch {}
+    if (!quit) {
+      try { this.proc.kill('SIGKILL') } catch (e: any) {
+        console.log(`⚠ ${this.name}: cannot signal Firefox (${e?.code ?? e})`)
+      }
+      if (!(await this.exited(3_000))) {
+        console.log(`⚠ ${this.name}: Firefox (pid ${this.proc.pid}) is STILL RUNNING — kill it by hand,`
+          + ' leaked browsers from repeated runs are what exhausts this machine')
+      }
+    }
+    try { rmSync(this.dir, { recursive: true, force: true }) } catch {}
+  }
+
+  private exited(ms: number): Promise<boolean> {
+    if (this.proc.exitCode !== null || this.proc.signalCode !== null) return Promise.resolve(true)
+    return new Promise((res) => {
+      const t = setTimeout(() => res(false), ms)
+      this.proc.once('exit', () => { clearTimeout(t); res(true) })
+    })
+  }
+}
+
+/** BiDi RemoteValue → plain JS. Objects arrive as entry lists, arrays as lists. */
+function plain(v: any): any {
+  if (!v || typeof v !== 'object') return v
+  switch (v.type) {
+    case 'undefined': case 'null': return null
+    case 'string': case 'number': case 'boolean': case 'bigint': return v.value
+    case 'array': case 'set': return (v.value ?? []).map(plain)
+    case 'object': case 'map': return Object.fromEntries((v.value ?? []).map(([k, val]: any[]) => [plain(k), plain(val)]))
+    default: return v.value ?? null
+  }
+}
+
 const step = (msg: string) => console.log(`• ${msg}`)
 const scenario = (name: string) => console.log(`\n▸ ${name}`)
 
 const BADGE_GREEN = `return document.getElementById('e2e-badge').textContent.includes('ratchet') ? document.getElementById('e2e-badge').textContent : ''`
-const send = (b: Browser, text: string) => b.eval(`
+const send = (b: Page, text: string) => b.eval(`
   const i = document.getElementById('msg-input'); i.value = ${JSON.stringify(text)};
   document.getElementById('send').click(); return 1;
 `)
 const seen = (text: string) => `return document.getElementById('messages').textContent.includes(${JSON.stringify(text)})`
 
+/**
+ * Which two browsers to pair. `chromium,firefox` is the mixed run — the one that
+ * says anything about ICE between different implementations.
+ */
+const PAIR = (process.env.BROWSERS ?? 'chromium,chromium').split(',').map((s) => s.trim().toLowerCase())
+const makePage = (kind: string, name: string): Page => {
+  if (kind === 'firefox') return new Firefox(name)
+  if (kind === 'chromium' || kind === 'chrome') return new Browser(name)
+  throw new Error(`unknown browser "${kind}" — use chromium or firefox`)
+}
+
 /** Log in with the software identity already in this profile's localStorage. */
-async function login(b: Browser, handle: string) {
+async function login(b: Page, handle: string) {
   await b.waitFor('login form', `return !!document.getElementById('go-soft')`)
   await b.eval(`(document.getElementById('handle')).value = ${JSON.stringify(handle)}; document.getElementById('go-soft').click();`)
   await b.waitFor('contact list', `return !!document.querySelector('#pane-contacts .contact')`)
 }
 
 /** Click a contact by its visible name. */
-async function openContact(b: Browser, name: string) {
+async function openContact(b: Page, name: string) {
   await b.eval(`
     const el = [...document.querySelectorAll('#pane-contacts .contact')]
       .find((c) => c.textContent.includes(${JSON.stringify(name)}));
@@ -261,7 +460,7 @@ async function openContact(b: Browser, name: string) {
 }
 
 /** One message each way — the check that a conversation is genuinely alive. */
-async function roundTrip(A: Browser, B: Browser, tag: string) {
+async function roundTrip(A: Page, B: Page, tag: string) {
   const a = `A-${tag}-${Date.now().toString(36)}`
   await send(A, a)
   await B.waitFor(`A→B (${tag})`, seen(a), 25_000)
@@ -271,13 +470,13 @@ async function roundTrip(A: Browser, B: Browser, tag: string) {
 }
 
 async function main() {
-  const A = new Browser('A', 0)
-  const B = new Browser('B', 0)
+  const A = makePage(PAIR[0], 'A')
+  const B = makePage(PAIR[1] ?? PAIR[0], 'B')
   const server = SERVE_LOCAL ? serveDist() : null
   if (server) step(`serving this checkout's web/dist on 127.0.0.1:${LOCAL_PORT}`)
   try {
     scenario('setup — two browsers, two identities, one room')
-    step(`launching Chromium ×2 on ${APP_URL}`)
+    step(`launching ${PAIR[0]} + ${PAIR[1] ?? PAIR[0]} on ${APP_URL}`)
     await Promise.all([A.start(APP_URL), B.start(APP_URL)])
 
     for (const [b, handle] of [[A, 'sim-a'], [B, 'sim-b']] as const) {
@@ -337,16 +536,16 @@ async function main() {
     // Browsers throttle timers in a hidden tab, so the Announce heartbeat goes
     // quiet and the peer eventually stops seeing us. What must NOT happen is
     // losing the session: coming back has to resume, not break.
-    const hide = (b: Browser, hidden: boolean) => b.eval(`
+    const hide = (b: Page, hidden: boolean) => b.eval(`
       Object.defineProperty(document, 'hidden', { value: ${hidden}, configurable: true });
       Object.defineProperty(document, 'visibilityState', { value: ${hidden ? "'hidden'" : "'visible'"}, configurable: true });
       document.dispatchEvent(new Event('visibilitychange'));
       return 1;
     `)
     await hide(B, true)
-    try { await B.send('Page.setWebLifecycleState', { state: 'frozen' }, true) } catch { /* best effort: not all builds allow it */ }
+    await B.freeze(true) // CDP only; on Firefox the visibility override alone has to do
     await sleep(12_000)
-    try { await B.send('Page.setWebLifecycleState', { state: 'active' }, true) } catch {}
+    await B.freeze(false)
     await hide(B, false)
     await roundTrip(A, B, 'after-background')
     step('messages flow after 12 s in the background')
@@ -409,6 +608,16 @@ async function main() {
     }
 
     console.log(`\nPASS — all scenarios${direct ? ' (content over WebRTC Direct)' : ' — but WebRTC never came up, see above'}`)
+    if (!direct) {
+      // Staying on the relay is a result, not a crash, so nothing would have
+      // printed — and then the one question worth answering ("why?") needs a
+      // whole rerun. The signalling trace is what answers it.
+      for (const b of [A, B]) {
+        const lines = b.console.filter((l) => /webrtc|rtc|signal|ice|probe/i.test(l))
+        console.log(`\n--- ${b.name}: signalling trace ---`)
+        console.log(lines.slice(-25).join('\n') || '(nothing — the plane never said a word)')
+      }
+    }
     process.exitCode = direct ? 0 : 1
   } catch (e: any) {
     console.log(`\nFAIL — ${e?.message ?? e}`)

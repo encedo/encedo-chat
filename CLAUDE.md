@@ -200,6 +200,33 @@ two-browser testing. ECDH via `crypto.subtle` (no 3rd-party crypto), byte-for-by
 == node/HEM raw X25519, so it interoperates with HEM identities. `localOnlyManager`
 gives it a local-only contact book.
 
+### Test harnesses — what each one actually covers
+
+| command | what it exercises |
+|---|---|
+| `npm test` | unit + offline integration over a mock pubsub (`test/*.test.ts`) |
+| `npm run room-sim` | seeded synthetic network: loss, duplication, reorder, staggered joins, a throttled tab |
+| `npm run gui-sim` | the `core.ts` facade the GUI buttons drive, printing a timeline |
+| `npm run eh2-test` / `chat-test` / `meet` | live against the **real onchato relay** |
+| `npm run browser-test` | two headless **Chromium**, the real bundle, the real relay, driven through the DOM |
+| `npm run browser-test:ff` | the same scenarios with **Chromium + Firefox** |
+
+The browser harness is the only thing that covers the **WebRTC data plane** —
+Node has no `RTCPeerConnection`. It speaks two protocols because the browsers do
+not agree on one: CDP for Chromium, **WebDriver BiDi** for Firefox (which
+dropped CDP in 129). Both are JSON over a WebSocket that Node 24 already has, so
+neither needs a dependency; they live behind one `Page` class in
+`net/browser-test.ts`. Two things about the Firefox side are not obvious and both
+cost a debugging round: its profile must sit somewhere a **snap** can see
+(`~/snap/firefox/common/…`, because snap confinement hides dot-directories, and
+Firefox then silently falls back to the user's real profile and hits its lock),
+and BiDi answers with structured RemoteValues rather than JSON, so results need
+converting back to plain data.
+
+**Never pipe `browser-test` through `tail`** — it buffers and hides all progress;
+redirect to a file instead. And watch what it leaves behind: leaked browsers from
+repeated runs are what once exhausted this machine (`pgrep -f chrome`, `free -m`).
+
 ### Delivery contract — acks, backoff, and the ⚠ marker
 
 **Nothing under us retransmits.** GossipSub is fire-and-forget and a DataChannel
@@ -236,6 +263,14 @@ peer as `quiet` after ~35 s without an Announce (2.5 missed heartbeats), well
 before the 90 s that count as `leave`: the ratchet is untouched and one Announce
 takes it back to `active`. Before this there was a minute and a half in which a
 green badge and a dead connection looked exactly alike.
+
+**Signalling retries too.** An offer or an answer rides GossipSub, which is
+fire-and-forget, and nothing here used to re-send — so one lost frame put a
+conversation on the relay for its whole life, and whether that happened was
+luck. The offering side (lower PeerId; the answering side must not fight it) now
+re-offers after 10 s without a proven channel, three attempts, then stays on the
+relay. `test/webrtc-plane.test.ts` covers this and the rebind with an injected
+link (`makeLink`) — `RTCPeerConnection` does not exist in Node.
 
 **The first unconfirmed re-send demotes the direct path — but only if content is
 actually riding it.** A DataChannel that goes deaf mid-conversation is worse than
