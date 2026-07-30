@@ -102,15 +102,49 @@ const until = async (cond: () => boolean, ms: number) => {
   return true
 }
 
-interface Result { profile: string; established: boolean; msEstablished: number; aGot: number; bGot: number; quietOk: boolean; ok: boolean }
+interface Result {
+  profile: string; established: boolean; msEstablished: number
+  aGot: number; bGot: number; quietOk: boolean
+  /** Arrivals that belonged behind something already delivered. */
+  reordered: number
+  /** …of those, how many the room FAILED to flag. Any is a bug. */
+  unflagged: number
+  ok: boolean
+}
+
+/** Received message, with what the room said about it. */
+interface Got { body: string; outOfOrder: boolean }
 
 /**
- * Two different promises, judged separately:
+ * Bodies are `x-0`, `x-1`, `x-2` — sent in that order — so the sender's order is
+ * readable from the text. Every arrival that goes backwards must have been
+ * flagged; an unflagged one means the receiver silently showed an answer before
+ * its question.
+ */
+function checkOrder(got: Got[]): { reordered: number; unflagged: number } {
+  let top = -1, reordered = 0, unflagged = 0
+  for (const g of got) {
+    const n = Number(g.body.split('-')[1])
+    if (!Number.isFinite(n)) continue
+    if (n > top) { top = n; continue }
+    reordered++
+    if (!g.outOfOrder) unflagged++
+  }
+  return { reordered, unflagged }
+}
+
+/**
+ * Three promises, judged separately:
  *  - the HANDSHAKE must always complete — it retries, so loss may delay it but
  *    must never leave the pair without a ratchet;
- *  - message DELIVERY is best-effort. Content rides GossipSub once, with no
- *    retransmission, so on a lossy path messages are simply lost. That is the
- *    current design, not a regression — the sim measures it instead of hiding it.
+ *  - message DELIVERY now survives loss too: content is confirmed and re-sent
+ *    until the peer acks it, so even the 30%-loss profile should get everything
+ *    through. (It did not always: this was best-effort until acks existed, and
+ *    the sim measured the losses instead of hiding them.)
+ *  - ORDER is not promised — jitter and re-sends genuinely shuffle messages —
+ *    but honesty about it is: every arrival that belongs behind one already
+ *    shown must be FLAGGED, so the UI can put it where it was written. An
+ *    unflagged reorder fails the run.
  */
 
 async function runOnce(p: NetProfile, seed: number): Promise<Result> {
@@ -119,19 +153,21 @@ async function runOnce(p: NetProfile, seed: number): Promise<Result> {
   const ss = new Uint8Array(32).fill(0x5e)
   const macKey = await announceMacKey(ss, { networkId: 'sim', dateUTC: '2026-07-29' })
   const [ikA, ikB] = [await generateX25519(), await generateX25519()]
-  const aGot: string[] = []
-  const bGot: string[] = []
+  const aGot: Got[] = []
+  const bGot: Got[] = []
   const eh2 = (ik: any, peerPub: Uint8Array) => ({ ik, peerIkPub: peerPub, attemptTimeoutMs: 800 })
   const t0 = Date.now()
 
   const A = joinChat(net.node('peer-a'), 'sim', { macKey, eh2: eh2(ikA, ikB.pub) }, {
-    firstAnnounceMs: 50, heartbeatMs: 1_000, onMessage: (_f, m) => aGot.push(m.body),
+    firstAnnounceMs: 50, heartbeatMs: 1_000,
+    onMessage: (_f, m, meta) => aGot.push({ body: m.body, outOfOrder: meta.outOfOrder }),
     onLog: LOG ? (m, lvl) => console.log(`    A${lvl === 'debug' ? '·' : ' '} ${m}`) : undefined,
     onUndelivered: LOG ? (id) => console.log(`    A  UNDELIVERED ${id}`) : undefined,
   })
   await new Promise((r) => setTimeout(r, p.joinGapMs))
   const B = joinChat(net.node('peer-b'), 'sim', { macKey, eh2: eh2(ikB, ikA.pub) }, {
-    firstAnnounceMs: 50, heartbeatMs: 1_000, onMessage: (_f, m) => bGot.push(m.body),
+    firstAnnounceMs: 50, heartbeatMs: 1_000,
+    onMessage: (_f, m, meta) => bGot.push({ body: m.body, outOfOrder: meta.outOfOrder }),
     onLog: LOG ? (m, lvl) => console.log(`    B${lvl === 'debug' ? '·' : ' '} ${m}`) : undefined,
     onUndelivered: LOG ? (id) => console.log(`    B  UNDELIVERED ${id}`) : undefined,
   })
@@ -156,14 +192,20 @@ async function runOnce(p: NetProfile, seed: number): Promise<Result> {
     net.silence('peer-b', p.quietMs)
     await new Promise((r) => setTimeout(r, p.quietMs + 200))
     B.sendText('back-from-background')
-    quietOk = await until(() => aGot.includes('back-from-background'), 8_000)
+    quietOk = await until(() => aGot.some((g) => g.body === 'back-from-background'), 8_000)
   }
 
   A.stop(); B.stop(); net.stop()
+  const order = [checkOrder(aGot), checkOrder(bGot)]
+  const reordered = order[0].reordered + order[1].reordered
+  const unflagged = order[0].unflagged + order[1].unflagged
   return {
     profile: p.name, established, msEstablished,
-    aGot: aGot.length, bGot: bGot.length, quietOk,
-    ok: established && quietOk && (lossless ? delivered : aGot.length + bGot.length > 0),
+    aGot: aGot.length, bGot: bGot.length, quietOk, reordered, unflagged,
+    // An unflagged reorder fails the run on ANY profile: jitter is allowed to
+    // shuffle messages, the receiver is not allowed to keep quiet about it.
+    ok: established && quietOk && unflagged === 0
+      && (lossless ? delivered : aGot.length + bGot.length > 0),
   }
 }
 
@@ -193,6 +235,7 @@ for (let i = 0; i < RUNS; i++) {
   console.log(
     `${mark} ${p.name.padEnd(18)} seed=${seed}  established=${r.established ? `${r.msEstablished} ms` : 'NO'}` +
     `  delivered=${Math.min(3, r.aGot) + Math.min(3, r.bGot)}/6${lost ? ` (lost ${lost})` : ''}` +
+    `${r.reordered ? `  reordered=${r.reordered}${r.unflagged ? ` (UNFLAGGED ${r.unflagged})` : ' (all flagged)'}` : ''}` +
     `${p.quietMs ? `  after-quiet=${r.quietOk ? 'ok' : 'LOST'}` : ''}`,
   )
 }
@@ -203,6 +246,9 @@ const totalSent = results.length * 6
 const totalGot = results.reduce((n, r) => n + Math.min(3, r.aGot) + Math.min(3, r.bGot), 0)
 console.log(`\nhandshakes: ${results.length - noHandshake.length}/${results.length} completed`)
 console.log(`content delivery across all profiles (incl. deliberately lossy ones): ${totalGot}/${totalSent}`)
+const reordered = results.reduce((n, r) => n + r.reordered, 0)
+const unflagged = results.reduce((n, r) => n + r.unflagged, 0)
+console.log(`arrived out of order: ${reordered}, of which unflagged: ${unflagged}`)
 const times = results.filter((r) => r.established).map((r) => r.msEstablished).sort((a, b) => a - b)
 console.log(`\nestablished: median ${times[Math.floor(times.length / 2)]} ms, worst ${times[times.length - 1]} ms`)
 if (bad.length === 0) { console.log(`PASS — ${results.length}/${results.length} runs`); process.exit(0) }

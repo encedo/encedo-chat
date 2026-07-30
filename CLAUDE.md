@@ -256,8 +256,12 @@ connection comes back and on `refresh()`.
 
 **Two different silences, told apart.** `onLink` (core) reports *our own*
 transport — `online` / `reconnecting` / `offline` — driven by libp2p's
-`connection:close` plus a 10 s poll, because a frozen tab wakes with a socket
-that is dead and never fired a close. Core re-dials by itself with backoff
+`connection:close`, a 10 s poll, and above all by **what the transport actually
+delivers**: GossipSub reports how many peers a publish reached, and two
+heartbeats in a row reaching zero means we are talking to ourselves whatever
+`getConnections()` claims (`onIsolated` → hang up, then re-dial). That is the
+honest signal — an offline machine keeps a connection object nothing has tried
+to write to, which is why a cut network used to look perfectly healthy. Core re-dials by itself with backoff
 instead of waiting for the tab to be focused. Separately, the room now reports a
 peer as `quiet` after ~35 s without an Announce (2.5 missed heartbeats), well
 before the 90 s that count as `leave`: the ratchet is untouched and one Announce
@@ -325,6 +329,14 @@ Notes that matter for anyone touching this:
 - **KATs** (`test/eh2-handshake.test.ts`, `test/eh2-mlkem.test.ts`) pin the
   schedule with fixed keys — re-record deliberately, and use them when porting
   to `core-rs`.
+- **The session has a bounded lifetime (§7.3).** A fresh EH-2 is forced after a
+  randomised 4–8 h (`Eh2Options.sessionLifetimeMs`; the randomisation stops a
+  fleet re-keying in lockstep). It is not housekeeping: it caps classical-PCS
+  exposure, and it is the hard stop on a stolen unlocked device, because the
+  ratchet itself never touches the HSM but the re-handshake does (§9.3). It is
+  transparent — the running ratchet keeps carrying content until the replacement
+  is live, and the ratchet it replaces is kept for 60 s so frames already in
+  flight under it still open (the two sides do not switch at the same instant).
 - ML-KEM is the **one** third-party crypto dependency (WebCrypto has no ML-KEM);
   everything else is `crypto.subtle`.
 
@@ -353,6 +365,42 @@ reloaded / rotated its PeerId); the session is replaced only once msg3 verifies.
 Discovery itself is gated on the relay joining the topic (~0.5 s), which is why
 the room announces as soon as `getSubscribers(topic)` is non-empty rather than
 after a fixed delay.
+
+### Two windows, one identity — and other peers that are not the contact
+
+A pair topic can contain more than the two people it was derived for. A **second
+tab logged into the same identity** derives the same topic and the same Announce
+MAC key, so its announces verify perfectly and each tab takes the other for the
+contact. The handshake can never succeed — each side expects the CONTACT's
+identity key and is offered its own — and without a stop rule the two retried
+each other forever: badge flickering 🔐/⚠, conversation dead, flapping that
+outlived the extra tab (reported live, 2026-07-30).
+
+What settles it:
+
+- **`initiator_id` is the one conclusive statement about identity.** msg1 carries
+  it, derived from the sender's IK, and the responder compares it with the
+  contact it holds a key for. That check cannot be an accident of timing, so one
+  occurrence is enough: the peer is ignored for 5 minutes and the UI is told.
+  **Do not use a failed MAC for this** — honest peers that open handshakes at the
+  same moment produce `mac_i` failures routinely, and an earlier attempt at this
+  blacklisted the room's real contact within seconds.
+- **The retry escalation slows down, it never stops.** A link losing a third of
+  its frames needs many attempts before the first handshake lands (`room-sim`'s
+  35%-loss profile fails outright if this ever gives up), so all the backoff buys
+  is quiet: one attempt per 15 s instead of one per second.
+- **Two live windows both keep their sessions.** `retireOtherPeers` only retires
+  a PeerId that has stopped announcing (a reload goes silent instantly; a second
+  tab does not). Retiring on every new establishment handed the whole
+  conversation to whichever window handshaked last — which is what "everything
+  stopped working when I opened a second tab" was.
+- **The badge shows the best state, not the last event.** A room can hold several
+  peer ids; rendering whichever fired last made it flicker while a good session
+  was carrying messages.
+
+The proper fix is §9.1 — single active session per identity, resolved on the
+self-topic, where the older window shuts itself down. That is still to build;
+the above stops the damage without a wire change.
 
 ### ⚠️ INTERIM (fallback only — on its way out)
 

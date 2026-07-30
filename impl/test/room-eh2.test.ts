@@ -86,6 +86,9 @@ async function rooms(opts: {
   onUndeliveredA?: (id: string) => void
   onLateDeliveredA?: (id: string, ms: number) => void
   onStallA?: () => void
+  /** §7.3 bounded session lifetime — hours in production, milliseconds here. */
+  sessionLifetimeMs?: number
+  heartbeatMs?: number
   onMessageB?: (from: string, m: any, meta: { outOfOrder: boolean }) => void
   delayMs?: (d: Uint8Array, from: string) => number
   /**
@@ -106,6 +109,7 @@ async function rooms(opts: {
   const states: string[] = []
   const eh2 = (ik: any, peerPub: Uint8Array) => ({
     ik, peerIkPub: peerPub, attemptTimeoutMs: 300,
+    sessionLifetimeMs: opts.sessionLifetimeMs,
     onState: (p: string, s: string) => states.push(`${p}:${s}`),
   })
 
@@ -113,6 +117,7 @@ async function rooms(opts: {
   const replaced: string[] = []
   const A = joinChat(nodeA, TOPIC, { macKey, eh2: eh2(ikA, ikB.pub) }, {
     firstAnnounceMs: 5,
+    heartbeatMs: opts.heartbeatMs,
     onMessage: (_from, m) => opts.backA?.push(m.body),
     onDelivered: opts.onDeliveredA,
     onUndelivered: opts.onUndeliveredA,
@@ -123,6 +128,7 @@ async function rooms(opts: {
   })
   const B = joinChat(nodeB, TOPIC, { macKey, eh2: eh2(ikB, ikA.pub) }, {
     firstAnnounceMs: 5,
+    heartbeatMs: opts.heartbeatMs,
     onMessage: (from, m, meta) => { opts.collect.push(m.body); opts.onMessageB?.(from, m, meta) },
   })
   /** A second window for B's identity — same keys, new PeerId (a page reload). */
@@ -230,7 +236,10 @@ test('the PeerId a reloaded peer left behind is retired, not kept alive', async 
   // keyed by the old PeerId, the WebRTC plane above all, kept addressing a peer
   // that no longer existed.
   const got: string[] = []
-  const { A, B, rejoinB, replaced } = await rooms({ collect: got })
+  // Short heartbeat: retirement waits for the old PeerId to MISS one, which is
+  // the only thing that tells a reload apart from a second window (see the test
+  // below). In production that is ~22 s; here it is under a second.
+  const { A, B, rejoinB, replaced } = await rooms({ collect: got, heartbeatMs: 300 })
   await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
 
   B.stop()
@@ -240,6 +249,7 @@ test('the PeerId a reloaded peer left behind is retired, not kept alive', async 
   t.after(() => { A.stop(); B2.stop() })
 
   await until(() => A.secured().includes('peer-c'), 8000)
+  await until(() => A.secured().length === 1, 8000)
   assert.deepEqual(A.secured(), ['peer-c'], 'the old PeerId must not keep a session')
   assert.deepEqual(replaced, ['peer-b→peer-c'], 'the data plane has to be told the peer moved')
 
@@ -512,6 +522,57 @@ test('a backlog left by an outage goes out in the order it was written', async (
   A.flushPending()
   await until(() => got.length === 3, 5000)
   assert.deepEqual(got, ['pierwsza', 'druga', 'trzecia'])
+})
+
+test('a session is replaced on a timer, without the conversation noticing (§7.3)', async (t) => {
+  // The bounded lifetime is a security boundary, not housekeeping: it caps
+  // classical-PCS exposure and it is the hard stop on a stolen unlocked device,
+  // because the re-handshake needs the HSM the thief does not have (§9.3).
+  // What must NOT happen is a visible break — content keeps flowing across it.
+  const got: string[] = []
+  const { A, B, states } = await rooms({ collect: got, sessionLifetimeMs: 600, heartbeatMs: 300 })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+
+  A.sendText('przed re-keyem')
+  await until(() => got.length === 1)
+
+  const established = () => states.filter((s) => s.endsWith(':established')).length
+  const before = established()
+  await until(() => established() >= before + 2, 8000) // both sides re-established
+  assert.equal(A.secured().length, 1, 'still exactly one session — replaced, not accumulated')
+
+  A.sendText('po re-keyu')
+  await until(() => got.length === 2, 8000)
+  assert.deepEqual(got, ['przed re-keyem', 'po re-keyu'])
+})
+
+test('a second tab on the same identity is recognised, not handshaked with forever', async (t) => {
+  // Reported from a live session: a second browser tab logged into the same
+  // account joined the room, and the two tabs tried to handshake with each other
+  // for as long as they were open — badge flickering 🔐/⚠, conversation dead,
+  // and it kept going after the extra tab was closed. They cannot succeed: each
+  // expects the CONTACT's identity key and is offered its own. What they can do
+  // is notice, and stop.
+  const got: string[] = []
+  const { A, B, rejoinB } = await rooms({ collect: got })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+
+  const logs2: string[] = []
+  const B2 = rejoinB('peer-d', [], logs2) // same identity as B, its own PeerId
+  t.after(() => { A.stop(); B.stop(); B2.stop() })
+
+  await until(() => logs2.some((l) => l.includes('identifies as someone else')), 12_000)
+  // Attempts toward the OTHER TAB must stop. Attempts toward the real contact
+  // are none of this test's business.
+  const atTab = () => logs2.filter((l) => l.includes('attempt → peer-b')).length
+  const settled = atTab()
+  await new Promise((r) => setTimeout(r, 2_500))
+  assert.equal(atTab(), settled, 'no further attempts once the peer is known to be foreign')
+
+  // …and the real conversation is untouched by any of it.
+  A.sendText('mimo drugiej zakładki')
+  await until(() => got.includes('mimo drugiej zakładki'), 8000)
 })
 
 test('interim mode is untouched (no eh2 → static key, no handshake frames)', async (t) => {

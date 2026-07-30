@@ -213,6 +213,8 @@ export interface OpenOpts extends ChatOpts {
    * had no way to draw, so a frozen laptop and a peer who left looked identical.
    */
   onLink?: (state: LinkState) => void
+  /** Someone in the room is not this contact — usually a second tab on the same identity. */
+  onForeign?: ChatOpts['onForeign']
 }
 export type LinkState = 'online' | 'reconnecting' | 'offline'
 export interface Conversation {
@@ -277,6 +279,7 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     // dead — `getConnections()` still reports a connection nothing has tried to
     // write to, which is why an offline tab used to look perfectly healthy.
     onIsolated: () => { setLink('reconnecting'); void reconnect(true) },
+    onForeign: (peer) => { log(`foreign peer in the room: ${peer.slice(0, 12)}… — its handshake does not verify`); opts.onForeign?.(peer) },
   })
   if (opts.webrtc) plane = attachWebRTC(room, self, { onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
 

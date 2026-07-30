@@ -408,10 +408,24 @@ function ecLog(msg: string, level: 'info' | 'debug' = 'info') {
 }
 ecLog(`app start — eh2=${EH2} debug=${DEBUG}; add ?debug=1 for the full trace, ?eh2=0 for the old crypto`)
 
-function setSecurity(_peer: string, state: 'handshaking' | 'established' | 'failed') {
+/**
+ * Per-peer handshake state. The badge shows ONE thing, but a room can have more
+ * than one peer id in it — a peer that reloaded, or a second tab logged into the
+ * same identity, which can never complete a handshake with us. Rendering
+ * whichever event came last made the badge flicker 🔐 → ⚠ → 🔐 while a perfectly
+ * good session was carrying messages. The best state wins instead: if any peer
+ * has a live ratchet, we are secure, whatever the others are doing.
+ */
+const security = new Map<string, 'handshaking' | 'established' | 'failed'>()
+function setSecurity(peer: string, state: 'handshaking' | 'established' | 'failed') {
+  if (peer) security.set(peer, state)
+  else { security.clear(); security.set('', state) }
+  const states = [...security.values()]
+  const best = states.includes('established') ? 'established'
+    : states.includes('handshaking') ? 'handshaking' : 'failed'
   const b = $('e2e-badge')
-  if (state === 'established') { b.className = 'badge direct'; b.textContent = '🔐 EH-2 + ratchet'; b.title = 'Handshake EH-2 uzgodniony — forward secrecy per wiadomość, hybryda PQ (ML-KEM-768)' }
-  else if (state === 'handshaking') { b.className = 'badge e2e'; b.textContent = '🤝 EH-2 handshake…'; b.title = 'Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)' }
+  if (best === 'established') { b.className = 'badge direct'; b.textContent = '🔐 EH-2 + ratchet'; b.title = 'Handshake EH-2 uzgodniony — forward secrecy per wiadomość, hybryda PQ (ML-KEM-768)' }
+  else if (best === 'handshaking') { b.className = 'badge e2e'; b.textContent = '🤝 EH-2 handshake…'; b.title = 'Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)' }
   else { b.className = 'badge e2e'; b.textContent = '⚠️ EH-2 nieudany'; b.title = 'Handshake nie doszedł do skutku — ponowi się przy następnym Announce' }
 }
 
@@ -455,6 +469,7 @@ async function openChat(contact: Contact) {
      */
     let peerLabel = 'łączę…'
     let linkState: 'online' | 'reconnecting' | 'offline' = 'online'
+    let warnedForeign = false
     const paintStatus = () => {
       const dot = $('peer-dot'), txt = $('peer-status')
       if (linkState !== 'online') {
@@ -483,6 +498,16 @@ async function openChat(contact: Contact) {
       onTyping: (_from, state) => { peerTyping = state === 'start'; setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => addReaction(r.to, r.emoji),
       onFile: (_from, f) => appendMsg('sys', `${contact.name} udostępnił plik: ${f.name} — interim (IPFS TODO)`),
+      onForeign: () => {
+        // The user is the only one who can fix this, so say it in the transcript
+        // rather than in a console nobody has open. Two windows on one identity
+        // is by far the common cause; a rotated contact key is the other.
+        if (!warnedForeign) {
+          warnedForeign = true
+          appendMsg('sys', 'Uwaga: w tym pokoju jest ktoś, kto nie uwierzytelnia się jako ten kontakt'
+            + ' — najczęściej druga zakładka zalogowana na tę samą tożsamość. Zamknij jedną z nich.')
+        }
+      },
       onLink: (state) => {
         // Our own transport. It outranks whatever we last heard about the peer:
         // with no connection we do not actually know anything about them.

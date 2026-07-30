@@ -46,6 +46,11 @@ export interface Eh2Options {
   maxQueued?: number
   /** Give up on a silent attempt and start a new one after this long. */
   attemptTimeoutMs?: number
+  /**
+   * Force a fresh EH-2 after this long (§7.3 bounded session lifetime).
+   * Default: a random 4–8 h. Tests use seconds.
+   */
+  sessionLifetimeMs?: number
 }
 
 /** Exactly one of `session` (interim static key) or `eh2` is used for content. */
@@ -80,6 +85,14 @@ export interface ChatOpts {
    * (core) should re-dial.
    */
   onIsolated?: () => void
+  /**
+   * Somebody is in our room whose handshake does not verify. Most often that is
+   * a second window logged into the SAME identity (it holds the Announce key, so
+   * it looks like the contact until the MACs fail); it can also be a contact
+   * whose IK has changed. The UI should say so — the user is the only one who
+   * can close a duplicate tab.
+   */
+  onForeign?: (peer: string) => void
   /** The peer's client confirmed it holds this message (`ms` = time in flight). */
   onDelivered?: (id: string, ms: number) => void
   /** Gave up after retrying: the peer very likely never got it. */
@@ -129,6 +142,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const onStall = opts.onStall ?? (() => {})
   const onPeerReplaced = opts.onPeerReplaced ?? (() => {})
   const onIsolated = opts.onIsolated ?? (() => {})
+  const onForeign = opts.onForeign ?? (() => {})
   /** Heartbeats that must reach nobody before we call the transport dead. */
   const ISOLATED_AFTER = 2
   const heartbeatMs = opts.heartbeatMs ?? 15_000
@@ -374,6 +388,37 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const sessionFor = (peer: string): Session | undefined => (eh2 ? sessions.get(peer) : keys.session)
 
   /**
+   * The ratchet a peer had until the last re-handshake, kept briefly so a
+   * re-key does not eat the frames that were already in flight under it.
+   *
+   * The two sides do not switch at the same instant — the initiator switches
+   * when msg2 comes back, the responder only when msg3 arrives — and content
+   * sealed under the old ratchet can overtake msg3. Without this, every forced
+   * re-handshake would cost a message or two and look exactly like loss.
+   */
+  const previous = new Map<string, { session: Session; until: number }>()
+  const PREVIOUS_GRACE_MS = 60_000
+
+  /**
+   * When each live ratchet was established, and how long it may live (§7.3).
+   *
+   * The **bounded session lifetime** is not housekeeping — it is a security
+   * boundary in two directions. It caps how long a compromise of the classical
+   * DH chain matters (post-compromise security), and it is the hard stop on a
+   * stolen unlocked device: the ratchet itself never touches the HSM, so an
+   * attacker holding the machine can read a live session indefinitely — until
+   * the forced re-handshake, which needs `ecdh(IK, ·)` inside the HSM they do
+   * not have (§9.3). The self-topic takeover in §9.1 is coordination between
+   * honest clients; THIS is the control.
+   *
+   * The window is randomised per session so that a fleet of clients does not
+   * re-key in lockstep, which would be a metadata signal of its own.
+   */
+  const establishedAt = new Map<string, number>()
+  const lifetimeMs = eh2?.sessionLifetimeMs
+    ?? 4 * 3_600_000 + Math.floor(Math.random() * 4 * 3_600_000) // 4–8 h
+
+  /**
    * An attempt can simply be lost — the GossipSub mesh takes seconds to form
    * and the frames are fire-and-forget. So an attempt that produces nothing is
    * abandoned after this long and started over, rather than pending forever.
@@ -396,6 +441,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const forgetPeer = (peer: string) => {
     clearAttempt(peer)
     sessions.delete(peer)
+    previous.delete(peer)
+    establishedAt.delete(peer)
     stuck.delete(peer)
     acking.delete(peer)
   }
@@ -416,6 +463,18 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const retireOtherPeers = (keep: string) => {
     for (const old of [...sessions.keys()]) {
       if (old === keep) continue
+      // …but only if that PeerId has actually stopped answering. A reloaded tab
+      // goes silent the instant it reloads, so this fires within a heartbeat.
+      // A SECOND tab of the same identity does not: it keeps announcing, and
+      // retiring it would hand the whole conversation to whichever window
+      // handshaked last — which is precisely what "everything stopped working
+      // when I opened a second tab" was. Two live windows both get the
+      // messages; `emitContent` already seals for every session.
+      const silence = nowMs() - (lastSeen.get(old) ?? 0)
+      if (silence < heartbeatMs * 1.5) {
+        dbg(`${short(old)} still announcing (${Math.round(silence / 1000)}s ago) — keeping its session alongside ${short(keep)}`)
+        continue
+      }
       log(`${short(old)} came back as ${short(keep)} → retiring the old session (reload or transport restart)`)
       forgetPeer(old)
       lastSeen.delete(old)
@@ -442,13 +501,19 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
           if (handshakes.get(peer) !== attempt) return // superseded by a newer attempt
           clearAttempt(peer)
           stuck.delete(peer)
+          const old = sessions.get(peer)
+          if (old) previous.set(peer, { session: old, until: nowMs() + PREVIOUS_GRACE_MS })
+          failedAttempts.delete(peer) // a success wipes the record — those failures were crossfire
+          backoffUntil.delete(peer)
+          everEstablished.add(peer)
           sessions.set(peer, s)
+          establishedAt.set(peer, nowMs())
           retireOtherPeers(peer)
           log(`EH-2 established with ${short(peer)} (${role}) — ratchet live, ${queued.length} queued frame(s) to flush`)
           eh2.onState?.(peer, 'established')
           void flushQueued()
         },
-        () => {
+        (err: any) => {
           if (handshakes.get(peer) !== attempt) return
           clearAttempt(peer)
           giveUp(peer)
@@ -495,24 +560,121 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    * the higher id. The jitter keeps two simultaneously-stuck peers from
    * retrying in lockstep.
    */
+  /**
+   * Handshakes that keep failing with the same peer, and the backoff that stops
+   * them from becoming a loop.
+   *
+   * The case that produced this: a second tab logged into the SAME identity. It
+   * derives the same pair topic and the same Announce MAC key, so its announces
+   * verify perfectly and each tab takes the other for the contact — but the
+   * handshake can never succeed, because each side expects the CONTACT's
+   * identity key and is offered its own. With no backoff the two tabs retried
+   * each other for as long as they were open: a badge flickering 🔐/⚠, a
+   * conversation that had stopped working, and — because the retry timer does
+   * not care whether anyone is listening — flapping that outlived the tab.
+   *
+   * Deliberately NOT keyed on the kind of failure. A failed MAC looks conclusive
+   * ("wrong identity") but is not: two honest peers that open handshakes at the
+   * same moment produce them routinely, and an early version of this blacklisted
+   * its own real contact that way. Most of these attempts do not even get that
+   * far — they simply time out. What IS diagnostic is the pattern: a peer that
+   * announces steadily and never completes a handshake. Backing off then is
+   * right whatever the cause — a duplicate tab, a rotated contact key, or a link
+   * that only carries Announces.
+   *
+   * Nothing is permanent: the backoff expires and the next Announce tries again.
+   */
+  const RETRY_SOON_MS = [200, 1_400] as const // jittered, as before
+  /**
+   * The escalation SLOWS DOWN, it never stops. A link that loses a third of its
+   * frames needs a lot of attempts before the first handshake lands — the
+   * simulator's 35%-loss profile fails outright if this ever gives up, and a
+   * first cut of these numbers cost it a run — so the only thing being bought
+   * here is quiet: eventually one attempt per 10 s instead of one per second,
+   * for a pair that is getting nowhere. Anything conclusive about
+   * identity is handled by `notOurContact`, not by counting.
+   */
+  const CALM_AFTER = 16
+  const CALM_MS = 3_000
+  const GIVE_ROOM_AFTER = 24
+  const GIVE_ROOM_MS = 10_000
+  /** How long we stay away from a peer that told us it is not our contact. */
+  const NOT_OURS_MS = 5 * 60_000
+  const failedAttempts = new Map<string, number>()
+  const backoffUntil = new Map<string, number>()
+  /**
+   * PeerIds we have completed a handshake with at least once. This is what keeps
+   * the backoff off our real contact: a peer that has worked before gets the
+   * fast retry for as long as it is here, whatever went wrong now. Only a peer
+   * that has NEVER once completed a handshake — while announcing steadily — is
+   * treated as structurally hopeless.
+   */
+  const everEstablished = new Set<string>()
+  let warnedForeign = false
+
+  /** True while we are deliberately not trying this peer. */
+  const inBackoff = (peer: string) => nowMs() < (backoffUntil.get(peer) ?? 0)
+
+  /**
+   * This peer told us who it is, and it is not the contact we hold a key for.
+   * No amount of retrying changes that, so stop — and say so, because the only
+   * person who can act on it is the user (usually by closing a second window).
+   */
+  const declaredForeign = new Set<string>()
+  const notOurContact = (peer: string) => {
+    if (declaredForeign.has(peer)) return
+    declaredForeign.add(peer)
+    backoffUntil.set(peer, nowMs() + NOT_OURS_MS)
+    clearAttempt(peer)
+    lastSeen.delete(peer)
+    quiet.delete(peer)
+    stuck.delete(peer)
+    log(`${short(peer)} is in our room but identifies as someone else — not the contact we hold a key for.`
+      + ' Ignoring it for 5 min. Most often this is a second window logged into the same identity.')
+    eh2?.onState?.(peer, 'failed')
+    onPresence(peer, 'leave')
+    if (!warnedForeign) { warnedForeign = true; onForeign(peer) }
+  }
+
   const giveUp = (peer: string) => {
     if (!eh2 || sessions.has(peer)) return
-    log(`EH-2 attempt with ${short(peer)} gave up — will retry`)
+    const n = (failedAttempts.get(peer) ?? 0) + 1
+    failedAttempts.set(peer, n)
     eh2.onState?.(peer, 'failed')
     stuck.add(peer)
-    if (!lastSeen.has(peer)) return
-    const t = setTimeout(() => maybeHandshake(peer), 200 + Math.floor(Math.random() * 1200))
+    if (!lastSeen.has(peer)) { log(`EH-2 attempt with ${short(peer)} gave up; it is not announcing — leaving it`); return }
+
+    const fast = RETRY_SOON_MS[0] + Math.floor(Math.random() * RETRY_SOON_MS[1])
+    let wait: number
+    if (everEstablished.has(peer) || n < CALM_AFTER) wait = fast
+    else if (n < GIVE_ROOM_AFTER) wait = CALM_MS
+    else wait = GIVE_ROOM_MS
+    if (!everEstablished.has(peer) && (n === CALM_AFTER || n === GIVE_ROOM_AFTER)) {
+      log(`${n} handshakes with ${short(peer)} in a row got nowhere while it keeps announcing`
+        + ` — backing off for ${Math.round(wait / 1000)}s.`
+        + ' Most often this is a second window logged into the same identity, which cannot authenticate as the contact.')
+      if (!warnedForeign) { warnedForeign = true; onForeign(peer) }
+    } else {
+      log(`EH-2 attempt with ${short(peer)} gave up — retrying in ${wait} ms`)
+    }
+    backoffUntil.set(peer, nowMs() + wait)
+    const t = setTimeout(() => maybeHandshake(peer), wait)
     ;(t as any).unref?.()
   }
 
   /** Seen a peer: open the handshake if it is our turn (idempotent). */
   const maybeHandshake = (peer: string) => {
-    if (!eh2 || peer === self || sessions.has(peer) || handshakes.has(peer)) return
+    if (!eh2 || peer === self || inBackoff(peer)) return
+    if (sessions.has(peer) || handshakes.has(peer)) return
+    // Do not keep offering to somebody who has stopped answering at all; the
+    // next Announce brings them back.
+    if (!lastSeen.has(peer)) return
     if (self < peer || stuck.has(peer)) void beginHandshake(peer, 'initiator')
   }
 
   const onHandshakeFrame = async (data: Uint8Array, from: string): Promise<void> => {
     if (!eh2 || from === self) return
+    if (inBackoff(from)) { dbg(`handshake frame from ${short(from)} ignored — backing off`); return }
     let attempt = handshakes.get(from)
     if (data[0] === T_MSG1) {
       // A REPEAT of the msg1 we are already answering (the initiator re-sends
@@ -539,7 +701,18 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     try {
       const reply = await attempt.h.feed(data)
       if (reply) { attempt.reply = reply; gossip(reply) }
-    } catch { /* the attempt is already gone; giveUp() schedules the next one */ }
+    } catch (e: any) {
+      const why = String(e?.message ?? e)
+      // The one conclusive statement about identity in the whole handshake: msg1
+      // carries an `initiator_id` derived from the sender's IK, and this check
+      // compares it with the contact we hold a key for. Unlike a failed MAC —
+      // which honest crossfire produces routinely, and which an earlier version
+      // of this code wrongly took as proof — it cannot be an accident of timing.
+      // Whoever sent that frame is not our contact.
+      if (/initiator_id does not match/.test(why)) notOurContact(from)
+      else dbg(`handshake frame from ${short(from)} did not apply: ${why}`)
+      /* the attempt is already gone; giveUp() schedules the next one */
+    }
   }
 
   const flushQueued = async () => {
@@ -575,7 +748,14 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     let pt: Uint8Array | null
     try { pt = await s.decrypt(data) }
     catch (e: any) { log(`frame from ${short(from)} rejected by the ratchet: ${e?.message ?? e}`); return false }
-    if (pt === null) return false
+    if (pt === null) {
+      // Still in flight under the ratchet we just replaced?
+      const prev = previous.get(from)
+      if (!prev || nowMs() > prev.until) return false
+      try { pt = await prev.session.decrypt(data) } catch { return false }
+      if (pt === null) return false
+      dbg(`frame from ${short(from)} opened with the previous ratchet (in flight across the re-key)`)
+    }
     if (from !== self) {
       const env = decodeEnvelope(pt)
       dbg(`← content ${data.length} B from ${short(from)} → ${env ? (env as any).t : 'undecodable'}`)
@@ -699,6 +879,39 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         onPresence(peer, 'quiet')
       }
     }
+
+    for (const [peer, session] of previous) if (now > session.until) previous.delete(peer)
+
+    // Retire a session whose PeerId has stopped announcing while another one is
+    // live. This is the second half of the rule in `retireOtherPeers`: the
+    // decision cannot be made at establishment time (the reloaded tab may still
+    // be within its last heartbeat), so it is re-checked here until it is clear.
+    if (sessions.size > 1) {
+      const alive = [...sessions.keys()].filter((p) => now - (lastSeen.get(p) ?? 0) < heartbeatMs * 1.5)
+      if (alive.length) {
+        for (const peer of [...sessions.keys()]) {
+          if (alive.includes(peer)) continue
+          log(`${short(peer)} stopped announcing and another session is live → retiring it`)
+          forgetPeer(peer)
+          lastSeen.delete(peer)
+          onPeerReplaced(peer, alive[alive.length - 1])
+        }
+      }
+    }
+
+    // §7.3 bounded session lifetime. Only the side that normally initiates
+    // starts it, so the two do not open crossing handshakes; the other answers
+    // as it would to any msg1. Nothing is torn down here — the running ratchet
+    // keeps carrying content until the replacement is live, which is what makes
+    // this "transparent to the UI" rather than a visible reconnect.
+    for (const [peer, at] of establishedAt) {
+      if (now - at < lifetimeMs || !sessions.has(peer)) continue
+      if (handshakes.has(peer) || !lastSeen.has(peer)) continue
+      if (!(self < peer)) continue
+      log(`session with ${short(peer)} is ${Math.round((now - at) / 60_000)} min old → forcing a fresh EH-2 (§7.3)`)
+      establishedAt.set(peer, now) // do not fire again while this attempt runs
+      void beginHandshake(peer, 'initiator')
+    }
   }, Math.min(heartbeatMs, 15_000))
 
   // data plane: content is sealed then sent here — GossipSub by default, or a
@@ -806,7 +1019,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       // the re-sender publishing into a room nobody is listening to any more —
       // a stopped conversation still shouting msg1 at its old topic.
       for (const p of new Set([...handshakes.keys(), ...attemptTimers.keys(), ...resendTimers.keys()])) clearAttempt(p)
-      sessions.clear(); handshakes.clear(); queued.length = 0; resendable.clear(); firstSentAt.clear()
+      sessions.clear(); previous.clear(); establishedAt.clear()
+      handshakes.clear(); queued.length = 0; resendable.clear(); firstSentAt.clear()
       clearInterval(t0); clearInterval(hb); clearInterval(sweep)
       for (const t of earlyBeacons) clearTimeout(t)
       for (const id of [...pending.keys()]) clearPending(id)
