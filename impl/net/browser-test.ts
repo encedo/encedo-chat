@@ -80,12 +80,16 @@ class Browser {
     this.dir = mkdtempSync(join(tmpdir(), `ec-${this.name}-`))
     this.proc = spawn(CHROME, [
       HEADFUL ? '--headless=false' : '--headless=new',
-      `--remote-debugging-port=${this.port}`,
+      // Port 0 = let Chromium pick and report it in DevToolsActivePort. A fixed
+      // port silently attaches to a LEFTOVER browser from an earlier run — which
+      // cost one confusing failure here: a stale profile, stale state, and a
+      // "bug" that was only the previous test still running.
+      '--remote-debugging-port=0',
       `--user-data-dir=${this.dir}`,
       '--no-first-run', '--no-default-browser-check', '--disable-gpu',
       '--autoplay-policy=no-user-gesture-required',
       url,
-    ], { stdio: 'ignore' })
+    ], { stdio: ['ignore', 'ignore', 'pipe'] })
 
     const target = await this.discover()
     this.ws = new WebSocket(target.browserWs)
@@ -104,17 +108,25 @@ class Browser {
     await this.send('Page.enable', {}, true)
   }
 
-  /** Chromium prints nothing useful on stdout with --headless=new; poll the HTTP endpoint. */
+  /**
+   * Chromium announces its endpoint on stderr ("DevTools listening on ws://…").
+   * Read it from there rather than from DevToolsActivePort in the profile dir:
+   * a snap-confined Chromium does not write that file where we asked it to,
+   * and a fixed port would happily attach us to a LEFTOVER browser from an
+   * earlier run — which cost one confusing failure here (stale profile, stale
+   * state, a "bug" that was only the previous test still alive).
+   */
   private async discover(): Promise<{ browserWs: string }> {
-    for (let i = 0; i < 100; i++) {
-      try {
-        const r = await fetch(`http://127.0.0.1:${this.port}/json/version`)
-        const j: any = await r.json()
-        if (j.webSocketDebuggerUrl) return { browserWs: j.webSocketDebuggerUrl }
-      } catch { /* not up yet */ }
-      await sleep(150)
-    }
-    throw new Error(`${this.name}: Chromium did not expose CDP on ${this.port}`)
+    return new Promise((resolve, reject) => {
+      let buf = ''
+      const timer = setTimeout(() => reject(new Error(`${this.name}: Chromium never announced a CDP endpoint`)), 25_000)
+      this.proc.stderr?.on('data', (chunk: Buffer) => {
+        buf += chunk.toString()
+        const m = buf.match(/DevTools listening on (ws:\/\/\S+)/)
+        if (m) { clearTimeout(timer); resolve({ browserWs: m[1] }) }
+      })
+      this.proc.on('exit', (code) => { clearTimeout(timer); reject(new Error(`${this.name}: Chromium exited (${code})`)) })
+    })
   }
 
   private onMessage(raw: string) {
@@ -181,87 +193,132 @@ class Browser {
 }
 
 const step = (msg: string) => console.log(`• ${msg}`)
+const scenario = (name: string) => console.log(`\n▸ ${name}`)
+
+const BADGE_GREEN = `return document.getElementById('e2e-badge').textContent.includes('ratchet') ? document.getElementById('e2e-badge').textContent : ''`
+const send = (b: Browser, text: string) => b.eval(`
+  const i = document.getElementById('msg-input'); i.value = ${JSON.stringify(text)};
+  document.getElementById('send').click(); return 1;
+`)
+const seen = (text: string) => `return document.getElementById('messages').textContent.includes(${JSON.stringify(text)})`
+
+/** Log in with the software identity already in this profile's localStorage. */
+async function login(b: Browser, handle: string) {
+  await b.waitFor('login form', `return !!document.getElementById('go-soft')`)
+  await b.eval(`(document.getElementById('handle')).value = ${JSON.stringify(handle)}; document.getElementById('go-soft').click();`)
+  await b.waitFor('contact list', `return !!document.querySelector('#pane-contacts .contact')`)
+}
+
+/** Click a contact by its visible name. */
+async function openContact(b: Browser, name: string) {
+  await b.eval(`
+    const el = [...document.querySelectorAll('#pane-contacts .contact')]
+      .find((c) => c.textContent.includes(${JSON.stringify(name)}));
+    if (!el) throw new Error('no contact ' + ${JSON.stringify(name)});
+    el.click(); return 1;
+  `)
+}
+
+/** One message each way — the check that a conversation is genuinely alive. */
+async function roundTrip(A: Browser, B: Browser, tag: string) {
+  const a = `A-${tag}-${Date.now().toString(36)}`
+  await send(A, a)
+  await B.waitFor(`A→B (${tag})`, seen(a), 25_000)
+  const b = `B-${tag}-${Date.now().toString(36)}`
+  await send(B, b)
+  await A.waitFor(`B→A (${tag})`, seen(b), 25_000)
+}
 
 async function main() {
-  const A = new Browser('A', 9331)
-  const B = new Browser('B', 9332)
+  const A = new Browser('A', 0)
+  const B = new Browser('B', 0)
   const server = SERVE_LOCAL ? serveDist() : null
   if (server) step(`serving this checkout's web/dist on 127.0.0.1:${LOCAL_PORT}`)
   try {
-    step(`launching two Chromium instances on ${APP_URL}`)
+    scenario('setup — two browsers, two identities, one room')
+    step(`launching Chromium ×2 on ${APP_URL}`)
     await Promise.all([A.start(APP_URL), B.start(APP_URL)])
 
-    // 1. software identities (no HEM needed for a transport/crypto test)
     for (const [b, handle] of [[A, 'sim-a'], [B, 'sim-b']] as const) {
       await b.waitFor('login form', `return !!document.getElementById('go-soft')`)
-      await b.eval(`
-        (document.getElementById('handle')).value = ${JSON.stringify(handle)};
-        document.getElementById('go-soft').click();
-      `)
+      await b.eval(`(document.getElementById('handle')).value = ${JSON.stringify(handle)}; document.getElementById('go-soft').click();`)
       await b.waitFor('app shell', `return document.getElementById('app') && !document.getElementById('app').hidden`)
     }
     const pubA = await A.eval<string>(`return JSON.parse(localStorage.getItem('ec-soft-id')).pub`)
     const pubB = await B.eval<string>(`return JSON.parse(localStorage.getItem('ec-soft-id')).pub`)
     step(`identities ready — A ${pubA.slice(0, 12)}…  B ${pubB.slice(0, 12)}…`)
 
-    // 2. each knows the other (local contact book), then reload to pick it up
-    await A.eval(`localStorage.setItem('ec-local-contacts-sim-a', ${JSON.stringify(JSON.stringify([{ name: 'sim-b', pub: pubB }]))}); return 1`)
+    // A also gets a second, unreachable contact — the "switch away and back" test
+    // needs somewhere to switch TO.
+    const ghostPub = Buffer.from(Array.from({ length: 32 }, (_, i) => (i * 7 + 13) & 0xff)).toString('base64')
+    await A.eval(`localStorage.setItem('ec-local-contacts-sim-a', ${JSON.stringify(JSON.stringify([{ name: 'sim-b', pub: pubB }, { name: 'ghost', pub: ghostPub }]))}); return 1`)
     await B.eval(`localStorage.setItem('ec-local-contacts-sim-b', ${JSON.stringify(JSON.stringify([{ name: 'sim-a', pub: pubA }]))}); return 1`)
     await Promise.all([A.reload(APP_URL), B.reload(APP_URL)])
-    for (const [b, handle] of [[A, 'sim-a'], [B, 'sim-b']] as const) {
-      await b.waitFor('login form', `return !!document.getElementById('go-soft')`)
-      await b.eval(`(document.getElementById('handle')).value = ${JSON.stringify(handle)}; document.getElementById('go-soft').click();`)
-      await b.waitFor('contact list', `return !!document.querySelector('#pane-contacts .contact')`)
-    }
+    await Promise.all([login(A, 'sim-a'), login(B, 'sim-b')])
 
-    // 3. both open the conversation
-    step('opening the room in both browsers')
-    await Promise.all([A, B].map((b) => b.eval(`document.querySelector('#pane-contacts .contact').click(); return 1`)))
-
-    // 4. EH-2 must go green on BOTH sides
-    const badge = `return document.getElementById('e2e-badge').textContent.includes('ratchet') ? document.getElementById('e2e-badge').textContent : ''`
-    const [ba, bb] = await Promise.all([A.waitFor<string>('EH-2 on A', badge, 45_000), B.waitFor<string>('EH-2 on B', badge, 45_000)])
+    await Promise.all([openContact(A, 'sim-b'), openContact(B, 'sim-a')])
+    const [ba, bb] = await Promise.all([A.waitFor<string>('EH-2 on A', BADGE_GREEN, 45_000), B.waitFor<string>('EH-2 on B', BADGE_GREEN, 45_000)])
     step(`EH-2 established in both: "${ba.trim()}" / "${bb.trim()}"`)
 
-    // 5. a message each way, through whatever transport the app chose
-    const send = (b: Browser, text: string) => b.eval(`
-      const i = document.getElementById('msg-input'); i.value = ${JSON.stringify(text)};
-      document.getElementById('send').click(); return 1;
-    `)
-    const seen = (text: string) => `return document.getElementById('messages').textContent.includes(${JSON.stringify(text)})`
-
-    const msgA = `from-A-${Date.now().toString(36)}`
-    await send(A, msgA)
-    await B.waitFor('A→B message', seen(msgA), 20_000)
-    step(`A → B delivered ("${msgA}")`)
-
-    const msgB = `from-B-${Date.now().toString(36)}`
-    await send(B, msgB)
-    await A.waitFor('B→A message', seen(msgB), 20_000)
-    step(`B → A delivered ("${msgB}")`)
-
-    // 6. the delivery confirmation must show up on the sender's own bubble
+    scenario('messages both ways, with delivery confirmations')
+    await roundTrip(A, B, 'first')
     await A.waitFor('delivery mark on A', `return document.getElementById('messages').textContent.includes('dostarczone')`, 20_000)
-    step('delivery confirmation shown (ack path works in the browser)')
+    await B.waitFor('delivery mark on B', `return document.getElementById('messages').textContent.includes('dostarczone')`, 20_000)
+    step('both sides show ✓ dostarczone (ack path works in a browser)')
 
-    // 7. and the content should end up on a direct DataChannel
-    const transport = await A.eval<string>(`return document.getElementById('transport-badge').textContent`)
-    let direct = transport.includes('Direct')
+    scenario('transport upgrade to a direct DataChannel')
+    let direct = (await A.eval<string>(`return document.getElementById('transport-badge').textContent`)).includes('Direct')
     if (!direct) {
       try {
         await A.waitFor('WebRTC direct', `return document.getElementById('transport-badge').textContent.includes('Direct')`, 25_000)
         direct = true
-      } catch { /* reported below */ }
+      } catch { /* reported at the end */ }
     }
     step(direct ? 'transport upgraded to WebRTC Direct' : '⚠ still on relay — WebRTC did not come up')
+    await roundTrip(A, B, 'after-upgrade')
+    step('messages still flow after the transport decision')
 
-    // 8. after the upgrade, messages must still flow (this is the plane Node cannot test)
-    const msgC = `after-upgrade-${Date.now().toString(36)}`
-    await send(A, msgC)
-    await B.waitFor('post-upgrade message', seen(msgC), 20_000)
-    step('message delivered after the transport decision')
+    // ---- the scenarios that come from real manual testing --------------------
 
-    console.log(`\nPASS — two real browsers, EH-2 + delivery both ways${direct ? ' over WebRTC Direct' : ' (relay only — see warning above)'}`)
+    scenario('one side reloads mid-conversation')
+    // A page reload means a NEW ephemeral PeerId and a fresh room, while the
+    // peer still holds a ratchet for the old one. The reloading side must be
+    // able to re-handshake, and the other side must accept it.
+    await A.reload(APP_URL)
+    await login(A, 'sim-a')
+    await openContact(A, 'sim-b')
+    await A.waitFor('EH-2 after reload (A)', BADGE_GREEN, 45_000)
+    await B.waitFor('EH-2 after reload (B)', BADGE_GREEN, 45_000)
+    await roundTrip(A, B, 'after-reload')
+    step('conversation re-established and messages flow again')
+
+    scenario('a tab goes to the background and comes back')
+    // Browsers throttle timers in a hidden tab, so the Announce heartbeat goes
+    // quiet and the peer eventually stops seeing us. What must NOT happen is
+    // losing the session: coming back has to resume, not break.
+    const hide = (b: Browser, hidden: boolean) => b.eval(`
+      Object.defineProperty(document, 'hidden', { value: ${hidden}, configurable: true });
+      Object.defineProperty(document, 'visibilityState', { value: ${hidden ? "'hidden'" : "'visible'"}, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      return 1;
+    `)
+    await hide(B, true)
+    try { await B.send('Page.setWebLifecycleState', { state: 'frozen' }, true) } catch { /* best effort: not all builds allow it */ }
+    await sleep(12_000)
+    try { await B.send('Page.setWebLifecycleState', { state: 'active' }, true) } catch {}
+    await hide(B, false)
+    await roundTrip(A, B, 'after-background')
+    step('messages flow after 12 s in the background')
+
+    scenario('switching to another contact and back')
+    await openContact(A, 'ghost')          // a peer that will never answer
+    await sleep(2_000)
+    await openContact(A, 'sim-b')          // …and back to the real conversation
+    await A.waitFor('EH-2 after switching back', BADGE_GREEN, 45_000)
+    await roundTrip(A, B, 'after-switch')
+    step('the original conversation resumed after switching away')
+
+    console.log(`\nPASS — all scenarios${direct ? ' (content over WebRTC Direct)' : ' — but WebRTC never came up, see above'}`)
     process.exitCode = direct ? 0 : 1
   } catch (e: any) {
     console.log(`\nFAIL — ${e?.message ?? e}`)
