@@ -31,6 +31,22 @@ export interface WebRTCOpts {
   iceServers?: RTCIceServer[]
 }
 
+/**
+ * Control frames on the DataChannel. Content frames are ratchet frames (they
+ * start with 0x10), so a 0x00 prefix cannot collide with one.
+ *
+ * Why they exist: `onopen` only means the channel was negotiated locally. It
+ * has happened in testing that both sides showed "WebRTC Direct" while nothing
+ * crossed — the room had handed content to a channel that never delivered. A
+ * ping that comes back proves BOTH directions before the channel is trusted
+ * with messages.
+ */
+const CTRL = 0x00
+const PING = new Uint8Array([CTRL, 0x50])
+const PONG = new Uint8Array([CTRL, 0x4f])
+const PROBE_TRIES = 4
+const PROBE_EVERY_MS = 700
+
 export function webrtcLink(opts: WebRTCOpts): WebRTCLink {
   const pc = new RTCPeerConnection({ iceServers: opts.iceServers ?? [{ urls: 'stun:stun.l.google.com:19302' }] })
   let dc: RTCDataChannel | null = null
@@ -38,12 +54,42 @@ export function webrtcLink(opts: WebRTCOpts): WebRTCLink {
   let remoteSet = false
   const pendingIce: RTCIceCandidateInit[] = []
 
+  let probeTimer: any = null
+  const stopProbe = () => { clearInterval(probeTimer); probeTimer = null }
+
   const wire = (channel: RTCDataChannel) => {
     dc = channel
     dc.binaryType = 'arraybuffer'
-    dc.onopen = () => { ready = true; opts.onOpen?.() }
-    dc.onclose = () => { ready = false; opts.onClose?.() }
-    dc.onmessage = (e) => opts.onData(new Uint8Array(e.data as ArrayBuffer))
+    dc.onopen = () => {
+      // Not ready yet — prove the round trip first.
+      let tries = 0
+      const probe = () => {
+        if (ready) return stopProbe()
+        if (++tries > PROBE_TRIES) {
+          stopProbe()
+          opts.onState?.('probe=failed')   // stay on the relay; nothing breaks
+          return
+        }
+        try { channel.send(PING) } catch {}
+      }
+      probe()
+      probeTimer = setInterval(probe, PROBE_EVERY_MS)
+    }
+    dc.onclose = () => { stopProbe(); if (ready) { ready = false; opts.onClose?.() } }
+    dc.onmessage = (e) => {
+      const bytes = new Uint8Array(e.data as ArrayBuffer)
+      if (bytes.length === 2 && bytes[0] === CTRL) {
+        if (bytes[1] === PING[1]) { try { channel.send(PONG) } catch {} ; return }
+        if (bytes[1] === PONG[1] && !ready) {
+          stopProbe()
+          ready = true
+          opts.onState?.('probe=ok')
+          opts.onOpen?.()   // only now may the room send content this way
+        }
+        return
+      }
+      opts.onData(bytes)
+    }
   }
   const flushIce = async () => {
     remoteSet = true
@@ -89,6 +135,10 @@ export function webrtcLink(opts: WebRTCOpts): WebRTCLink {
       }
     },
     send(bytes: Uint8Array) { if (dc && ready) dc.send(bytes) },
-    close() { try { dc?.close() } catch {} ; try { pc.close() } catch {} },
+    close() {
+      stopProbe()
+      try { dc?.close() } catch {}
+      try { pc.close() } catch {}
+    },
   }
 }

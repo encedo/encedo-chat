@@ -259,6 +259,7 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     onLog: opts.onLog,
     onDelivered: (id, ms) => { log(`delivered ${id} in ${ms} ms`); opts.onDelivered?.(id, ms) },
     onUndelivered: (id) => { log(`UNDELIVERED ${id} — peer never confirmed`); opts.onUndelivered?.(id) },
+    onStall: () => plane?.demote(),
   })
   if (opts.webrtc) plane = attachWebRTC(room, self, { onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
 

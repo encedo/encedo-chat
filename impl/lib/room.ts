@@ -62,6 +62,12 @@ export interface ChatOpts {
   onDelivered?: (id: string, ms: number) => void
   /** Gave up after retrying: the peer very likely never got it. */
   onUndelivered?: (id: string) => void
+  /**
+   * A message went unconfirmed long enough to be re-sent. The transport we are
+   * using may be the problem, so this is the moment to stop trusting it — the
+   * data plane owner (core) drops back to the relay before the retry goes out.
+   */
+  onStall?: () => void
   heartbeatMs?: number
   /** Delay before the first Announce (tests shorten it; the mesh needs a moment). */
   firstAnnounceMs?: number
@@ -85,6 +91,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const onSignal = opts.onSignal ?? (() => {})
   const onDelivered = opts.onDelivered ?? (() => {})
   const onUndelivered = opts.onUndelivered ?? (() => {})
+  const onStall = opts.onStall ?? (() => {})
   const heartbeatMs = opts.heartbeatMs ?? 15_000
   // Be generous: a browser throttles timers in a hidden tab (Firefox to about
   // once a minute), so a peer that is merely in a background window must not
@@ -153,6 +160,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       if (!pending.has(id)) return
       p.tries++
       dbg(`no ack for ${id} in ${delay} ms → re-sending (try ${p.tries + 1})`)
+      if (p.tries === 1) { log('unconfirmed message — distrusting the current content path'); onStall() }
       void emitContent(p.bytes)
       armRetry(id)
     }, delay)

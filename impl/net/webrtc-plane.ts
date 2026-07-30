@@ -19,11 +19,17 @@ export interface RoomDataPlane {
 export interface WebRTCPlane {
   onPeer(peer: string): void // call when a peer joins the room (presence 'join')
   onSignal(from: string, env: { to: string; sig: Signal }): void // route a t:'rtc' envelope
+  /** Content stopped being confirmed: hand it back to the relay and stay there. */
+  demote(): void
   stop(): void
 }
 
 export function attachWebRTC(room: RoomDataPlane, self: string, opts: { onState?: (s: string) => void } = {}): WebRTCPlane {
   let link: WebRTCLink | null = null
+  /** Once the direct path has failed to deliver, it does not get a second turn
+   *  in this conversation — a channel that looks open but drops content is
+   *  worse than the relay, and it already cost us undelivered messages. */
+  let demoted = false
 
   const onPeer = (peer: string) => {
     if (link || peer === self) return
@@ -31,7 +37,7 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: { onState?
       initiator: self < peer, // deterministic: lower PeerId offers
       sendSignal: (sig) => room.sendSignal(peer, sig),
       onData: (bytes) => room.injectContent(bytes, peer),
-      onOpen: () => room.setContentSend((sealed) => link!.send(sealed)), // content → DataChannel
+      onOpen: () => { if (!demoted) room.setContentSend((sealed) => link!.send(sealed)) }, // content → DataChannel
       onClose: () => room.setContentSend(null), // fall back to GossipSub
       onState: opts.onState,
     })
@@ -39,6 +45,12 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: { onState?
 
   return {
     onPeer,
+    demote() {
+      if (demoted) return
+      demoted = true
+      opts.onState?.('demoted=relay')
+      room.setContentSend(null)
+    },
     onSignal(from, env) {
       if (env.to !== self) return
       if (!link) onPeer(from) // a signal may arrive before we saw their presence
