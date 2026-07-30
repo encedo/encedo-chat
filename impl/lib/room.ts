@@ -50,7 +50,12 @@ export interface Eh2Options {
 
 /** Exactly one of `session` (interim static key) or `eh2` is used for content. */
 export interface RoomKeys { macKey: CryptoKey; session?: Session; eh2?: Eh2Options }
-export type PresenceEvent = 'join' | 'active' | 'away' | 'leave'
+/**
+ * `quiet` is not something the peer says — it is us noticing that it has stopped
+ * announcing, well before the 90 s that count as leaving. It is a warning, not a
+ * verdict: the ratchet is untouched and one Announce takes it back to `active`.
+ */
+export type PresenceEvent = 'join' | 'active' | 'away' | 'quiet' | 'leave'
 export interface ChatOpts {
   /**
    * `meta.outOfOrder` marks a message that belongs behind one already shown —
@@ -122,14 +127,20 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   // once a minute), so a peer that is merely in a background window must not
   // look dead. This is a presence heuristic, nothing security-relevant.
   const ttlMs = Math.max(heartbeatMs * 6, 90_000)
+  /** Two and a half missed heartbeats: late enough not to fire on jitter, early enough to matter. */
+  const quietMs = Math.max(heartbeatMs * 2.5, 35_000)
   const self = node.peerId.toString()
   const seenNonces = new Set<string>()
   const seenSeq = new Set<string>() // dedup msg/reaction/file by `${from}:${seq}` (both planes)
   const lastSeen = new Map<string, number>()
 
+  /** Peers we have already reported as quiet, so it is said once, not every sweep. */
+  const quiet = new Set<string>()
+
   const touch = (peer: string) => {
     const fresh = !lastSeen.has(peer)
     lastSeen.set(peer, nowMs())
+    if (quiet.delete(peer)) { log(`${short(peer)} is answering again`); onPresence(peer, 'active') }
     if (fresh) {
       log(`peer visible: ${short(peer)}`)
       onPresence(peer, 'join')
@@ -162,7 +173,13 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const MAX_INFLIGHT_MS = opts.maxInflightMs ?? 60_000 // hard cap, however present the peer looks
   /** Re-sending is pointless with nobody in the room to receive it. */
   const peerPresent = () => lastSeen.size > 0
-  interface Pending { bytes: Uint8Array; sentAt: number; tries: number; timer: any }
+  /**
+   * `sentAt` is when the user pressed enter — it is what the delivery time in
+   * the UI means. `since` is when the current re-send budget started, which a
+   * flush after a reconnect resets: the message deserves a full budget from a
+   * transport that exists, not the remains of one it spent while offline.
+   */
+  interface Pending { bytes: Uint8Array; sentAt: number; since: number; tries: number; timer: any }
   const pending = new Map<string, Pending>()
   /** Peers known to send acks. A client that predates them must not be marked ⚠. */
   const acking = new Set<string>()
@@ -195,7 +212,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const armRetry = (id: string) => {
     const p = pending.get(id)
     if (!p) return
-    const waited = nowMs() - p.sentAt
+    const waited = nowMs() - p.since
     const delay = RETRIES[p.tries]
     // The first two tries are unconditional — a peer that vanished mid-sentence
     // still deserves them. Past that, re-sending only makes sense while someone
@@ -239,7 +256,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
 
   /** Track an outgoing content envelope until the peer confirms it. */
   const trackDelivery = (id: string, bytes: Uint8Array) => {
-    pending.set(id, { bytes, sentAt: nowMs(), tries: 0, timer: null })
+    pending.set(id, { bytes, sentAt: nowMs(), since: nowMs(), tries: 0, timer: null })
     armRetry(id)
   }
 
@@ -543,7 +560,12 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const processSealed = async (data: Uint8Array, from: string): Promise<boolean> => {
     const s = sessionFor(from)
     if (!s) return false
-    const pt = await s.decrypt(data)
+    // A throw here (the ratchet raises one when a header claims a jump past the
+    // §7.3 skip bound) used to escape into the pubsub handler and vanish, which
+    // looked identical to a frame that simply was not ours.
+    let pt: Uint8Array | null
+    try { pt = await s.decrypt(data) }
+    catch (e: any) { log(`frame from ${short(from)} rejected by the ratchet: ${e?.message ?? e}`); return false }
     if (pt === null) return false
     if (from !== self) {
       const env = decodeEnvelope(pt)
@@ -623,10 +645,21 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     // on a guess is how a throttled background tab turned into "the badge is
     // green but nothing sends" — the peer was still there, we had thrown its
     // keys away. An actual leave (below) does clear it; so does a new handshake.
-    for (const [peer, t] of lastSeen) if (now - t > ttlMs) {
-      lastSeen.delete(peer)
-      log(`no Announce from ${short(peer)} for ${Math.round((now - t) / 1000)}s → presence off (ratchet kept)`)
-      onPresence(peer, 'leave')
+    for (const [peer, t] of lastSeen) {
+      const silent = now - t
+      if (silent > ttlMs) {
+        lastSeen.delete(peer)
+        quiet.delete(peer)
+        log(`no Announce from ${short(peer)} for ${Math.round(silent / 1000)}s → presence off (ratchet kept)`)
+        onPresence(peer, 'leave')
+      } else if (silent > quietMs && !quiet.has(peer)) {
+        // Between "answering" and "gone" there is a minute and a half of a green
+        // badge and no messages. Name that gap while it is happening instead of
+        // letting the user work it out from the silence.
+        quiet.add(peer)
+        log(`no Announce from ${short(peer)} for ${Math.round(silent / 1000)}s → going quiet`)
+        onPresence(peer, 'quiet')
+      }
     }
   }, Math.min(heartbeatMs, 15_000))
 
@@ -703,6 +736,30 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     who: () => [...lastSeen.keys()],
     /** Announce now — e.g. when a tab becomes visible after being throttled. */
     refresh: () => { void announce() },
+    /**
+     * Send everything still unconfirmed again, oldest first, and restart its
+     * schedule. For use the moment the transport comes back: each message
+     * otherwise waits out its own private backoff, so a backlog leaves in
+     * whatever order the timers happen to fire — which is how a reconnect
+     * turned three queued messages into three out-of-order ones.
+     *
+     * `pending` is a Map, so insertion order IS send order; that is the whole
+     * mechanism. Nothing is re-queued that the peer already confirmed.
+     */
+    flushPending: () => {
+      const ids = [...pending.keys()]
+      if (!ids.length) return
+      log(`flushing ${ids.length} unconfirmed message(s) in order`)
+      for (const id of ids) {
+        const p = pending.get(id)
+        if (!p) continue
+        clearTimeout(p.timer)
+        void emitContent(p.bytes)
+        p.tries = 0
+        p.since = nowMs() // fresh budget; `sentAt` still says when it was written
+        armRetry(id)
+      }
+    },
     /** Peers with a live EH-2 ratchet (empty in interim mode) — for the UI badge. */
     secured: () => (eh2 ? [...sessions.keys()] : []),
     stop: () => {

@@ -162,3 +162,37 @@ test('old chains and stale keys are dropped (5 chains back, TTL)', async () => {
   assert.equal(await R.decrypt(stale), null, 'past its TTL the key is gone')
   assert.equal(R.stats().skipped, 0)
 })
+
+test('sends fired in the same tick do not collide (the ratchet serialises itself)', async () => {
+  // Callers do not await: the room sends content with `void emitContent(...)`,
+  // so an ack for an incoming message races the typing notice, and a flush of
+  // pending messages races itself. Without serialisation both calls read the
+  // same chain key, stamp the same `n`, and then both advance the chain — the
+  // peer opens one frame at most and its receiving chain is behind for good.
+  const { I, R } = await pair()
+  const bodies = ['jeden', 'dwa', 'trzy', 'cztery', 'pięć']
+  const frames = await Promise.all(bodies.map((b) => I.encrypt(te.encode(b))))
+
+  const seen = frames.map((f) => new DataView(f.buffer, f.byteOffset).getUint32(38, false)) // `n` from the header
+  assert.equal(new Set(seen).size, frames.length, 'every frame gets its own message number')
+
+  const opened: string[] = []
+  for (const f of frames) {
+    const pt = await R.decrypt(f)
+    assert.ok(pt, 'every frame from a burst must open')
+    opened.push(td.decode(pt!))
+  }
+  assert.deepEqual(opened, bodies)
+})
+
+test('receives fired in the same tick do not collide either', async () => {
+  // The mirror image: frames arrive from GossipSub and from the DataChannel, and
+  // the room feeds both without awaiting.
+  const { I, R } = await pair()
+  const bodies = ['a', 'b', 'c', 'd']
+  const frames: Uint8Array[] = []
+  for (const b of bodies) frames.push(await I.encrypt(te.encode(b)))
+
+  const opened = await Promise.all(frames.map((f) => R.decrypt(f)))
+  assert.deepEqual(opened.map((p) => (p ? td.decode(p) : null)), bodies)
+})

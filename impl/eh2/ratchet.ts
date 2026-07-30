@@ -361,9 +361,34 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
     return pt
   }
 
+  /**
+   * One at a time. Both halves of the ratchet are multi-step state machines that
+   * await WebCrypto between reading state and writing it back — `encrypt` reads
+   * `ckSend`/`nSend`, awaits four times, then advances them. Two calls issued in
+   * the same tick therefore interleave: both derive a message key from the SAME
+   * chain key and stamp the SAME `n`, then both advance the chain. The peer can
+   * open at most one of those frames and its receiving chain is left behind the
+   * sender's for good — messages "not arriving" with the badge still green, and
+   * no error anywhere.
+   *
+   * That is not exotic: the room fires content without awaiting it (`void
+   * emitContent(...)`), so an ack for an incoming message races the typing
+   * notice, and a flush of pending messages races itself. Serialising here fixes
+   * every caller at once, and nothing above needs to know.
+   *
+   * `queue` is a promise chain that survives failures — a rejected call must not
+   * wedge the ones behind it.
+   */
+  let queue: Promise<unknown> = Promise.resolve()
+  const serial = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = queue.then(fn, fn)
+    queue = run.then(() => undefined, () => undefined)
+    return run
+  }
+
   return {
-    encrypt,
-    decrypt,
+    encrypt: (plaintext) => serial(() => encrypt(plaintext)),
+    decrypt: (frame) => serial(() => decrypt(frame)),
     stats: () => ({ nSend, nRecv, skipped: skipped.size, dhPub: dhSelf ? b64(dhSelf.pub) : null }),
   }
 }

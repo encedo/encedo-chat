@@ -487,6 +487,33 @@ test('a message that arrives behind newer ones is delivered marked, not silently
   assert.deepEqual(seen.map((s) => s.outOfOrder), [false, true], 'only the straggler is marked')
 })
 
+test('a backlog left by an outage goes out in the order it was written', async (t) => {
+  // Each message otherwise waits out its own private backoff, so what comes back
+  // from an outage arrives in whatever order the timers happen to fire.
+  const got: string[] = []
+  let offline = true
+  const { A, B } = await rooms({
+    collect: got,
+    // Nothing from A reaches B until the "network" comes back. Announces from A
+    // are swallowed too — that is what an outage looks like.
+    drop: (d, from) => offline && from === 'peer-a' && d[0] !== 0x01 && d[0] !== 0x02 && d[0] !== 0x03,
+    retry: { retryMs: [30_000], giveUpMs: 30_000, maxInflightMs: 60_000 },
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+
+  A.sendText('pierwsza')
+  A.sendText('druga')
+  A.sendText('trzecia')
+  await new Promise((r) => setTimeout(r, 200))
+  assert.deepEqual(got, [], 'the outage really did swallow them')
+
+  offline = false
+  A.flushPending()
+  await until(() => got.length === 3, 5000)
+  assert.deepEqual(got, ['pierwsza', 'druga', 'trzecia'])
+})
+
 test('interim mode is untouched (no eh2 → static key, no handshake frames)', async (t) => {
   const net = hub()
   const ss = new Uint8Array(32).fill(0x11)

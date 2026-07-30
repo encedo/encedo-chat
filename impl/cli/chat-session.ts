@@ -82,9 +82,15 @@ export async function runChatSession(
       onReaction: (_from, r) => ui.print(`${time(r.ts)} ${C.peer}* ${peerName} reacted ${r.emoji}${C.reset}`),
       onFile: (_from, f) => ui.print(`${time(f.ts)} ${C.peer}* ${peerName} shared a file: ${f.name} (${f.cid.slice(0, 12)}…) — interim: fetch TODO${C.reset}`),
       onPresence: (peer, ev) => {
-        const what = ev === 'join' ? 'is in the room' : ev === 'active' ? 'is back' : ev === 'away' ? 'is away' : 'left'
+        const what = ev === 'join' ? 'is in the room' : ev === 'active' ? 'is back' : ev === 'away' ? 'is away'
+          : ev === 'quiet' ? 'has gone quiet — no heartbeat' : 'left'
         ui.print(`${C.sys}* ${peerName} ${what} (${short(peer)})${C.reset}`)
       },
+      onLink: (state) => ui.print(
+        state === 'online' ? `${C.sys}— relay connection is back${C.reset}`
+          : state === 'reconnecting' ? `${C.warn}— lost the relay, reconnecting…${C.reset}`
+          : `${C.warn}— no connection to the relay${C.reset}`,
+      ),
     })
     ui.print(`${C.sys}— room open (topic ${conv.topic.slice(0, 12)}…) as ${short(conv.peerId)}. Type to chat.  /who  /me <a>  /react <emoji>  /quit${C.reset}`)
     ui.print(`${C.sys}— waiting for ${peerName} to join…${C.reset}`)

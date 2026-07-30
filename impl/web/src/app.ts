@@ -446,6 +446,26 @@ async function openChat(contact: Contact) {
   try {
     let peerTyping = false
     let lastPresence: string | null = null
+    /**
+     * Two independent facts share one line in the header, and they used to be
+     * confused for each other: what the peer is doing, and whether we have a
+     * transport at all. A frozen laptop looked exactly like a peer who left.
+     * Our own link wins when it is down — we cannot honestly report on someone
+     * we currently cannot hear.
+     */
+    let peerLabel = 'łączę…'
+    let linkState: 'online' | 'reconnecting' | 'offline' = 'online'
+    const paintStatus = () => {
+      const dot = $('peer-dot'), txt = $('peer-status')
+      if (linkState !== 'online') {
+        dot.className = 'dot bad'
+        txt.textContent = linkState === 'reconnecting' ? 'wznawiam połączenie…' : 'brak połączenia z przekaźnikiem'
+        return
+      }
+      dot.className = 'dot ' + (lastPresence === 'join' || lastPresence === 'active' ? 'ok'
+        : lastPresence === 'away' || lastPresence === 'quiet' ? 'away' : '')
+      txt.textContent = peerLabel
+    }
     const conv = await openConversation(session.id, { pub: contact.pub, kid: contact.kid }, {
       relay: RELAY,
       webrtc: true,
@@ -463,9 +483,16 @@ async function openChat(contact: Contact) {
       onTyping: (_from, state) => { peerTyping = state === 'start'; setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => addReaction(r.to, r.emoji),
       onFile: (_from, f) => appendMsg('sys', `${contact.name} udostępnił plik: ${f.name} — interim (IPFS TODO)`),
+      onLink: (state) => {
+        // Our own transport. It outranks whatever we last heard about the peer:
+        // with no connection we do not actually know anything about them.
+        linkState = state
+        paintStatus()
+      },
       onPresence: (_peer, ev) => {
         if (active) active.inRoom = ev !== 'leave'
-        const label = ev === 'join' ? 'w pokoju' : ev === 'active' ? 'wrócił/a' : ev === 'away' ? 'nieobecny/a' : 'wyszedł/wyszła'
+        const label = ev === 'join' ? 'w pokoju' : ev === 'active' ? 'wrócił/a' : ev === 'away' ? 'nieobecny/a'
+          : ev === 'quiet' ? 'brak sygnału' : 'wyszedł/wyszła'
         // Presence belongs in the header, not in the transcript. Every tab
         // switch flips away→active, and writing each one into the conversation
         // buried the actual messages under "nieobecny/a · wrócił/a" noise.
@@ -473,8 +500,8 @@ async function openChat(contact: Contact) {
         // the state really changed.
         if ((ev === 'join' || ev === 'leave') && lastPresence !== ev) appendMsg('sys', `${contact.name} ${label}`)
         lastPresence = ev
-        $('peer-dot').className = 'dot ' + (ev === 'join' || ev === 'active' ? 'ok' : ev === 'away' ? 'away' : '')
-        $('peer-status').textContent = ev === 'leave' ? 'poza pokojem' : label
+        peerLabel = ev === 'leave' ? 'poza pokojem' : label
+        paintStatus()
         if (ev === 'leave') { peerTyping = false; setTyping(false) }
         renderContacts()
       },

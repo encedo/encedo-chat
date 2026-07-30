@@ -207,7 +207,14 @@ export interface OpenOpts extends ChatOpts {
   onDelivered?: ChatOpts['onDelivered']
   onUndelivered?: ChatOpts['onUndelivered']
   onLateDelivered?: ChatOpts['onLateDelivered']
+  /**
+   * Our own transport, as opposed to the peer's presence. `offline` means this
+   * client currently has no way to reach the relay at all — a distinction the UI
+   * had no way to draw, so a frozen laptop and a peer who left looked identical.
+   */
+  onLink?: (state: LinkState) => void
 }
+export type LinkState = 'online' | 'reconnecting' | 'offline'
 export interface Conversation {
   peerId: string
   topic: string
@@ -269,6 +276,63 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
   })
   if (opts.webrtc) plane = attachWebRTC(room, self, { onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
 
+  // ---- our own transport, watched out loud ---------------------------------
+  // Losing the relay connection used to be invisible: the room kept its state,
+  // the badge stayed green, presence took 90 s to expire, and messages went into
+  // a socket that no longer existed. The only thing that ever noticed was the
+  // user, once nothing had arrived for a while. So watch it, say so, and get
+  // back on by ourselves instead of waiting for a tab to be focused.
+  const REDIAL_BACKOFF = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000]
+  let link: LinkState = 'online'
+  let redialing = false
+  let closed = false
+  const setLink = (s: LinkState) => {
+    if (s === link) return
+    link = s
+    log(`link: ${s}`)
+    opts.onLink?.(s)
+  }
+  const connected = () => {
+    try { return node.getConnections().length > 0 } catch { return false }
+  }
+  const reconnect = async () => {
+    if (redialing || closed) return
+    redialing = true
+    setLink('reconnecting')
+    for (let i = 0; !closed && !connected(); i++) {
+      try {
+        await dial(node, opts.relay)
+        break
+      } catch (e: any) {
+        const wait = REDIAL_BACKOFF[Math.min(i, REDIAL_BACKOFF.length - 1)]
+        log(`re-dial failed (${e?.message ?? e}) — again in ${wait} ms`)
+        // Past the first few tries this is a machine with no network at all;
+        // saying "offline" is more honest than an endless "reconnecting".
+        if (i >= 2) setLink('offline')
+        await new Promise((r) => setTimeout(r, wait))
+      }
+    }
+    redialing = false
+    if (closed) return
+    if (connected()) {
+      setLink('online')
+      log('relay connection restored — announcing and flushing what is waiting')
+      room.refresh()
+      room.flushPending() // oldest first: an outage must not reorder the backlog
+    }
+  }
+  node.addEventListener?.('connection:close', () => {
+    if (!closed && !connected()) { log('lost the relay connection'); void reconnect() }
+  })
+  // Belt and braces: events can be missed (a frozen tab wakes with a socket that
+  // is dead but never fired a close), so look for ourselves as well.
+  const linkWatch = setInterval(() => {
+    if (closed) return
+    if (!connected()) void reconnect()
+    else setLink('online')
+  }, 10_000)
+  ;(linkWatch as any).unref?.()
+
   let typingSent = false
   let away = false
   let tT: any
@@ -297,16 +361,19 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
       // background) and the relay connection goes with it. Nothing downstream
       // notices, so the room looks alive while nothing can leave it. Re-dial
       // first, then speak up.
-      if (node.getConnections().length === 0) {
+      if (!connected()) {
         log('back with no relay connection — re-dialing')
-        try { await dial(node, opts.relay) } catch (e: any) { log(`re-dial failed: ${e?.message ?? e}`) }
+        await reconnect()
       }
       room.refresh()
+      room.flushPending()
       if (away) { away = false; room.sendPresence('active') }
     },
     who: () => room.who(),
     secured: () => room.secured(),
     leave: async () => {
+      closed = true
+      clearInterval(linkWatch)
       clearTimeout(tT); clearTimeout(aT)
       try { room.sendPresence('leave') } catch {}
       await new Promise((r) => setTimeout(r, FLUSH_MS))
