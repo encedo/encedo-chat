@@ -696,7 +696,13 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     // Do not keep offering to somebody who has stopped answering at all; the
     // next Announce brings them back.
     if (!lastSeen.has(peer)) return
-    if (self < peer || stuck.has(peer)) void beginHandshake(peer, 'initiator')
+    // Whoever is in a room initiates on discovery — we do NOT wait for the lower
+    // id. That wait deadlocked the presence→conversation upgrade: the peer we
+    // want may only be in the light presence layer (announcing, but not in a
+    // room), so it will never initiate, and if it held the lower id nobody
+    // would. Both initiating is fine — a crossed pair of msg1s is resolved by
+    // the tie-break in onHandshakeFrame (lower id keeps initiator, higher yields).
+    void beginHandshake(peer, 'initiator')
   }
 
   const onHandshakeFrame = async (data: Uint8Array, from: string): Promise<void> => {

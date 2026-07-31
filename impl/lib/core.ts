@@ -19,6 +19,7 @@ import { createPeer, dial } from '../net/peer.ts'
 import { createMqttPeer } from '../net/mqtt-node.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
 import { watchSelfSession, type SelfWatch } from './selfsession.ts'
+import { watchPresence, type PresenceWatch } from './presence.ts'
 import { b64, unb64 } from './wc.ts'
 
 export interface Identity {
@@ -187,6 +188,16 @@ export async function deriveRoom(
 }
 
 /**
+ * The rendezvous half of a pair room, without the EH-2 keys — all the light
+ * presence layer needs (`lib/presence.ts`): the pair topic to subscribe to and
+ * the Announce MAC key. One `ecdh`, no handshake material.
+ */
+export async function derivePresence(id: Identity, peer: Peer, p: RoomParams): Promise<{ topic: string; macKey: CryptoKey }> {
+  const ss = await id.ecdh(peer.pub, peer.kid)
+  return { topic: await topicFromSecret(ss, p), macKey: await announceMacKey(ss, p) }
+}
+
+/**
  * The self-topic (§5.2): the same derivation as a pair topic, with ourselves as
  * the peer. `ss = ECDH(IK, IK_pub)` is computable only by the holder of that IK,
  * so the topic and its Announce key are ours alone — which is what makes
@@ -268,6 +279,19 @@ export interface ClientSession {
   readonly self: string
   /** Open a room with one contact on this session's transport. */
   open(peer: Peer, opts: RoomOpts): Promise<Conversation>
+  /**
+   * Start the LIGHT presence layer for a set of contacts: a subscribe+announce
+   * watch each, so they can see us online and we them, with no handshake. A
+   * contact is upgraded to a full conversation by `open`, or automatically when
+   * their EH-2 frame arrives (`onWantsConversation` — the app opens the room).
+   */
+  watchContacts(contacts: Peer[], handlers: {
+    onOnline?: (p: Peer) => void
+    onOffline?: (p: Peer) => void
+    onWantsConversation?: (p: Peer) => void
+  }): Promise<void>
+  /** Drop one contact's presence watch (e.g. it was removed). */
+  unwatch(pub: string): void
   /** The tab came back: re-dial if needed, then wake every open room. */
   refresh(): Promise<void>
   /**
@@ -395,10 +419,39 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   }, 10_000)
   ;(linkWatch as any).unref?.()
 
+  // ---- presence layer (light): one subscribe+announce watch per contact -----
+  // Being visible to N contacts is N cheap watches on one transport, NOT N
+  // handshakes. A contact is upgraded to a full room only on demand (`open`) or
+  // when their EH-2 frame arrives (`onWantsConversation`); on `leave` it drops
+  // back to a watch.
+  interface Watched { peer: Peer; watch: PresenceWatch }
+  const presence = new Map<string, Watched>() // key = peer.pub
+  let presenceHandlers: {
+    onOnline?: (p: Peer) => void
+    onOffline?: (p: Peer) => void
+    onWantsConversation?: (p: Peer) => void
+  } = {}
+  const startWatch = async (peer: Peer) => {
+    if (closed || presence.has(peer.pub)) return
+    try {
+      const { topic, macKey } = await derivePresence(id, peer, params)
+      const watch = watchPresence(node, topic, macKey, self, {
+        onOnline: () => presenceHandlers.onOnline?.(peer),
+        onOffline: () => presenceHandlers.onOffline?.(peer),
+        onIncomingHandshake: () => presenceHandlers.onWantsConversation?.(peer),
+        onLog: opts.onLog,
+      })
+      presence.set(peer.pub, { peer, watch })
+    } catch (e: any) { log(`presence watch for ${peer.pub.slice(0, 12)}… failed: ${e?.message ?? e}`) }
+  }
+  const stopWatch = (pub: string) => { presence.get(pub)?.watch.stop(); presence.delete(pub) }
+
   const shutdown = async (why: string) => {
     if (closed) return
     closed = true
     log(`session closing: ${why}`)
+    for (const w of presence.values()) { try { w.watch.stop() } catch {} }
+    presence.clear()
     selfWatch?.stop()
     clearInterval(linkWatch)
     for (const r of rooms) { try { r.sendPresence('leave') } catch {} }
@@ -434,16 +487,33 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   return {
     self,
     async open(peer: Peer, roomOpts: RoomOpts) {
-      return openRoom(id, peer, node, self, params, roomOpts, {
+      // Upgrade: the full room does presence too, so retire the light watch while
+      // the conversation is open — but HAND OFF the topic (keep the subscription
+      // and its warm mesh) so the room does not have to re-graft. Restore a fresh
+      // watch on leave.
+      const wasWatched = presence.has(peer.pub)
+      presence.get(peer.pub)?.watch.stop(false) // false = handoff, do not unsubscribe
+      presence.delete(peer.pub)
+      const conv = await openRoom(id, peer, node, self, params, roomOpts, {
         log,
         onIsolated: () => { setLink('reconnecting'); void reconnect(true) },
         ensureConnected: async () => { if (!connected()) await reconnect() },
         register: (r: OpenRoom) => { rooms.add(r); return () => rooms.delete(r) },
       })
+      return {
+        ...conv,
+        leave: async () => { await conv.leave(); if (wasWatched && !closed) await startWatch(peer) },
+      }
     },
+    async watchContacts(contacts: Peer[], handlers) {
+      presenceHandlers = handlers
+      for (const c of contacts) await startWatch(c)
+    },
+    unwatch(pub: string) { stopWatch(pub) },
     async refresh() {
       if (!connected()) { log('back with no relay connection — re-dialing'); await reconnect() }
       for (const r of rooms) { r.refresh(); r.flushPending() }
+      for (const w of presence.values()) w.watch.announce()
     },
     setOffline(offline: boolean) {
       if (offline) {
