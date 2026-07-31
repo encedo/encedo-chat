@@ -387,6 +387,15 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     h: Eh2Handshake | null
     role: 'initiator' | 'responder'
     startedAt: number
+    /**
+     * Set when this attempt is abandoned. Its handshake promise can still
+     * resolve afterwards — the frames were already in flight — and installing
+     * the session it produces is how a room ends up with two ratchets seconds
+     * apart, of which the peer only holds one. Checking `handshakes.get(peer)`
+     * is not enough: a fresh attempt for the same peer replaces the entry, so
+     * the stale promise sees "not me" only until the next attempt reuses it.
+     */
+    cancelled?: boolean
     /** Responder: the msg1 this attempt answers, and the msg2 it answered with. */
     msg1?: Uint8Array
     reply?: Uint8Array
@@ -445,6 +454,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const resendTimers = new Map<string, any>()
 
   const clearAttempt = (peer: string) => {
+    const a = handshakes.get(peer)
+    if (a) a.cancelled = true
     clearTimeout(attemptTimers.get(peer))
     clearInterval(resendTimers.get(peer))
     attemptTimers.delete(peer)
@@ -514,6 +525,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       eh2.onState?.(peer, 'handshaking')
       h.session.then(
         (s) => {
+          if (attempt.cancelled) { log(`ignoring a handshake with ${short(peer)} that completed after it was abandoned`); return }
           if (handshakes.get(peer) !== attempt) return // superseded by a newer attempt
           clearAttempt(peer)
           stuck.delete(peer)
@@ -531,7 +543,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
           void flushQueued()
         },
         (err: any) => {
-          if (handshakes.get(peer) !== attempt) return
+          if (attempt.cancelled || handshakes.get(peer) !== attempt) return
           clearAttempt(peer)
           giveUp(peer)
         },

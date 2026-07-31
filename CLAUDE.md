@@ -287,16 +287,29 @@ converting back to plain data.
 redirect to a file instead. And watch what it leaves behind: leaked browsers from
 repeated runs are what once exhausted this machine (`pgrep -f chrome`, `free -m`).
 
-### Phone layout
+### Compact layout (phones, and phones on their side)
 
-Below **720px** the two-panel dashboard becomes what a messenger on a phone is:
-**one pane at a time** — the contact list or the conversation, switched by
-`.chat-open` on `#app`, with a back arrow in the chat header. Stacking the panels
-(the old ≤860px rule, still there for tablets) means scrolling past the whole
-contact list to reach the messages.
+The two-panel dashboard needs **both** dimensions, so the condition is
+`@media (max-width:900px), (max-height:560px)` — narrow **or** short gets **one
+pane at a time**: the contact list or the conversation, switched by `.chat-open`
+on `#app`, with a back arrow in the chat header.
 
-Two things that are easy to get wrong and are pinned by the `browser-test`
-"phone layout" scenario (it runs at 390×780 on whichever browser is B):
+Width alone was wrong, and a user found it: a phone in **landscape** is 852×393,
+sails past every "phone" breakpoint, and got the old stacked layout — contact
+list on screen, conversation below the fold, and nothing scrolling anywhere,
+because `.app{height:auto}` let the panel grow instead of `.messages` overflowing
+inside it. "I cannot see the chat at all, scrolling does not work."
+
+**`#btn-back{display:none}` must stay ABOVE the media query.** Same specificity,
+so source order decides; putting it after silently disables the back button on
+every phone. This has now been broken twice — check it when moving CSS around.
+
+Pinned by the `browser-test` "phone layout" scenario, which runs **both
+orientations** (390×780 and 852×393) on whichever browser is B, and by
+`node net/phone-shot.ts <dir>` — screenshots at real device metrics (iPhone 16,
+Galaxy S24/Ultra, landscape, tablet), including the keyboard case. A layout bug
+is a visual fact; assertions about computed styles miss overlap and clipping.
+Two more that are easy to get wrong:
 
 - **Height is `--app-h`, kept in step with `visualViewport`.** A software
   keyboard does not resize `100vh` — that is the screen — so the composer ends up

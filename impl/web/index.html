@@ -163,33 +163,27 @@
   .kv .v{color:var(--text);font-weight:500;font-variant-numeric:tabular-nums;word-break:break-all;text-align:right}
   .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(8px);background:var(--text);color:var(--card);padding:9px 16px;border-radius:20px;font-size:13px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:20}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-  /* Narrow layout: the panels stack and the page scrolls. The chat panel must
-     still be BOUNDED — with only a min-height it grew with the transcript, so
-     .messages never overflowed, never scrolled, and the jump-to-latest button
-     (which only appears when you scroll away from the bottom) could not appear
-     at all. Two browser windows side by side are enough to land here.
-     `flex:none` matters as much as the height: the base rule is `.chat{flex:1}`,
-     and in a column flex container `flex-basis:0%` decides the main size, so a
-     plain `height` here is simply ignored. */
-  @media (max-width:860px){.app{flex-direction:column;height:auto}.sidebar{width:100%}.chat{flex:none;height:70vh;min-height:420px}}
-
   #btn-back{display:none;place-items:center;width:36px;height:36px;flex:none;border:1px solid var(--border);
             border-radius:10px;background:transparent;color:var(--text);font-size:18px;line-height:1}
 
-  /* ---- phone: one pane at a time -------------------------------------------
-     Below 720px the two-panel dashboard stops making sense: stacking them means
-     scrolling past the whole contact list to reach the conversation. So it
-     becomes what every messenger on a phone is — the list OR the chat, with a
-     back arrow — driven by `.chat-open` on the app container.
+  /* ---- compact: one pane at a time -----------------------------------------
+     The two-panel dashboard needs BOTH dimensions. It used to degrade by
+     stacking the panels and letting the page scroll, which is how a phone in
+     landscape (852×393 — wider than any "phone" breakpoint, and 393 tall) ended
+     up showing the contact list with the conversation somewhere below the fold:
+     "I cannot see the chat at all, and scrolling does nothing". Nothing scrolled
+     because `.app{height:auto}` let the panel grow instead of `.messages`
+     overflowing inside it.
 
-     Height is `--app-h`, which app.ts keeps in step with `visualViewport`. That
-     is the only thing that survives a software keyboard: `100vh` is the screen,
-     not the visible area, so the composer ends up underneath the keyboard, and
-     even `100dvh` only settles after the animation. */
-  @media (max-width:720px){
-    /* `min-height` from the desktop rule has to go: on a small phone with the
-       keyboard open the visible area is well under it, and a floored height
-       pushes the composer off screen — the exact thing --app-h prevents. */
+     So the condition is not width alone. Anything that is narrow OR short gets
+     what a messenger on a phone is: the list or the conversation, switched by
+     `.chat-open` on #app, with a back arrow — and the app bounded to the visible
+     viewport so the transcript scrolls inside itself.
+
+     Height is `--app-h`, which app.ts keeps in step with `visualViewport`; the
+     desktop `min-height` has to be cancelled, or a keyboard-shrunk viewport
+     pushes the composer off screen. */
+  @media (max-width:900px), (max-height:560px){
     .app{flex-direction:column;gap:0;padding:0;height:var(--app-h,100dvh);min-height:0;max-width:none}
     .sidebar,.chat{border-radius:0;border-left:none;border-right:none;box-shadow:none}
     .sidebar{width:100%;flex:1;min-height:0}
@@ -204,6 +198,11 @@
     .to-bottom{right:14px;bottom:calc(72px + env(safe-area-inset-bottom))}
     #btn-back{display:grid}
     .login-card{margin:12px;padding:18px}
+  }
+  /* A short screen has no room for a wrapped header: keep it on one line. */
+  @media (max-height:560px){
+    .chat-head{flex-wrap:nowrap;overflow-x:auto;padding:8px 12px}
+    .chat-head .badge{white-space:nowrap}
   }
 
   /* Touch: no hover, so anything that only appears on hover is unreachable. The

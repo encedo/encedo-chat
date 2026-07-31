@@ -662,10 +662,30 @@ async function main() {
     }
 
     scenario('the phone layout')
-    // A phone is not a narrow desktop: below 720px the app shows ONE pane, so
-    // the conversation must fill the screen, the composer must be reachable, and
-    // the way back to the contact list must exist at all.
-    await B.resize(390, 780) // iPhone-ish
+    // A phone is not a narrow desktop: a compact viewport shows ONE pane, so the
+    // conversation must fill the screen, the composer must be reachable, and the
+    // way back to the contact list must exist at all.
+    //
+    // Both orientations, because width alone was the wrong condition: a phone in
+    // LANDSCAPE is 852 wide and 393 tall, sailed past every "phone" breakpoint,
+    // and got the old stacked layout — contact list on screen, conversation
+    // somewhere below the fold, nothing scrolling. That is what a user reported.
+    for (const [w, h, label] of [[390, 780, 'portrait'], [852, 393, 'landscape']] as const) {
+    await B.resize(w, h)
+    // Enough transcript to overflow at this size. Re-opening a contact clears
+    // the messages box, so without this the scroll assertion measures an empty
+    // list rather than the layout.
+    await B.eval(`
+      const box = document.getElementById('messages');
+      for (let i = 0; i < 12; i++) {
+        const row = document.createElement('div'); row.className = 'mrow ' + (i % 2 ? 'out' : 'in');
+        row.dataset.ts = String(Date.now());
+        row.innerHTML = '<div class="bubble"><div class="b-text">wypełniacz ' + i + '</div><div class="b-meta">12:00 UTC</div></div>';
+        box.appendChild(row);
+      }
+      box.scrollTop = box.scrollHeight;
+      return 1;
+    `)
     const phone = await B.eval<any>(`
       const app = document.getElementById('app'), m = document.getElementById('messages');
       const back = document.getElementById('btn-back'), comp = document.querySelector('.composer');
@@ -680,14 +700,18 @@ async function main() {
         appHeight: getComputedStyle(app).height + ' / viewport ' + window.innerHeight,
       };
     `)
-    console.log('   ' + JSON.stringify(phone))
+    console.log(`   ${label}: ` + JSON.stringify(phone))
     for (const [k, want] of [['onePane', true], ['chatOpen', true], ['backVisible', true], ['composerInView', true], ['transcriptScrolls', true], ['appFitsViewport', true]] as const) {
-      if (phone[k] !== want) throw new Error(`phone layout: ${k} was ${phone[k]}, expected ${want}`)
+      if (phone[k] !== want) throw new Error(`phone layout (${label}): ${k} was ${phone[k]}, expected ${want}`)
     }
     await B.eval(`document.getElementById('btn-back').click(); return 1`)
     const backToList = await B.eval<boolean>(`return getComputedStyle(document.querySelector('.sidebar')).display !== 'none'`)
-    if (!backToList) throw new Error('phone layout: the back button did not return to the contact list')
-    step('one pane, a way back, and a composer above the fold')
+    if (!backToList) throw new Error(`phone layout (${label}): the back button did not return to the contact list`)
+    await openContact(B, 'sim-a') // back into the conversation for the next size
+    await B.waitFor('the conversation again', `return document.getElementById('app').classList.contains('chat-open')`, 15_000)
+    await sleep(400)
+    step(`${label}: one pane, a way back, and a composer above the fold`)
+    }
     await B.resize(1200, 800)
 
     console.log(`\nPASS — all scenarios${direct ? ' (content over WebRTC Direct)' : ' — but WebRTC never came up, see above'}`)
