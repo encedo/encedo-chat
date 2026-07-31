@@ -160,6 +160,21 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   /** Peers we have already reported as quiet, so it is said once, not every sweep. */
   const quiet = new Set<string>()
 
+  /**
+   * Forget everything we know about a peer's message STREAM (dedup + ordering).
+   *
+   * Sequence numbers are per sender and start at 1 for each room, which was
+   * harmless while every room had its own transport and therefore its own
+   * PeerId. Sharing one transport across rooms broke that: leaving a room and
+   * coming back reuses the PeerId, the counter restarts, and the peer discards
+   * the new messages as ones it has already seen — silently, because that is
+   * exactly what dedup is for. A new stream starts wherever a new ratchet does.
+   */
+  const forgetStream = (peer: string) => {
+    topSeq.delete(peer)
+    for (const k of [...seenSeq]) if (k.startsWith(`${peer}:`)) seenSeq.delete(k)
+  }
+
   const touch = (peer: string) => {
     const fresh = !lastSeen.has(peer)
     lastSeen.set(peer, nowMs())
@@ -440,6 +455,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   /** A peer that left takes its ratchet with it — a new visit re-handshakes. */
   const forgetPeer = (peer: string) => {
     clearAttempt(peer)
+    forgetStream(peer)
     sessions.delete(peer)
     previous.delete(peer)
     establishedAt.delete(peer)
@@ -503,6 +519,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
           stuck.delete(peer)
           const old = sessions.get(peer)
           if (old) previous.set(peer, { session: old, until: nowMs() + PREVIOUS_GRACE_MS })
+          forgetStream(peer) // new ratchet ⇒ new stream: its `seq` starts from 1 again
           failedAttempts.delete(peer) // a success wipes the record — those failures were crossfire
           backoffUntil.delete(peer)
           everEstablished.add(peer)

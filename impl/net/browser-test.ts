@@ -574,6 +574,8 @@ async function main() {
     // the tab. What must happen instead: the client notices by itself, says so,
     // re-dials, and the backlog arrives IN ORDER once it is back.
     if (await B.offline(true)) {
+      const sawIt = await B.eval<boolean>('return navigator.onLine === false')
+      step(`network cut — the page ${sawIt ? 'knows it is offline' : 'still believes it is online'}`)
       await B.waitFor('B admits it is not connected',
         `return /wznawiam|brak połączenia/.test(document.getElementById('peer-status').textContent)`, 30_000)
       step('B noticed the relay was gone without being touched — no tab focus, no user action')

@@ -12,7 +12,7 @@
  */
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
-import { hemIdentityFrom, browserSoftwareIdentity, openConversation, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, type Conversation, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
+import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 
 const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
@@ -22,6 +22,35 @@ const dec = new TextDecoder()
 
 let mode: 'login' | 'register' = 'login'
 let session: { id: Identity; handle: string; pub: string; kid?: string; book: ContactManager } | null = null
+/**
+ * ONE transport for the whole app, opened at login: every room runs on it.
+ * Building a node per conversation was invisible while only one chat was ever
+ * open, and would have meant a WebSocket per contact the moment several are.
+ */
+let client: ClientSession | null = null
+/** Resolves once the transport is up; rooms wait on it instead of on a null. */
+let clientReady: Promise<ClientSession> | null = null
+
+/**
+ * Two independent facts share the header line, and they used to be confused for
+ * each other: what the peer is doing, and whether we have a transport at all. A
+ * frozen laptop looked exactly like a peer who left. Our own link wins when it
+ * is down — we cannot honestly report on someone we currently cannot hear.
+ */
+let peerLabel = 'łączę…'
+let lastPresence: string | null = null
+let linkState: 'online' | 'reconnecting' | 'offline' = 'online'
+function paintStatus() {
+  const dot = $('peer-dot'), txt = $('peer-status')
+  if (linkState !== 'online') {
+    dot.className = 'dot bad'
+    txt.textContent = linkState === 'reconnecting' ? 'wznawiam połączenie…' : 'brak połączenia z przekaźnikiem'
+    return
+  }
+  dot.className = 'dot ' + (lastPresence === 'join' || lastPresence === 'active' ? 'ok'
+    : lastPresence === 'away' || lastPresence === 'quiet' ? 'away' : '')
+  txt.textContent = peerLabel
+}
 let active: { name: string; pub: string; inRoom: boolean; conv: Conversation | null } | null = null
 let rotTimer: any = null
 
@@ -114,6 +143,33 @@ const shortKid = (kid?: string) => (kid ? kid.slice(0, 8) + '…' : '')
 
 async function enterApp(id: Identity, book: ContactManager, sourceLabel: string, kid?: string) {
   session = { id, handle: id.handle, pub: id.pub, kid, book }
+  // Start the transport, but do NOT make the app shell wait for it: dialing a
+  // relay is network work, and a login screen that hangs on it looks broken
+  // (it also blocked the first automated run of this app outright).
+  clientReady = startSession(id, {
+    relay: RELAY,
+    onLog: ecLog,
+    onLink: (state) => { linkState = state; paintStatus() },
+    onSessionTakenOver: () => {
+      // §9.1/§9.2: a second window of this identity showed up, so BOTH stand
+      // down — the other one is doing exactly this too. The transport is gone
+      // by now; clear the transcript, because this window cannot decrypt
+      // anything any more, and say plainly what to do about it.
+      if (active) { active.conv = null; active.inRoom = false }
+      $('messages').innerHTML = ''
+      msgEls.clear(); stateEls.clear(); setTyping(false)
+      appendMsg('sys', 'Wykryto drugie okno zalogowane na tę samą tożsamość.'
+        + ' Obie sesje zostały zamknięte — jedna tożsamość, jedna aktywna sesja.'
+        + ' Zamknij nadmiarową kartę i odśwież tę, w której chcesz rozmawiać.')
+      linkState = 'offline'
+      peerLabel = 'sesja zamknięta (duplikat)'
+      paintStatus()
+    },
+  })
+  clientReady.then((c) => { client = c }, (e: any) => {
+    ecLog(`session failed to start: ${e?.message ?? e}`)
+    toast('Brak połączenia z przekaźnikiem — odśwież stronę')
+  })
   $('login').hidden = true; $('app').hidden = false
   $('me-avatar').textContent = initials(id.handle)
   $('me-handle').textContent = id.handle
@@ -459,30 +515,10 @@ async function openChat(contact: Contact) {
 
   try {
     let peerTyping = false
-    let lastPresence: string | null = null
-    /**
-     * Two independent facts share one line in the header, and they used to be
-     * confused for each other: what the peer is doing, and whether we have a
-     * transport at all. A frozen laptop looked exactly like a peer who left.
-     * Our own link wins when it is down — we cannot honestly report on someone
-     * we currently cannot hear.
-     */
-    let peerLabel = 'łączę…'
-    let linkState: 'online' | 'reconnecting' | 'offline' = 'online'
     let warnedForeign = false
-    const paintStatus = () => {
-      const dot = $('peer-dot'), txt = $('peer-status')
-      if (linkState !== 'online') {
-        dot.className = 'dot bad'
-        txt.textContent = linkState === 'reconnecting' ? 'wznawiam połączenie…' : 'brak połączenia z przekaźnikiem'
-        return
-      }
-      dot.className = 'dot ' + (lastPresence === 'join' || lastPresence === 'active' ? 'ok'
-        : lastPresence === 'away' || lastPresence === 'quiet' ? 'away' : '')
-      txt.textContent = peerLabel
-    }
-    const conv = await openConversation(session.id, { pub: contact.pub, kid: contact.kid }, {
-      relay: RELAY,
+    lastPresence = null
+    peerLabel = 'łączę…'
+    const conv = await (await clientReady!).open({ pub: contact.pub, kid: contact.kid }, {
       webrtc: true,
       onWebrtcState: setTransport,
       eh2: EH2,
@@ -498,21 +534,6 @@ async function openChat(contact: Contact) {
       onTyping: (_from, state) => { peerTyping = state === 'start'; setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => addReaction(r.to, r.emoji),
       onFile: (_from, f) => appendMsg('sys', `${contact.name} udostępnił plik: ${f.name} — interim (IPFS TODO)`),
-      onSessionTakenOver: () => {
-        // §9.1/§9.2: a second window of this identity showed up, so BOTH stand
-        // down — the other one is doing exactly this too. The transport is
-        // already gone by now; clear the transcript, because this window cannot
-        // decrypt anything any more, and say plainly what to do about it.
-        if (active) { active.conv = null; active.inRoom = false }
-        $('messages').innerHTML = ''
-        msgEls.clear(); stateEls.clear(); setTyping(false)
-        appendMsg('sys', 'Wykryto drugie okno zalogowane na tę samą tożsamość.'
-          + ' Obie sesje zostały zamknięte — jedna tożsamość, jedna aktywna sesja.'
-          + ' Zamknij nadmiarową kartę i odśwież tę, w której chcesz rozmawiać.')
-        linkState = 'offline'
-        peerLabel = 'sesja zamknięta (duplikat)'
-        paintStatus()
-      },
       onForeign: () => {
         // The user is the only one who can fix this, so say it in the transcript
         // rather than in a console nobody has open. Two windows on one identity
@@ -522,12 +543,6 @@ async function openChat(contact: Contact) {
           appendMsg('sys', 'Uwaga: w tym pokoju jest ktoś, kto nie uwierzytelnia się jako ten kontakt'
             + ' — najczęściej druga zakładka zalogowana na tę samą tożsamość. Zamknij jedną z nich.')
         }
-      },
-      onLink: (state) => {
-        // Our own transport. It outranks whatever we last heard about the peer:
-        // with no connection we do not actually know anything about them.
-        linkState = state
-        paintStatus()
       },
       onPresence: (_peer, ev) => {
         if (active) active.inRoom = ev !== 'leave'
@@ -573,7 +588,24 @@ document.addEventListener('visibilitychange', () => {
   // immediately instead of waiting for the next tick.
   else active?.conv?.refresh()
 })
-window.addEventListener('beforeunload', () => { active?.conv?.leave() })
+// The browser tells us about the network directly — no need to infer it from
+// silence. This is what makes a Wi-Fi drop or a tunnel show up instantly instead
+// of after a couple of missed heartbeats.
+window.addEventListener('offline', () => {
+  ecLog('browser: offline')
+  linkState = 'offline'; paintStatus()
+  client?.setOffline(true)
+})
+window.addEventListener('online', () => {
+  ecLog('browser: online')
+  linkState = 'reconnecting'; paintStatus()
+  client?.setOffline(false)
+})
+
+// Leaving the page ends the whole session, not just the open room: the §9.1
+// watch has to stop announcing, or the next window sees a rival that is already
+// gone and closes itself for nothing.
+window.addEventListener('beforeunload', () => { active?.conv?.leave(); client?.close() })
 
 // ---- room rotation countdown (next UTC midnight) ----
 function startRotation() {

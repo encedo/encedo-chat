@@ -166,6 +166,38 @@ Presence: Announce/HMAC (§5.5) stays for authenticated discovery/liveness;
 (relay blind). Ctrl+C and `/quit` → `presence:leave` last-will + clean
 `node.stop()`.
 
+### Sessions and rooms — `lib/core.ts`
+
+**One transport per client, many rooms on it.** `startSession(id, …)` owns the
+libp2p node, the relay connection and its health, and the §9.1 self-topic watch;
+`session.open(peer, …)` joins one room on it. `openConversation()` still exists
+and is what the CLI and the tests use — it starts a private session, opens one
+room, and closes both on `leave()`.
+
+The split is not tidiness. The previous shape built a node and a relay connection
+*inside* `openConversation`, which was invisible while the UI only ever held one
+chat — and would have meant **a WebSocket per contact** the moment several are
+open, for topics that one connection carries happily. Measured, for scale: 20
+full EH-2 handshakes (both sides, ML-KEM included) take **66 ms**, and a sealed
+round trip is **0.42 ms**. Twenty rooms is not a CPU problem and needs no worker;
+twenty transports would have been.
+
+Two things the refactor broke and how they are fixed — both worth knowing before
+touching this again:
+
+- **`seq` restarts per room, PeerIds no longer do.** Sharing a transport means
+  leaving a room and coming back reuses the PeerId, so the peer's dedup
+  (`${from}:${seq}`) silently discarded the new stream as already-seen.
+  `forgetStream(peer)` clears dedup + ordering whenever a new ratchet is
+  established, and on `forgetPeer`. A new stream starts wherever a new ratchet
+  does.
+- **Losing the network is now reported by the platform.** `session.setOffline()`
+  is wired to the browser's `offline`/`online` events, which are immediate and
+  certain; the heartbeat-reach and connection-count detectors stay as the
+  fallback for "network up, relay unreachable". Inferring it from silence alone
+  was unreliable — a socket survives a Wi-Fi drop as a zombie, and the browser
+  test caught it failing about half the time.
+
 ### Core facade — `lib/core.ts`
 
 The single **headless API both front-ends consume** (the "backend↔GUI" seam):

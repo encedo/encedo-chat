@@ -252,63 +252,76 @@ export interface Conversation {
 }
 
 /**
- * Open a live conversation: derive room → create peer + dial relay → join, and
- * run the typing/away/leave presence machine. The UI only renders (via the
- * on* callbacks) and feeds intent (sendText / noteActivity / leave).
+ * A client session: ONE transport, many rooms.
+ *
+ * Everything that is per-CLIENT rather than per-conversation lives here — the
+ * libp2p node, the relay connection and its health, and the §9.1 self-topic
+ * watch. Rooms are opened on top of it.
+ *
+ * That split is not tidiness. The previous shape built a whole node and a whole
+ * relay connection *inside* `openConversation`, which was invisible while the UI
+ * only ever held one chat: twenty contacts open at once would have meant twenty
+ * nodes and twenty WebSockets to the same relay, for twenty topics that one
+ * connection carries happily. It also duplicated the takeover watch per room,
+ * when "one active session per identity" is by definition a per-identity thing.
  */
-export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts): Promise<Conversation> {
+export interface ClientSession {
+  /** Our ephemeral PeerId for this session. */
+  readonly self: string
+  /** Open a room with one contact on this session's transport. */
+  open(peer: Peer, opts: RoomOpts): Promise<Conversation>
+  /** The tab came back: re-dial if needed, then wake every open room. */
+  refresh(): Promise<void>
+  /**
+   * The platform says the network went away or came back (the browser's
+   * `offline`/`online` events). Worth wiring: it is immediate and certain,
+   * where everything else here has to infer it from silence — and a socket
+   * that survives a Wi-Fi drop as a zombie infers it very slowly. Coming back
+   * forces a hang-up and a fresh dial, because that zombie is still there.
+   */
+  setOffline(offline: boolean): void
+  /** Stop every room and the transport. */
+  close(): Promise<void>
+}
+
+export interface SessionOpts {
+  relay: string
+  params?: RoomParams
+  onLog?: ChatOpts['onLog']
+  /** Our own transport state — see `LinkState`. */
+  onLink?: (state: LinkState) => void
+  /**
+   * Another window of THIS identity appeared, so both stand down (§9.1). By the
+   * time this fires the transport is gone and every room is stopped; the UI
+   * should clear what it shows. Omit it and the self-topic watch is not started.
+   */
+  onSessionTakenOver?: (byPeer: string) => void
+}
+
+/** Per-room options: everything in OpenOpts that is not about the transport. */
+export type RoomOpts = Omit<OpenOpts, 'relay' | 'params' | 'onLink' | 'onSessionTakenOver'>
+
+const REDIAL_BACKOFF = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000]
+
+export async function startSession(id: Identity, opts: SessionOpts): Promise<ClientSession> {
   const log = opts.onLog ?? (() => {})
   const params = opts.params ?? { networkId: 'main', dateUTC: todayUTC() }
-  log(`opening conversation: network=${params.networkId} date=${params.dateUTC} eh2=${!!opts.eh2} webrtc=${!!opts.webrtc}`)
-  // In EH-2 mode the WebRTC offer cannot go out before the session exists —
-  // signaling rides the room encrypted. So the plane is kicked when the
-  // handshake completes, not (only) when presence says the peer joined.
-  let plane: WebRTCPlane | null = null
-  const onSecurity: Eh2Options['onState'] = (p, state) => {
-    log(`security: ${state} with ${p.slice(0, 12)}…`)
-    opts.onSecurity?.(p, state)
-    if (state === 'established') plane?.onPeer(p)
-  }
-  const { topic, keys } = await deriveRoom(id, peer, params, opts.eh2 ? { onState: onSecurity } : false)
-  log(`room derived: topic ${topic.slice(0, 16)}…`)
   const node = await createPeer()
   const dialT0 = Date.now()
   await dial(node, opts.relay)
-  log(`relay dialed in ${Date.now() - dialT0} ms as ${node.peerId.toString().slice(0, 12)}…`)
-
   const self = node.peerId.toString()
-  const room = joinChat(node, topic, keys, {
-    onMessage: opts.onMessage,
-    onTyping: opts.onTyping,
-    // In EH-2 mode the plane is kicked from onSecurity instead (see above) —
-    // signaling needs a session, which presence 'join' does not imply.
-    onPresence: (p, ev) => { opts.onPresence?.(p, ev); if (ev === 'join' && !opts.eh2) plane?.onPeer(p) },
-    onReaction: opts.onReaction,
-    onFile: opts.onFile,
-    onSignal: (from, env) => plane?.onSignal(from, env),
-    // The peer reloaded: rebind the data plane onto the PeerId that is alive.
-    onPeerReplaced: (old, now) => { log(`peer ${old.slice(0, 12)}… is now ${now.slice(0, 12)}… — rebinding the data plane`); plane?.onPeer(now) },
-    heartbeatMs: opts.heartbeatMs,
-    onLog: opts.onLog,
-    onDelivered: (id, ms) => { log(`delivered ${id} in ${ms} ms`); opts.onDelivered?.(id, ms) },
-    onUndelivered: (id) => { log(`UNDELIVERED ${id} — peer never confirmed`); opts.onUndelivered?.(id) },
-    onLateDelivered: (id, ms) => { log(`late: ${id} arrived after all, ${Math.round(ms / 1000)}s`); opts.onLateDelivered?.(id, ms) },
-    onStall: () => plane?.demote(),
-    // Heartbeats reaching nobody is the honest signal that the transport is
-    // dead — `getConnections()` still reports a connection nothing has tried to
-    // write to, which is why an offline tab used to look perfectly healthy.
-    onIsolated: () => { setLink('reconnecting'); void reconnect(true) },
-    onForeign: (peer) => { log(`foreign peer in the room: ${peer.slice(0, 12)}… — its handshake does not verify`); opts.onForeign?.(peer) },
-  })
-  if (opts.webrtc) plane = attachWebRTC(room, self, { onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
+  log(`session up: relay dialed in ${Date.now() - dialT0} ms as ${self.slice(0, 12)}…`)
 
-  // ---- our own transport, watched out loud ---------------------------------
-  // Losing the relay connection used to be invisible: the room kept its state,
-  // the badge stayed green, presence took 90 s to expire, and messages went into
-  // a socket that no longer existed. The only thing that ever noticed was the
-  // user, once nothing had arrived for a while. So watch it, say so, and get
-  // back on by ourselves instead of waiting for a tab to be focused.
-  const REDIAL_BACKOFF = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000]
+  /** Every room open on this transport — refreshed, flushed and stopped together. */
+  interface OpenRoom { refresh(): void; flushPending(): void; stop(): void; sendPresence(s: any): void }
+  const rooms = new Set<OpenRoom>()
+
+  // ---- the transport, watched out loud -------------------------------------
+  // Losing the relay connection used to be invisible: rooms kept their state,
+  // badges stayed green, presence took 90 s to expire, and messages went into a
+  // socket that no longer existed. The only thing that noticed was the user,
+  // once nothing had arrived for a while. So watch it, say so, and get back on
+  // by ourselves instead of waiting for a tab to be focused.
   let link: LinkState = 'online'
   let redialing = false
   let closed = false
@@ -352,8 +365,7 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     if (connected()) {
       setLink('online')
       log('relay connection restored — announcing and flushing what is waiting')
-      room.refresh()
-      room.flushPending() // oldest first: an outage must not reorder the backlog
+      for (const r of rooms) { r.refresh(); r.flushPending() } // oldest first: an outage must not reorder a backlog
     }
   }
   node.addEventListener?.('connection:close', () => {
@@ -368,11 +380,24 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
   }, 10_000)
   ;(linkWatch as any).unref?.()
 
+  const shutdown = async (why: string) => {
+    if (closed) return
+    closed = true
+    log(`session closing: ${why}`)
+    selfWatch?.stop()
+    clearInterval(linkWatch)
+    for (const r of rooms) { try { r.sendPresence('leave') } catch {} }
+    await new Promise((r) => setTimeout(r, FLUSH_MS))
+    for (const r of rooms) { try { r.stop() } catch {} }
+    rooms.clear()
+    try { await node.stop() } catch {}
+  }
+
   // ---- §9.1: one active session per identity -------------------------------
   // Best effort by design: if the self-topic cannot be derived (a HEM that
-  // refuses an ECDH against our own public key, say) the conversation carries on
-  // without it. Losing the takeover rule is a nuisance; losing the chat is not
-  // an acceptable trade for it.
+  // refuses an ECDH against its own public key, say) the session runs on without
+  // it. Losing the takeover rule is a nuisance; losing the chat is not an
+  // acceptable trade for it.
   let selfWatch: SelfWatch | null = null
   if (opts.onSessionTakenOver) {
     try {
@@ -380,14 +405,8 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
       selfWatch = watchSelfSession(node, selfRoom.topic, selfRoom.macKey, self, {
         onLog: opts.onLog,
         onTakenOver: (byPeer) => {
-          log(`session taken over by ${byPeer.slice(0, 12)}… — shutting this one down (§9.1/§9.2)`)
-          // §9.2 graceful shutdown: say goodbye, drop the ratchets and the
-          // transport, then let the UI clear what it is showing.
           void (async () => {
-            try { room.sendPresence('leave') } catch {}
-            try { plane?.stop() } catch {}
-            try { room.stop() } catch {}
-            try { await node.stop() } catch {}
+            await shutdown(`a second window of this identity appeared (${byPeer.slice(0, 12)}…)`)
             opts.onSessionTakenOver?.(byPeer)
           })()
         },
@@ -396,6 +415,88 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
       log(`self-topic unavailable (${e?.message ?? e}) — running without the §9.1 takeover rule`)
     }
   }
+
+  return {
+    self,
+    async open(peer: Peer, roomOpts: RoomOpts) {
+      return openRoom(id, peer, node, self, params, roomOpts, {
+        log,
+        onIsolated: () => { setLink('reconnecting'); void reconnect(true) },
+        ensureConnected: async () => { if (!connected()) await reconnect() },
+        register: (r: OpenRoom) => { rooms.add(r); return () => rooms.delete(r) },
+      })
+    },
+    async refresh() {
+      if (!connected()) { log('back with no relay connection — re-dialing'); await reconnect() }
+      for (const r of rooms) { r.refresh(); r.flushPending() }
+    },
+    setOffline(offline: boolean) {
+      if (offline) {
+        log('the platform reports no network')
+        setLink('offline')
+        return
+      }
+      log('the platform reports the network is back — re-dialing')
+      void reconnect(true)
+    },
+    close: () => shutdown('closed by the app'),
+  }
+}
+
+/** What a room needs from the session that owns its transport. */
+interface RoomHost {
+  log: (m: string, level?: 'info' | 'debug') => void
+  onIsolated: () => void
+  ensureConnected: () => Promise<void>
+  register: (r: { refresh(): void; flushPending(): void; stop(): void; sendPresence(s: any): void }) => () => void
+}
+
+/**
+ * Join one room on an existing transport, and run the typing/away/leave presence
+ * machine. The UI only renders (via the on* callbacks) and feeds intent.
+ */
+async function openRoom(
+  id: Identity, peer: Peer, node: any, self: string, params: RoomParams, opts: RoomOpts, host: RoomHost,
+): Promise<Conversation> {
+  const log = opts.onLog ?? host.log
+  log(`opening conversation: network=${params.networkId} date=${params.dateUTC} eh2=${!!opts.eh2} webrtc=${!!opts.webrtc}`)
+  // In EH-2 mode the WebRTC offer cannot go out before the session exists —
+  // signaling rides the room encrypted. So the plane is kicked when the
+  // handshake completes, not (only) when presence says the peer joined.
+  let plane: WebRTCPlane | null = null
+  const onSecurity: Eh2Options['onState'] = (p, state) => {
+    log(`security: ${state} with ${p.slice(0, 12)}…`)
+    opts.onSecurity?.(p, state)
+    if (state === 'established') plane?.onPeer(p)
+  }
+  const { topic, keys } = await deriveRoom(id, peer, params, opts.eh2 ? { onState: onSecurity } : false)
+  log(`room derived: topic ${topic.slice(0, 16)}…`)
+
+  const room = joinChat(node, topic, keys, {
+    onMessage: opts.onMessage,
+    onTyping: opts.onTyping,
+    // In EH-2 mode the plane is kicked from onSecurity instead (see above) —
+    // signaling needs a session, which presence 'join' does not imply.
+    onPresence: (p, ev) => { opts.onPresence?.(p, ev); if (ev === 'join' && !opts.eh2) plane?.onPeer(p) },
+    onReaction: opts.onReaction,
+    onFile: opts.onFile,
+    onSignal: (from, env) => plane?.onSignal(from, env),
+    // The peer reloaded: rebind the data plane onto the PeerId that is alive.
+    onPeerReplaced: (old, now) => { log(`peer ${old.slice(0, 12)}… is now ${now.slice(0, 12)}… — rebinding the data plane`); plane?.onPeer(now) },
+    heartbeatMs: opts.heartbeatMs,
+    onLog: opts.onLog,
+    onDelivered: (mid, ms) => { log(`delivered ${mid} in ${ms} ms`); opts.onDelivered?.(mid, ms) },
+    onUndelivered: (mid) => { log(`UNDELIVERED ${mid} — peer never confirmed`); opts.onUndelivered?.(mid) },
+    onLateDelivered: (mid, ms) => { log(`late: ${mid} arrived after all, ${Math.round(ms / 1000)}s`); opts.onLateDelivered?.(mid, ms) },
+    onStall: () => plane?.demote(),
+    // Heartbeats reaching nobody is the honest signal that the transport is
+    // dead — `getConnections()` still reports a connection nothing has tried to
+    // write to, which is why an offline tab used to look perfectly healthy.
+    onIsolated: host.onIsolated,
+    onForeign: (p) => { log(`foreign peer in the room: ${p.slice(0, 12)}… — its handshake does not verify`); opts.onForeign?.(p) },
+  })
+  if (opts.webrtc) plane = attachWebRTC(room, self, { onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
+  const unregister = host.register(room)
 
   let typingSent = false
   let away = false
@@ -412,23 +513,19 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
   const noteAway = () => { stopTyping(); clearTimeout(aT); if (!away) { away = true; room.sendPresence('away') } }
 
   return {
-    peerId: node.peerId.toString(),
+    peerId: self,
     topic,
-    sendText: (body) => { const id = room.sendText(body); stopTyping(); return id },
-    resend: (id) => room.resend(id),
+    sendText: (body) => { const mid = room.sendText(body); stopTyping(); return mid },
+    resend: (mid) => room.resend(mid),
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),
     noteActivity,
     noteAway,
     refresh: async () => {
-      // A tab that was hidden for a while may come back with its transport
-      // dead: throttling turns into freezing (laptop asleep, mobile app in the
-      // background) and the relay connection goes with it. Nothing downstream
-      // notices, so the room looks alive while nothing can leave it. Re-dial
-      // first, then speak up.
-      if (!connected()) {
-        log('back with no relay connection — re-dialing')
-        await reconnect()
-      }
+      // A tab that was hidden for a while may come back with its transport dead:
+      // throttling turns into freezing (laptop asleep, app in the background)
+      // and the relay connection goes with it. Nothing downstream notices, so
+      // the room looks alive while nothing can leave it.
+      await host.ensureConnected()
       room.refresh()
       room.flushPending()
       if (away) { away = false; room.sendPresence('active') }
@@ -436,15 +533,34 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     who: () => room.who(),
     secured: () => room.secured(),
     leave: async () => {
-      closed = true
-      selfWatch?.stop()
-      clearInterval(linkWatch)
+      log(`leaving room ${topic.slice(0, 12)}…`)
       clearTimeout(tT); clearTimeout(aT)
+      unregister()
       try { room.sendPresence('leave') } catch {}
       await new Promise((r) => setTimeout(r, FLUSH_MS))
       try { plane?.stop() } catch {}
       try { room.stop() } catch {}
-      try { await node.stop() } catch {}
     },
+  }
+}
+
+/**
+ * One conversation on a transport of its own — the shape everything used before
+ * sessions existed, kept for the CLI and the tests. `leave()` takes the whole
+ * session with it, which is what a single-room caller means by leaving.
+ */
+export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts): Promise<Conversation> {
+  const session = await startSession(id, {
+    relay: opts.relay,
+    params: opts.params,
+    onLog: opts.onLog,
+    onLink: opts.onLink,
+    onSessionTakenOver: opts.onSessionTakenOver,
+  })
+  const conv = await session.open(peer, opts)
+  return {
+    ...conv,
+    refresh: () => session.refresh(),
+    leave: async () => { await conv.leave(); await session.close() },
   }
 }
