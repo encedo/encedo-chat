@@ -612,6 +612,29 @@ async function main() {
     await roundTrip(A, B, 'after-switch')
     step('the original conversation resumed after switching away')
 
+    scenario('returning to a mobile room does not tear it down')
+    // Reported from a split-screen phone: tapping the back-arrow to the peer
+    // list and then back into the room rebuilt the whole conversation — a
+    // presence:leave, a stopped ratchet, a fresh handshake, and one side
+    // flipping to Relay while the other stayed on WebRTC — so messages stopped
+    // until the ratchet came back N seconds later. Returning to a room that is
+    // ALREADY open must just show it.
+    await B.resize(390, 780) // phone width → mobile one-pane layout
+    await B.waitFor('the back arrow', `return document.getElementById('btn-back').getBoundingClientRect().height > 0`, 8_000)
+    const peerIdBefore = await B.eval<string>(`return document.getElementById('sess-peerid').textContent`)
+    await B.eval(`document.getElementById('btn-back').click(); return 1`)   // to the peer list
+    await sleep(1_000)
+    await openContact(B, 'sim-a')                                          // tap the contact → back to the room
+    await sleep(1_500)
+    const peerIdAfter = await B.eval<string>(`return document.getElementById('sess-peerid').textContent`)
+    if (peerIdBefore !== peerIdAfter) throw new Error(`returning rebuilt the session (peerId ${peerIdBefore} → ${peerIdAfter})`)
+    if (!(await B.eval(BADGE_GREEN))) throw new Error('EH-2 badge dropped on return — the room was torn down')
+    const t0 = Date.now()
+    await roundTrip(A, B, 'after-return')
+    if (Date.now() - t0 > 8_000) throw new Error(`round-trip after return took ${Date.now() - t0} ms — looks like a rebuild`)
+    step('same session, same badge, messages flow at once')
+    await B.resize(1200, 800)
+
     scenario('reading older messages is not interrupted by new ones')
     // Fill past one screen so the transcript can actually scroll, then read
     // from the top while the peer keeps talking.

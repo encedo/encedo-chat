@@ -299,6 +299,20 @@ converting back to plain data.
 redirect to a file instead. And watch what it leaves behind: leaked browsers from
 repeated runs are what once exhausted this machine (`pgrep -f chrome`, `free -m`).
 
+### Returning to an open room must not rebuild it
+
+`openChat()` used to `leave()` and rebuild unconditionally, so **tapping a
+contact you are already in** — which is how you get back to the room after the
+mobile back-arrow — tore the conversation down: presence:leave, ratchet stopped,
+a fresh handshake, and (because the WebRTC plane restarts) one side flipping to
+Relay while the peer stayed on WebRTC. Reported as "back and return desyncs; the
+ratchet comes back after N seconds; Firefox WebRTC, Chromium Relay, but messages
+still arrive." The guard is now: if the tapped contact is the active one and its
+conversation is live, just `showChatPane(true)` + a cheap `refresh()`, no
+teardown. Pinned by the `browser-test` scenario "returning to a mobile room does
+not tear it down" (checks the `sess-peerid` is unchanged across the round trip —
+a rebuild would mint a new one), which **fails without the guard** (verified).
+
 ### Compact layout (phones, and phones on their side)
 
 The two-panel dashboard needs **both** dimensions, so the condition is

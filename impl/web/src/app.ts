@@ -509,6 +509,16 @@ function setTransport(state: string) {
 
 async function openChat(contact: Contact) {
   if (!session) return
+  // Returning to a room that is already open — tapping the contact again after
+  // the mobile back-arrow — must NOT rebuild it. The old unconditional leave()
+  // sent a presence:leave, stopped the ratchet and the transport, and started a
+  // fresh handshake: that is the "messages stop, ratchet comes back after N
+  // seconds, one side flips to Relay" desync. A live room just gets shown again.
+  if (active?.name === contact.name && active.conv) {
+    showChatPane(true)
+    void active.conv.refresh() // came back to the room: re-announce, flush anything pending — cheap, no teardown
+    return
+  }
   if (active?.conv) { try { await active.conv.leave() } catch {} }
   active = { name: contact.name, pub: contact.pub, inRoom: false, conv: null }
   renderContacts()
