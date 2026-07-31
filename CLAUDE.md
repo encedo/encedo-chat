@@ -562,17 +562,16 @@ Details that are load-bearing:
   The relay's topic budget and eviction are sized per topic — halve the client
   estimate.
 
-### ⚠️ INTERIM (fallback only — on its way out)
+### Content crypto — EH-2 only (the interim box is gone)
 
-- `lib/msgcrypto.ts` — a **static AES-256-GCM sealed box** keyed from ss (HKDF);
-  seals **opaque bytes** (the envelope lives inside). Real E2E vs the relay but
-  **no forward secrecy / no ratchet**. Reachable only via `?eh2=0` / `--no-eh2`,
-  kept as an escape hatch while EH-2 settles; **delete it** (with
-  `interimSession`) once nothing needs the fallback.
-- `lib/session.ts` — the **crypto seam**. The room talks to a `Session`
-  (`encrypt`/`decrypt`), not to a key: `interimSession` wraps the box above,
-  `eh2Session` wraps the ratchet. Same interface, so room / envelope / transport
-  never learned which scheme is in use. `test/session.test.ts` covers both.
+- The interim static-AES-GCM box (`lib/msgcrypto.ts`, `interimSession`, `?eh2=0`
+  / `--no-eh2`) was **removed** once EH-2 became mandatory — see `git log
+  --grep=interim` (`git revert` that commit restores the whole path). EH-2 +
+  Double Ratchet is now the only content scheme, both sides, no opt-out.
+- `lib/session.ts` — the **crypto seam**, kept deliberately. The room talks to a
+  `Session` (`encrypt`/`decrypt`), not to a key; today only `eh2Session`
+  implements it, but room / envelope / transport stay decoupled from the scheme
+  so a future one (core-rs, a new ratchet) drops in unchanged.
 - **Content prefers a direct WebRTC DataChannel** once two peers are in the room
   — content goes P2P (relay-blind); GossipSub through the relay carries presence
   + WebRTC signaling and is the content **fallback**. This is the **direct (P1)**
@@ -668,8 +667,8 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
   cryptographer cleared implementation of §6–7 as written; if the review lands
   changes, they go into `docs/` by the user and into `impl/eh2/` as fixes.
 - **EH-2 + Double Ratchet is the default content crypto** since the two-browser
-  validation passed (Chromium + Firefox, handshake in ~2 s). The interim box is
-  now only `?eh2=0` / `--no-eh2` and is scheduled for deletion.
+  validation passed (Chromium + Firefox, handshake in ~2 s), and the interim
+  box has since been removed — EH-2 is the only content scheme.
 - **WebRTC direct data plane (P1) done + verified live** (two browsers,
   DataChannel both ways, badge ⚪ Relay → 🟢 WebRTC Direct). Ready to deploy.
 - Known follow-ups in the EH-2 area: bounded session lifetime / re-handshake
