@@ -8,7 +8,6 @@
  * numbers instead of "nic się nie dzieje".
  *
  *   node net/gui-sim.ts            # EH-2 (what ?eh2=1 does)
- *   node net/gui-sim.ts --interim  # the old static-key path, for comparison
  *
  * Difference from a real browser: no WebRTC (Node has no RTCPeerConnection), so
  * content stays on GossipSub — the relay-fallback path.
@@ -19,7 +18,6 @@ import { openConversation, type Identity } from '../lib/core.ts'
 import { b64 } from '../lib/wc.ts'
 import { onchatoRelay } from './onchato.ts'
 
-const EH2 = !process.argv.includes('--interim')
 const t0 = Date.now()
 const log = (who: string, what: string) => console.log(`[${String(Date.now() - t0).padStart(6)} ms] ${who}: ${what}`)
 
@@ -40,13 +38,12 @@ const open = (me: Identity, peerPub: string, name: 'dev1' | 'dev2') =>
     relay: RELAY,
     params,
     webrtc: false, // browser-only; in Node content stays on GossipSub
-    eh2: EH2,
     onSecurity: (peer, state) => log(name, `EH-2 ${state} with ${peer.slice(0, 12)}…`),
     onMessage: (_from, m) => { inbox[name].push(m.body); log(name, `received "${m.body}"`) },
     onPresence: (peer, ev) => log(name, `presence ${ev} (${peer.slice(0, 12)}…)`),
   })
 
-log('sim', `mode=${EH2 ? 'EH-2' : 'interim'}  relay=${RELAY.slice(0, 40)}…`)
+log('sim', `mode=EH-2  relay=${RELAY.slice(0, 40)}…`)
 const c1 = await open(dev1, dev2.pub, 'dev1')
 log('dev1', `room open, topic=${c1.topic.slice(0, 12)}… as ${c1.peerId.slice(0, 12)}…`)
 const c2 = await open(dev2, dev1.pub, 'dev2')
@@ -80,6 +77,6 @@ c2.sendText('po ustanowieniu — dev2')
 const ok2 = await until(() => inbox.dev1.length > before.d1 && inbox.dev2.length > before.d2, 20_000)
 
 await Promise.allSettled([c1.leave(), c2.leave()])
-if (ok && ok2) { console.log(`\nPASS — GUI path works end to end in ${EH2 ? 'EH-2' : 'interim'} mode`); process.exit(0) }
+if (ok && ok2) { console.log('\nPASS — GUI path works end to end (EH-2)'); process.exit(0) }
 console.log(`\nFAIL — first-exchange=${ok} follow-up=${ok2}; dev1 inbox=${inbox.dev1.length} dev2 inbox=${inbox.dev2.length}`)
 process.exit(1)

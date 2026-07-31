@@ -2,7 +2,6 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { deriveRoom, hemIdentityFrom, hemContactBook, localContactBook, mergedContactBook, type Identity } from '../lib/core.ts'
 import { topicFromSecret, announceMacKey } from '../lib/rendezvous.ts'
-import { msgKeyFromSecret, seal, open } from '../lib/msgcrypto.ts'
 
 const P = { networkId: 'main', dateUTC: '2026-07-27' }
 const fakeId = (ss: Uint8Array): Identity => ({ handle: 'x', pub: '', ecdh: async () => ss })
@@ -13,16 +12,18 @@ test('deriveRoom topic == the direct rendezvous derivation (no drift)', async ()
   assert.equal(topic, await topicFromSecret(ss, P))
 })
 
-test('deriveRoom keys work: macKey verifies, session seals the same as the primitives', async () => {
+test('deriveRoom keys: macKey verifies, and EH-2 keys are wired (no interim path)', async () => {
   const ss = new Uint8Array(32).fill(5)
-  const { keys } = await deriveRoom(fakeId(ss), { pub: 'ignored' }, P)
+  const peerPub = Buffer.from(new Uint8Array(32).fill(7)).toString('base64')
+  const { keys } = await deriveRoom(fakeId(ss), { pub: peerPub }, P)
   // macKey is the same HMAC key (an announce built with the primitive verifies)
   const { buildAnnounce, verifyAnnounce } = await import('../lib/announce.ts')
   const ann = await buildAnnounce('12D3KooPeer', await announceMacKey(ss, P))
   assert.equal((await verifyAnnounce(ann, keys.macKey)).ok, true)
-  // session decrypts a box sealed with the primitive key
-  const box = await seal(new TextEncoder().encode('hi'), await msgKeyFromSecret(ss, P))
-  assert.deepEqual(await keys.session.decrypt(box), new TextEncoder().encode('hi'))
+  // content crypto is EH-2: the room gets our IK + the peer's IK public, no static session
+  assert.ok(keys.eh2, 'eh2 keys present')
+  assert.equal((keys as any).session, undefined, 'no interim session key')
+  assert.deepEqual(keys.eh2.peerIkPub, new Uint8Array(32).fill(7))
 })
 
 test('hemIdentityFrom: ecdh uses base64 pubkey, or ecdhKid when a peer kid is given', async () => {

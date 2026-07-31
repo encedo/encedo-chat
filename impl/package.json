@@ -11,7 +11,6 @@
     "test": "node --test test/*.test.ts",
     "meet": "node net/meet.ts",
     "mqtt-meet": "node net/mqtt-meet.ts",
-    "chat-test": "node net/chat-test.ts",
     "eh2-test": "node net/eh2-chat-test.ts",
     "gui-sim": "node net/gui-sim.ts",
     "bob": "node bob/bob.ts",

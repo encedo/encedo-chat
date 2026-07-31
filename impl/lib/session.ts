@@ -1,23 +1,22 @@
 /**
  * session.ts — the message-crypto SEAM (interface layer).
  *
- * `Session` is the per-message crypto contract the room talks to. It does NOT
- * know whether it's the interim static key or the real EH-2 ratchet — the room
- * only ever calls encrypt/decrypt on it. This is the seam that lets EH-2
- * (docs/PROTOCOL.md §6–7) drop in behind the SAME interface once the
- * cryptographer signs off, with zero change to room / envelope / transport.
+ * `Session` is the per-message crypto contract the room talks to: it only ever
+ * calls encrypt/decrypt, never touching a key. That decoupling is the point —
+ * room / envelope / transport do not know which scheme is underneath, so a new
+ * one (a core-rs port, a future ratchet) drops in behind this exact interface
+ * with zero change above it. Today there is one implementation, `eh2Session`;
+ * the seam is kept deliberately for the next.
  *
- *   interimSession — static AES-GCM key from ss (no forward secrecy); still the
- *                    scheme the live room uses until the EH-2 path is wired in
- *   eh2Session     — EH-2 handshake + Double Ratchet (eh2/), the real thing
+ * History: an interim static-AES-GCM box lived here as a placeholder until EH-2
+ * was blessed and wired in. It was removed once EH-2 became mandatory — see the
+ * commit that deleted `lib/msgcrypto.ts` (`git log --grep=interim`).
  *
  * The application payload (the JSON envelope, lib/envelope.ts) is what gets
  * sealed; the Session owns its own wire format (for EH-2 that includes the
  * ratchet header — DH pub + counters — which the room never sees).
  */
 
-import { msgKeyFromSecret, seal, open } from './msgcrypto.ts'
-import type { RvParams } from './rendezvous.ts'
 import { ratchetFrom, type RatchetOpts } from '../eh2/ratchet.ts'
 import type { HandshakeResult } from '../eh2/handshake.ts'
 
@@ -26,19 +25,6 @@ export interface Session {
   encrypt(plaintext: Uint8Array): Promise<Uint8Array>
   /** Open incoming wire bytes → plaintext, or null if not ours / undecryptable. */
   decrypt(data: Uint8Array): Promise<Uint8Array | null>
-}
-
-/**
- * Interim session: a static AES-256-GCM key derived from the pair secret ss.
- * Stateless, no handshake, no forward secrecy — but already behind the Session
- * interface, so the room is decoupled from the scheme. ⚠️ Placeholder until EH-2.
- */
-export async function interimSession(ss: Uint8Array, p: RvParams): Promise<Session> {
-  const key = await msgKeyFromSecret(ss, p)
-  return {
-    encrypt: (plaintext) => seal(plaintext, key),
-    decrypt: (data) => open(data, key),
-  }
 }
 
 /**

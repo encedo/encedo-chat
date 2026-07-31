@@ -1,26 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { interimSession, eh2Session } from '../lib/session.ts'
+import { eh2Session } from '../lib/session.ts'
 import { encodeEnvelope, decodeEnvelope, envMsg } from '../lib/envelope.ts'
 import { initiate, initiatorComplete, respond, responderComplete } from '../eh2/handshake.ts'
 import { generateX25519 } from '../lib/x25519.ts'
 import { mlkem768 } from '../eh2/mlkem.ts'
 
 const P = { networkId: 'main', dateUTC: '2026-07-27' }
-
-test('interim session: envelope encrypt/decrypt roundtrip through the seam', async () => {
-  const s = await interimSession(new Uint8Array(32).fill(4), P)
-  const box = await s.encrypt(encodeEnvelope(envMsg(1, 'przez seam')))
-  const pt = await s.decrypt(box)
-  assert.notEqual(pt, null)
-  assert.equal((decodeEnvelope(pt!) as any).body, 'przez seam')
-})
-
-test('interim session: cross-secret decrypt returns null', async () => {
-  const a = await interimSession(new Uint8Array(32).fill(1), P)
-  const b = await interimSession(new Uint8Array(32).fill(2), P)
-  assert.equal(await b.decrypt(await a.encrypt(new Uint8Array([1, 2, 3]))), null)
-})
 
 test('eh2 session: the same seam, now backed by the ratchet', async () => {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
@@ -33,7 +19,7 @@ test('eh2 session: the same seam, now backed by the ratchet', async () => {
   const pt = await b.decrypt(await a.encrypt(encodeEnvelope(envMsg(1, 'przez seam, z ratchetem'))))
   assert.notEqual(pt, null)
   assert.equal((decodeEnvelope(pt!) as any).body, 'przez seam, z ratchetem')
-  // and unlike the interim box, the same plaintext never seals the same way
+  // the same plaintext never seals the same way (per-message forward secrecy)
   const [x, y] = [await a.encrypt(new Uint8Array([7])), await a.encrypt(new Uint8Array([7]))]
   assert.notDeepEqual(x, y)
 })

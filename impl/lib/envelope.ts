@@ -1,7 +1,7 @@
 /**
  * envelope.ts — the message envelope (codec layer). Pure: Envelope <-> bytes.
  *
- * The plaintext INSIDE the interim AES-GCM seal (msgcrypto.ts) is a JSON
+ * The plaintext INSIDE the Session seal (lib/session.ts) is a JSON
  * envelope: one versioned shape, a type discriminator `t`, and per-message meta
  * (id / ts / seq). New meta types (reaction, file, …) slot in here without
  * touching crypto or transport. An unknown `t` still decodes (to UnknownEnv) so

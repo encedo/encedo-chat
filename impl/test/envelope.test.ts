@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import {
   encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile, ENVELOPE_V,
 } from '../lib/envelope.ts'
-import { msgKeyFromSecret, seal, open } from '../lib/msgcrypto.ts'
 
 const te = new TextEncoder()
 const rt = (e: any) => decodeEnvelope(encodeEnvelope(e)) as any
@@ -33,10 +32,8 @@ test('unknown type decodes (forward-compat); bad shape / version / garbage drop'
   assert.equal(decodeEnvelope(te.encode('nonsense')), null)
 })
 
-test('full pipe: envelope → seal → open → decode', async () => {
-  const key = await msgKeyFromSecret(new Uint8Array(32).fill(5), { networkId: 'main', dateUTC: '2026-07-27' })
-  const box = await seal(encodeEnvelope(envMsg(9, 'end to end')), key)
-  const pt = await open(box, key)
+test('full pipe: envelope → encode → decode (crypto-agnostic — the Session seals opaque bytes)', async () => {
+  const pt = encodeEnvelope(envMsg(9, 'end to end'))
   assert.notEqual(pt, null)
   const d = decodeEnvelope(pt!) as any
   assert.equal(d.body, 'end to end'); assert.equal(d.seq, 9)

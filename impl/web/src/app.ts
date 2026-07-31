@@ -453,13 +453,6 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   refreshJump()
 }
 const setTyping = (on: boolean, name = '') => { $('typing-ind').textContent = on ? `${name} pisze…` : '' }
-/**
- * EH-2 (§6–7) is the default content crypto. `?eh2=0` falls back to the interim
- * static key, which exists only until the last client that needs it is gone.
- * Both sides must agree — mixing modes means the peers cannot read each other
- * (different content crypto entirely), so `eh2=0` is a two-browser decision.
- */
-const EH2 = (new URLSearchParams(location.search).get('eh2') ?? '1') !== '0'
 /** `?debug=1` adds per-frame lines (every handshake frame, every sealed payload). */
 const DEBUG = new URLSearchParams(location.search).has('debug')
 
@@ -477,8 +470,8 @@ function ecLog(msg: string, level: 'info' | 'debug' = 'info') {
   const style = level === 'debug' ? 'color:#79829c' : 'color:#6579e0;font-weight:600'
   console.log(`%c[ec ${t}s] %c${msg}`, 'color:#74788d', style)
 }
-ecLog(`app start — eh2=${EH2} debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : 'libp2p'};`
-  + ' add ?debug=1 for the full trace, ?eh2=0 for the old crypto, ?mqtt=1 for the broker transport')
+ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : 'libp2p'};`
+  + ' add ?debug=1 for the full trace, ?mqtt=1 for the broker transport')
 
 /**
  * Per-peer handshake state. The badge shows ONE thing, but a room can have more
@@ -536,7 +529,7 @@ async function openChat(contact: Contact) {
   $('peer-dot').className = 'dot'; $('peer-status').textContent = 'łączę…'
   $('messages').innerHTML = ''; msgEls.clear(); setTyping(false)
   $('transport-badge').className = 'badge relay'; $('transport-badge').textContent = '⚪ Relay'
-  if (EH2) setSecurity('', 'handshaking')
+  setSecurity('', 'handshaking')
   appendMsg('sys', `Pokój otwarty — czekam na ${contact.name}…`)
   startRotation()
 
@@ -548,7 +541,6 @@ async function openChat(contact: Contact) {
     const conv = await (await clientReady!).open({ pub: contact.pub, kid: contact.kid }, {
       webrtc: true,
       onWebrtcState: setTransport,
-      eh2: EH2,
       onSecurity: setSecurity,
       onLog: ecLog,
       onDelivered: (id, ms) => setDelivery(id, 'ok', ms),

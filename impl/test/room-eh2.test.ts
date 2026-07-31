@@ -1,18 +1,16 @@
 /**
  * EH-2 stage 6 — the room seam (docs/PROTOCOL.md §6–7 meeting §5).
  *
- * Offline test over a mock pubsub: two rooms on one topic, EH-2 enabled. What
- * it pins is the wiring, not the crypto (that is covered in eh2-*.test.ts):
- * the handshake runs by itself on discovery, content is sealed by the ratchet
- * (not the interim key), and a message typed before the handshake finishes
- * still arrives.
+ * Offline test over a mock pubsub: two rooms on one topic. What it pins is the
+ * wiring, not the crypto (that is covered in eh2-*.test.ts): the handshake runs
+ * by itself on discovery, content is sealed by the ratchet, and a message typed
+ * before the handshake finishes still arrives.
  */
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { joinChat } from '../lib/room.ts'
 import { announceMacKey } from '../lib/rendezvous.ts'
-import { interimSession } from '../lib/session.ts'
 import { generateX25519 } from '../lib/x25519.ts'
 
 const TOPIC = 'test-topic'
@@ -573,19 +571,4 @@ test('a second tab on the same identity is recognised, not handshaked with forev
   // …and the real conversation is untouched by any of it.
   A.sendText('mimo drugiej zakładki')
   await until(() => got.includes('mimo drugiej zakładki'), 8000)
-})
-
-test('interim mode is untouched (no eh2 → static key, no handshake frames)', async (t) => {
-  const net = hub()
-  const ss = new Uint8Array(32).fill(0x11)
-  const keys = { macKey: await announceMacKey(ss, P), session: await interimSession(ss, P) }
-  const got: string[] = []
-  const A = joinChat(net.node('peer-a'), TOPIC, keys, { firstAnnounceMs: 5 })
-  const B = joinChat(net.node('peer-b'), TOPIC, keys, { firstAnnounceMs: 5, onMessage: (_f, m) => got.push(m.body) })
-  t.after(() => { A.stop(); B.stop() })
-
-  A.sendText('stara droga')
-  await until(() => got.length === 1)
-  assert.deepEqual(got, ['stara droga'])
-  assert.deepEqual(A.secured(), [], 'no EH-2 sessions in interim mode')
 })

@@ -13,7 +13,6 @@
  */
 
 import { topicFromSecret, announceMacKey, todayUTC, type RvParams } from './rendezvous.ts'
-import { interimSession } from './session.ts'
 import { joinChat, type RoomKeys, type ChatOpts, type Eh2Options } from './room.ts'
 import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
@@ -167,27 +166,24 @@ export function localOnlyManager(local: ContactBook): ContactManager {
 /**
  * Derive the day's room for a pair: the topic (§5) plus the content keys.
  *
- * Rendezvous is unchanged either way — topic and Announce MAC key come from
- * `ss = ECDH(IK_a, IK_b)`. What changes is how content is sealed: `eh2` swaps
- * the interim static key for a per-peer EH-2 handshake + ratchet negotiated
- * inside the room (§6–7). The pair secret is then used ONLY for rendezvous.
+ * Rendezvous and content use the pair secret differently: topic and Announce MAC
+ * key come from `ss = ECDH(IK_a, IK_b)`, while content is sealed by a per-peer
+ * EH-2 handshake + ratchet negotiated inside the room (§6–7). So `ss` is used
+ * ONLY for rendezvous; the message keys never derive from it.
  */
 export async function deriveRoom(
   id: Identity,
   peer: Peer,
   p: RoomParams,
-  eh2?: { onState?: Eh2Options['onState']; ratchet?: Eh2Options['ratchet'] } | false,
+  eh2: { onState?: Eh2Options['onState']; ratchet?: Eh2Options['ratchet'] } = {},
 ): Promise<{ topic: string; keys: RoomKeys }> {
   const ss = await id.ecdh(peer.pub, peer.kid)
   const topic = await topicFromSecret(ss, p)
   const macKey = await announceMacKey(ss, p)
-  if (eh2) {
-    // The EH-2 DHs run against the peer's EPHEMERAL keys, so no contact `kid`
-    // here — just our IK against raw public keys (HEM raw ecdh, §4.3).
-    const ik = dhFromEcdh(id.pub, (peerPubB64) => id.ecdh(peerPubB64))
-    return { topic, keys: { macKey, eh2: { ik, peerIkPub: unb64(peer.pub), ...eh2 } } }
-  }
-  return { topic, keys: { macKey, session: await interimSession(ss, p) } }
+  // The EH-2 DHs run against the peer's EPHEMERAL keys, so no contact `kid`
+  // here — just our IK against raw public keys (HEM raw ecdh, §4.3).
+  const ik = dhFromEcdh(id.pub, (peerPubB64) => id.ecdh(peerPubB64))
+  return { topic, keys: { macKey, eh2: { ik, peerIkPub: unb64(peer.pub), ...eh2 } } }
 }
 
 /**
@@ -213,8 +209,6 @@ export interface OpenOpts extends ChatOpts {
   params?: RoomParams
   webrtc?: boolean // enable the WebRTC direct data plane (browser only)
   onWebrtcState?: (s: string) => void // WebRTC conn/ICE state (for a UI badge)
-  /** Seal content with EH-2 + Double Ratchet (§6–7) instead of the interim key. */
-  eh2?: boolean
   /** EH-2 handshake progress per peer (for a UI badge). */
   onSecurity?: Eh2Options['onState']
   /** Narration for a UI console (the engine never writes to one itself). */
@@ -480,7 +474,7 @@ async function openRoom(
   id: Identity, peer: Peer, node: any, self: string, params: RoomParams, opts: RoomOpts, host: RoomHost,
 ): Promise<Conversation> {
   const log = opts.onLog ?? host.log
-  log(`opening conversation: network=${params.networkId} date=${params.dateUTC} eh2=${!!opts.eh2} webrtc=${!!opts.webrtc}`)
+  log(`opening conversation: network=${params.networkId} date=${params.dateUTC} webrtc=${!!opts.webrtc}`)
   // In EH-2 mode the WebRTC offer cannot go out before the session exists —
   // signaling rides the room encrypted. So the plane is kicked when the
   // handshake completes, not (only) when presence says the peer joined.
@@ -490,15 +484,15 @@ async function openRoom(
     opts.onSecurity?.(p, state)
     if (state === 'established') plane?.onPeer(p)
   }
-  const { topic, keys } = await deriveRoom(id, peer, params, opts.eh2 ? { onState: onSecurity } : false)
+  const { topic, keys } = await deriveRoom(id, peer, params, { onState: onSecurity })
   log(`room derived: topic ${topic.slice(0, 16)}…`)
 
   const room = joinChat(node, topic, keys, {
     onMessage: opts.onMessage,
     onTyping: opts.onTyping,
-    // In EH-2 mode the plane is kicked from onSecurity instead (see above) —
-    // signaling needs a session, which presence 'join' does not imply.
-    onPresence: (p, ev) => { opts.onPresence?.(p, ev); if (ev === 'join' && !opts.eh2) plane?.onPeer(p) },
+    // The plane is kicked from onSecurity (see above), not on presence 'join':
+    // WebRTC signaling needs a live session, which a join does not imply.
+    onPresence: opts.onPresence,
     onReaction: opts.onReaction,
     onFile: opts.onFile,
     onSignal: (from, env) => plane?.onSignal(from, env),

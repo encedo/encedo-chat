@@ -25,8 +25,8 @@ import {
 import { nowMs } from './time.ts'
 
 /**
- * EH-2 mode (docs/PROTOCOL.md §6–7). When present, content is sealed by a
- * per-peer ratchet established over this topic instead of by a static key:
+ * EH-2 content crypto (docs/PROTOCOL.md §6–7). Content is sealed by a per-peer
+ * Double Ratchet established over this topic:
  *
  *   - the three handshake frames travel UNSEALED on the control plane (they
  *     have to — the session key is what they produce), authenticated by their
@@ -53,8 +53,8 @@ export interface Eh2Options {
   sessionLifetimeMs?: number
 }
 
-/** Exactly one of `session` (interim static key) or `eh2` is used for content. */
-export interface RoomKeys { macKey: CryptoKey; session?: Session; eh2?: Eh2Options }
+/** `macKey` authenticates Announce (§5.5); `eh2` seals content (§6–7). */
+export interface RoomKeys { macKey: CryptoKey; eh2: Eh2Options }
 /**
  * `quiet` is not something the peer says — it is us noticing that it has stopped
  * announcing, well before the 90 s that count as leaving. It is a warning, not a
@@ -186,7 +186,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       // discovery has to be mutual before the lower id can open the handshake.
       void announce()
     }
-    maybeHandshake(peer) // [EH-2 seam] — no-op unless keys.eh2 is set
+    maybeHandshake(peer) // opens the EH-2 handshake if it is our turn
   }
   /**
    * Delivery confirmation (§ envelope `ack`). Content rides GossipSub once and
@@ -379,8 +379,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   }
 
   // ---- [EH-2 seam] --------------------------------------------------------
-  // With `keys.eh2` set, each peer gets its own handshake and its own ratchet;
-  // without it the room keeps using the interim static key (`keys.session`).
+  // Each peer gets its own EH-2 handshake and its own Double Ratchet.
   const sessions = new Map<string, Session>()
   /** `h` is null only for the moment between reserving the slot and having keys. */
   interface Attempt {
@@ -409,7 +408,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const eh2 = keys.eh2
   const maxQueued = eh2?.maxQueued ?? 32
 
-  const sessionFor = (peer: string): Session | undefined => (eh2 ? sessions.get(peer) : keys.session)
+  const sessionFor = (peer: string): Session | undefined => sessions.get(peer)
 
   /**
    * The ratchet a peer had until the last re-handshake, kept briefly so a
@@ -510,7 +509,6 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   }
 
   const beginHandshake = async (peer: string, role: 'initiator' | 'responder', msg1?: Uint8Array): Promise<Attempt | null> => {
-    if (!eh2) return null
     clearAttempt(peer) // a fresh attempt always replaces the previous one
     // Reserve the slot BEFORE the first await: generating the ephemerals takes
     // a tick, and two Announces arriving back to back would otherwise both pass
@@ -666,7 +664,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   }
 
   const giveUp = (peer: string) => {
-    if (!eh2 || sessions.has(peer)) return
+    if (sessions.has(peer)) return
     const n = (failedAttempts.get(peer) ?? 0) + 1
     failedAttempts.set(peer, n)
     eh2.onState?.(peer, 'failed')
@@ -693,7 +691,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
 
   /** Seen a peer: open the handshake if it is our turn (idempotent). */
   const maybeHandshake = (peer: string) => {
-    if (!eh2 || peer === self || inBackoff(peer)) return
+    if (peer === self || inBackoff(peer)) return
     if (sessions.has(peer) || handshakes.has(peer)) return
     // Do not keep offering to somebody who has stopped answering at all; the
     // next Announce brings them back.
@@ -702,7 +700,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   }
 
   const onHandshakeFrame = async (data: Uint8Array, from: string): Promise<void> => {
-    if (!eh2 || from === self) return
+    if (from === self) return
     if (inBackoff(from)) { dbg(`handshake frame from ${short(from)} ignored — backing off`); return }
     let attempt = handshakes.get(from)
     if (data[0] === T_MSG1) {
@@ -955,26 +953,18 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    * completes waits in `queued` (bounded) rather than being lost.
    */
   const emitContent = async (bytes: Uint8Array) => {
-    if (eh2) {
-      if (!sessions.size) {
-        if (queued.length < maxQueued) { queued.push(bytes); dbg(`no session yet → queued (${queued.length})`) }
-        else log('queue full — dropping outgoing frame')
-        return
-      }
-      for (const s of sessions.values()) {
-        try { const sealed = await s.encrypt(bytes); dbg(`→ content ${sealed.length} B via ${contentSend === gossipContent ? 'relay' : 'WebRTC'}`); contentSend(sealed) }
-        catch (e: any) { log(`send failed: ${e?.message ?? e}`) }
-      }
+    if (!sessions.size) {
+      if (queued.length < maxQueued) { queued.push(bytes); dbg(`no session yet → queued (${queued.length})`) }
+      else log('queue full — dropping outgoing frame')
       return
     }
-    try { contentSend(await keys.session!.encrypt(bytes)) } catch {}
+    for (const s of sessions.values()) {
+      try { const sealed = await s.encrypt(bytes); dbg(`→ content ${sealed.length} B via ${contentSend === gossipContent ? 'relay' : 'WebRTC'}`); contentSend(sealed) }
+      catch (e: any) { log(`send failed: ${e?.message ?? e}`) }
+    }
   }
   const emitGossip = async (bytes: Uint8Array) => {
-    if (eh2) {
-      for (const s of sessions.values()) { try { gossip(await s.encrypt(bytes)) } catch {} }
-      return
-    }
-    try { gossip(await keys.session!.encrypt(bytes)) } catch {}
+    for (const s of sessions.values()) { try { gossip(await s.encrypt(bytes)) } catch {} }
   }
 
   return {
