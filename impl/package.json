@@ -22,7 +22,11 @@
     "web:dev": "webpack serve --config web/webpack.config.cjs --mode development",
     "room-sim": "node net/room-sim.ts",
     "browser-test": "node net/browser-test.ts",
-    "browser-test:ff": "BROWSERS=chromium,firefox node net/browser-test.ts"
+    "browser-test:ff": "BROWSERS=chromium,firefox node net/browser-test.ts",
+    "relay-load": "node net/relay-load.ts",
+    "relay-saturate": "node net/relay-saturate.ts",
+    "relay-flood": "node net/relay-flood.ts",
+    "phone-shot": "node net/phone-shot.ts"
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.2",

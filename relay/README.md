@@ -191,6 +191,50 @@ message round trip ~135 ms. Against a local relay with the limits raised: 80
 clients, zero failures, dial 88 ms p50. Nothing about the VPS was the
 constraint; the default was.
 
+## Capacity & the DoS surface (measured 2026-07-31, current cheap VPS)
+
+Numbers from `impl/`, all client-side (no SSH to the box, so its CPU/RAM/fd are
+inferred from external behaviour, not read):
+
+- **`npm run relay-saturate`** — held libp2p connections, ramped slowly so
+  arrival-rate limits do not interfere. **517 concurrent sessions held, none
+  pruned over 30 s.** That is our own `maxConnections: 520`, not the VPS —
+  memory grew linearly (~1 MB/client on the *client* side) and the relay
+  accepted flat to its own cap. To find the real hardware ceiling, raise the cap
+  and re-run.
+- **`npm run relay-flood churn`** — raw `wss://…/relay` connect+close as fast as
+  possible (an attacker does not finish the libp2p handshake; nginx still does a
+  full TLS handshake per attempt). This is the front door's ceiling:
+
+  | concurrency | successful/s | failures | connect p50/p95 | real user served? |
+  |---|---|---|---|---|
+  | 200 | 430/s | 0 | 450 / 615 ms | ✔ |
+  | 600 | 290/s | 126 | 1293 / 3998 ms | ✖ locked out |
+  | 1200 | 66/s | 2292 | 1812 / 4835 ms | ✖ locked out |
+
+  Throughput **falls** as concurrency rises — saturation, almost certainly nginx
+  TLS-handshake CPU on a ~1 vCPU box. Knee ~600 concurrent; collapse ~1200. It
+  **recovers within ~20 s** of the flood stopping (meet passes, front door back
+  to 162 ms) — `Restart=always` and the short-burst nature make it self-heal.
+
+- **The cheap DoS is the relay's inbound limits, not bandwidth.** With the stock
+  libp2p defaults still in production (`inboundConnectionThreshold: 5/s`,
+  `maxIncomingPendingConnections: 10`, and every client arriving from
+  `127.0.0.1` behind nginx), a flood of only a **few hundred half-open sockets**
+  — or any churn above ~5 conn/s aggregate — starves the pool and **new
+  legitimate users cannot connect at all**, while nginx is barely warm. The
+  raised limits in `relay.mjs` (`500/s`, `128` pending) plus `limit_req` at nginx
+  are precisely this mitigation; deploy them before treating the flood numbers as
+  representative.
+
+**Sizing take.** One cheap VPS front-ended by nginx sustains a few hundred TLS
+handshakes/sec and ~500 concurrent chat sessions before the app cap. Chat is
+bursty, not 1:1 concurrent, but past a few thousand users this wants **horizontal
+sharding** (topic → small node-set, the sharding note in `docs/`): TLS CPU is the
+per-node limiter and scales cleanly by adding small nodes or offloading TLS. The
+single most cost-effective hardening is the inbound-limit fix above — it turns a
+trivial few-hundred-socket DoS into a real bandwidth problem.
+
 ## Tunables (relay.mjs)
 
 - `maxConnections: 520`, `maxReservations: 256`, `maxMessageSize: 65536` (64 KB).
