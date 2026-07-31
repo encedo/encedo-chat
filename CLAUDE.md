@@ -257,7 +257,19 @@ session (`startSession({transport:'mqtt', broker})`, web `?mqtt=1`, CLI
   does not fire here; liveness comes from the MQTT keep-alive instead.
 - `npm run mqtt-meet` is the proof: two peers discover each other, complete EH-2
   and exchange ratcheted messages over a broker, with the engine unchanged
-  (~130 ms discovery, ~200 ms handshake locally — an order faster than the mesh).
+  (~130 ms discovery, ~200 ms handshake — verified live against bs1.onchato.com
+  2026-07-31, an order faster than the mesh).
+- **Metadata leak — inherent, not fixable in config.** Testing the live broker
+  found that a client subscribing to `#` receives **every room's** traffic (the
+  ACL blocks `$SYS` but must grant read on `ec/+/+`, which is network-wide —
+  rooms are runtime secrets a static ACL cannot scope to). Content stays E2E
+  encrypted; the exposure is which rooms are active + timing/size. GossipSub does
+  not have this (no wildcard, unguessable topics). The ACL now scopes **publish**
+  to the client's own id (`pattern write ec/+/%c` — our client already publishes
+  `ec/<topic>/<clientId>` with `clientId` = the connect id, so it still fits) but
+  read cannot be narrowed. Documented as a fallback trade-off in README; true
+  isolation needs a broker capability plugin. **The earlier claim that the ACL
+  stops enumeration was wrong** — corrected 2026-07-31.
 
 ### Test harnesses — what each one actually covers
 

@@ -94,10 +94,18 @@ node can still run the network on infrastructure they already understand.
   finding each other.
 - No path to the relay-blind data plane (§13) — that design needs circuit relay.
   The direct WebRTC plane (P1) works identically on both transports.
-- The broker learns nothing new about content (everything is end-to-end
-  encrypted), but it must be configured against **wildcard subscriptions** — see
-  below. Under GossipSub a peer must already know a topic to join it; under MQTT
-  a single `#` subscription would otherwise enumerate every room.
+- **Weaker metadata privacy than GossipSub — a real trade-off, not a config
+  knob.** Content stays end-to-end encrypted, but on MQTT any connected client
+  can subscribe to `#` and receive **every room's** traffic: which rooms are
+  active (who is talking to whom), and message timing and size. A static broker
+  ACL cannot prevent it — members need read on `ec/<their-room>/+`, and since the
+  room is a runtime secret the only static grant that covers it is `ec/+/+`,
+  which grants read on all rooms to everyone. Verified against the live broker
+  (2026-07-31): `#` swept a room message; only `$SYS` was blocked. Under
+  GossipSub, topics are unguessable and there is no wildcard subscribe, so this
+  does not arise. **Do not enable MQTT where cross-room metadata to a connected
+  client is unacceptable.** True isolation would need a broker auth plugin that
+  treats the room secret as a subscribe capability — see the caveat below.
 
 **Topic mapping.** `ec/<room-topic>/<client-id>` for publishing,
 `ec/<room-topic>/+` for subscribing — the sender id lives in the topic because
@@ -161,20 +169,21 @@ log_timestamp true
 connection_messages false     # do not log a line per client id
 ```
 
-`/etc/mosquitto/encedo.acl` — **this is the security-critical file**:
+`/etc/mosquitto/encedo.acl` — copy `relay/mqtt/encedo.acl` verbatim. It blocks
+`$SYS`, scopes **publish** to the client's own id (no sender-forging within a
+room), and leaves **read** on `ec/+/+` — which, as the file itself documents and
+the point above explains, is broad by necessity and does **not** isolate rooms.
+Read it before deploying; it is honest about what it cannot do.
 
-```conf
-# One rule, and it is the whole model: a client may read and write inside a
-# single room, and rooms are named by a secret only its two members can derive.
-#
-# `ec/+/+` matches exactly one room and one sender. It does NOT match `ec/#`,
-# so a client cannot subscribe to everything and enumerate the network — which
-# is the one property MQTT does not give us for free.
-topic readwrite ec/+/+
-
-# Deny the broker's own telemetry outright.
-topic deny $SYS/#
-```
+**MQTT metadata caveat — how true isolation would be built (not shipped).** To
+stop `#` sweeps, the broker would need a per-connection capability check: a
+client subscribing to `ec/R/+` must prove it knows `R`, without the broker
+learning `R` outside that check. A mosquitto auth plugin can do this (username
+carries the room, password carries an HMAC the plugin verifies against a
+per-room key the operator provisions), but it re-introduces per-room state the
+transport is designed to avoid. Until then, MQTT is the reach-over-privacy
+fallback: it connects clients GossipSub cannot, at the cost of cross-room
+metadata to a connected observer.
 
 nginx, next to the existing site (the relay already lives at `/relay`):
 
