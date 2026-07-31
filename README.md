@@ -66,7 +66,7 @@ GossipSub is the main one.** MQTT over WebSocket is a fully working **fall-back*
 session and invisible to everything above it:
 
 ```bash
-# web:  add ?mqtt=1        → wss://<same host>/mqtt
+# web:  add ?mqtt=1        → wss://bs1.onchato.com/mqtt (the relay host)
 #       or ?mqtt=wss://broker.example/mqtt
 # CLI:  ec chat <name> --mqtt [mqtt://127.0.0.1:1883]
 # proof it runs unchanged (needs a local broker):

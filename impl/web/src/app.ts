@@ -23,7 +23,12 @@ const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooW
  */
 const MQTT_PARAM = new URLSearchParams(location.search).get('mqtt')
 const USE_MQTT = MQTT_PARAM !== null && MQTT_PARAM !== '0'
-const BROKER = MQTT_PARAM && MQTT_PARAM.startsWith('ws') ? MQTT_PARAM : `wss://${location.hostname}/mqtt`
+// The broker lives on the SAME host as the relay (bs1.onchato.com), not on the
+// site the app is served from — deriving it from `location.hostname` pointed it
+// at onchato.com, where there is no broker. Take the host straight from RELAY so
+// the two can never drift.
+const RELAY_HOST = RELAY.match(/\/dns4\/([^/]+)/)?.[1] ?? location.hostname
+const BROKER = MQTT_PARAM && MQTT_PARAM.startsWith('ws') ? MQTT_PARAM : `wss://${RELAY_HOST}/mqtt`
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
