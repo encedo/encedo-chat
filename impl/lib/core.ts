@@ -17,6 +17,7 @@ import { interimSession } from './session.ts'
 import { joinChat, type RoomKeys, type ChatOpts, type Eh2Options } from './room.ts'
 import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
+import { createMqttPeer } from '../net/mqtt-node.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
 import { watchSelfSession, type SelfWatch } from './selfsession.ts'
 import { b64, unb64 } from './wc.ts'
@@ -206,6 +207,9 @@ const FLUSH_MS = 250 // let the leave reach the relay before teardown
 
 export interface OpenOpts extends ChatOpts {
   relay: string
+  /** See `SessionOpts` — the fall-back transport, chosen per session. */
+  transport?: 'libp2p' | 'mqtt'
+  broker?: string
   params?: RoomParams
   webrtc?: boolean // enable the WebRTC direct data plane (browser only)
   onWebrtcState?: (s: string) => void // WebRTC conn/ICE state (for a UI badge)
@@ -285,7 +289,18 @@ export interface ClientSession {
 }
 
 export interface SessionOpts {
+  /** libp2p relay multiaddr — ignored when `transport` is `'mqtt'`. */
   relay: string
+  /**
+   * Which transport carries rendezvous, presence and signalling.
+   *
+   * `libp2p` (default) is the main one. `mqtt` is the **fall-back**: same
+   * engine, same crypto, a broker instead of a GossipSub mesh — see the MQTT
+   * section in README.md for what that costs and what it buys.
+   */
+  transport?: 'libp2p' | 'mqtt'
+  /** Broker URL for `transport: 'mqtt'` (`wss://host/mqtt`, or `mqtt://host:1883` in Node). */
+  broker?: string
   params?: RoomParams
   onLog?: ChatOpts['onLog']
   /** Our own transport state — see `LinkState`. */
@@ -306,11 +321,17 @@ const REDIAL_BACKOFF = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000]
 export async function startSession(id: Identity, opts: SessionOpts): Promise<ClientSession> {
   const log = opts.onLog ?? (() => {})
   const params = opts.params ?? { networkId: 'main', dateUTC: todayUTC() }
-  const node = await createPeer()
+  const viaMqtt = opts.transport === 'mqtt'
+  if (viaMqtt && !opts.broker) throw new Error('transport "mqtt" needs a broker url')
   const dialT0 = Date.now()
-  await dial(node, opts.relay)
+  const node: any = viaMqtt
+    ? await createMqttPeer({ url: opts.broker!, onLog: opts.onLog })
+    : await createPeer()
+  /** Dial, or re-dial. The two transports differ here and nowhere else. */
+  const redial = () => (viaMqtt ? node.reconnect() : dial(node, opts.relay))
+  if (!viaMqtt) await redial()
   const self = node.peerId.toString()
-  log(`session up: relay dialed in ${Date.now() - dialT0} ms as ${self.slice(0, 12)}…`)
+  log(`session up over ${viaMqtt ? 'MQTT' : 'libp2p'} in ${Date.now() - dialT0} ms as ${self.slice(0, 12)}…`)
 
   /** Every room open on this transport — refreshed, flushed and stopped together. */
   interface OpenRoom { refresh(): void; flushPending(): void; stop(): void; sendPresence(s: any): void }
@@ -349,7 +370,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     }
     for (let i = 0; !closed && !connected(); i++) {
       try {
-        await dial(node, opts.relay)
+        await redial()
         break
       } catch (e: any) {
         const wait = REDIAL_BACKOFF[Math.min(i, REDIAL_BACKOFF.length - 1)]
@@ -552,6 +573,8 @@ async function openRoom(
 export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts): Promise<Conversation> {
   const session = await startSession(id, {
     relay: opts.relay,
+    transport: opts.transport,
+    broker: opts.broker,
     params: opts.params,
     onLog: opts.onLog,
     onLink: opts.onLink,

@@ -18,6 +18,8 @@ export async function runChatSession(
   params?: RoomParams,
   /** Seal content with EH-2 + ratchet (§6–7); `false` picks the interim key. Both sides must agree. */
   eh2 = true,
+  /** Broker URL to use the MQTT fall-back transport instead of the libp2p relay. */
+  mqtt: string | null = null,
 ) {
   console.log(`${C.sys}— connecting via relay…${C.reset}`)
 
@@ -60,6 +62,8 @@ export async function runChatSession(
   try {
     conv = await openConversation(id, { pub: peerPub }, {
       relay,
+      transport: mqtt ? 'mqtt' : 'libp2p',
+      broker: mqtt ?? undefined,
       params,
       eh2,
       onSecurity: (peer, state) => ui.print(

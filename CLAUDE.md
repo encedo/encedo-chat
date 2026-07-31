@@ -232,6 +232,33 @@ two-browser testing. ECDH via `crypto.subtle` (no 3rd-party crypto), byte-for-by
 == node/HEM raw X25519, so it interoperates with HEM identities. `localOnlyManager`
 gives it a local-only contact book.
 
+### MQTT — the fall-back transport (`net/mqtt.ts`, `net/mqtt-node.ts`)
+
+libp2p stays the main transport; MQTT is a second, fully working one, chosen per
+session (`startSession({transport:'mqtt', broker})`, web `?mqtt=1`, CLI
+`--mqtt`). README.md has the trade-offs and the broker setup; what matters here:
+
+- **No dependency.** `net/mqtt.ts` is a hand-written MQTT 3.1.1 client — CONNECT,
+  SUBSCRIBE, UNSUBSCRIBE, PUBLISH QoS 0, PING, DISCONNECT, over a WebSocket in
+  the browser or TCP in Node. The subset is the point: QoS>0, retained messages
+  and persistent sessions are the features that make a broker **store** traffic,
+  and not implementing them is the cheapest guarantee that we never turn them on.
+- **It wears the libp2p node's shape** (`net/mqtt-node.ts`) rather than
+  introducing an abstraction. That surface — subscribe/unsubscribe/publish, a
+  `message` event, `getSubscribers`, `peerId`, `getConnections`, `stop` — is
+  already the project's de-facto transport interface, because every test double
+  mocks exactly it. So room, core, WebRTC plane, EH-2 and all tests are
+  untouched.
+- **Sender identity moves into the topic**: publish `ec/<topic>/<client-id>`,
+  subscribe `ec/<topic>/+`. MQTT does not identify publishers, and putting the
+  sender in the payload would be a wire change the crypto layer would see.
+- **`publish` reports `recipients: null`** — a broker does not say who is
+  listening. The room's isolation check only fires on a real zero, so it simply
+  does not fire here; liveness comes from the MQTT keep-alive instead.
+- `npm run mqtt-meet` is the proof: two peers discover each other, complete EH-2
+  and exchange ratcheted messages over a broker, with the engine unchanged
+  (~130 ms discovery, ~200 ms handshake locally — an order faster than the mesh).
+
 ### Test harnesses — what each one actually covers
 
 | command | what it exercises |
@@ -242,6 +269,7 @@ gives it a local-only contact book.
 | `npm run eh2-test` / `chat-test` / `meet` | live against the **real onchato relay** |
 | `npm run browser-test` | two headless **Chromium**, the real bundle, the real relay, driven through the DOM |
 | `npm run browser-test:ff` | the same scenarios with **Chromium + Firefox** |
+| `npm run mqtt-meet` | the whole engine over an MQTT broker instead of libp2p |
 
 The browser harness is the only thing that covers the **WebRTC data plane** —
 Node has no `RTCPeerConnection`. It speaks two protocols because the browsers do

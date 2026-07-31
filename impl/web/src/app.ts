@@ -16,6 +16,14 @@ import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook,
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 
 const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
+/**
+ * Transport. libp2p is the default; `?mqtt=1` switches to the broker (fall-back
+ * transport — README has the trade-offs), `?mqtt=wss://host/mqtt` points it
+ * somewhere else. Everything above the transport is identical either way.
+ */
+const MQTT_PARAM = new URLSearchParams(location.search).get('mqtt')
+const USE_MQTT = MQTT_PARAM !== null && MQTT_PARAM !== '0'
+const BROKER = MQTT_PARAM && MQTT_PARAM.startsWith('ws') ? MQTT_PARAM : `wss://${location.hostname}/mqtt`
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
@@ -148,6 +156,8 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   // (it also blocked the first automated run of this app outright).
   clientReady = startSession(id, {
     relay: RELAY,
+    transport: USE_MQTT ? 'mqtt' : 'libp2p',
+    broker: BROKER,
     onLog: ecLog,
     onLink: (state) => { linkState = state; paintStatus() },
     onSessionTakenOver: () => {
@@ -462,7 +472,8 @@ function ecLog(msg: string, level: 'info' | 'debug' = 'info') {
   const style = level === 'debug' ? 'color:#79829c' : 'color:#6579e0;font-weight:600'
   console.log(`%c[ec ${t}s] %c${msg}`, 'color:#74788d', style)
 }
-ecLog(`app start — eh2=${EH2} debug=${DEBUG}; add ?debug=1 for the full trace, ?eh2=0 for the old crypto`)
+ecLog(`app start — eh2=${EH2} debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : 'libp2p'};`
+  + ' add ?debug=1 for the full trace, ?eh2=0 for the old crypto, ?mqtt=1 for the broker transport')
 
 /**
  * Per-peer handshake state. The badge shows ONE thing, but a room can have more

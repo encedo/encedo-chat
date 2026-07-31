@@ -1,0 +1,14 @@
+# The whole access model, in one rule.
+#
+# A client may read and write inside a single room, and rooms are named by a
+# secret only their two members can derive:
+#
+#     ec/<room-topic>/<sender-client-id>
+#
+# `ec/+/+` matches exactly one room and one sender. It does NOT match `ec/#`,
+# so a client cannot subscribe to everything and enumerate the network — the
+# one property GossipSub gives for free and MQTT does not.
+topic readwrite ec/+/+
+
+# Deny the brokers own telemetry outright.
+topic deny $SYS/#
