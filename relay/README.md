@@ -191,6 +191,78 @@ message round trip ~135 ms. Against a local relay with the limits raised: 80
 clients, zero failures, dial 88 ms p50. Nothing about the VPS was the
 constraint; the default was.
 
+## Scaling guidelines — what to add, and when (measured 2026-07-31)
+
+Two sources of numbers: the live cheap VPS (behind nginx, real internet), and a
+Docker rig on the dev box (relay and nginx in CPU/RAM-capped containers,
+`docker stats` reading each side — full VMs are impossible here, no `/dev/kvm`).
+Absolute rates differ by hardware; the **shape** and the **per-unit costs** are
+what transfer. Run them yourself: `npm run relay-saturate` / `relay-flood` /
+`relay-chatload` (from `impl/`, `RELAY=` to point at a target).
+
+### Size for TWO content paths — WebRTC is not guaranteed
+
+Content goes **direct over WebRTC** when it can, and **through the relay**
+(GossipSub) when it cannot — hard NAT, a browser that refuses WebRTC, or a
+relay-only deployment. These load the relay completely differently, so size for
+both and treat the WebRTC success ratio as a business input.
+
+**Variant A — WebRTC carries content (the light path).** The relay only ever
+sees rendezvous + the one-time EH-2 handshake + a presence heartbeat every 15 s.
+Steady-state content cost: **zero**. What you are buying is:
+
+- **Connection setup — the CPU wall, and it is TLS in nginx, not the relay.**
+  Under a raw-connection flood the nginx container pegged **100 % of its core at
+  ~1500–1700 TLS handshakes/s** (dev box, RSA-2048, no session cache) while the
+  relay behind it sat at 25–30 %. The real VPS managed ~430/s on its slower
+  core. TLS handshakes are independent CPU work across nginx workers, so the rate
+  **scales linearly with cores** — the transferable unit is *per-core handshakes
+  per second* (≈0.6 ms CPU/handshake on the dev core). *Caveat: the 1→2 core
+  doubling could not be confirmed from one host — the load generator also does
+  TLS and ran out of cores; needs a second box to prove, but the per-connection
+  independence makes linearity safe to assume until a shared limit (NIC, accept
+  queue) intervenes.*
+- **Concurrency — the RAM wall.** Measured server-side: idle relay ~63 MB, and
+  **~0.25 MB per held connection** (63 → 192 MB across 520 sessions). So roughly
+  **~4000 sessions per GB** after the base. Held sessions are near-free on CPU —
+  this ceiling is memory, not compute.
+
+**Variant B — the relay carries content (the fallback).** Everything above,
+plus every message transits GossipSub. Measured with 30 chatting pairs
+(`relay-chatload`):
+
+- **CPU stays cheap** — ~2–6 % of one core for ~19 msg/s aggregate, i.e.
+  hundreds of small messages/sec per core. CPU is not the content bottleneck.
+- **Bandwidth is the bottleneck** — on the order of a **few KB of relay traffic
+  per message** (the body is ~250 B sealed; the rest is fan-out + GossipSub
+  control + WS/TCP framing). This scales with *talking*, linearly, and is what
+  exhausts a cheap VPS's network allowance long before its CPU.
+- RAM creeps up modestly (GossipSub message cache), still connection-count-bound.
+
+### The sizing recipe
+
+For **U** concurrent users, average **R** messages/sec each, WebRTC success
+fraction **w**:
+
+- **RAM** = base + `U × 0.25 MB` → the concurrency ceiling. (≈ 4000 users/GB.)
+- **Setup CPU** (TLS) = sized to the *reconnect storm*, not the average: a
+  deploy or a topic rollover makes many clients redial at once. Provision cores
+  for the peak handshake rate; enable `ssl_session_cache` and the raised inbound
+  limits (see below) to cut it. This is where **adding CPU** helps — and it is
+  nginx's core, so scaling/offloading **TLS** is the lever, not the relay.
+- **Relay bandwidth** = `U × R × (1 − w) × ~3 KB`. This is the number that
+  decides whether one box survives the day WebRTC does not work. Example: 4000
+  users, 0.2 msg/s each, only 50 % on WebRTC → `4000 × 0.2 × 0.5 × 3 KB ≈
+  1.2 MB/s ≈ 10 Mbit/s` — fine on one VPS; at `w = 0` and heavier chat it climbs
+  fast and pushes you to shard.
+
+**So: scale RAM for how many are connected, CPU (nginx/TLS) for how fast they
+(re)connect, and bandwidth for how much they talk when WebRTC is unavailable.**
+Past a few thousand users any of the three tips over — and because topics shard
+cleanly (topic → small node-set), the answer there is **horizontal**: more small
+nodes, each carrying its slice of connections, handshakes and content. Vertical
+scaling buys headroom on one axis; sharding buys all three at once.
+
 ## Capacity & the DoS surface (measured 2026-07-31, current cheap VPS)
 
 Numbers from `impl/`, all client-side (no SSH to the box, so its CPU/RAM/fd are
