@@ -65,7 +65,24 @@ const relay = await createLibp2p({
   streamMuxers: [yamux()],
   connectionGater: { denyDialMultiaddr: () => false },
   connectionManager: {
-    maxConnections: 520  // 512 clients + headroom for inter-relay connections
+    maxConnections: 520,  // 512 clients + headroom for inter-relay connections
+
+    // Behind nginx, EVERY client arrives from 127.0.0.1 — so any limit libp2p
+    // applies "per host" is really a limit on the whole network. Its defaults
+    // are 5 new inbound connections per second per host and 10 in flight at
+    // once, which measured out as exactly that: dialing sequentially, 8 of 8
+    // clients connect; dialing 8 at once, 3 are refused mid-Noise handshake
+    // ("EncryptionFailedError: unexpected end of input" on the client, and no
+    // trace at all on the relay). A deploy, or any blip that makes a few dozen
+    // clients re-dial together, would have run straight into it.
+    //
+    // This is the same trap as the GossipSub IP-colocation score (see below):
+    // a reverse proxy makes per-IP defences meaningless, and leaving them on
+    // punishes the whole userbase for looking like one machine. Rate limiting
+    // belongs in nginx, where the real client address is known —
+    // `limit_conn`/`limit_req` on the /relay location (see relay/README).
+    inboundConnectionThreshold: 500,
+    maxIncomingPendingConnections: 128
   },
   services: {
     identify: identify(),

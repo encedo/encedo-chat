@@ -140,6 +140,57 @@ Reproduce and verify with `node net/relay-colocation-test.ts <relay-multiaddr>`
 (from `impl/`): it churns 14 peers from one IP and then checks whether a fresh
 subscription is still accepted.
 
+## Inbound connection limits — why they are raised (same trap, second floor)
+
+libp2p defends itself against connection floods **per host**: at most
+`inboundConnectionThreshold` new inbound connections per second (default **5**)
+and `maxIncomingPendingConnections` in flight at once (default **10**). Behind
+nginx those are not per user — they are limits on the entire network, for the
+same reason the colocation score was: every client arrives from `127.0.0.1`.
+
+Measured against the live relay before the change:
+
+| how clients arrive | result |
+|---|---|
+| 8 dials, one at a time | 8 of 8 connect |
+| 8 dials at once | **3 refused** mid-Noise handshake |
+| 24 dials at once (local relay, stock defaults) | **19 refused** |
+| 24 dials at once (local relay, raised) | 0 refused, 117 ms |
+
+The client sees `EncryptionFailedError: unexpected end of input` — the socket
+closes during the handshake — and **the relay logs nothing at all**. Any event
+that makes a few dozen clients dial together (a deploy, a network blip, a
+morning) walks straight into it.
+
+So `inboundConnectionThreshold: 500` and `maxIncomingPendingConnections: 128`.
+That deliberately removes libp2p's flood protection, which was ineffective here
+anyway — **it has to be replaced at the edge**, where the real client address is
+known. In the `/relay` location:
+
+```nginx
+# http{} once:
+#   limit_conn_zone $binary_remote_addr zone=relay_conn:10m;
+#   limit_req_zone  $binary_remote_addr zone=relay_req:10m rate=10r/s;
+location /relay {
+    # …existing proxy_pass / Upgrade headers…
+    limit_conn relay_conn 20;                  # per real IP
+    limit_req  zone=relay_req burst=30 nodelay;
+}
+```
+
+Measure it with `node net/relay-load.ts` (from `impl/`): waves of pairs, each
+doing a real EH-2 handshake and a message both ways, reporting dial / discovery
+/ handshake / round-trip percentiles plus this machine's own RSS and CPU — so a
+slow wave can be attributed to the right side. `STAGGER_MS=700` spreads the
+arrivals for a relay that still has the stock defaults.
+
+**Where onchato stands** (2026-07-31, cheap VPS, staggered so the old limit did
+not bite): 40 clients / 20 rooms, **zero failures**, dial 324 ms p50 (flat from
+10 to 40 clients — it is TLS + round trip, not load), handshake ~1.2 s,
+message round trip ~135 ms. Against a local relay with the limits raised: 80
+clients, zero failures, dial 88 ms p50. Nothing about the VPS was the
+constraint; the default was.
+
 ## Tunables (relay.mjs)
 
 - `maxConnections: 520`, `maxReservations: 256`, `maxMessageSize: 65536` (64 KB).
