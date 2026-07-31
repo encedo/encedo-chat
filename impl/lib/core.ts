@@ -19,7 +19,7 @@ import { createPeer, dial } from '../net/peer.ts'
 import { createMqttPeer } from '../net/mqtt-node.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
 import { watchSelfSession, type SelfWatch } from './selfsession.ts'
-import { watchPresence, type PresenceWatch } from './presence.ts'
+import { watchPresenceRotating, type PresenceWatch } from './presence.ts'
 import { b64, unb64 } from './wc.ts'
 
 export interface Identity {
@@ -193,7 +193,16 @@ export async function deriveRoom(
  * the Announce MAC key. One `ecdh`, no handshake material.
  */
 export async function derivePresence(id: Identity, peer: Peer, p: RoomParams): Promise<{ topic: string; macKey: CryptoKey }> {
-  const ss = await id.ecdh(peer.pub, peer.kid)
+  return presenceFromSecret(await id.ecdh(peer.pub, peer.kid), p)
+}
+
+/**
+ * The presence topic + MAC key from an already-computed pair secret. `ss` is
+ * date-independent (only the HKDF `info` carries the date), so a rotating watch
+ * computes `ss` once and calls this per day — never a second `ecdh` (an HSM
+ * round-trip for a HEM identity).
+ */
+export async function presenceFromSecret(ss: Uint8Array, p: RoomParams): Promise<{ topic: string; macKey: CryptoKey }> {
   return { topic: await topicFromSecret(ss, p), macKey: await announceMacKey(ss, p) }
 }
 
@@ -426,6 +435,12 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // back to a watch.
   interface Watched { peer: Peer; watch: PresenceWatch }
   const presence = new Map<string, Watched>() // key = peer.pub
+  // The day a contact's handshake arrived on, remembered until we open the room
+  // so it lands on the exact rotating topic the handshake is using (see `open`).
+  // Time-bounded: only an upgrade opened promptly should override today, never a
+  // handshake seen hours ago on a since-rotated topic.
+  const upgradeDate = new Map<string, { date: string; at: number }>()
+  const UPGRADE_DATE_TTL = 5 * 60_000
   let presenceHandlers: {
     onOnline?: (p: Peer) => void
     onOffline?: (p: Peer) => void
@@ -434,24 +449,26 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   const startWatch = async (peer: Peer) => {
     if (closed || presence.has(peer.pub)) return
     try {
-      const { topic, macKey } = await derivePresence(id, peer, params)
-      const watch = watchPresence(node, topic, macKey, self, {
+      // One ecdh for the pair; the rotating watch derives each day's topic from
+      // this secret (date only changes the HKDF info), never a second HSM call.
+      const ss = await id.ecdh(peer.pub, peer.kid)
+      const watch = watchPresenceRotating(node, self, (dateUTC) => presenceFromSecret(ss, { ...params, dateUTC }), {
         onOnline: () => presenceHandlers.onOnline?.(peer),
         onOffline: () => presenceHandlers.onOffline?.(peer),
-        onIncomingHandshake: () => presenceHandlers.onWantsConversation?.(peer),
+        onIncomingHandshake: (_f, _from, dateUTC) => { upgradeDate.set(peer.pub, { date: dateUTC, at: Date.now() }); presenceHandlers.onWantsConversation?.(peer) },
         onLog: opts.onLog,
       })
       presence.set(peer.pub, { peer, watch })
     } catch (e: any) { log(`presence watch for ${peer.pub.slice(0, 12)}… failed: ${e?.message ?? e}`) }
   }
-  const stopWatch = (pub: string) => { presence.get(pub)?.watch.stop(); presence.delete(pub) }
+  const stopWatch = (pub: string) => { presence.get(pub)?.watch.stop(); presence.delete(pub); upgradeDate.delete(pub) }
 
   const shutdown = async (why: string) => {
     if (closed) return
     closed = true
     log(`session closing: ${why}`)
     for (const w of presence.values()) { try { w.watch.stop() } catch {} }
-    presence.clear()
+    presence.clear(); upgradeDate.clear()
     selfWatch?.stop()
     clearInterval(linkWatch)
     for (const r of rooms) { try { r.sendPresence('leave') } catch {} }
@@ -487,6 +504,16 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   return {
     self,
     async open(peer: Peer, roomOpts: RoomOpts) {
+      // The room's day is the CLOCK's, not the session's frozen `params.dateUTC`
+      // — a session held across midnight must open new rooms on today's topic,
+      // coherent with the rotating presence watch. On an upgrade we use the day
+      // the contact's handshake actually arrived on, so the room lands on the
+      // exact topic the handshake is using (within the overlap the two can differ
+      // by a day). The session's networkId is preserved.
+      const pending = upgradeDate.get(peer.pub)
+      upgradeDate.delete(peer.pub)
+      const dateUTC = pending && Date.now() - pending.at < UPGRADE_DATE_TTL ? pending.date : todayUTC()
+      const liveParams = { ...params, dateUTC }
       // Upgrade: the full room does presence too, so retire the light watch while
       // the conversation is open — but HAND OFF the topic (keep the subscription
       // and its warm mesh) so the room does not have to re-graft. Restore a fresh
@@ -494,7 +521,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       const wasWatched = presence.has(peer.pub)
       presence.get(peer.pub)?.watch.stop(false) // false = handoff, do not unsubscribe
       presence.delete(peer.pub)
-      const conv = await openRoom(id, peer, node, self, params, roomOpts, {
+      const conv = await openRoom(id, peer, node, self, liveParams, roomOpts, {
         log,
         onIsolated: () => { setLink('reconnecting'); void reconnect(true) },
         ensureConnected: async () => { if (!connected()) await reconnect() },

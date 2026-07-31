@@ -21,3 +21,24 @@ export const utcHHMMSS = (ts: number): string => `${utcHHMM(ts)}:${p2(new Date(t
 
 /** ISO-8601 in UTC, e.g. 2026-07-27T12:34:56.000Z. */
 export const utcISO = (ts: number): string => new Date(ts).toISOString()
+
+// ---- UTC day arithmetic (topic rotation lives on it) -----------------------
+
+/** "YYYY-MM-DD" (UTC) for an epoch-ms instant. */
+export const utcDateOf = (ts: number): string => new Date(ts).toISOString().slice(0, 10)
+
+/** Shift a "YYYY-MM-DD" by whole days, staying in UTC. */
+export const addUTCDays = (date: string, days: number): string =>
+  new Date(Date.parse(date + 'T00:00:00Z') + days * 86_400_000).toISOString().slice(0, 10)
+
+/** ms from `ts` until the next UTC midnight (0 < n ≤ 86_400_000). */
+export const msToNextUTCMidnight = (ts: number): number => {
+  const d = new Date(ts)
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) - ts
+}
+
+/** ms since the previous UTC midnight (0 ≤ n < 86_400_000). */
+export const msSincePrevUTCMidnight = (ts: number): number => {
+  const d = new Date(ts)
+  return ts - Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+}

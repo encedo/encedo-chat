@@ -28,7 +28,7 @@
 
 import { buildAnnounce, verifyAnnounce } from './announce.ts'
 import { isHandshakeFrame } from '../eh2/establish.ts'
-import { nowMs } from './time.ts'
+import { nowMs, utcDateOf, addUTCDays, msToNextUTCMidnight, msSincePrevUTCMidnight } from './time.ts'
 
 export interface PresenceWatch {
   /** Announce now — e.g. a tab became visible after being throttled. */
@@ -113,6 +113,132 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
       // mesh stay; the room owns the topic from here and unsubscribes on its own
       // teardown.
       if (unsubscribe) { try { node.services.pubsub.unsubscribe(topic) } catch {} }
+    },
+  }
+}
+
+// ---- rotation: the same pair, but the topic changes every UTC day -----------
+
+/** A `[0,1)` value from the peer id — deterministic (so it is testable and
+ *  survives reloads) yet different per client, which is what spreads the
+ *  cutover instead of every client rotating at 00:00:00 UTC together. FNV-1a. */
+function unitHash(s: string): number {
+  let h = 2166136261 >>> 0
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0 }
+  return h / 4294967296
+}
+
+export interface RotationConfig {
+  /** Base half-window each side of a UTC midnight (default 30 min). */
+  overlapMs?: number
+  /** Extra half-window, scaled per-client by the id hash, that smears the
+   *  subscribe/unsubscribe moments across time (default 20 min). */
+  jitterMs?: number
+}
+
+/**
+ * Which day-topics should be LIVE for this client at `now`. Normally just
+ * today; within the (jittered) overlap window around a UTC midnight, today AND
+ * the adjacent day, so a pair crossing midnight at slightly different instants
+ * still meets on a shared topic. Pure and deterministic — the whole rotation is
+ * a function of the clock and the id, nothing hidden. `[0]` is always today
+ * (the primary the room hands off to).
+ */
+export function activeDatesFor(now: number, self: string, cfg: RotationConfig = {}): string[] {
+  const W = cfg.overlapMs ?? 30 * 60_000
+  const J = cfg.jitterMs ?? 20 * 60_000
+  const edge = W + unitHash(self) * J
+  const today = utcDateOf(now)
+  const dates = [today]
+  if (msToNextUTCMidnight(now) <= edge) dates.push(addUTCDays(today, 1))
+  if (msSincePrevUTCMidnight(now) < edge) dates.push(addUTCDays(today, -1))
+  return dates
+}
+
+export interface RotatingPresenceOpts extends RotationConfig {
+  heartbeatMs?: number
+  onOnline: () => void
+  onOffline: () => void
+  /** An EH-2 frame arrived on `dateUTC`'s topic → upgrade the conversation ON
+   *  THAT DATE, so the room lands on the exact topic the handshake is using. */
+  onIncomingHandshake: (frame: Uint8Array, from: string, dateUTC: string) => void
+  onLog?: (msg: string, level?: 'info' | 'debug') => void
+  /** Clock seam for tests. */
+  now?: () => number
+  /** How often to re-evaluate the active day-set (default 60 s). */
+  tickMs?: number
+}
+
+/**
+ * A presence watch that rotates its pair topic across UTC days. It holds one
+ * `watchPresence` per active day (see `activeDatesFor`): one topic normally,
+ * two through the midnight overlap. The contact is ONLINE if it is announcing
+ * on any of them, and an incoming handshake is surfaced with the day it arrived
+ * on. `deriveForDate` turns a day into that day's `{topic, macKey}` — the caller
+ * caches the pair `ss` once and only re-runs the (cheap) HKDF per day, never a
+ * second `ecdh`.
+ */
+export function watchPresenceRotating(
+  node: any,
+  self: string,
+  deriveForDate: (dateUTC: string) => Promise<{ topic: string; macKey: CryptoKey }>,
+  opts: RotatingPresenceOpts,
+): PresenceWatch {
+  const now = opts.now ?? nowMs
+  const tickMs = opts.tickMs ?? 60_000
+  const watches = new Map<string, { watch: PresenceWatch; online: boolean }>()
+  let aggregate = false
+  let stopped = false
+
+  const recompute = () => {
+    const any = [...watches.values()].some((w) => w.online)
+    if (any && !aggregate) { aggregate = true; opts.onOnline() }
+    else if (!any && aggregate) { aggregate = false; opts.onOffline() }
+  }
+
+  // Serialise reconciliations: `deriveForDate` is async, so two ticks must not
+  // both decide to create the same day's watch. Each runs after the last.
+  let chain: Promise<void> = Promise.resolve()
+  const reconcile = () => { chain = chain.then(sync).catch(() => {}) }
+
+  const sync = async () => {
+    if (stopped) return
+    const want = activeDatesFor(now(), self, opts)
+    for (const d of want) {
+      if (watches.has(d) || stopped) continue
+      const slot: { watch: PresenceWatch; online: boolean } = { watch: undefined as any, online: false }
+      watches.set(d, slot) // reserve the slot before the await so a racing tick skips it
+      const { topic, macKey } = await deriveForDate(d)
+      if (stopped) { watches.delete(d); return }
+      slot.watch = watchPresence(node, topic, macKey, self, {
+        heartbeatMs: opts.heartbeatMs,
+        onOnline: () => { slot.online = true; recompute() },
+        onOffline: () => { slot.online = false; recompute() },
+        onIncomingHandshake: (f, from) => opts.onIncomingHandshake(f, from, d),
+        onLog: opts.onLog,
+      })
+    }
+    for (const [d, slot] of [...watches]) {
+      if (!want.includes(d)) { slot.watch?.stop(true); watches.delete(d) }
+    }
+    recompute()
+  }
+
+  reconcile()
+  const timer = setInterval(reconcile, tickMs)
+  ;(timer as any).unref?.()
+
+  return {
+    announce() { for (const s of watches.values()) s.watch?.announce() },
+    stop(unsubscribe = true) {
+      stopped = true
+      clearInterval(timer)
+      // Handoff (unsubscribe=false): keep today's subscription warm for the room
+      // taking over (its topic == today's presence topic); always drop the
+      // overlap day. Full stop: unsubscribe everything.
+      const primary = utcDateOf(now())
+      for (const [d, slot] of watches) slot.watch?.stop(unsubscribe || d !== primary)
+      watches.clear()
     },
   }
 }
