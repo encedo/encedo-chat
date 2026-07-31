@@ -200,6 +200,73 @@ Same construction with `ikm = group_secret` (from Sender-Key distribution contex
 - Within ±5 min of midnight UTC: subscribe `[yesterday, today, tomorrow]`; otherwise `today` only.
 - Publish always on sender's `today`. Accept if timestamp within ±5 min **and** topic matches any of the three.
 
+> **Proposal — per-pair rotation offset** *(v6, 2026-08-01; not yet normative — the fixed-midnight rollover above stands until this is accepted).*
+>
+> **Motivation.** The baseline rotates every pair at 00:00 UTC, so the whole user
+> base re-subscribes inside one ±5 min window — a synchronised load spike on the
+> discovery nodes (§5.6) — and the window must be wide enough to absorb clock skew
+> between the two members. Deriving each pair's own rollover time-of-day from the
+> pair secret fixes both: rotations spread ~uniformly across 24 h across the user
+> base (no midnight spike), and both members derive the **identical** offset, so
+> they cross together and the overlap shrinks to a skew/propagation guard.
+>
+> **Derivation** (date-independent, so computed once per contact and cached until
+> IK rotation — same `ecdh`+HKDF-in-HSM mode as §5.1, the raw secret never leaves):
+>
+> ```
+> rotation_material = HKDF-SHA256(
+>                       ikm  = shared_secret,
+>                       salt = "encedo-chat-rotation-v1",
+>                       info = network_id || 0x00,          // NO date — the offset is stable per pair
+>                       L    = 4)
+> offset_seconds    = be32(rotation_material) mod 86400     // rollover time-of-day, seconds past 00:00 UTC
+> ```
+>
+> The topic itself still rotates **daily** per §5.1 (`date_UTC` stays in its
+> `info`); only the *instant* of rollover moves from 00:00 UTC to
+> `00:00 + offset_seconds`. The offset is secret to the pair — derived from
+> `shared_secret`, so not predictable without a private IK, exactly like the topic.
+>
+> **Rollover rule** (replaces the fixed-midnight window, for this pair):
+> - The pair's topic transitions from day `D` to `D+1` at
+>   `T = midnight(D+1) + offset_seconds`.
+> - Within ±`guard` of `T`, subscribe **both** adjacent days' topics; otherwise the
+>   current day only. Because both members share `offset_seconds` they cross
+>   together, so `guard` covers only clock skew + GossipSub mesh-graft propagation
+>   on the new topic — not a 24 h disagreement, and only **two** topics overlap, not
+>   three. (A per-*client* jittered offset, which the members do NOT share, would
+>   need a wide overlap to cover the disagreement — rejected.)
+> - Publish on the sender's current-day topic under this schedule; accept if the
+>   topic matches either side of the guard.
+>
+> **Clock synchronisation** (lets `guard` shrink from minutes to seconds).
+> Members SHOULD anchor the rollover to a common clock so the guard covers only
+> propagation, not device drift. Browsers cannot run NTP (no UDP), so time comes
+> over HTTPS from an operator host. The cheapest source is the **`Date` response
+> header**, which every HTTPS response already carries: a **same-origin** `HEAD /`
+> on the web app's own host (e.g. `onchato.com`) exposes it with no endpoint and no
+> server code, and its 1 s resolution sits well inside any `guard`. Caveats — the
+> request must not be answered from a cache (use a dynamic/no-store path); a
+> *cross-origin* host must add `Access-Control-Expose-Headers: Date` for JS to read
+> it; and the WebSocket-upgrade response's own headers are **not** exposed to JS, so
+> this is a separate cheap request, not a free read off the relay socket. A
+> dedicated `GET /now` → epoch-ms is warranted only for sub-second precision, which
+> rollover does not need. The client computes `skew = server_time − (t_send +
+> t_recv)/2` (SNTP-style RTT correction), caches it, uses `local_clock + skew`, and
+> re-syncs ~hourly / on reconnect — not per message. The time source is a **soft hint, not a trust anchor**: a discovery
+> node is already trusted only for availability (threat model), so a false clock is
+> a denial-of-service (desync) it could already cause by dropping traffic, and it
+> never learns `offset_seconds` (secret) from serving a global clock. Clients clamp
+> the correction (reject/alert if it disagrees with the local clock by more than a
+> few minutes) and fall back to the local clock (wider guard) if the time fetch
+> is unavailable; native clients MAY use the OS clock instead.
+>
+> **Compatibility.** Two implementations MUST agree on the schedule: a client
+> applying the offset and one still on fixed-midnight would miss each other for up
+> to `offset_seconds`. Hence this is gated behind the amendment, not a unilateral
+> client change; the interim client-side behaviour is the baseline ±5 min midnight
+> window.
+
 ### 5.5 Announce (presence)
 
 Published on every active topic (contact topics + self-topic) at session start, every 60 s (heartbeat), and at rollover. This is also the room-presence signal ("is Y in the park yet").
