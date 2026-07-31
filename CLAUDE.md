@@ -562,6 +562,52 @@ Details that are load-bearing:
   The relay's topic budget and eviction are sized per topic — halve the client
   estimate.
 
+### Presence — being seen online without a handshake — `lib/presence.ts`
+
+The two-layer model the design is for. A conversation (EH-2 + ratchet + WebRTC)
+is **heavy**; being *visible* to a contact must not cost one. So each contact
+gets a **light** `watchPresence` on the **pair topic**: subscribe, Announce
+(§5.5 HMAC) on a heartbeat, and report whether the contact is announcing — a
+green dot, nothing more. Twenty contacts = twenty subscriptions + a beacon each
+on the one transport, **not** twenty handshakes.
+
+- **Why the pair topic, not a shared "presence" topic** — only the two members
+  derive `ss = ECDH(IK_a, IK_b)`, so an Announce there is visible to exactly one
+  contact. A common announcement topic would leak the whole presence graph (who
+  is online, to everyone on it). Holding 20 pair topics instead is a **deliberate
+  security choice, not a cost** (the user's call).
+- **Upgrade on send — either side, no "enter" step.** The watch is subscribed, so
+  it hears an EH-2 handshake frame the moment a contact sends. `core.ts`
+  (`watchContacts` / `startWatch`) turns that into `onWantsConversation`; the app
+  opens the full room, which **replays the frame** and completes the handshake.
+  The receiver never has to open the conversation first. Load-bearing pieces:
+  - **`maybeHandshake` always initiates** (it no longer waits for the lower
+    PeerId). A presence peer is passive and would never initiate, so the opener
+    must; a crossed msg1 is settled by the ordinary tie-break. `room-sim` covers
+    it under loss/dup/reorder — this must not regress.
+  - **Handoff, not teardown, on upgrade.** `session.open` calls the watch's
+    `stop(false)` — keep the subscription and its warm GossipSub mesh, the room
+    takes the topic over. Unsubscribe+resubscribe churned the mesh and stalled
+    the upgrade. `leave` restores a fresh watch (downgrade back to a dot).
+  - **Early beacons `[1s, 3s, 7s]`.** The first Announce goes out before the
+    relay joins the topic's mesh and reaches nobody; without the repeats the dot
+    took a full heartbeat (~15 s) to light. Same trick the room uses on join.
+- **Web wiring (`web/src/app.ts`).** `syncPresence()` reconciles the watches with
+  the contact list on every `refreshContacts()` (login/add/remove) — idempotent,
+  `startWatch` skips already-watched. `onOnline`/`onOffline` drive the contact
+  dot (green = announcing on the pair topic, distinct from ⚫ offline and the
+  in-room state); `onWantsConversation` toasts and `openChat`s (no-op if already
+  in it). **The active conversation's contact is excluded from the watch call** —
+  the room owns (was handed) that topic, so re-watching it would spawn a second
+  watcher on the room's own topic; `watchedPubs` still records it so a later
+  removal tears core's restored watch down.
+- **Duplicate-tab caveat, documented:** a second tab of our OWN identity derives
+  the same pair topic and its Announce verifies (same pair secret), so it could
+  briefly light the dot until §9.1 resolves the duplicate. The clean fix is an
+  identity tag in the Announce (spec-queue). Covered by `test/presence.test.ts`
+  (4), the live `npm run presence-test` (presence-only visibility → upgrade), and
+  exercised on login by `browser-test`.
+
 ### Content crypto — EH-2 only (the interim box is gone)
 
 - The interim static-AES-GCM box (`lib/msgcrypto.ts`, `interimSession`, `?eh2=0`

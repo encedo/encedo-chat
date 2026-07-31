@@ -208,6 +208,51 @@ async function refreshContacts() {
   catch (e: any) { toast('Błąd listy kontaktów: ' + (e?.message ?? e)) }
   for (const c of contactsCache) if (!fpCache.has(c.pub)) fpCache.set(c.pub, await fingerprint(c.pub))
   renderContacts()
+  void syncPresence()
+}
+
+/** Contacts we currently show a green dot for, and the ones we hold a light
+ *  presence watch on. The heavy conversation is a separate thing — being here
+ *  means "announcing on our pair topic", no handshake, no room. */
+const onlinePubs = new Set<string>()
+const watchedPubs = new Set<string>()
+
+/**
+ * Bring the presence watches in line with the contact list: watch anyone new,
+ * drop anyone removed. `watchContacts` starts a light watcher per contact (see
+ * core `watchContacts` / `lib/presence.ts`) and calls back on the transitions —
+ * a dot, and, when the contact actually sends, `onWantsConversation`, which is
+ * the whole upgrade path: their EH-2 frame reached our watcher, so we open the
+ * full room and it takes over the warm topic. Idempotent — safe to call on
+ * every contact change; `startWatch` skips anyone already watched.
+ */
+async function syncPresence() {
+  if (!clientReady) return
+  let c: ClientSession
+  try { c = await clientReady } catch { return }
+  const current = new Set(contactsCache.map((x) => x.pub))
+  for (const pub of [...watchedPubs]) if (!current.has(pub)) { c.unwatch(pub); watchedPubs.delete(pub); onlinePubs.delete(pub) }
+  // The contact we have a conversation open with is covered by the room, which
+  // owns (and handed off) that topic — watching it here would spawn a second
+  // watcher on the room's own topic. core restores its light watch on `leave`.
+  const activePub = active?.pub ?? null
+  const toWatch = contactsCache.filter((x) => x.pub !== activePub)
+  await c.watchContacts(toWatch.map((x) => ({ pub: x.pub, kid: x.kid })), {
+    onOnline: (p) => { if (!onlinePubs.has(p.pub)) { onlinePubs.add(p.pub); renderContacts() } },
+    onOffline: (p) => { if (onlinePubs.delete(p.pub)) renderContacts() },
+    onWantsConversation: (p) => {
+      const contact = contactsCache.find((x) => x.pub === p.pub)
+      // Already in this conversation → the room's own handshake handling owns it,
+      // nothing to do. Otherwise the contact is opening EH-2: surface it and open
+      // the room, which replays their frame and completes the handshake.
+      if (!contact || active?.pub === p.pub) return
+      toast(`${contact.name} chce rozmawiać…`)
+      void openChat(contact)
+    },
+  })
+  // Record every contact (incl. the active one, whose watch core owns and
+  // restores on leave) so removal always tears its watch down.
+  for (const x of contactsCache) watchedPubs.add(x.pub)
 }
 function renderContacts() {
   const pane = $('pane-contacts'); pane.innerHTML = ''
@@ -216,9 +261,11 @@ function renderContacts() {
   if (!list.length) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = filter ? '(brak dopasowań)' : '(brak kontaktów — dodaj peera)'; pane.appendChild(e); return }
   for (const c of list) {
     const inRoom = active?.name === c.name && active?.inRoom
+    const online = onlinePubs.has(c.pub)
+    const dotTitle = inRoom ? 'W rozmowie' : online ? 'Online (widoczny na Waszym topicu)' : 'Offline'
     const src = c.source === 'hem' ? { i: '🔒', t: 'W HEM (trwałe, przenośne)' } : { i: '💻', t: 'Lokalnie (ta przeglądarka)' }
     const b = document.createElement('button'); b.className = 'contact' + (active?.name === c.name ? ' active' : '')
-    b.innerHTML = `<span class="dot ${inRoom ? 'ok' : ''}"></span><div class="avatar">${escapeHtml(initials(c.name))}</div>`
+    b.innerHTML = `<span class="dot ${inRoom || online ? 'ok' : ''}" title="${dotTitle}"></span><div class="avatar">${escapeHtml(initials(c.name))}</div>`
       + `<div class="c-info"><div class="c-name">${escapeHtml(c.name)} <span class="src" title="${src.t}">${src.i}</span></div>`
       + `<div class="c-sub" title="${escapeHtml(c.kid ? `KID ${c.kid}` : c.pub)}">🔑 ${escapeHtml(fpCache.get(c.pub) ?? '…')}${c.kid ? ' · KID ' + escapeHtml(shortKid(c.kid)) : ''}</div></div>`
       + `<span class="c-x" title="Usuń">×</span>`
