@@ -26,6 +26,7 @@
     "relay-load": "node net/relay-load.ts",
     "relay-saturate": "node net/relay-saturate.ts",
     "relay-flood": "node net/relay-flood.ts",
+    "relay-hsrate": "node net/relay-hsrate.ts",
     "relay-chatload": "node net/relay-chatload.ts",
     "phone-shot": "node net/phone-shot.ts"
   },
