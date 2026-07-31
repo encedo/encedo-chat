@@ -661,6 +661,35 @@ async function main() {
       step(`${label} layout: the view stays put, counts what arrived, and ⬇ returns to it`)
     }
 
+    scenario('the phone layout')
+    // A phone is not a narrow desktop: below 720px the app shows ONE pane, so
+    // the conversation must fill the screen, the composer must be reachable, and
+    // the way back to the contact list must exist at all.
+    await B.resize(390, 780) // iPhone-ish
+    const phone = await B.eval<any>(`
+      const app = document.getElementById('app'), m = document.getElementById('messages');
+      const back = document.getElementById('btn-back'), comp = document.querySelector('.composer');
+      const cr = comp.getBoundingClientRect();
+      return {
+        onePane: getComputedStyle(document.querySelector('.sidebar')).display === 'none',
+        chatOpen: app.classList.contains('chat-open'),
+        backVisible: back.getBoundingClientRect().height > 0,
+        composerInView: cr.bottom <= window.innerHeight + 1,
+        transcriptScrolls: m.scrollHeight > m.clientHeight,
+        appFitsViewport: app.getBoundingClientRect().height <= window.innerHeight + 1,
+        appHeight: getComputedStyle(app).height + ' / viewport ' + window.innerHeight,
+      };
+    `)
+    console.log('   ' + JSON.stringify(phone))
+    for (const [k, want] of [['onePane', true], ['chatOpen', true], ['backVisible', true], ['composerInView', true], ['transcriptScrolls', true], ['appFitsViewport', true]] as const) {
+      if (phone[k] !== want) throw new Error(`phone layout: ${k} was ${phone[k]}, expected ${want}`)
+    }
+    await B.eval(`document.getElementById('btn-back').click(); return 1`)
+    const backToList = await B.eval<boolean>(`return getComputedStyle(document.querySelector('.sidebar')).display !== 'none'`)
+    if (!backToList) throw new Error('phone layout: the back button did not return to the contact list')
+    step('one pane, a way back, and a composer above the fold')
+    await B.resize(1200, 800)
+
     console.log(`\nPASS — all scenarios${direct ? ' (content over WebRTC Direct)' : ' — but WebRTC never came up, see above'}`)
     if (!direct) {
       // Staying on the relay is a result, not a crash, so nothing would have

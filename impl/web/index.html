@@ -2,7 +2,7 @@
 <html lang="pl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Encedo Chat</title>
 <style>
   :root{
@@ -172,6 +172,53 @@
      and in a column flex container `flex-basis:0%` decides the main size, so a
      plain `height` here is simply ignored. */
   @media (max-width:860px){.app{flex-direction:column;height:auto}.sidebar{width:100%}.chat{flex:none;height:70vh;min-height:420px}}
+
+  #btn-back{display:none;place-items:center;width:36px;height:36px;flex:none;border:1px solid var(--border);
+            border-radius:10px;background:transparent;color:var(--text);font-size:18px;line-height:1}
+
+  /* ---- phone: one pane at a time -------------------------------------------
+     Below 720px the two-panel dashboard stops making sense: stacking them means
+     scrolling past the whole contact list to reach the conversation. So it
+     becomes what every messenger on a phone is — the list OR the chat, with a
+     back arrow — driven by `.chat-open` on the app container.
+
+     Height is `--app-h`, which app.ts keeps in step with `visualViewport`. That
+     is the only thing that survives a software keyboard: `100vh` is the screen,
+     not the visible area, so the composer ends up underneath the keyboard, and
+     even `100dvh` only settles after the animation. */
+  @media (max-width:720px){
+    /* `min-height` from the desktop rule has to go: on a small phone with the
+       keyboard open the visible area is well under it, and a floored height
+       pushes the composer off screen — the exact thing --app-h prevents. */
+    .app{flex-direction:column;gap:0;padding:0;height:var(--app-h,100dvh);min-height:0;max-width:none}
+    .sidebar,.chat{border-radius:0;border-left:none;border-right:none;box-shadow:none}
+    .sidebar{width:100%;flex:1;min-height:0}
+    .chat{display:none}
+    .app.chat-open .sidebar{display:none}
+    .app.chat-open .chat{display:flex;flex:1;height:auto;min-height:0}
+    .chat-head{padding:10px 12px;gap:8px}
+    .chat-head .who{min-width:0}
+    .messages{padding:12px}
+    .composer{padding:10px 12px calc(10px + env(safe-area-inset-bottom))}
+    .profile-strip,.add-row{padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+    .to-bottom{right:14px;bottom:calc(72px + env(safe-area-inset-bottom))}
+    #btn-back{display:grid}
+    .login-card{margin:12px;padding:18px}
+  }
+
+  /* Touch: no hover, so anything that only appears on hover is unreachable. The
+     reaction bar is the one that matters — on a phone it is simply always there,
+     and every tap target gets a finger-sized minimum. */
+  @media (pointer:coarse){
+    .b-react{display:flex;opacity:.75}
+    .b-react button{min-width:34px;min-height:34px}
+    .b-resend{min-height:32px;padding:0 10px}
+    .icon-btn,.tab,.chip,.add-btn{min-height:42px}
+    .contact{min-height:52px}
+    .composer input,.composer button{min-height:44px}
+    /* 16px keeps iOS from zooming the page when a field takes focus. */
+    input,select,textarea{font-size:16px}
+  }
 </style>
 </head>
 <body>
@@ -220,6 +267,7 @@
       </div>
       <div id="chat-view" hidden style="display:flex;flex-direction:column;flex:1;min-height:0;position:relative">
         <div class="chat-head">
+          <button id="btn-back" title="Wróć do kontaktów" aria-label="Wróć do kontaktów">‹</button>
           <div class="avatar" id="peer-avatar">··</div>
           <div class="who">
             <div class="name"><span id="peer-name">—</span></div>

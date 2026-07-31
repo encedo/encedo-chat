@@ -497,6 +497,7 @@ async function openChat(contact: Contact) {
   active = { name: contact.name, pub: contact.pub, inRoom: false, conv: null }
   renderContacts()
   $('chat-empty').hidden = true; $('chat-view').hidden = false
+  showChatPane(true)
   $('peer-avatar').textContent = initials(contact.name)
   $('peer-name').textContent = contact.name
   // The peer is identified the same way we identify ourselves: 8-byte
@@ -588,6 +589,43 @@ document.addEventListener('visibilitychange', () => {
   // immediately instead of waiting for the next tick.
   else active?.conv?.refresh()
 })
+/**
+ * Phone layout: one pane at a time (see the ≤720px rules in index.html). The
+ * class is what switches between the contact list and the conversation; on a
+ * desktop it changes nothing.
+ */
+const showChatPane = (on: boolean) => $('app').classList.toggle('chat-open', on)
+$('btn-back').addEventListener('click', () => { showChatPane(false); renderContacts() })
+
+/**
+ * Keep the app exactly as tall as the VISIBLE viewport.
+ *
+ * A software keyboard does not resize `100vh` — that is the screen — so the
+ * composer ends up underneath it, which is the single most common way a chat
+ * app is unusable on a phone. `visualViewport` reports what is actually visible,
+ * including while the keyboard animates.
+ */
+function trackViewport() {
+  const vv = window.visualViewport
+  const apply = () => {
+    const visible = Math.round(vv?.height ?? window.innerHeight)
+    // Clamp to the visible area ONLY while a field is focused and something is
+    // genuinely covering the screen. `visualViewport` can report a smaller
+    // height for other reasons (a headless viewport override does), and shrinking
+    // the app to that would waste a third of the screen for no reason.
+    const typing = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement
+    const covered = window.innerHeight - visible > 120
+    document.documentElement.style.setProperty('--app-h', typing && covered ? `${visible}px` : '100dvh')
+  }
+  apply()
+  vv?.addEventListener('resize', apply)
+  vv?.addEventListener('scroll', apply)
+  window.addEventListener('resize', apply) // emulated viewports (and desktops) resize the window, not visualViewport
+  document.addEventListener('focusin', apply)
+  document.addEventListener('focusout', () => setTimeout(apply, 100))
+  window.addEventListener('orientationchange', () => setTimeout(apply, 250))
+}
+
 // The browser tells us about the network directly — no need to infer it from
 // silence. This is what makes a Wi-Fi drop or a tunnel show up instantly instead
 // of after a couple of missed heartbeats.

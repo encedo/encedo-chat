@@ -259,6 +259,32 @@ converting back to plain data.
 redirect to a file instead. And watch what it leaves behind: leaked browsers from
 repeated runs are what once exhausted this machine (`pgrep -f chrome`, `free -m`).
 
+### Phone layout
+
+Below **720px** the two-panel dashboard becomes what a messenger on a phone is:
+**one pane at a time** — the contact list or the conversation, switched by
+`.chat-open` on `#app`, with a back arrow in the chat header. Stacking the panels
+(the old ≤860px rule, still there for tablets) means scrolling past the whole
+contact list to reach the messages.
+
+Two things that are easy to get wrong and are pinned by the `browser-test`
+"phone layout" scenario (it runs at 390×780 on whichever browser is B):
+
+- **Height is `--app-h`, kept in step with `visualViewport`.** A software
+  keyboard does not resize `100vh` — that is the screen — so the composer ends up
+  underneath it. The clamp applies **only** while a field is focused and
+  something really covers the screen (>120px): `visualViewport` reports a smaller
+  height for other reasons too, and an unconditional clamp shrank the app to 63%
+  of the window under an emulated viewport.
+- **`min-height` had to go on phones.** The desktop `.app{min-height:560px}`
+  floors the height, and a floored height with the keyboard open pushes the
+  composer off screen — exactly what `--app-h` exists to prevent.
+
+Touch also gets what hover-only affordances cannot give it: `@media
+(pointer:coarse)` keeps the reaction bar permanently visible, gives every target
+a finger-sized minimum, and sets inputs to 16px so iOS does not zoom the page on
+focus.
+
 ### Delivery contract — acks, backoff, and the ⚠ marker
 
 **Nothing under us retransmits.** GossipSub is fire-and-forget and a DataChannel
