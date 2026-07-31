@@ -211,17 +211,25 @@ both and treat the WebRTC success ratio as a business input.
 sees rendezvous + the one-time EH-2 handshake + a presence heartbeat every 15 s.
 Steady-state content cost: **zero**. What you are buying is:
 
-- **Connection setup — the CPU wall, and it is TLS in nginx, not the relay.**
-  Under a raw-connection flood the nginx container pegged **100 % of its core at
-  ~1500–1700 TLS handshakes/s** (dev box, RSA-2048, no session cache) while the
-  relay behind it sat at 25–30 %. The real VPS managed ~430/s on its slower
-  core. TLS handshakes are independent CPU work across nginx workers, so the rate
-  **scales linearly with cores** — the transferable unit is *per-core handshakes
-  per second* (≈0.6 ms CPU/handshake on the dev core). *Caveat: the 1→2 core
-  doubling could not be confirmed from one host — the load generator also does
-  TLS and ran out of cores; needs a second box to prove, but the per-connection
-  independence makes linearity safe to assume until a shared limit (NIC, accept
-  queue) intervenes.*
+- **Connection setup — two CPU limits, and the tighter one does NOT scale with
+  vCPU.** Two different pieces of work per arriving client:
+  - **TLS (nginx)** *scales* with cores — nginx is multi-worker, handshakes are
+    independent. Raw-connection flood: **~1500–1700 TLS handshakes/s per core**
+    (dev box, RSA-2048, no session cache); the real cheap VPS ~430/s on its
+    slower core.
+  - **Noise + libp2p (the relay)** does **not**. The relay is a single Node
+    process; measured on the i7 laptop (`relay-hsrate`, `taskset`-pinned, load
+    from other cores): **~260 real libp2p handshakes/s on one core, and the same
+    ~260/s given two cores** (CPU held at ~one core's worth — 94 % → 106 %, a
+    marginal libuv-threadpool spillover, rate 257 → 269). A second vCPU buys the
+    relay essentially nothing.
+
+  So for **real** clients (who do Noise), the per-node ceiling is the relay's
+  **~260 handshakes/s per process**, not nginx — nginx can feed far faster than
+  one relay accepts. The lever is therefore **horizontal**: more relay processes
+  / nodes (each its own PeerId, sharded by topic), not a bigger box. Adding vCPU
+  helps nginx and nothing else; adding relay processes is what raises the setup
+  rate.
 - **Concurrency — the RAM wall.** Measured server-side: idle relay ~63 MB, and
   **~0.25 MB per held connection** (63 → 192 MB across 520 sessions). So roughly
   **~4000 sessions per GB** after the base. Held sessions are near-free on CPU —
@@ -246,10 +254,12 @@ fraction **w**:
 
 - **RAM** = base + `U × 0.25 MB` → the concurrency ceiling. (≈ 4000 users/GB.)
 - **Setup CPU** (TLS) = sized to the *reconnect storm*, not the average: a
-  deploy or a topic rollover makes many clients redial at once. Provision cores
-  for the peak handshake rate; enable `ssl_session_cache` and the raised inbound
-  limits (see below) to cut it. This is where **adding CPU** helps — and it is
-  nginx's core, so scaling/offloading **TLS** is the lever, not the relay.
+  deploy or a topic rollover makes many clients redial at once. Provision for the peak
+  handshake rate — but note (above) this splits: **nginx cores** raise TLS
+  throughput, while the relay's ~260 hs/s/process is raised only by **more relay
+  processes/shards**. `ssl_session_cache` + the raised inbound limits cut the
+  nginx side; sharding cuts the relay side. A bigger single box does neither past
+  one relay core.
 - **Relay bandwidth** = `U × R × (1 − w) × ~3 KB`. This is the number that
   decides whether one box survives the day WebRTC does not work. Example: 4000
   users, 0.2 msg/s each, only 50 % on WebRTC → `4000 × 0.2 × 0.5 × 3 KB ≈
