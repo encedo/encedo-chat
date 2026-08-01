@@ -55,10 +55,25 @@ export interface FileEnv extends BaseEnv {
 export interface AckEnv extends BaseEnv { t: 'ack'; ref: string; rts: number }
 /** WebRTC signaling (SDP/ICE) relayed over the control plane (GossipSub), encrypted. */
 export interface RtcEnv extends BaseEnv { t: 'rtc'; to: string; sig: any }
+/**
+ * Sender-Key Distribution (§8): carries a group's shared secret + the sender's
+ * sending key to one member, over the 1:1 EH-2/ratchet (which authenticates it).
+ * All fields base64 except `epoch`/`roster`. `rmac` is the admin's roster MAC.
+ */
+export interface GroupSkdEnv extends BaseEnv {
+  t: 'group-skd'
+  gid: string      // 16 B group id
+  gkPub: string    // GK_pub (group identity key)
+  epoch: number
+  secret: string   // group_secret (32 B) — seeds the topic
+  chain: string    // the sender's sending-chain key (32 B)
+  roster: string[] // member IK_pub, incl. admin & self
+  rmac?: string    // roster MAC (rk_i), present when the sender is the admin
+}
 /** A valid envelope whose `t` this build doesn't know — carried for forward-compat. */
 export interface UnknownEnv extends BaseEnv { [k: string]: unknown }
 
-export type KnownEnv = MsgEnv | TypingEnv | PresenceEnv | ReactionEnv | FileEnv | RtcEnv | AckEnv
+export type KnownEnv = MsgEnv | TypingEnv | PresenceEnv | ReactionEnv | FileEnv | RtcEnv | AckEnv | GroupSkdEnv
 export type Envelope = KnownEnv | UnknownEnv
 export type FileMeta = Omit<FileEnv, keyof BaseEnv>
 
@@ -78,6 +93,8 @@ export const envReaction = (seq: number, to: string, emoji: string): ReactionEnv
 export const envFile = (seq: number, f: FileMeta): FileEnv => ({ ...base('file', seq), ...f })
 export const envRtc = (seq: number, to: string, sig: any): RtcEnv => ({ ...base('rtc', seq), to, sig })
 export const envAck = (seq: number, ref: string, rts: number = nowMs()): AckEnv => ({ ...base('ack', seq), ref, rts })
+export type SkdFields = Omit<GroupSkdEnv, keyof BaseEnv | 't'>
+export const envGroupSkd = (seq: number, f: SkdFields): GroupSkdEnv => ({ ...base('group-skd', seq), ...f })
 
 export const encodeEnvelope = (e: Envelope): Uint8Array => te.encode(JSON.stringify(e))
 
@@ -103,6 +120,8 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
     case 'file': return (typeof m.cid === 'string' && typeof m.name === 'string' && typeof m.size === 'number' && typeof m.mime === 'string') ? (m as FileEnv) : null
     case 'rtc': return (typeof m.to === 'string' && m.sig != null) ? (m as RtcEnv) : null
     case 'ack': return (typeof m.ref === 'string' && typeof m.rts === 'number') ? (m as AckEnv) : null
+    case 'group-skd': return (typeof m.gid === 'string' && typeof m.gkPub === 'string' && typeof m.epoch === 'number'
+      && typeof m.secret === 'string' && typeof m.chain === 'string' && Array.isArray(m.roster)) ? (m as GroupSkdEnv) : null
     default: return m as UnknownEnv // forward-compat: dispatcher ignores unknown types
   }
 }
