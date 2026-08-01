@@ -501,8 +501,8 @@ async function main() {
       await b.eval(`(document.getElementById('handle')).value = ${JSON.stringify(handle)}; document.getElementById('go-soft').click();`)
       await b.waitFor('app shell', `return document.getElementById('app') && !document.getElementById('app').hidden`)
     }
-    const pubA = await A.eval<string>(`return JSON.parse(localStorage.getItem('ec-soft-id')).pub`)
-    const pubB = await B.eval<string>(`return JSON.parse(localStorage.getItem('ec-soft-id')).pub`)
+    const pubA = await A.eval<string>(`return JSON.parse(localStorage.getItem('ec-soft-id-sim-a')).pub`)
+    const pubB = await B.eval<string>(`return JSON.parse(localStorage.getItem('ec-soft-id-sim-b')).pub`)
     step(`identities ready — A ${pubA.slice(0, 12)}…  B ${pubB.slice(0, 12)}…`)
 
     // A also gets a second, unreachable contact — the "switch away and back" test

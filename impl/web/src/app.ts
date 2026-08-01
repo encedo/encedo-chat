@@ -180,7 +180,12 @@ $('go-soft').addEventListener('click', async () => {
   if (!handle) return
   clr('msg')
   try {
-    const id = await browserSoftwareIdentity(handle, () => localStorage.getItem('ec-soft-id'), (v) => localStorage.setItem('ec-soft-id', v))
+    // One persistent software profile PER handle: typing "Lab1" loads (or first
+    // creates) the Lab1 keypair; "Kab88" is its own identity, not whatever was
+    // created first. Lets several software identities coexist (e.g. group testing
+    // across tabs). The keystore lives in localStorage under ec-soft-id-<handle>.
+    const key = 'ec-soft-id-' + handle
+    const id = await browserSoftwareIdentity(handle, () => localStorage.getItem(key), (v) => localStorage.setItem(key, v))
     await enterApp(id, localOnlyManager(makeLocalBook(id.handle, localStorage)), 'Software · dev')
   } catch (e: any) { setMsg('msg', 'Błąd tożsamości software: ' + (e?.message ?? e), 'err') }
 })
