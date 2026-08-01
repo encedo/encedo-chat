@@ -663,6 +663,32 @@ async function main() {
     step('same session, same badge, messages flow at once')
     await B.resize(1200, 800)
 
+    scenario('the unread counter keeps working after you leave and come back')
+    // Reported on Android: the counter fired ONCE. The mobile back-arrow leaves
+    // the room `activePub` but hides its pane, so a new message rendered into the
+    // hidden pane instead of lighting the dot. Back on the peer list, a message
+    // from the peer must re-light the unread pill.
+    await B.resize(390, 780)
+    await B.waitFor('back arrow', `return document.getElementById('btn-back').getBoundingClientRect().height > 0`, 8_000)
+    await B.eval(`document.getElementById('btn-back').click(); return 1`) // to the peer list
+    await sleep(500)
+    const probe = `unread-again-${Date.now().toString(36)}`
+    await send(A, probe)
+    await B.waitFor('the unread pill re-lights on sim-a', `
+      const c = [...document.querySelectorAll('#pane-contacts .contact')].find((x) => x.textContent.includes('sim-a'));
+      return !!(c && c.querySelector('.c-unread'));
+    `, 20_000)
+    step('a message after leaving re-lit the unread dot')
+    await openContact(B, 'sim-a')
+    await B.waitFor('the message shows on open', seen(probe), 10_000)
+    const cleared = await B.eval<boolean>(`
+      const c = [...document.querySelectorAll('#pane-contacts .contact')].find((x) => x.textContent.includes('sim-a'));
+      return !(c && c.querySelector('.c-unread'));
+    `)
+    if (!cleared) throw new Error('unread pill did not clear on return')
+    step('opening it showed the message and cleared the pill')
+    await B.resize(1200, 800)
+
     scenario('reading older messages is not interrupted by new ones')
     // Fill past one screen so the transcript can actually scroll, then read
     // from the top while the peer keeps talking.

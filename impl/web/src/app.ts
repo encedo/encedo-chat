@@ -89,6 +89,11 @@ interface Room {
 const rooms = new Map<string, Room>() // key = contact.pub
 let activePub: string | null = null
 const activeRoom = (): Room | null => (activePub ? rooms.get(activePub) ?? null : null)
+/** Am I actually LOOKING at this room? Being `activePub` is not enough — the
+ *  mobile back-arrow leaves the room active but hides its pane (removes
+ *  `.chat-open`). Without this the unread counter fired once, then messages for
+ *  the still-active room rendered into the hidden pane instead of lighting the dot. */
+const isViewing = (room: Room): boolean => room === activeRoom() && $('app').classList.contains('chat-open')
 const LOG_CAP = 1000
 
 function paintStatus() {
@@ -619,7 +624,7 @@ function paintTransport(room: Room) {
  *  through applyEv reconstructs the transcript exactly. */
 const record = (room: Room, ev: Ev) => {
   room.log.push(ev); if (room.log.length > LOG_CAP) room.log.shift()
-  if (room === activeRoom()) applyEv(ev)
+  if (isViewing(room)) applyEv(ev)
   else if (ev.t === 'msg' && ev.kind === 'peer') { room.unseen++; renderContacts() }
 }
 function applyEv(ev: Ev) {
