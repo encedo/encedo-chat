@@ -276,6 +276,20 @@ export class GroupManager {
     session.setSenderKey(from, unb64(skd.chain))
   }
 
+  /**
+   * Membership change (admin): bump the epoch, mint a NEW `group_secret` (→ a new
+   * topic) and a fresh sending key, and set the new roster. On *remove* pass the
+   * roster without the removed member and distribute only to those who remain — the
+   * removed member never gets the new epoch, so it cannot derive the new topic
+   * (new secret) or open new messages (new sender keys). On *add*, include the
+   * newcomer. `admit` does the work (a newer epoch always replaces the session).
+   */
+  async rekey(gidHex: string, newRoster: Member[]): Promise<void> {
+    const rec = this.recs.get(gidHex)
+    if (!rec) return
+    await this.admit({ gid: rec.session.gid, gkPub: rec.gkPub, epoch: rec.epoch + 1, secret: randomBytes(32), roster: newRoster })
+  }
+
   /** Build the SKD to hand to another member (same for all recipients — the 1:1
    *  session authenticates it). Null if I am not in that group. */
   skdFor(gidHex: string): SkdFields | null {
