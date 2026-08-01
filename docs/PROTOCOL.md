@@ -195,6 +195,40 @@ Same construction with `ikm = IK_a_pub` (public), `salt = "encedo-chat-self-rend
 
 Same construction with `ikm = group_secret` (from Sender-Key distribution context), `salt = "encedo-chat-rendezvous-v1"`, same `info`. The audited design references `group_topic` without fixing derivation; this fills the gap symmetrically with the pair topic.
 
+> **Proposal — group topic from a client-side per-epoch secret** *(v6, 2026-08-01; not yet normative — fills the §5.3 [v6 extension] gap for the auditor).*
+>
+> **Seed.** `group_secret` is a random 32-byte value the group creator generates
+> and distributes pairwise (with the sender keys, §8) over existing 1:1 sessions;
+> it is **rotated on every membership change** (new epoch → new `group_secret`). It
+> lives **client-side** (the encrypted cache, §10), **not** in the HSM — a disposable
+> metadata seed, kept forward-secret with the rest of the group state. (An HSM cannot
+> import a symmetric secret; keeping it client-side also avoids a retrievable topic.)
+>
+> **Topic.**
+> ```
+> topic = base32(HKDF-SHA256(
+>           ikm  = group_secret,
+>           salt = "encedo-chat-group-rendezvous-v1",
+>           info = network_id ‖ 0x00 ‖ date_UTC,
+>           L    = 32))[0:52]
+> ```
+> The HKDF runs **client-side** (the client holds `group_secret`) — unlike the pair
+> topic (§5.1), whose `ikm = ss` is an HSM-protected DH secret; here the ikm is not an
+> HSM secret, so nothing needs the device. Rotates **per epoch** (`group_secret` changes
+> on membership change) and **daily** (`date_UTC`, §5.4). A removed member holds only
+> the old `group_secret` → cannot derive the new topic; with the sender-key rotation
+> (§8) it can neither find nor read the group.
+>
+> **Rejected seeds.**
+> - *A per-group public key `GK_pub` as ikm* (`topic = HKDF(GK_pub)`): `GK_pub` is a
+>   stored, retrievable HSM value, so a HEM dump would compute the topic. `GK` is kept
+>   as the group **identity/marker** and roster-MAC key (§8), **not** the topic seed —
+>   the two are deliberately separated so a `GK_pub` leak does not expose the topic.
+> - *A contributory group DH `abc·G`* (each member contributes an ephemeral, all derive
+>   the same seed via chained `ecdh`): correct and HEM-native, but a multi-round
+>   synchronised ceremony re-run on every membership change, fragile over async
+>   GossipSub — for a value that is random either way, not worth it.
+
 ### 5.4 UTC rollover
 
 - Within ±5 min of midnight UTC: subscribe `[yesterday, today, tomorrow]`; otherwise `today` only.
@@ -392,6 +426,73 @@ Scale assumption: **3–5 members, max 8–10** (1:1 goes through §6–7, not t
 - **Membership change:** every remaining member increments epoch, regenerates its sender key, and redistributes — on *add*, including the newcomer; on *remove*, excluding the removed (who then cannot read post-removal messages).
 - Signatures use **ephemeral per-epoch keys**, not IK — insider-forgery protection (member A cannot forge a message as B), at the cost of reduced in-group deniability (accepted, S3).
 - **Property note (vs 1:1):** the group chain gives forward secrecy within a chain (hash-ratchet forward) but **no post-compromise security inside an epoch** — a compromised `chain_key` reads all of that sender's group traffic until the next membership change / epoch rotation re-keys it. The 1:1 DH-ratchet self-healing has no group counterpart here (that is MLS territory — deferred, §11.4).
+
+> **Proposal — deniable groups: ECDH-HMAC auth, a group identity key, HEM-portable membership** *(v6, 2026-08-01; not yet normative — the Sender-Key baseline above stands until this is accepted).*
+>
+> The baseline authenticates group messages with per-epoch **Ed25519 signatures** —
+> the protocol's only signature, and the reason for the S3 deniability exception. This
+> replaces them with **ECDH-derived HMACs**, restoring deniability and keeping the whole
+> protocol on ECDH (no `exdsa_sign`, §4.3), at the cost of O(N-1) MACs per message —
+> negligible at 3–10 members. Sender Keys (`chain_key` + hash ratchet) are unchanged.
+>
+> **Message authentication (replaces the signature).** For each recipient `j` the
+> sender `i` attaches a MAC under a key both derive from their pair:
+> ```
+> mk_ij  = HKDF(ECDH(IK_i, IK_j), "encedo-group-msg-mac" ‖ group_id ‖ epoch)
+> MAC_ij = HMAC(mk_ij, header ‖ ct)
+> broadcast { header, ct, {MAC_ij} }          // header = { group_id, sender_id, epoch, ctr }
+> ```
+> `MK`, `ct`, chain advance and `sender_id` are as in the baseline. Recipient `j` derives
+> `mk_ij` from its own IK and the sender's IK_pub (a contact), verifies, then opens.
+> **Insider-unforgeable** — `B` lacks `mk_AC` (needs A's or C's private IK), so cannot
+> forge A→C; **deniable** — `C` holds `mk_AC` and could have produced the MAC. The
+> per-epoch signing keypair is **removed**: `mk_ij` is *derived* from the IK pair, never
+> generated or distributed. (`mk_ij` authenticates, not encrypts; content FS stays with
+> `chain_key`. A compromised IK forges, does not decrypt — as it already could in 1:1.)
+>
+> **Group identity `GK`.** A per-group **X25519** keypair the creator (admin) generates
+> in the HSM; the admin holds `GK_priv`, members import `GK_pub`. Roles: (1) the group's
+> stable identity/marker; (2) roster authentication —
+> ```
+> rk_i  = HKDF(ECDH(GK_priv, IK_i), "encedo-chat-group-roster-mac" ‖ group_id ‖ epoch)
+> MAC_i = HMAC(rk_i, roster)
+> ```
+> only the admin (holds `GK_priv`) can MAC a roster member `i` accepts (verified with
+> `ECDH(IK_i, GK_pub)`); deniable, and it gives cryptographic admin authority over
+> membership without a signature. **`GK` does not seed the topic** (§5.3) — identity and
+> topic seed are separated so a `GK_pub` leak does not expose the topic.
+>
+> **Membership.** A contact is a **precondition** — sender keys ride 1:1 sessions, so you
+> cannot be in a group with someone you have no 1:1 channel with. **v1: all members are
+> mutual contacts** (every fingerprint verified out of band; no in-group TOFU).
+> Introduction (the admin vouches, a member does in-group TOFU) is a deferred extension.
+> `group_id = SHA-256(GK_pub)[0:16]`.
+>
+> **HEM marker (portable membership).** The only per-group HSM object: the `GK_pub` entry
+> (admin: the `GK` keypair), DESCR `CHAT:channel:<group_id>:admin=<admin_KID>`.
+> `key_search("CHAT:channel:")` yields the portable group list. It holds **no**
+> `group_secret` (topic) and **no** sender keys (content) — those are client-side and
+> forward-secret. Optionally the DESCR carries a **compact roster** (≤10 members:
+> `KID[0:4]` per member + `CRC32` of the full KIDs, ~44 B; `KID = SHA1(pub)[0:16]`),
+> reconstructed by HSM KID-prefix lookup — CRC for reconstruction integrity, the admin's
+> `rk_i` MAC for authenticity. Trade-off: the roster blob lets one HEM dump reveal the
+> whole membership graph; without it a dump reveals only that the group exists.
+>
+> **Portability & recovery.** `group_secret` + sender keys are client-side (forward
+> secret) and **re-synced** over 1:1 on a device change — messages sent while away are
+> unrecoverable (FS, by design). If **all** members lose their client state at once, the
+> admin **founds a new group** (fresh `GK`) rather than partially rebuilding the old one:
+> a member re-imported into a half-rebuilt group would hold a live `GK_pub` but no
+> `group_secret` — a "zombie" membership.
+>
+> **Rejected.** A **deterministic HSM-derived** group key (re-derivable on any device):
+> re-derivable-from-HSM ⟺ no forward secrecy — rejected for message keys. Storing
+> `group_secret` **in the HSM via `cipherUnwrap`**: makes the seed durable but adds a
+> per-member group keypair, a wrap ceremony and a re-wrap every epoch, for a partial gain
+> (sender keys re-sync regardless) — a documented variant, not v1.
+>
+> **New HKDF labels:** `encedo-chat-group-rendezvous-v1` (§5.3), `encedo-group-msg-mac`,
+> `encedo-chat-group-roster-mac`. (`encedo-group-msg` / `encedo-group-chain` unchanged.)
 
 ---
 
