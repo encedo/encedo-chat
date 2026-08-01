@@ -102,6 +102,40 @@ Two identifiers, different jobs: **HEM KID = `SHA1(pub)[0:16]`** (key index, ros
   member over re-established 1:1. History gone (FS).
 - **All-wipe:** see §4.
 
+### Chain-key lifecycle (who is online)
+
+A `chain_key` is **per sender** and advances on **every message its owner sends**,
+independent of who is listening. 3 members ⇒ 3 sending chains; each member keeps its
+own + a receiving copy of the other two. **Instant-only (§10): the network stores
+nothing** — a member offline when a message is sent **misses it**; the chain lets it
+catch up POSITION, never recover CONTENT.
+
+- **Sender advances regardless of audience.** A sends 3× while B, C are offline →
+  A's chain `A₀→A₃`; the messages reach nobody and are gone; B/C copies of A stay at `A₀`.
+- **Catch-up = fast-forward.** When a member returns, its copy of a sender's chain
+  lags. On the next received message (`ctr=n`) it hash-ratchets that copy forward to `n`
+  (deterministic), derives MK, decrypts. The skipped positions are messages it never
+  received (unrecoverable). Bounded by a skipped-key limit (anti-DoS); a huge gap → **re-sync**
+  the sender's current `chain_key` over 1:1 instead of iterating.
+- **FS within the chain.** A ratcheted-past `chain_key` is discarded → even its owner
+  cannot re-read its own old messages (group FS; no PCS inside an epoch).
+- **Exit vs wipe (cache) — two different actions.** Closing the app / shutting the
+  machine down is **LOCK**: the encrypted cache (§10, key from the HEM) **persists**; on
+  return you authenticate to the HEM and **resume** every chain — no re-sync. A deliberate
+  **WIPE** ("sign out & forget"; the P2/P3 default) deletes the salt → the cache is
+  cryptographically dead → next start re-syncs like a new device (regenerate your own
+  chain, re-fetch the others'). A normal user only LOCKs; WIPE is opt-in (or profile-enforced).
+  See the §10 note below.
+
+> **Note on §10 "logout deletes the salt".** For P1 (persistent encrypted cache) that
+> line describes the **WIPE** action, not a normal exit. A normal logout/shutdown should
+> **keep** the cache (it is already HEM-gated: a stolen disk without the HEM is
+> unreadable), so groups resume without a re-sync. The only reason to wipe is
+> **cache-forward-secrecy** — after a wipe the cached history is unrecoverable even if the
+> HEM is later compromised/coerced. So: **LOCK = persist (P1 default); WIPE = deliberate /
+> P2-P3.** This is a product-behaviour clarification (the crypto — cache key from HEM ECDH
+> — is unchanged); flag for the cryptographer, do not edit audited §10 unilaterally.
+
 ---
 
 ## 2. Diff vs current spec
