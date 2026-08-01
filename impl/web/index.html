@@ -121,7 +121,7 @@
   .mrow.out .b-meta{text-align:right}
   .sysline{text-align:center;font-size:12px;color:var(--muted)}
   .b-react{display:none;gap:3px}
-  .mrow:hover .b-react{display:flex}
+  .mrow:hover .b-react,.mrow.tapped .b-react{display:flex}
   .mrow.out .b-react{order:-1}
   .b-react button{background:var(--card);border:1px solid var(--border);border-radius:14px;cursor:pointer;font-size:14px;line-height:1;padding:3px 6px}
   .b-react button:hover{background:var(--accent-soft);border-color:var(--accent)}
@@ -207,11 +207,11 @@
     .chat-head .badge{white-space:nowrap}
   }
 
-  /* Touch: no hover, so anything that only appears on hover is unreachable. The
-     reaction bar is the one that matters — on a phone it is simply always there,
-     and every tap target gets a finger-sized minimum. */
+  /* Touch: no hover, so the reaction bar is revealed by TAPPING the bubble
+     (`.tapped`, wired in app.ts) instead of hover — showing it on every message
+     permanently buried the transcript under emoji rows. Tap targets stay
+     finger-sized. */
   @media (pointer:coarse){
-    .b-react{display:flex;opacity:.75}
     .b-react button{min-width:34px;min-height:34px}
     .b-resend{min-height:32px;padding:0 10px}
     .icon-btn,.tab,.chip,.add-btn{min-height:42px}

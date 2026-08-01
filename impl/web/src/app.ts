@@ -270,10 +270,14 @@ async function syncPresence() {
   try { c = await clientReady } catch { return }
   const current = new Set(contactsCache.map((x) => x.pub))
   for (const pub of [...watchedPubs]) if (!current.has(pub)) { c.unwatch(pub); watchedPubs.delete(pub); onlinePubs.delete(pub) }
-  // Every OPEN conversation is covered by its room, which owns (and was handed
-  // off) that topic — watching it here would spawn a second watcher on the room's
-  // own topic. core restores the light watch on `leave`.
-  const toWatch = contactsCache.filter((x) => !rooms.has(x.pub))
+  // Exclude only the ON-SCREEN room: it handed its topic to the room, which drives
+  // that contact's dot via `inRoom`. Every OTHER contact — including ones with a
+  // BACKGROUND room open — is light-watched, so its green "online" dot works again
+  // (the earlier "exclude every open room" left opened contacts permanently
+  // unwatched, since background rooms never close). The extra light watch over a
+  // background room's topic is benign: idempotent subscribe, a harmless second
+  // announce, and `onWantsConversation` is guarded by `rooms.has`.
+  const toWatch = contactsCache.filter((x) => x.pub !== activePub)
   await c.watchContacts(toWatch.map((x) => ({ pub: x.pub, kid: x.kid })), {
     onOnline: (p) => { if (!onlinePubs.has(p.pub)) { onlinePubs.add(p.pub); renderContacts() } },
     onOffline: (p) => { if (onlinePubs.delete(p.pub)) renderContacts() },
@@ -532,10 +536,19 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
     const bar = document.createElement('div'); bar.className = 'b-react'
     for (const e of QUICK_EMOJI) {
       const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = e
-      btn.addEventListener('click', () => { const r = activeRoom(); if (!r?.conv) return; r.conv.sendReaction(id, e); record(r, { t: 'react', id, emoji: e }) })
+      btn.addEventListener('click', () => { row.classList.remove('tapped'); const r = activeRoom(); if (!r?.conv) return; r.conv.sendReaction(id, e); record(r, { t: 'react', id, emoji: e }) })
       bar.appendChild(btn)
     }
     row.appendChild(bar)
+    // Touch has no hover: tap the bubble to reveal its reaction bar (one row at a
+    // time), tap again to hide. On desktop hover still shows it; this just adds a
+    // way in for fingers without a permanently-visible bar on every message.
+    bub.addEventListener('click', (e: any) => {
+      if (e.target.closest('button')) return // a control inside the bubble (e.g. ↻ resend), not a reveal
+      const open = row.classList.contains('tapped')
+      for (const r of $('messages').querySelectorAll('.mrow.tapped')) r.classList.remove('tapped')
+      if (!open) row.classList.add('tapped')
+    })
   }
   if (outOfOrder) insertByTime(box, row, Number(row.dataset.ts))
   else box.appendChild(row)
@@ -646,6 +659,7 @@ async function activateRoom(pub: string) {
   for (const ev of room.log) applyEv(ev)
   paintSecurity(room); paintTransport(room); paintStatus()
   startRotation(); renderContacts()
+  void syncPresence() // foreground changed → light-watch the contact we just left
   void room.conv?.refresh() // re-announce / flush pending — cheap, no teardown
 }
 
@@ -682,6 +696,14 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
       onLateDelivered: (id, ms) => record(room, { t: 'delivery', id, state: 'late', ms }),
       onMessage: (from, msg, meta) => {
         ecLog(`message from ${from.slice(0, 12)}…: "${msg.body.slice(0, 40)}"${meta.outOfOrder ? ' (out of order)' : ''}`)
+        // A message IS activity: a peer that just wrote is not "away". Presence
+        // announces lag (a backgrounded tab throttles them), so a stale away/quiet
+        // label sat over a live conversation — clear it on any inbound message.
+        if (room.lastPresence !== 'active' && room.lastPresence !== 'join') {
+          room.lastPresence = 'active'; room.inRoom = true; room.peerLabel = 'w pokoju'
+          if (room === activeRoom()) paintStatus()
+          renderContacts()
+        }
         if (room === activeRoom()) { peerTyping = false; setTyping(false) }
         record(room, { t: 'msg', kind: 'peer', text: msg.body, ts: msg.ts, id: msg.id, ooo: meta.outOfOrder })
       },
