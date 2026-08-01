@@ -29,6 +29,17 @@ const USE_MQTT = MQTT_PARAM !== null && MQTT_PARAM !== '0'
 // the two can never drift.
 const RELAY_HOST = RELAY.match(/\/dns4\/([^/]+)/)?.[1] ?? location.hostname
 const BROKER = MQTT_PARAM && MQTT_PARAM.startsWith('ws') ? MQTT_PARAM : `wss://${RELAY_HOST}/mqtt`
+// `?rot=<hour>` forces every pair's topic rotation to that UTC time-of-day, so
+// two test tabs can share a known rollover instant instead of waiting for each
+// pair's real offset (§5.4). Absent or `0` = the real per-pair offset algorithm
+// (the default). Accepts an hour (`14`), a decimal hour (`14.5`), or `HH:MM`.
+function parseRotSec(v: string | null): number | undefined {
+  if (v == null || v === '' || v === '0') return undefined
+  const hm = v.match(/^(\d{1,2}):(\d{2})$/)
+  const sec = hm ? +hm[1] * 3600 + +hm[2] * 60 : Math.round(parseFloat(v) * 3600)
+  return Number.isFinite(sec) && sec >= 0 && sec < 86400 ? sec : undefined
+}
+const FORCED_ROTATION_SEC = parseRotSec(new URLSearchParams(location.search).get('rot'))
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
@@ -163,6 +174,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     relay: RELAY,
     transport: USE_MQTT ? 'mqtt' : 'libp2p',
     broker: BROKER,
+    forcedRotationSec: FORCED_ROTATION_SEC,
     onLog: ecLog,
     onLink: (state) => { linkState = state; paintStatus() },
     onSessionTakenOver: () => {
@@ -517,8 +529,9 @@ function ecLog(msg: string, level: 'info' | 'debug' = 'info') {
   const style = level === 'debug' ? 'color:#79829c' : 'color:#6579e0;font-weight:600'
   console.log(`%c[ec ${t}s] %c${msg}`, 'color:#74788d', style)
 }
-ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : 'libp2p'};`
-  + ' add ?debug=1 for the full trace, ?mqtt=1 for the broker transport')
+ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : 'libp2p'}`
+  + ` rotation=${FORCED_ROTATION_SEC == null ? 'per-pair offset' : `forced ${String(Math.floor(FORCED_ROTATION_SEC / 3600)).padStart(2, '0')}:${String(Math.floor((FORCED_ROTATION_SEC % 3600) / 60)).padStart(2, '0')} UTC`};`
+  + ' add ?debug=1 for the full trace, ?mqtt=1 for the broker transport, ?rot=<hour> to force the rollover time')
 
 /**
  * Per-peer handshake state. The badge shows ONE thing, but a room can have more

@@ -1,24 +1,78 @@
 /**
- * Topic rotation across UTC days (`lib/presence.ts` `activeDatesFor` +
- * `watchPresenceRotating`). The pair topic changes every UTC midnight; around
- * the boundary both days are live (the overlap) so a pair crossing midnight at
- * slightly different instants still meets, and the cutover is jittered per
- * client so the whole network does not rotate at 00:00:00 UTC at once.
+ * Topic rotation across UTC days (`lib/presence.ts` `activeDatesForOffset` /
+ * `rendezvousDay` + `lib/rendezvous.ts` `rotationOffsetSec`). Each pair rotates
+ * its topic at its OWN instant `midnight + offset` (offset derived from the pair
+ * secret, §5.4), so the user base spreads across 24 h instead of spiking at
+ * midnight; around that instant both days are live (the overlap) so the two
+ * members cross on a shared topic. The mechanism is "shift the clock back by the
+ * offset, then apply plain 00:00 rollover".
  */
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { activeDatesFor, watchPresenceRotating } from '../lib/presence.ts'
-import { announceMacKey } from '../lib/rendezvous.ts'
+import { activeDatesForOffset, rendezvousDay, watchPresenceRotating } from '../lib/presence.ts'
+import { rotationOffsetSec, announceMacKey } from '../lib/rendezvous.ts'
 import { buildAnnounce } from '../lib/announce.ts'
 import { T_MSG1 } from '../eh2/wire.ts'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const DAY = 86_400_000
+const HOUR = 3_600_000
 const at = (iso: string) => Date.parse(iso) // ms for a UTC instant
 
-/** In-memory pubsub shared by both ends; delivery is filtered by topic in the
- *  watch handler, so publishing on one day's topic reaches only that watch. */
+// ---- pure schedule ---------------------------------------------------------
+
+test('offset 0 is the plain 00:00 rollover', () => {
+  assert.deepEqual(activeDatesForOffset(at('2026-07-31T12:00:00Z'), 0), ['2026-07-31'])
+  const before = activeDatesForOffset(at('2026-07-31T23:50:00Z'), 0)
+  assert.ok(before.includes('2026-07-31') && before.includes('2026-08-01'), `got ${before}`)
+  const after = activeDatesForOffset(at('2026-08-01T00:05:00Z'), 0)
+  assert.ok(after.includes('2026-08-01') && after.includes('2026-07-31'), `got ${after}`)
+})
+
+test('the offset moves the rotation instant off midnight', () => {
+  // A pair whose offset is 06:00 rotates at 06:00, not 00:00.
+  const t = at('2026-07-31T06:00:00Z')
+  assert.equal(activeDatesForOffset(t, 0).length, 1, 'offset 0: midday-ish, no overlap')
+  assert.equal(activeDatesForOffset(t, 6 * HOUR).length, 2, 'offset 6h: this IS its rollover → overlap')
+})
+
+test('rendezvousDay lags by the offset', () => {
+  // 1h offset → the pair rolls to the new day at 01:00, not 00:00.
+  assert.equal(rendezvousDay(at('2026-07-31T00:30:00Z'), HOUR), '2026-07-30', 'before 01:00 it is still yesterday')
+  assert.equal(rendezvousDay(at('2026-07-31T01:30:00Z'), HOUR), '2026-07-31', 'after 01:00 it is today')
+  assert.equal(rendezvousDay(at('2026-07-31T12:00:00Z'), 0), '2026-07-31', 'offset 0 is the calendar date')
+})
+
+test('different offsets put different pairs in overlap at the same instant (spread)', () => {
+  const t = at('2026-07-31T04:00:00Z')
+  // offset 4h → rolling now (overlap); offset 12h → nowhere near its instant.
+  assert.equal(activeDatesForOffset(t, 4 * HOUR).length, 2)
+  assert.equal(activeDatesForOffset(t, 12 * HOUR).length, 1)
+})
+
+// ---- the offset derivation -------------------------------------------------
+
+test('rotationOffsetSec is in range, deterministic, and spreads by pair', async () => {
+  const P = { networkId: 'main', dateUTC: '2026-07-31' }
+  const a = await rotationOffsetSec(new Uint8Array(32).fill(0x11), P)
+  const a2 = await rotationOffsetSec(new Uint8Array(32).fill(0x11), P)
+  const b = await rotationOffsetSec(new Uint8Array(32).fill(0x22), P)
+  assert.ok(a >= 0 && a < 86400, `in-range: ${a}`)
+  assert.equal(a, a2, 'deterministic for the same pair secret')
+  assert.notEqual(a, b, 'a different pair secret gives a different instant')
+})
+
+test('rotationOffsetSec ignores the date but not the network', async () => {
+  const ss = new Uint8Array(32).fill(0x55)
+  const d1 = await rotationOffsetSec(ss, { networkId: 'main', dateUTC: '2026-07-31' })
+  const d2 = await rotationOffsetSec(ss, { networkId: 'main', dateUTC: '2027-01-01' })
+  const n2 = await rotationOffsetSec(ss, { networkId: 'other', dateUTC: '2026-07-31' })
+  assert.equal(d1, d2, 'date-independent → stable per pair, cacheable')
+  assert.notEqual(d1, n2, 'network-scoped like the topic')
+})
+
+// ---- composed watch over a mock hub ---------------------------------------
+
 function hub() {
   const nodes = new Map<string, (topic: string, data: Uint8Array, from: string) => void>()
   return {
@@ -45,66 +99,37 @@ function hub() {
     },
   }
 }
-
 async function macKey() { return announceMacKey(new Uint8Array(32).fill(0x33), { networkId: 'test', dateUTC: 'x' }) }
-/** One topic per day, so the day a frame lands on is legible in the routing. */
 const deriveFor = (mac: CryptoKey) => async (dateUTC: string) => ({ topic: `pair-${dateUTC}`, macKey: mac })
-
-test('far from midnight only today is live', () => {
-  const days = activeDatesFor(at('2026-07-31T12:00:00Z'), 'peer-a')
-  assert.deepEqual(days, ['2026-07-31'])
-})
-
-test('just before UTC midnight, tomorrow is live too (overlap)', () => {
-  const days = activeDatesFor(at('2026-07-31T23:50:00Z'), 'peer-a')
-  assert.ok(days.includes('2026-07-31') && days.includes('2026-08-01'), `got ${days}`)
-  assert.equal(days[0], '2026-07-31', 'today stays primary')
-})
-
-test('just after UTC midnight, yesterday is still live', () => {
-  const days = activeDatesFor(at('2026-08-01T00:05:00Z'), 'peer-a')
-  assert.ok(days.includes('2026-08-01') && days.includes('2026-07-31'), `got ${days}`)
-  assert.equal(days[0], '2026-08-01', 'the new day is primary')
-})
-
-test('the jitter shifts the window per client', () => {
-  // A time inside SOME clients' overlap but not others': find one by scanning
-  // the jitter-band edge. With W=1min,J=59min the edge is 1..60min before
-  // midnight and differs per id, so at 40min before midnight some ids overlap
-  // and some do not — the whole point (no synchronized 00:00 rotation).
-  const t = at('2026-07-31T23:20:00Z') // 40 min before midnight
-  const cfg = { overlapMs: 60_000, jitterMs: 59 * 60_000 }
-  const ids = Array.from({ length: 40 }, (_, i) => `peer-${i}`)
-  const overlapping = ids.filter((id) => activeDatesFor(t, id, cfg).length > 1)
-  assert.ok(overlapping.length > 0 && overlapping.length < ids.length,
-    `expected a mix, got ${overlapping.length}/${ids.length} overlapping`)
-})
 
 test('normally one day is watched; a contact there lights online', async () => {
   const net = hub(); const mac = await macKey()
   let online = false
   const me = watchPresenceRotating(net.node('me'), 'me', deriveFor(mac), {
-    now: () => at('2026-07-31T12:00:00Z'), heartbeatMs: 1000, tickMs: 10_000,
+    now: () => at('2026-07-31T12:00:00Z'), offsetMs: 0, heartbeatMs: 1000, tickMs: 10_000,
     onOnline: () => { online = true }, onOffline: () => { online = false }, onIncomingHandshake: () => {},
   })
-  await sleep(30) // let the initial reconcile derive + subscribe today's topic
+  await sleep(30)
   await net.node('contact').services.pubsub.publish('pair-2026-07-31', await buildAnnounce('contact', mac))
   await sleep(30)
-  assert.equal(online, true, 'contact on today lit the dot')
+  assert.equal(online, true)
   me.stop()
 })
 
-test('in the overlap, a contact on TOMORROW lights online (both days watched)', async () => {
+test('in the offset overlap, a contact on the adjacent day lights online', async () => {
   const net = hub(); const mac = await macKey()
   let online = false
+  // offset 12h → this pair rotates at 12:00; at 11:55 it is in the overlap and
+  // watches BOTH rendezvous days: shifted clock = 2026-07-30T23:55, so the days
+  // are 2026-07-30 and (5 min ahead) 2026-07-31.
   const me = watchPresenceRotating(net.node('me'), 'me', deriveFor(mac), {
-    now: () => at('2026-07-31T23:50:00Z'), heartbeatMs: 1000, tickMs: 10_000,
+    now: () => at('2026-07-31T11:55:00Z'), offsetMs: 12 * HOUR, heartbeatMs: 1000, tickMs: 10_000,
     onOnline: () => { online = true }, onOffline: () => { online = false }, onIncomingHandshake: () => {},
   })
-  await sleep(40) // two reconciles worth: today + tomorrow
-  await net.node('contact').services.pubsub.publish('pair-2026-08-01', await buildAnnounce('contact', mac))
+  await sleep(40)
+  await net.node('contact').services.pubsub.publish('pair-2026-07-31', await buildAnnounce('contact', mac))
   await sleep(30)
-  assert.equal(online, true, 'a contact announcing on tomorrow, during the overlap, is seen')
+  assert.equal(online, true, 'the adjacent-day topic during the offset overlap is watched')
   me.stop()
 })
 
@@ -112,21 +137,14 @@ test('an incoming handshake is surfaced with the day it arrived on', async () =>
   const net = hub(); const mac = await macKey()
   let gotDate = ''
   const me = watchPresenceRotating(net.node('me'), 'me', deriveFor(mac), {
-    now: () => at('2026-07-31T23:50:00Z'), heartbeatMs: 1000, tickMs: 10_000,
+    now: () => at('2026-07-31T11:55:00Z'), offsetMs: 12 * HOUR, heartbeatMs: 1000, tickMs: 10_000,
     onOnline: () => {}, onOffline: () => {},
     onIncomingHandshake: (_f, _from, dateUTC) => { gotDate = dateUTC },
   })
   await sleep(40)
   const msg1 = new Uint8Array([T_MSG1, 0x01, 0xaa, 0xbb, 0xcc])
-  await net.node('contact').services.pubsub.publish('pair-2026-08-01', msg1)
+  await net.node('contact').services.pubsub.publish('pair-2026-07-31', msg1)
   await sleep(30)
-  assert.equal(gotDate, '2026-08-01', 'upgrade is pinned to the topic the handshake used')
+  assert.equal(gotDate, '2026-07-31', 'upgrade is pinned to the topic the handshake used')
   me.stop()
-})
-
-test('addUTCDays round-trips a leap boundary', () => {
-  // sanity that the day math is UTC and does not drift with the host TZ
-  assert.equal(activeDatesFor(at('2026-02-28T23:59:00Z'), 'zzz', { overlapMs: 5 * 60_000, jitterMs: 0 })
-    .includes('2026-03-01'), true)
-  void DAY
 })

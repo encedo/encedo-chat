@@ -12,14 +12,14 @@
  * here (openConversation) without touching a single UI.
  */
 
-import { topicFromSecret, announceMacKey, todayUTC, type RvParams } from './rendezvous.ts'
+import { topicFromSecret, announceMacKey, todayUTC, rotationOffsetSec, type RvParams } from './rendezvous.ts'
 import { joinChat, type RoomKeys, type ChatOpts, type Eh2Options } from './room.ts'
 import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { createMqttPeer } from '../net/mqtt-node.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
 import { watchSelfSession, type SelfWatch } from './selfsession.ts'
-import { watchPresenceRotating, type PresenceWatch } from './presence.ts'
+import { watchPresenceRotating, rendezvousDay, type PresenceWatch } from './presence.ts'
 import { b64, unb64 } from './wc.ts'
 
 export interface Identity {
@@ -329,6 +329,13 @@ export interface SessionOpts {
   /** Broker URL for `transport: 'mqtt'` (`wss://host/mqtt`, or `mqtt://host:1883` in Node). */
   broker?: string
   params?: RoomParams
+  /**
+   * Force every pair to rotate its topic at this second-of-day (UTC) instead of
+   * the per-pair `rotationOffsetSec` (§5.4). For testing the rollover on demand:
+   * both ends set the same value (web `?rot=<hour>`) so they share a known
+   * instant. Undefined = the real per-pair offset algorithm (the default).
+   */
+  forcedRotationSec?: number
   onLog?: ChatOpts['onLog']
   /** Our own transport state — see `LinkState`. */
   onLink?: (state: LinkState) => void
@@ -441,6 +448,18 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // handshake seen hours ago on a since-rotated topic.
   const upgradeDate = new Map<string, { date: string; at: number }>()
   const UPGRADE_DATE_TTL = 5 * 60_000
+  // Per-pair rotation offset (§5.4), in seconds-of-day. Stable per pair so it is
+  // computed once (from the same ss as the topic) and cached; a forced override
+  // (`?rot=<hour>`) skips the derivation entirely so both test ends share it.
+  const offsetCache = new Map<string, number>()
+  const offsetSecFor = async (peer: Peer): Promise<number> => {
+    if (opts.forcedRotationSec != null) return opts.forcedRotationSec
+    const cached = offsetCache.get(peer.pub)
+    if (cached != null) return cached
+    const off = await rotationOffsetSec(await id.ecdh(peer.pub, peer.kid), params)
+    offsetCache.set(peer.pub, off)
+    return off
+  }
   let presenceHandlers: {
     onOnline?: (p: Peer) => void
     onOffline?: (p: Peer) => void
@@ -451,8 +470,12 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     try {
       // One ecdh for the pair; the rotating watch derives each day's topic from
       // this secret (date only changes the HKDF info), never a second HSM call.
+      // The rotation offset comes from the same secret (or the forced override).
       const ss = await id.ecdh(peer.pub, peer.kid)
+      const offsetSec = opts.forcedRotationSec ?? await rotationOffsetSec(ss, params)
+      offsetCache.set(peer.pub, offsetSec)
       const watch = watchPresenceRotating(node, self, (dateUTC) => presenceFromSecret(ss, { ...params, dateUTC }), {
+        offsetMs: offsetSec * 1000,
         onOnline: () => presenceHandlers.onOnline?.(peer),
         onOffline: () => presenceHandlers.onOffline?.(peer),
         onIncomingHandshake: (_f, _from, dateUTC) => { upgradeDate.set(peer.pub, { date: dateUTC, at: Date.now() }); presenceHandlers.onWantsConversation?.(peer) },
@@ -504,15 +527,18 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   return {
     self,
     async open(peer: Peer, roomOpts: RoomOpts) {
-      // The room's day is the CLOCK's, not the session's frozen `params.dateUTC`
-      // — a session held across midnight must open new rooms on today's topic,
+      // The room's day is the pair's CURRENT rendezvous day (its rotation instant
+      // is `midnight + offset`, §5.4), not the session's frozen `params.dateUTC`
+      // — a session held across a rotation must open new rooms on the live topic,
       // coherent with the rotating presence watch. On an upgrade we use the day
       // the contact's handshake actually arrived on, so the room lands on the
       // exact topic the handshake is using (within the overlap the two can differ
       // by a day). The session's networkId is preserved.
       const pending = upgradeDate.get(peer.pub)
       upgradeDate.delete(peer.pub)
-      const dateUTC = pending && Date.now() - pending.at < UPGRADE_DATE_TTL ? pending.date : todayUTC()
+      const dateUTC = pending && Date.now() - pending.at < UPGRADE_DATE_TTL
+        ? pending.date
+        : rendezvousDay(Date.now(), (await offsetSecFor(peer)) * 1000)
       const liveParams = { ...params, dateUTC }
       // Upgrade: the full room does presence too, so retire the light watch while
       // the conversation is open — but HAND OFF the topic (keep the subscription

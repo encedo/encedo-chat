@@ -53,3 +53,25 @@ export async function announceMacKey(ss: Uint8Array, p: RvParams): Promise<Crypt
 export function todayUTC(): string {
   return new Date().toISOString().slice(0, 10)
 }
+
+/**
+ * Per-pair rotation offset (docs/PROTOCOL.md §5.4 Proposal): the second of the
+ * UTC day at which THIS pair rotates its topic. Derived from the pair secret so
+ * both members agree, and pseudo-random across pairs so the user base spreads
+ * over 24 h instead of spiking at 00:00 UTC. **Date-independent** (the `info`
+ * carries no date) → stable per pair, computed once and cached.
+ *
+ * Firmware seam (same as the topic/MAC/cache derivations — CLAUDE.md): TODAY this
+ * runs HKDF client-side over the raw `ss` a HEM returns. On newer fw the ecdh+HKDF
+ * runs INSIDE the device (raw `ss` never leaves), and this becomes, in effect,
+ * `rotationOffsetSec(myKid, peerKidOrPub) → offset` — one HSM ecdh+HKDF call whose
+ * `salt`/`info`/`L` are exactly the ones here. It migrates in-device together with
+ * `topicFromSecret`/`announceMacKey`, not on its own.
+ */
+export async function rotationOffsetSec(ss: Uint8Array, p: RvParams): Promise<number> {
+  const nid = enc.encode(p.networkId)
+  const info = new Uint8Array(nid.length + 1)
+  info.set(nid, 0); info[nid.length] = 0 // network_id || 0x00 — NO date
+  const mat = await hkdfBits(ss, enc.encode('encedo-chat-rotation-v1'), info, 4)
+  return new DataView(mat.buffer, mat.byteOffset, 4).getUint32(0) % 86400
+}

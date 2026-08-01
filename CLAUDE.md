@@ -601,42 +601,52 @@ on the one transport, **not** twenty handshakes.
   the room owns (was handed) that topic, so re-watching it would spawn a second
   watcher on the room's own topic; `watchedPubs` still records it so a later
   removal tears core's restored watch down.
-- **Daily topic rotation, with an overlap so nobody blinks out at midnight.** The
-  pair topic carries the UTC date, so it changes every 00:00 UTC. Two problems
-  come with that, and `watchPresenceRotating` (`lib/presence.ts`) + `activeDatesFor`
-  handle both, entirely client-side (no spec change):
-  - **Rotation is now actually live.** Before this the room date was frozen at
-    session start (`startRotation()` in the web was a cosmetic countdown that did
-    nothing at midnight) — a client left open overnight stayed on yesterday's
-    topic. A rotating watch holds one `watchPresence` per **active day** and
-    re-evaluates on a 60 s tick; `session.open` derives the room on the **clock's**
-    day (`todayUTC()`), not `params.dateUTC`, so new conversations rotate too. A
-    conversation held open **across** midnight keeps its topic to the end (both
-    sides consistent) — live-conversation re-rendezvous is deliberately out of
-    scope.
-  - **No 00:00 spike, no missed crossing.** Around a UTC midnight, `activeDatesFor`
-    returns **two** days — today and the adjacent one — so both peers stay reachable
-    on a shared topic even if they cross at slightly different instants (announce
-    goes on all active topics; online = a contact on **any** of them). The window
-    edges are jittered per client by a hash of its id (deterministic, survives
-    reloads, different per client), so subscribe/unsubscribe events **smear across
-    time** instead of every client rotating at 00:00:00 UTC at once — the whole
-    point of the user's "don't DDoS the relay at midnight" concern.
-  - **The upgrade lands on the right day.** An incoming handshake is surfaced with
-    the day it arrived on (`onIncomingHandshake(frame, from, dateUTC)`); core
-    remembers it (time-bounded, 5 min) and `session.open` opens the room on **that**
-    day — so within the overlap the responder's room lands on the exact topic the
-    initiator is using, not on its own clock-today which could be a day off. The
-    room topic == the presence topic for a given (pair, day), so the warm handoff
-    still applies; `ss` is computed **once** per contact and only the per-day HKDF
-    re-runs, never a second `ecdh` (an HSM round-trip for a HEM identity).
+- **Daily topic rotation, at a per-pair instant (§5.4, cryptographer-approved).**
+  The pair topic carries the UTC date, so it changes once a day. `watchPresenceRotating`
+  (`lib/presence.ts`) + `activeDatesForOffset` + `rendezvousDay` handle three
+  things:
+  - **Rotation is actually live.** Before this the room date was frozen at session
+    start (`startRotation()` in the web was a cosmetic countdown that did nothing at
+    midnight) — a client left open overnight stayed on yesterday's topic. A rotating
+    watch holds one `watchPresence` per **active day** and re-evaluates on a 60 s
+    tick; `session.open` derives the room on the pair's **current rendezvous day**,
+    not `params.dateUTC`, so new conversations rotate too. A conversation held open
+    **across** a rotation keeps its topic to the end (both sides consistent) —
+    live-conversation re-rendezvous is deliberately out of scope.
+  - **Per-pair rotation instant, no 00:00 spike.** Each pair rotates at
+    `midnight + offset`, where `offset = rotationOffsetSec(ss)` (`lib/rendezvous.ts`:
+    `HKDF(ss, "encedo-chat-rotation-v1", info = network_id||0x00)`, **date-independent**
+    → computed once per contact and cached in core's `offsetCache`). Because it comes
+    from the pair secret, **both members derive the identical offset** and cross
+    together — and because it is pseudo-random across pairs, rotations spread over 24 h
+    instead of the whole base re-subscribing at 00:00 (the user's "don't DDoS the relay
+    at midnight"). The mechanism is *shift the clock back by the offset, then apply the
+    plain 00:00 rollover*: `rendezvousDay(now, offset) = utcDate(now − offset)`, and
+    `activeDatesForOffset` runs the ±overlap window on that shifted clock. Around the
+    instant it returns **two** days so the pair stays reachable on a shared topic
+    (announce on all active topics; online = a contact on **any** of them). This
+    **replaced** the earlier per-*client* jitter — that never let the two members
+    agree, so it needed a wide overlap; the shared offset shrinks the overlap to a
+    clock-skew/propagation guard (a Date-header time source, §5.4, shrinks it further).
+  - **The upgrade lands on the right day.** An incoming handshake is surfaced with the
+    day it arrived on (`onIncomingHandshake(frame, from, dateUTC)`); core remembers it
+    (time-bounded, 5 min) and `session.open` opens the room on **that** day, else on
+    `rendezvousDay(now, offset)`. The room topic == the presence topic for a given
+    (pair, day), so the warm handoff still applies; `ss` and the offset are computed
+    **once** per contact and cached, never a second `ecdh`.
+  - **`?rot=<hour>` forces the instant for testing.** `startSession({forcedRotationSec})`
+    (web `?rot=14`, `?rot=14:30`, `?rot=14.5`) makes **every** pair rotate at that
+    UTC time-of-day instead of its real offset, so two tabs share a known rollover to
+    watch the topic-hop on demand; absent or `?rot=0` = the real per-pair algorithm
+    (the default). Behaviour is identical either way — only *when* the hop happens
+    changes.
 
-  `test/presence-rotation.test.ts` (8) pins the day math, the jittered overlap,
-  the two-day online aggregation, and the handshake-day surfacing. **Follow-ups:**
-  a per-pair deterministic rotation offset (`HMAC(ss,"rotation")`, §5.4) would let
-  the two members agree on a shared jittered instant instead of a small guard band
-  — but that changes when a topic is valid, so it is a spec-queue item, not this
-  client-side window.
+  `test/presence-rotation.test.ts` (9) pins the shifted-clock schedule, `rendezvousDay`,
+  the offset derivation (range/determinism/date-independence/network scope), the
+  two-day online aggregation and the handshake-day surfacing. **Note:** the per-pair
+  offset is written into `docs/PROTOCOL.md` §5.4 as a Proposal (non-normative until the
+  spec is amended); both ends must run the same scheme, so a mixed old/new deployment
+  would mismatch — the whole build cuts over together.
 - **Duplicate-tab caveat, documented:** a second tab of our OWN identity derives
   the same pair topic and its Announce verifies (same pair secret), so it could
   briefly light the dot until §9.1 resolves the duplicate. The clean fix is an
