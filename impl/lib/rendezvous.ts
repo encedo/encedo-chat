@@ -54,6 +54,16 @@ export function todayUTC(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+/** Group rendezvous topic (§5.3 Proposal): same construction as the pair topic
+ *  but `ikm = group_secret` (a client-side per-epoch secret, not a DH secret) and
+ *  a distinct salt so the two topic spaces cannot collide. All members share
+ *  `group_secret`, so all derive the same topic; it rotates per epoch (the secret
+ *  changes on membership change) and daily (`date_UTC` in `info`). */
+export async function groupTopicFromSecret(groupSecret: Uint8Array, p: RvParams): Promise<string> {
+  const mat = await hkdfBits(groupSecret, enc.encode('encedo-chat-group-rendezvous-v1'), paramsInfo(p), 32)
+  return base32(mat).slice(0, 52)
+}
+
 /**
  * Per-pair rotation offset (docs/PROTOCOL.md §5.4 Proposal): the second of the
  * UTC day at which THIS pair rotates its topic. Derived from the pair secret so
