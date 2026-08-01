@@ -700,6 +700,47 @@ on the one transport, **not** twenty handshakes.
   **relay-blind / anonymous** plane (blind circuit-relay, no IP exposure —
   `docs/PROTOCOL.md` §13) is still the later step (see Directions).
 
+### Groups — Sender Keys, all-ECDH (impl/lib, stages 1–5)
+
+Cryptographer-approved (§8/§5.3 Proposals) and built **as a self-contained engine,
+unit-tested, not yet wired into core/app** — the design is `GROUPS-DESIGN.md`.
+A group is a **software layer over the 1:1 mesh**: identity in HEM, membership
+decentralized (no group server, like Threema), messages via Sender Keys (like
+Signal/WhatsApp) but authenticated by **per-recipient ECDH-HMAC instead of Ed25519
+— so it stays deniable and all-ECDH** (no `exdsa_sign`; the §8 S3 exception is gone).
+
+- **`lib/senderkey.ts`** — one member's sending chain: `MK=HKDF(chain,"encedo-group-msg")`,
+  `chain'=HKDF(chain,"encedo-group-chain")`, AES-256-GCM body (nonce from MK). A
+  `SenderReceiver` walks a copy of a sender's chain to each counter with bounded,
+  transactional skipped-key handling (a forged frame neither opens nor burns the
+  chain). MAC helpers `tag`/`verify` apply a per-recipient HMAC over `header||ct`.
+- **`lib/group.ts`** — `GroupSession` (one group at one epoch): `group_id=SHA-256(GK_pub)[0:16]`,
+  `sender_id=SHA-256(IK_pub)[0:8]`, topic via `groupTopicFromSecret(group_secret)`
+  (client-side secret, §5.3), `mk_ij=HKDF(ECDH(IK_i,IK_j),"encedo-group-msg-mac",gid‖epoch)`,
+  `rk_i=HKDF(ECDH(GK,IK_i),"encedo-chat-group-roster-mac",…)`. `send` seals + attaches
+  one HMAC per other member; `receive` verifies OUR MAC **before** decrypting (an
+  insider holding the sender's chain can re-seal a body but cannot forge that member's
+  MAC to a third party — the load-bearing property, unit-pinned). `GroupManager` holds
+  every group and turns distribution in/out: `createGroup` / `admit` (a newer epoch
+  replaces the session with a fresh sender key; the same epoch keeps it) / `applySkd` /
+  `skdFor` / `rekey` (membership change → epoch++, new `group_secret`+topic, fresh keys;
+  distribute only to those who remain → the removed member is locked out of the new
+  topic **and** fails the epoch-scoped MAC).
+- **`lib/envelope.ts`** — a `group-skd` envelope (gid, GK_pub, epoch, group_secret,
+  the sender's chain key, roster) carried over the **1:1 EH-2/ratchet**, which
+  authenticates it. The plaintext INSIDE a group message is the same envelope codec
+  as 1:1 (msg/reaction/…).
+- **`lib/grouproom.ts`** — `joinGroup` ties a `GroupSession` to a GossipSub topic
+  (subscribe / broadcast / dispatch). Groups ride GossipSub through the relay, **not
+  WebRTC** (a mesh would be N² channels); content stays ciphertext + metadata to the relay.
+- **Tests:** `test/senderkey` (KAT + forge), `group` (insider-forge), `group-dist`
+  (bootstrap loop), `grouproom` (topic broadcast + **scale 8**), `group-rotate`
+  (remove locks out, add joins). All over WebCrypto, deterministic.
+- **Not done (stages 6–7):** wiring into `core.ts`/`app.ts` (a group is another Room
+  in the web multi-room model), a real HEM `GK` keypair + roster MAC on the wire, the
+  compact-roster marker, and the live 4–5-user test. `mySenderKey()` returns a copy —
+  the client keeps sender keys in the encrypted cache (§10), re-synced on device change.
+
 ## Deploy (onchato.com) — two parts, one host
 
 The host builds; nothing is uploaded. Clone lives at **`/opt/github/encedo-chat`**.
