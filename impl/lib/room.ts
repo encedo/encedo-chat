@@ -19,8 +19,9 @@ import type { RatchetOpts } from '../eh2/ratchet.ts'
 import { startHandshake, isHandshakeFrame, type Eh2Handshake } from '../eh2/establish.ts'
 import { T_MSG1 } from '../eh2/wire.ts'
 import {
-  encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile, envRtc, envAck,
+  encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile, envRtc, envAck, envGroupSkd,
   type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta, type TypingState, type PresenceState, type RtcEnv, type AckEnv,
+  type GroupSkdEnv, type SkdFields,
 } from './envelope.ts'
 import { nowMs } from './time.ts'
 
@@ -73,6 +74,9 @@ export interface ChatOpts {
   onReaction?: (from: string, r: ReactionEnv) => void
   onFile?: (from: string, f: FileEnv) => void
   onSignal?: (from: string, env: RtcEnv) => void // WebRTC signaling (control plane)
+  /** A group Sender-Key Distribution arrived over this 1:1 ratchet (§8) — the
+   *  session routes it to the group manager. */
+  onGroupSkd?: (from: string, skd: GroupSkdEnv) => void
   /**
    * The one peer in this pair room now answers to a different PeerId (it
    * reloaded, or its transport restarted) — `old` is dead, `now` is live.
@@ -136,6 +140,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const onReaction = opts.onReaction ?? (() => {})
   const onFile = opts.onFile ?? (() => {})
   const onSignal = opts.onSignal ?? (() => {})
+  const onGroupSkd = opts.onGroupSkd ?? (() => {})
   const onDelivered = opts.onDelivered ?? (() => {})
   const onUndelivered = opts.onUndelivered ?? (() => {})
   const onLateDelivered = opts.onLateDelivered ?? (() => {})
@@ -348,6 +353,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         break
       }
       case 'rtc': onSignal(from, env as RtcEnv); break
+      case 'group-skd': onGroupSkd(from, env as GroupSkdEnv); break
       case 'ack': {
         touch(from)
         acking.add(from)
@@ -997,6 +1003,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     sendTyping: (state: TypingState) => emitContent(encodeEnvelope(envTyping(seq++, state))),
     sendPresence: (state: PresenceState) => emitContent(encodeEnvelope(envPresence(seq++, state))),
     sendReaction: (to: string, emoji: string) => emitContent(encodeEnvelope(envReaction(seq++, to, emoji))),
+    /** Hand a group's Sender-Key Distribution to this contact over the ratchet (§8). */
+    sendGroupSkd: (skd: SkdFields) => emitContent(encodeEnvelope(envGroupSkd(seq++, skd))),
     sendFile: (f: FileMeta) => {
       const e = envFile(seq++, f)
       const bytes = encodeEnvelope(e)

@@ -20,6 +20,8 @@ import { createMqttPeer } from '../net/mqtt-node.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
 import { watchSelfSession, type SelfWatch } from './selfsession.ts'
 import { watchPresenceRotating, rendezvousDay, type PresenceWatch } from './presence.ts'
+import { GroupManager } from './group.ts'
+import { joinGroup, type GroupRoom, type GroupRoomOpts } from './grouproom.ts'
 import { b64, unb64 } from './wc.ts'
 
 export interface Identity {
@@ -301,6 +303,12 @@ export interface ClientSession {
   }): Promise<void>
   /** Drop one contact's presence watch (e.g. it was removed). */
   unwatch(pub: string): void
+  /** This identity's group manager (Sender Keys, §8) — createGroup / applySkd /
+   *  skdFor / rekey. Incoming SKDs on any 1:1 room are applied to it automatically. */
+  readonly groups: GroupManager
+  /** Join an established group's topic (broadcast + dispatch). The group must
+   *  already exist in `groups` (created here, or admitted from a received SKD). */
+  openGroup(gidHex: string, handlers: GroupRoomOpts): Promise<GroupRoom>
   /** The tab came back: re-dial if needed, then wake every open room. */
   refresh(): Promise<void>
   /**
@@ -337,6 +345,9 @@ export interface SessionOpts {
    */
   forcedRotationSec?: number
   onLog?: ChatOpts['onLog']
+  /** A group Sender-Key Distribution arrived over some 1:1 room (§8). It is already
+   *  applied to `session.groups`; this lets the app react (e.g. surface the group). */
+  onGroupSkd?: ChatOpts['onGroupSkd']
   /** Our own transport state — see `LinkState`. */
   onLink?: (state: LinkState) => void
   /**
@@ -355,6 +366,9 @@ const REDIAL_BACKOFF = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000]
 export async function startSession(id: Identity, opts: SessionOpts): Promise<ClientSession> {
   const log = opts.onLog ?? (() => {})
   const params = opts.params ?? { networkId: 'main', dateUTC: todayUTC() }
+  // Group Sender Keys (§8). Incoming SKDs on any 1:1 room feed this; `openGroup`
+  // joins a group's topic. The manager is identity-scoped, like the self-topic watch.
+  const groups = new GroupManager(id, params)
   const viaMqtt = opts.transport === 'mqtt'
   if (viaMqtt && !opts.broker) throw new Error('transport "mqtt" needs a broker url')
   const dialT0 = Date.now()
@@ -547,7 +561,12 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       const wasWatched = presence.has(peer.pub)
       presence.get(peer.pub)?.watch.stop(false) // false = handoff, do not unsubscribe
       presence.delete(peer.pub)
-      const conv = await openRoom(id, peer, node, self, liveParams, roomOpts, {
+      const conv = await openRoom(id, peer, node, self, liveParams, {
+        ...roomOpts,
+        // A group SKD on this 1:1 room feeds the group manager (§8); the app is
+        // notified after, so it can surface the group.
+        onGroupSkd: (from, skd) => { void groups.applySkd(from, skd); roomOpts.onGroupSkd?.(from, skd); opts.onGroupSkd?.(from, skd) },
+      }, {
         log,
         onIsolated: () => { setLink('reconnecting'); void reconnect(true) },
         ensureConnected: async () => { if (!connected()) await reconnect() },
@@ -563,6 +582,12 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       for (const c of contacts) await startWatch(c)
     },
     unwatch(pub: string) { stopWatch(pub) },
+    groups,
+    async openGroup(gidHex: string, handlers: GroupRoomOpts) {
+      const gs = groups.session(gidHex)
+      if (!gs) throw new Error(`openGroup: unknown group ${gidHex.slice(0, 12)}…`)
+      return joinGroup(node, gs, handlers)
+    },
     async refresh() {
       if (!connected()) { log('back with no relay connection — re-dialing'); await reconnect() }
       for (const r of rooms) { r.refresh(); r.flushPending() }
