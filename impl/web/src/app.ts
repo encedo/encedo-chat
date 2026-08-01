@@ -55,15 +55,42 @@ let client: ClientSession | null = null
 /** Resolves once the transport is up; rooms wait on it instead of on a null. */
 let clientReady: Promise<ClientSession> | null = null
 
-/**
- * Two independent facts share the header line, and they used to be confused for
- * each other: what the peer is doing, and whether we have a transport at all. A
- * frozen laptop looked exactly like a peer who left. Our own link wins when it
- * is down — we cannot honestly report on someone we currently cannot hear.
- */
-let peerLabel = 'łączę…'
-let lastPresence: string | null = null
 let linkState: 'online' | 'reconnecting' | 'offline' = 'online'
+
+// ---- rooms: many open conversations, one shown at a time -------------------
+// A message must not yank the view. An incoming conversation opens in the
+// BACKGROUND — the handshake completes and the message is received — and only
+// lights an unread dot on the contact list (Slack/Signal-style); the user
+// switches when they want. Each room keeps a replayable LOG of its events, so
+// switching to it just clears the transcript and replays that log through the
+// same render functions: nothing is lost and no room is ever torn down to show
+// another. The module-level render state (msgEls/stateEls/security DOM, the
+// scroll counter) always describes whichever room is on screen.
+type Ev =
+  | { t: 'msg'; kind: 'me' | 'peer'; text: string; ts: number; id?: string; ooo?: boolean }
+  | { t: 'react'; id: string; emoji: string }
+  | { t: 'delivery'; id: string; state: 'ok' | 'lost' | 'late'; ms?: number }
+  | { t: 'sys'; text: string }
+interface Room {
+  contact: Contact
+  conv: Conversation | null
+  log: Ev[]
+  unseen: number
+  inRoom: boolean
+  /** Header snapshots so a background room repaints correctly when shown. Two
+   *  independent facts share the header — what the peer is doing, and whether WE
+   *  have a transport at all (`linkState`, shared); a frozen laptop once looked
+   *  exactly like a peer who left, so our own link wins when it is down. */
+  security: Map<string, 'handshaking' | 'established' | 'failed'>
+  transport: string
+  peerLabel: string
+  lastPresence: string | null
+}
+const rooms = new Map<string, Room>() // key = contact.pub
+let activePub: string | null = null
+const activeRoom = (): Room | null => (activePub ? rooms.get(activePub) ?? null : null)
+const LOG_CAP = 1000
+
 function paintStatus() {
   const dot = $('peer-dot'), txt = $('peer-status')
   if (linkState !== 'online') {
@@ -71,11 +98,10 @@ function paintStatus() {
     txt.textContent = linkState === 'reconnecting' ? 'wznawiam połączenie…' : 'brak połączenia z przekaźnikiem'
     return
   }
-  dot.className = 'dot ' + (lastPresence === 'join' || lastPresence === 'active' ? 'ok'
-    : lastPresence === 'away' || lastPresence === 'quiet' ? 'away' : '')
-  txt.textContent = peerLabel
+  const lp = activeRoom()?.lastPresence
+  dot.className = 'dot ' + (lp === 'join' || lp === 'active' ? 'ok' : lp === 'away' || lp === 'quiet' ? 'away' : '')
+  txt.textContent = activeRoom()?.peerLabel ?? 'łączę…'
 }
-let active: { name: string; pub: string; inRoom: boolean; conv: Conversation | null } | null = null
 let rotTimer: any = null
 
 const setMsg = (id: string, text: string, kind: 'err' | 'ok') => { const m = $(id); m.textContent = text; m.className = 'msg ' + kind }
@@ -182,15 +208,15 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
       // down — the other one is doing exactly this too. The transport is gone
       // by now; clear the transcript, because this window cannot decrypt
       // anything any more, and say plainly what to do about it.
-      if (active) { active.conv = null; active.inRoom = false }
+      for (const r of rooms.values()) { r.conv = null; r.inRoom = false }
       $('messages').innerHTML = ''
       msgEls.clear(); stateEls.clear(); setTyping(false)
       appendMsg('sys', 'Wykryto drugie okno zalogowane na tę samą tożsamość.'
         + ' Obie sesje zostały zamknięte — jedna tożsamość, jedna aktywna sesja.'
         + ' Zamknij nadmiarową kartę i odśwież tę, w której chcesz rozmawiać.')
       linkState = 'offline'
-      peerLabel = 'sesja zamknięta (duplikat)'
       paintStatus()
+      $('peer-status').textContent = 'sesja zamknięta (duplikat)'
     },
   })
   clientReady.then((c) => { client = c }, (e: any) => {
@@ -244,22 +270,22 @@ async function syncPresence() {
   try { c = await clientReady } catch { return }
   const current = new Set(contactsCache.map((x) => x.pub))
   for (const pub of [...watchedPubs]) if (!current.has(pub)) { c.unwatch(pub); watchedPubs.delete(pub); onlinePubs.delete(pub) }
-  // The contact we have a conversation open with is covered by the room, which
-  // owns (and handed off) that topic — watching it here would spawn a second
-  // watcher on the room's own topic. core restores its light watch on `leave`.
-  const activePub = active?.pub ?? null
-  const toWatch = contactsCache.filter((x) => x.pub !== activePub)
+  // Every OPEN conversation is covered by its room, which owns (and was handed
+  // off) that topic — watching it here would spawn a second watcher on the room's
+  // own topic. core restores the light watch on `leave`.
+  const toWatch = contactsCache.filter((x) => !rooms.has(x.pub))
   await c.watchContacts(toWatch.map((x) => ({ pub: x.pub, kid: x.kid })), {
     onOnline: (p) => { if (!onlinePubs.has(p.pub)) { onlinePubs.add(p.pub); renderContacts() } },
     onOffline: (p) => { if (onlinePubs.delete(p.pub)) renderContacts() },
     onWantsConversation: (p) => {
+      // The contact is opening EH-2. Open the room IN THE BACKGROUND so their
+      // frame is replayed and the handshake completes and the message arrives —
+      // but do NOT steal the view (5 people writing must not thrash the UI).
+      // A dot lights on the contact; the user switches when they want.
       const contact = contactsCache.find((x) => x.pub === p.pub)
-      // Already in this conversation → the room's own handshake handling owns it,
-      // nothing to do. Otherwise the contact is opening EH-2: surface it and open
-      // the room, which replays their frame and completes the handshake.
-      if (!contact || active?.pub === p.pub) return
+      if (!contact || rooms.has(p.pub)) return
       toast(`${contact.name} chce rozmawiać…`)
-      void openChat(contact)
+      void openRoomFor(contact, false)
     },
   })
   // Record every contact (incl. the active one, whose watch core owns and
@@ -272,22 +298,28 @@ function renderContacts() {
   const list = contactsCache.filter((c) => !filter || c.name.toLowerCase().includes(filter))
   if (!list.length) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = filter ? '(brak dopasowań)' : '(brak kontaktów — dodaj peera)'; pane.appendChild(e); return }
   for (const c of list) {
-    const inRoom = active?.name === c.name && active?.inRoom
+    const room = rooms.get(c.pub)
+    const inRoom = !!room?.inRoom
     const online = onlinePubs.has(c.pub)
+    const unseen = room?.unseen ?? 0
     const dotTitle = inRoom ? 'W rozmowie' : online ? 'Online (widoczny na Waszym topicu)' : 'Offline'
     const src = c.source === 'hem' ? { i: '🔒', t: 'W HEM (trwałe, przenośne)' } : { i: '💻', t: 'Lokalnie (ta przeglądarka)' }
-    const b = document.createElement('button'); b.className = 'contact' + (active?.name === c.name ? ' active' : '')
+    const b = document.createElement('button'); b.className = 'contact' + (activePub === c.pub ? ' active' : '') + (unseen ? ' unread' : '')
+    // The unread pill is the whole point of the background model: a message that
+    // arrived while you were elsewhere lights here instead of yanking the view.
+    const pill = unseen ? `<span class="c-unread" title="${unseen} nieprzeczytane">${unseen > 99 ? '99+' : unseen}</span>` : ''
     b.innerHTML = `<span class="dot ${inRoom || online ? 'ok' : ''}" title="${dotTitle}"></span><div class="avatar">${escapeHtml(initials(c.name))}</div>`
       + `<div class="c-info"><div class="c-name">${escapeHtml(c.name)} <span class="src" title="${src.t}">${src.i}</span></div>`
       + `<div class="c-sub" title="${escapeHtml(c.kid ? `KID ${c.kid}` : c.pub)}">🔑 ${escapeHtml(fpCache.get(c.pub) ?? '…')}${c.kid ? ' · KID ' + escapeHtml(shortKid(c.kid)) : ''}</div></div>`
-      + `<span class="c-x" title="Usuń">×</span>`
+      + pill + `<span class="c-x" title="Usuń">×</span>`
     b.addEventListener('click', async (e: any) => {
       if (e.target.classList.contains('c-x')) {
         e.stopPropagation()
+        await closeRoom(c.pub)
         if (session) { try { await session.book.remove(c) } catch (err: any) { toast('Błąd usuwania: ' + (err?.message ?? err)) } }
         await refreshContacts(); return
       }
-      openChat(c)
+      void openRoomFor(c, true)
     })
     pane.appendChild(b)
   }
@@ -306,7 +338,7 @@ $('add-save').addEventListener('click', async () => {
   try { if (Uint8Array.from(atob(pub), (c) => c.charCodeAt(0)).length !== 32) { setMsg('add-msg', 'Klucz nie wygląda na 32-bajtowy X25519 (base64).', 'err'); return } }
   catch { setMsg('add-msg', 'Klucz nie jest poprawnym base64.', 'err'); return }
   const store = (document.querySelector('input[name="store"]:checked') as HTMLInputElement | null)?.value ?? 'hem'
-  if (store === 'none') { closeModal(); openChat({ name, pub, source: 'local' }); return } // ephemeral — nothing saved (HEM nor localStorage)
+  if (store === 'none') { closeModal(); void openRoomFor({ name, pub, source: 'local' }, true); return } // ephemeral — nothing saved (HEM nor localStorage)
   const persistent = store !== 'local'
   const btn = $('add-save') as HTMLButtonElement; btn.disabled = true; btn.textContent = 'Zapisuję…'
   try {
@@ -432,7 +464,7 @@ function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
     again.textContent = '↻'
     again.title = 'Wyślij ponownie'
     again.addEventListener('click', () => {
-      if (!active?.conv?.resend(id)) return
+      if (!activeRoom()?.conv?.resend(id)) return
       el.textContent = ' · wysyłam ponownie…'
       el.title = 'Czekam na potwierdzenie od klienta rozmówcy'
     })
@@ -500,7 +532,7 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
     const bar = document.createElement('div'); bar.className = 'b-react'
     for (const e of QUICK_EMOJI) {
       const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = e
-      btn.addEventListener('click', () => { active?.conv?.sendReaction(id, e); addReaction(id, e) })
+      btn.addEventListener('click', () => { const r = activeRoom(); if (!r?.conv) return; r.conv.sendReaction(id, e); record(r, { t: 'react', id, emoji: e }) })
       bar.appendChild(btn)
     }
     row.appendChild(bar)
@@ -541,131 +573,183 @@ ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : 
  * good session was carrying messages. The best state wins instead: if any peer
  * has a live ratchet, we are secure, whatever the others are doing.
  */
-const security = new Map<string, 'handshaking' | 'established' | 'failed'>()
-function setSecurity(peer: string, state: 'handshaking' | 'established' | 'failed') {
-  if (peer) security.set(peer, state)
-  else { security.clear(); security.set('', state) }
-  const states = [...security.values()]
+/** Update a room's security map, then paint the badge if that room is on screen.
+ *  The map is per-room now: a background handshake must not move the foreground
+ *  badge. On switching in, `paintSecurity` repaints from the room's own map. */
+function noteSecurity(room: Room, peer: string, state: 'handshaking' | 'established' | 'failed') {
+  if (peer) room.security.set(peer, state)
+  else { room.security.clear(); room.security.set('', state) }
+  if (room === activeRoom()) paintSecurity(room)
+}
+function paintSecurity(room: Room) {
+  const states = [...room.security.values()]
   const best = states.includes('established') ? 'established'
-    : states.includes('handshaking') ? 'handshaking' : 'failed'
+    : states.includes('handshaking') ? 'handshaking' : states.length ? 'failed' : 'handshaking'
   const b = $('e2e-badge')
   if (best === 'established') { b.className = 'badge direct'; b.textContent = '🔐 EH-2 + ratchet'; b.title = 'Handshake EH-2 uzgodniony — forward secrecy per wiadomość, hybryda PQ (ML-KEM-768)' }
   else if (best === 'handshaking') { b.className = 'badge e2e'; b.textContent = '🤝 EH-2 handshake…'; b.title = 'Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)' }
   else { b.className = 'badge e2e'; b.textContent = '⚠️ EH-2 nieudany'; b.title = 'Handshake nie doszedł do skutku — ponowi się przy następnym Announce' }
 }
 
-function setTransport(state: string) {
+function noteTransport(room: Room, state: string) {
+  if (state.startsWith('conn=connected') || state.startsWith('conn=failed') || state.startsWith('conn=disconnected') || state.startsWith('conn=closed')) room.transport = state
+  if (room === activeRoom()) paintTransport(room)
+}
+function paintTransport(room: Room) {
   const b = $('transport-badge')
-  if (state.startsWith('conn=connected')) { b.className = 'badge direct'; b.textContent = '🟢 WebRTC Direct'; b.title = 'Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing' }
-  else if (state.startsWith('conn=failed') || state.startsWith('conn=disconnected') || state.startsWith('conn=closed')) { b.className = 'badge relay'; b.textContent = '⚪ Relay'; b.title = 'Treść przez relay (GossipSub)' }
+  if (room.transport.startsWith('conn=connected')) { b.className = 'badge direct'; b.textContent = '🟢 WebRTC Direct'; b.title = 'Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing' }
+  else { b.className = 'badge relay'; b.textContent = '⚪ Relay'; b.title = 'Treść przez relay (GossipSub)' }
 }
 
-async function openChat(contact: Contact) {
-  if (!session) return
-  // Returning to a room that is already open — tapping the contact again after
-  // the mobile back-arrow — must NOT rebuild it. The old unconditional leave()
-  // sent a presence:leave, stopped the ratchet and the transport, and started a
-  // fresh handshake: that is the "messages stop, ratchet comes back after N
-  // seconds, one side flips to Relay" desync. A live room just gets shown again.
-  if (active?.name === contact.name && active.conv) {
-    showChatPane(true)
-    void active.conv.refresh() // came back to the room: re-announce, flush anything pending — cheap, no teardown
-    return
-  }
-  if (active?.conv) { try { await active.conv.leave() } catch {} }
-  active = { name: contact.name, pub: contact.pub, inRoom: false, conv: null }
-  renderContacts()
+/** Record one event on a room's log; render it if that room is on screen,
+ *  otherwise (background) just count it and light the dot. Replaying the log
+ *  through applyEv reconstructs the transcript exactly. */
+const record = (room: Room, ev: Ev) => {
+  room.log.push(ev); if (room.log.length > LOG_CAP) room.log.shift()
+  if (room === activeRoom()) applyEv(ev)
+  else if (ev.t === 'msg' && ev.kind === 'peer') { room.unseen++; renderContacts() }
+}
+function applyEv(ev: Ev) {
+  if (ev.t === 'msg') appendMsg(ev.kind, ev.text, ev.ts, ev.id, ev.ooo)
+  else if (ev.t === 'react') addReaction(ev.id, ev.emoji)
+  else if (ev.t === 'delivery') setDelivery(ev.id, ev.state, ev.ms)
+  else appendMsg('sys', ev.text)
+}
+
+/**
+ * Show a room that is already open. No teardown, no rebuild of the conversation
+ * — clear the transcript DOM and REPLAY the room's log, then repaint the header
+ * from the room's own snapshots. This subsumes the old "return to a room" path
+ * that once desynced by calling leave() (the ratchet came back after N seconds,
+ * one side flipped to Relay): switching between rooms now never touches any
+ * conversation, so there is nothing to tear down.
+ */
+async function activateRoom(pub: string) {
+  const room = rooms.get(pub); if (!room) return
+  activePub = pub
+  room.unseen = 0
   $('chat-empty').hidden = true; $('chat-view').hidden = false
   showChatPane(true)
-  $('peer-avatar').textContent = initials(contact.name)
-  $('peer-name').textContent = contact.name
+  $('peer-avatar').textContent = initials(room.contact.name)
+  $('peer-name').textContent = room.contact.name
   // The peer is identified the same way we identify ourselves: 8-byte
   // fingerprint (comparable out of band) plus the HSM key id when it has one.
-  const peerFp = fpCache.get(contact.pub) ?? await fingerprint(contact.pub)
-  fpCache.set(contact.pub, peerFp)
-  $('sess-peer').textContent = '🔑 ' + peerFp + (contact.kid ? ' · KID ' + shortKid(contact.kid) : '')
-  $('sess-peer').title = contact.kid ? `KID ${contact.kid}` : contact.pub
-  $('peer-name').title = '🔑 ' + peerFp + (contact.kid ? ` · KID ${contact.kid}` : '')
-  $('peer-dot').className = 'dot'; $('peer-status').textContent = 'łączę…'
-  $('messages').innerHTML = ''; msgEls.clear(); setTyping(false)
-  $('transport-badge').className = 'badge relay'; $('transport-badge').textContent = '⚪ Relay'
-  setSecurity('', 'handshaking')
-  appendMsg('sys', `Pokój otwarty — czekam na ${contact.name}…`)
-  startRotation()
+  const peerFp = fpCache.get(room.contact.pub) ?? await fingerprint(room.contact.pub)
+  fpCache.set(room.contact.pub, peerFp)
+  $('sess-peer').textContent = '🔑 ' + peerFp + (room.contact.kid ? ' · KID ' + shortKid(room.contact.kid) : '')
+  $('sess-peer').title = room.contact.kid ? `KID ${room.contact.kid}` : room.contact.pub
+  $('peer-name').title = '🔑 ' + peerFp + (room.contact.kid ? ` · KID ${room.contact.kid}` : '')
+  $('sess-peerid').textContent = room.conv ? room.conv.peerId.slice(0, 16) + '…' : '…'
+  // Rebuild the transcript from the log; the module render state (msgEls/stateEls)
+  // now describes this room.
+  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false)
+  for (const ev of room.log) applyEv(ev)
+  paintSecurity(room); paintTransport(room); paintStatus()
+  startRotation(); renderContacts()
+  void room.conv?.refresh() // re-announce / flush pending — cheap, no teardown
+}
+
+/**
+ * Open a conversation. `foreground` = the user asked for it (a contact click):
+ * show it. Background (an incoming handshake surfaced by presence) opens the
+ * room to RECEIVE — the handshake must complete or the message never arrives —
+ * but does NOT steal the view: it only lights the unread dot. Idempotent; an
+ * already-open room is just re-shown (foreground) or left alone (background).
+ */
+async function openRoomFor(contact: Contact, foreground: boolean) {
+  if (!session) return
+  if (rooms.has(contact.pub)) { if (foreground) await activateRoom(contact.pub); return }
+
+  const room: Room = {
+    contact, conv: null, log: [], unseen: 0, inRoom: false,
+    security: new Map([['', 'handshaking']]), transport: '', peerLabel: 'łączę…', lastPresence: null,
+  }
+  rooms.set(contact.pub, room)
+  record(room, { t: 'sys', text: `Pokój otwarty — czekam na ${contact.name}…` })
+  if (foreground) await activateRoom(contact.pub)
+  else renderContacts()
 
   try {
     let peerTyping = false
     let warnedForeign = false
-    lastPresence = null
-    peerLabel = 'łączę…'
     const conv = await (await clientReady!).open({ pub: contact.pub, kid: contact.kid }, {
       webrtc: true,
-      onWebrtcState: setTransport,
-      onSecurity: setSecurity,
+      onWebrtcState: (s) => noteTransport(room, s),
+      onSecurity: (peer, state) => noteSecurity(room, peer, state),
       onLog: ecLog,
-      onDelivered: (id, ms) => setDelivery(id, 'ok', ms),
-      onUndelivered: (id) => setDelivery(id, 'lost'),
-      onLateDelivered: (id, ms) => setDelivery(id, 'late', ms),
+      onDelivered: (id, ms) => record(room, { t: 'delivery', id, state: 'ok', ms }),
+      onUndelivered: (id) => record(room, { t: 'delivery', id, state: 'lost' }),
+      onLateDelivered: (id, ms) => record(room, { t: 'delivery', id, state: 'late', ms }),
       onMessage: (from, msg, meta) => {
         ecLog(`message from ${from.slice(0, 12)}…: "${msg.body.slice(0, 40)}"${meta.outOfOrder ? ' (out of order)' : ''}`)
-        peerTyping = false; setTyping(false); appendMsg('peer', msg.body, msg.ts, msg.id, meta.outOfOrder)
+        if (room === activeRoom()) { peerTyping = false; setTyping(false) }
+        record(room, { t: 'msg', kind: 'peer', text: msg.body, ts: msg.ts, id: msg.id, ooo: meta.outOfOrder })
       },
-      onTyping: (_from, state) => { peerTyping = state === 'start'; setTyping(peerTyping, contact.name) },
-      onReaction: (_from, r) => addReaction(r.to, r.emoji),
-      onFile: (_from, f) => appendMsg('sys', `${contact.name} udostępnił plik: ${f.name} — interim (IPFS TODO)`),
+      onTyping: (_from, state) => { peerTyping = state === 'start'; if (room === activeRoom()) setTyping(peerTyping, contact.name) },
+      onReaction: (_from, r) => record(room, { t: 'react', id: r.to, emoji: r.emoji }),
+      onFile: (_from, f) => record(room, { t: 'sys', text: `${contact.name} udostępnił plik: ${f.name} — interim (IPFS TODO)` }),
       onForeign: () => {
         // The user is the only one who can fix this, so say it in the transcript
         // rather than in a console nobody has open. Two windows on one identity
         // is by far the common cause; a rotated contact key is the other.
         if (!warnedForeign) {
           warnedForeign = true
-          appendMsg('sys', 'Uwaga: w tym pokoju jest ktoś, kto nie uwierzytelnia się jako ten kontakt'
-            + ' — najczęściej druga zakładka zalogowana na tę samą tożsamość. Zamknij jedną z nich.')
+          record(room, { t: 'sys', text: 'Uwaga: w tym pokoju jest ktoś, kto nie uwierzytelnia się jako ten kontakt'
+            + ' — najczęściej druga zakładka zalogowana na tę samą tożsamość. Zamknij jedną z nich.' })
         }
       },
       onPresence: (_peer, ev) => {
-        if (active) active.inRoom = ev !== 'leave'
+        room.inRoom = ev !== 'leave'
         const label = ev === 'join' ? 'w pokoju' : ev === 'active' ? 'wrócił/a' : ev === 'away' ? 'nieobecny/a'
           : ev === 'quiet' ? 'brak sygnału' : 'wyszedł/wyszła'
-        // Presence belongs in the header, not in the transcript. Every tab
-        // switch flips away→active, and writing each one into the conversation
-        // buried the actual messages under "nieobecny/a · wrócił/a" noise.
-        // Only entering and leaving the room are worth a line, and only when
-        // the state really changed.
-        if ((ev === 'join' || ev === 'leave') && lastPresence !== ev) appendMsg('sys', `${contact.name} ${label}`)
-        lastPresence = ev
-        peerLabel = ev === 'leave' ? 'poza pokojem' : label
-        paintStatus()
-        if (ev === 'leave') { peerTyping = false; setTyping(false) }
+        // Presence belongs in the header, not in the transcript. Every tab switch
+        // flips away→active; only entering and leaving are worth a line, and only
+        // when the state really changed.
+        if ((ev === 'join' || ev === 'leave') && room.lastPresence !== ev) record(room, { t: 'sys', text: `${contact.name} ${label}` })
+        room.lastPresence = ev
+        room.peerLabel = ev === 'leave' ? 'poza pokojem' : label
+        if (room === activeRoom()) { paintStatus(); if (ev === 'leave') { peerTyping = false; setTyping(false) } }
         renderContacts()
       },
     })
-    if (active?.name !== contact.name) { await conv.leave(); return } // switched away mid-connect
-    active.conv = conv
-    $('sess-peerid').textContent = conv.peerId.slice(0, 16) + '…'
-
-    const send = () => {
-      const inp = $('msg-input') as HTMLInputElement; const t = inp.value.trim(); if (!t) return
-      const id = conv.sendText(t)
-      ecLog(`sent "${t.slice(0, 40)}" (id ${id}); secured peers: ${conv.secured().length}`)
-      appendMsg('me', t, nowMs(), id); inp.value = ''
-    }
-    ;($('send') as HTMLButtonElement).onclick = send
-    ;($('msg-input') as HTMLInputElement).oninput = () => conv.noteActivity()
-    ;($('msg-input') as HTMLInputElement).onkeydown = (e: any) => { if (e.key === 'Enter') send() }
+    if (!rooms.has(contact.pub)) { await conv.leave(); return } // room was closed mid-connect
+    room.conv = conv
+    if (room === activeRoom()) $('sess-peerid').textContent = conv.peerId.slice(0, 16) + '…'
   } catch (e: any) {
-    appendMsg('sys', 'Błąd: ' + (e?.message ?? e))
-    $('peer-status').textContent = 'błąd połączenia'
+    record(room, { t: 'sys', text: 'Błąd: ' + (e?.message ?? e) })
+    if (room === activeRoom()) $('peer-status').textContent = 'błąd połączenia'
   }
 }
 
+/** Close a room for good: leave the conversation (presence:leave, ratchet stop)
+ *  and drop it. Used on contact removal — ordinary view switches never close a
+ *  room, that is the whole point. Resets the view if the closed room was on it. */
+async function closeRoom(pub: string) {
+  const room = rooms.get(pub); if (!room) return
+  rooms.delete(pub)
+  if (activePub === pub) { activePub = null; $('chat-view').hidden = true; $('chat-empty').hidden = false; showChatPane(false) }
+  try { await room.conv?.leave() } catch {}
+}
+
+// The composer targets whichever room is on screen — wired once, not per open.
+function sendComposer() {
+  const room = activeRoom(); if (!room?.conv) return
+  const inp = $('msg-input') as HTMLInputElement; const t = inp.value.trim(); if (!t) return
+  const id = room.conv.sendText(t)
+  ecLog(`sent "${t.slice(0, 40)}" (id ${id}); secured peers: ${room.conv.secured().length}`)
+  record(room, { t: 'msg', kind: 'me', text: t, ts: nowMs(), id }); inp.value = ''
+}
+;($('send') as HTMLButtonElement).onclick = sendComposer
+;($('msg-input') as HTMLInputElement).oninput = () => activeRoom()?.conv?.noteActivity()
+;($('msg-input') as HTMLInputElement).onkeydown = (e: any) => { if (e.key === 'Enter') sendComposer() }
+
 document.addEventListener('visibilitychange', () => {
   ecLog(document.hidden ? 'tab hidden — browser will throttle our timers' : 'tab visible — re-announcing')
-  if (document.hidden) active?.conv?.noteAway()
-  // Coming back: the tab's timers were throttled while hidden, so our Announce
-  // heartbeat went quiet and the peer may already have written us off. Speak up
-  // immediately instead of waiting for the next tick.
-  else active?.conv?.refresh()
+  // Every open room, not just the visible one: a background conversation must
+  // stay alive across the throttle too. Coming back, the tab's timers were
+  // throttled while hidden, so our Announce heartbeat went quiet and the peer may
+  // already have written us off — speak up now instead of waiting for the tick.
+  for (const r of rooms.values()) { if (document.hidden) r.conv?.noteAway(); else r.conv?.refresh() }
 })
 /**
  * Phone layout: one pane at a time (see the ≤720px rules in index.html). The
@@ -721,7 +805,7 @@ window.addEventListener('online', () => {
 // Leaving the page ends the whole session, not just the open room: the §9.1
 // watch has to stop announcing, or the next window sees a rival that is already
 // gone and closes itself for nothing.
-window.addEventListener('beforeunload', () => { active?.conv?.leave(); client?.close() })
+window.addEventListener('beforeunload', () => { for (const r of rooms.values()) r.conv?.leave(); client?.close() })
 
 // ---- room rotation countdown (next UTC midnight) ----
 function startRotation() {

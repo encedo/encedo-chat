@@ -612,6 +612,34 @@ async function main() {
     await roundTrip(A, B, 'after-switch')
     step('the original conversation resumed after switching away')
 
+    scenario('an incoming message opens in the background, not in your face')
+    // The point of the model: while you read one conversation, a message from
+    // ANOTHER contact must light an unread dot on the list — never yank the view
+    // (5 people writing must not thrash your windows). A opens `sim-b`'s room in
+    // the background to RECEIVE, but stays looking at `ghost`.
+    await openContact(A, 'ghost')          // look away at a peer that never answers
+    await sleep(500)
+    const away = await A.eval<string>(`return document.getElementById('peer-name').textContent`)
+    const bgTok = `w-tle-${Date.now().toString(36)}`
+    await send(B, bgTok)                    // B writes while A is looking at ghost
+    await A.waitFor('unread pill on sim-b', `
+      const c = [...document.querySelectorAll('#pane-contacts .contact')].find((x) => x.textContent.includes('sim-b'));
+      return !!(c && c.querySelector('.c-unread'));
+    `, 25_000)
+    const stillAway = await A.eval<string>(`return document.getElementById('peer-name').textContent`)
+    const leaked = await A.eval<boolean>(`return document.getElementById('messages').textContent.includes(${JSON.stringify(bgTok)})`)
+    if (stillAway !== away) throw new Error(`view was yanked to another conversation (${away} → ${stillAway})`)
+    if (leaked) throw new Error('a background message rendered into the foreground transcript')
+    step('message landed in the background — unread dot lit, view unmoved')
+    await openContact(A, 'sim-b')           // now go read it
+    await A.waitFor('the buffered message shows on switch', seen(bgTok), 10_000)
+    const pillGone = await A.eval<boolean>(`
+      const c = [...document.querySelectorAll('#pane-contacts .contact')].find((x) => x.textContent.includes('sim-b'));
+      return !(c && c.querySelector('.c-unread'));
+    `)
+    if (!pillGone) throw new Error('unread pill did not clear after opening the conversation')
+    step('opening the conversation replayed the buffered message and cleared the dot')
+
     scenario('returning to a mobile room does not tear it down')
     // Reported from a split-screen phone: tapping the back-arrow to the peer
     // list and then back into the room rebuilt the whole conversation — a

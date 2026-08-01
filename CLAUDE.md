@@ -299,19 +299,47 @@ converting back to plain data.
 redirect to a file instead. And watch what it leaves behind: leaked browsers from
 repeated runs are what once exhausted this machine (`pgrep -f chrome`, `free -m`).
 
-### Returning to an open room must not rebuild it
+### Many open conversations, one on screen — the background-rooms model
 
-`openChat()` used to `leave()` and rebuild unconditionally, so **tapping a
-contact you are already in** — which is how you get back to the room after the
-mobile back-arrow — tore the conversation down: presence:leave, ratchet stopped,
-a fresh handshake, and (because the WebRTC plane restarts) one side flipping to
-Relay while the peer stayed on WebRTC. Reported as "back and return desyncs; the
-ratchet comes back after N seconds; Firefox WebRTC, Chromium Relay, but messages
-still arrive." The guard is now: if the tapped contact is the active one and its
-conversation is live, just `showChatPane(true)` + a cheap `refresh()`, no
-teardown. Pinned by the `browser-test` scenario "returning to a mobile room does
-not tear it down" (checks the `sess-peerid` is unchanged across the round trip —
-a rebuild would mint a new one), which **fails without the guard** (verified).
+The web app holds **many rooms open at once** and shows one (`web/src/app.ts`:
+`rooms: Map<pub, Room>` + `activePub`; core is already "one transport, many
+rooms"). This exists because a message must not **yank the view**: an incoming
+conversation (surfaced by presence's `onWantsConversation`) opens **in the
+background** — the handshake must complete or the message never arrives — and
+only lights an **unread pill** on the contact list (Slack/Signal-style). Five
+people writing no longer thrash the window. Reported as "wiadomość wskakuje do
+pokoju… jak 5 osób zacznie pisać, okna będą się zmieniać".
+
+How it holds together:
+
+- **Each room keeps a replayable `log: Ev[]`** (message / reaction / delivery /
+  sys). `record(room, ev)` appends to the log and, *if that room is on screen*,
+  renders it now (`applyEv` → the existing `appendMsg`/`addReaction`/`setDelivery`);
+  otherwise it bumps `unseen` and lights the dot. **Switching is not a rebuild**:
+  `activateRoom` clears the transcript DOM and **replays the log**, so nothing is
+  lost and no conversation is ever torn down to show another. The module render
+  state (`msgEls`/`stateEls`, the scroll counter) always describes the on-screen
+  room; header badges (security/transport/presence) are per-room snapshots
+  (`noteSecurity`/`paintSecurity`, etc.) repainted on switch.
+- **This subsumes the old "return to a room must not rebuild" bug.** `openChat`
+  used to `leave()` and rebuild unconditionally, so tapping a contact you were
+  already in (how you return after the mobile back-arrow) tore the conversation
+  down — presence:leave, stopped ratchet, fresh handshake, one side flipping to
+  Relay. Now switching *never* touches a conversation, so there is nothing to tear
+  down; the back-arrow just hides the pane and the room stays open. Still pinned by
+  the `browser-test` "returning to a mobile room does not tear it down" (checks
+  `sess-peerid` unchanged across the round trip).
+- **`syncPresence` excludes every OPEN room**, not just the visible one — each
+  open room owns (was handed) its pair topic, so watching it would spawn a second
+  watcher there. core restores the light watch on `leave`. Rooms persist until the
+  contact is removed (`closeRoom` → `leave` + drop) or the tab closes; ordinary
+  switches keep them all alive (ratchet + WebRTC per room).
+- Pinned by the `browser-test` scenario "an incoming message opens in the
+  background, not in your face": while A reads `ghost`, B writes → A shows an
+  unread pill on `sim-b`, the view does **not** move and the message is **not** in
+  the foreground transcript; opening `sim-b` replays the buffered message and
+  clears the pill. **Deferred:** typing/presence for background rooms (transient,
+  ignored), a WebRTC-for-foreground-only optimisation, desktop notifications.
 
 ### Compact layout (phones, and phones on their side)
 
