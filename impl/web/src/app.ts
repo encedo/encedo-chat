@@ -15,7 +15,8 @@ import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 import { generateX25519 } from '../../lib/x25519.ts'
-import { unb64 } from '../../lib/wc.ts'
+import { unb64, b64 } from '../../lib/wc.ts'
+import { sealCache, openCache } from '../../lib/gcache.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
 
@@ -836,46 +837,101 @@ function recordGroup(gu: GroupUI, ev: Ev) {
   gu.log.push(ev); if (gu.log.length > LOG_CAP) gu.log.shift()
   if (activeGid === gu.gid && $('app').classList.contains('chat-open')) applyEv(ev)
   else if (ev.t === 'msg' && ev.kind === 'peer') { gu.unseen++; renderGroups() }
-  if (ev.t === 'msg') schedulePersist() // a send/receive advanced a chain — persist it (debounced)
+  // A send must be durable at once (a spent counter cannot be reused after a fast
+  // reload); a receive is self-healing (the chain re-walks) so it can debounce.
+  if (ev.t === 'msg') { if (ev.kind === 'me') void persistGroups(); else schedulePersist() }
 }
 
 // ---- persistence: the group's full state survives a reload (§10) -----------
-// Stores every group's material + my sending chain + EVERY member's receiving key,
-// so a reload continues without re-distribution. v1 writes it PLAINTEXT.
-// SECURITY: `group_secret` and the chain keys sit unencrypted in localStorage — a
-// deliberate, temporary at-rest exposure. Wrap this blob with the §10 cache key
-// (HKDF(ECDH(IK, emp_pub), info=gid), one HEM call per session) before wide use.
-const groupsKey = () => 'ec-groups-' + (session?.handle ?? '')
+// Each group's full state (material + my sending chain + EVERY member's receiving
+// key) is sealed to its own §10-encrypted blob, so a reload continues without
+// re-distribution. The at-rest key is anchored to the identity: base = ECDH(IK,
+// emp_pub) (one id.ecdh per session; IK stays in the HEM), per-group AES key =
+// HKDF(base, gid) — see lib/gcache.ts. One blob per gid: ec-gcache-<handle>-<gid>.
+const genc = new TextEncoder()
+const empKey = () => 'ec-gcache-emp-' + (session?.handle ?? '')
+const gcachePrefix = () => 'ec-gcache-' + (session?.handle ?? '') + '-'
+const legacyGroupsKey = () => 'ec-groups-' + (session?.handle ?? '') // B1 plaintext (migrated away)
+let cacheBase: Uint8Array | null = null
 let persistTimer: any
-function persistGroups() {
-  if (!client || !session || wiping) return // a wipeout must not be undone by the unload flush
-  try {
-    const blob = { groups: client.groups.snapshot(), names: [...groupsUI].map(([gid, gu]) => [gid, gu.name]) }
-    localStorage.setItem(groupsKey(), JSON.stringify(blob))
-  } catch (e: any) { ecLog('group persist failed: ' + (e?.message ?? e), 'debug') }
+
+/** The §10 cache master secret ECDH(IK, emp_pub), computed once and cached. The
+ *  emp public key is random and kept in localStorage; IK never leaves the HEM. */
+async function ensureCacheBase(): Promise<Uint8Array | null> {
+  if (cacheBase) return cacheBase
+  if (!session) return null
+  let empPub = localStorage.getItem(empKey())
+  if (!empPub) { empPub = b64((await generateX25519()).pub); localStorage.setItem(empKey(), empPub) }
+  try { cacheBase = await session.id.ecdh(empPub) } catch (e: any) { ecLog('group cache: ecdh(base) failed — ' + (e?.message ?? e), 'debug'); return null }
+  return cacheBase
 }
-// Message activity advances chains constantly; debounce so we write once the burst
-// settles, not per message. Key/membership changes call persistGroups() directly,
-// and a tab-hide / pagehide forces a final flush (that is the reload case).
-function schedulePersist() { clearTimeout(persistTimer); persistTimer = setTimeout(persistGroups, 1500) }
+
+/** Seal every group's full state to its own §10 blob. Async; the message path uses
+ *  schedulePersist (debounced) for receives, immediate for my own sends. */
+async function persistGroups() {
+  if (!client || !session || wiping) return // a wipeout must not be undone by the unload flush
+  const base = await ensureCacheBase(); if (!base) return
+  for (const snap of client.groups.snapshot()) {
+    const gidHex = client.groups.gidHexOf(unb64(snap.gid))
+    const name = groupsUI.get(gidHex)?.name ?? ''
+    try {
+      const blob = await sealCache(base, gidHex, genc.encode(JSON.stringify({ snap, name })))
+      localStorage.setItem(gcachePrefix() + gidHex, blob)
+    } catch (e: any) { ecLog('group persist failed: ' + (e?.message ?? e), 'debug') }
+  }
+}
+function schedulePersist() { clearTimeout(persistTimer); persistTimer = setTimeout(() => void persistGroups(), 1500) }
+
+/** Bring one group back from a decrypted snapshot: engine + UI + re-subscribe. */
+async function addRestoredGroup(snap: any, name: string): Promise<string | null> {
+  if (!client) return null
+  try {
+    const [gidHex] = await client.groups.restore([snap])
+    if (!groupsUI.has(gidHex)) {
+      const members = (snap.roster as { pub: string }[]).map((m) => ({ pub: m.pub, name: memberName(m.pub) }))
+      const gu: GroupUI = { gid: gidHex, name: name || 'Grupa', epoch: snap.epoch, members, log: [], unseen: 0, room: null }
+      groupsUI.set(gidHex, gu)
+      gu.room = await client.openGroup(gidHex, groupHandlers(gidHex))
+    }
+    return gidHex
+  } catch (e: any) { ecLog('group restore failed: ' + (e?.message ?? e), 'debug'); return null }
+}
+
+/** Restore groups from the encrypted §10 cache on startup (+ migrate a B1 blob). */
 async function restoreGroups() {
   if (!client || !session) return
-  let blob: any
-  try { blob = JSON.parse(localStorage.getItem(groupsKey()) || 'null') } catch { return }
-  if (!blob?.groups?.length) return
-  const names = new Map<string, string>(blob.names ?? [])
-  let gids: string[] = []
-  try { gids = await client.groups.restore(blob.groups) } catch (e: any) { ecLog('group restore failed: ' + (e?.message ?? e), 'debug'); return }
-  for (let i = 0; i < gids.length; i++) { // restore() preserves snapshot order
-    const gid = gids[i]; const snap = blob.groups[i]
-    if (groupsUI.has(gid)) continue
-    const members = (snap.roster as { pub: string }[]).map((m) => ({ pub: m.pub, name: memberName(m.pub) }))
-    const gu: GroupUI = { gid, name: names.get(gid) || 'Grupa', epoch: snap.epoch, members, log: [], unseen: 0, room: null }
-    groupsUI.set(gid, gu)
-    gu.room = await client.openGroup(gid, groupHandlers(gid))
+  const base = await ensureCacheBase(); if (!base) return
+  const seen = new Set<string>()
+  const prefix = gcachePrefix()
+  for (const k of Object.keys(localStorage)) {
+    if (!k.startsWith(prefix)) continue
+    const gidHex = k.slice(prefix.length)
+    const blob = localStorage.getItem(k); if (!blob) continue
+    const pt = await openCache(base, gidHex, blob)
+    if (!pt) { ecLog('group cache: decrypt failed for ' + gidHex.slice(0, 8) + '…', 'debug'); continue }
+    let parsed: any; try { parsed = JSON.parse(dec.decode(pt)) } catch { continue }
+    if (await addRestoredGroup(parsed.snap, parsed.name)) seen.add(gidHex)
   }
+  await migrateLegacyGroups(seen)
   renderGroups()
-  ecLog(`restored ${gids.length} group(s) from cache`)
+  if (seen.size) ecLog(`restored ${seen.size} group(s) from the encrypted cache`)
+}
+
+/** One-time upgrade: a B1 plaintext blob (ec-groups-<handle>) → encrypt each group
+ *  into the §10 cache, then delete the plaintext. Prevents groups vanishing on the
+ *  B1→B2 upgrade the same way the identity change once broke 1:1. */
+async function migrateLegacyGroups(seen: Set<string>) {
+  const raw = localStorage.getItem(legacyGroupsKey()); if (!raw || !client) return
+  try {
+    const blob = JSON.parse(raw); const names = new Map<string, string>(blob.names ?? [])
+    for (const snap of blob.groups ?? []) {
+      const gidHex = client.groups.gidHexOf(unb64(snap.gid))
+      if (!seen.has(gidHex)) { if (await addRestoredGroup(snap, names.get(gidHex) ?? '')) seen.add(gidHex) }
+    }
+    await persistGroups()                    // re-seal as encrypted blobs
+    localStorage.removeItem(legacyGroupsKey()) // drop the plaintext
+    ecLog('migrated the B1 plaintext group cache to the §10 encrypted cache')
+  } catch (e: any) { ecLog('legacy group migration failed: ' + (e?.message ?? e), 'debug') }
 }
 
 /** Show a group in the chat pane (reuses #messages; sender labels via `who`). */
@@ -945,7 +1001,7 @@ async function onGroupInvite(_from: string, skd: GroupSkdEnv) {
     }
   }
   renderGroups()
-  persistGroups() // key/membership changed — flush now, not on the debounce
+  void persistGroups() // key/membership changed — flush now, not on the debounce
 }
 
 // ---- create-group modal ----
@@ -978,7 +1034,7 @@ $('group-create').addEventListener('click', async () => {
     closeGroupModal()
     await activateGroup(gid)
     void distributeGroup(gid, name) // send the invite (keys) to each member over 1:1
-    persistGroups() // the new group must survive a reload immediately
+    void persistGroups() // the new group must survive a reload immediately
     toast(`Grupa „${name}" utworzona — rozsyłam zaproszenia…`)
   } catch (e: any) { setMsg('group-msg', 'Błąd: ' + (e?.message ?? e), 'err') }
 })
@@ -990,7 +1046,7 @@ document.addEventListener('visibilitychange', () => {
   // throttled while hidden, so our Announce heartbeat went quiet and the peer may
   // already have written us off — speak up now instead of waiting for the tick.
   for (const r of rooms.values()) { if (document.hidden) r.conv?.noteAway(); else r.conv?.refresh() }
-  if (document.hidden) persistGroups() // reliable on mobile, unlike beforeunload — this is the reload/close flush
+  if (document.hidden) void persistGroups() // best-effort flush on backgrounding (encrypt is async); sends are already durable
 })
 /**
  * Phone layout: one pane at a time (see the ≤720px rules in index.html). The
@@ -1046,7 +1102,7 @@ window.addEventListener('online', () => {
 // Leaving the page ends the whole session, not just the open room: the §9.1
 // watch has to stop announcing, or the next window sees a rival that is already
 // gone and closes itself for nothing.
-window.addEventListener('beforeunload', () => { persistGroups(); for (const r of rooms.values()) r.conv?.leave(); client?.close() })
+window.addEventListener('beforeunload', () => { void persistGroups(); for (const r of rooms.values()) r.conv?.leave(); client?.close() })
 
 // ---- room rotation countdown (next UTC midnight) ----
 function startRotation() {

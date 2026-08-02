@@ -837,6 +837,18 @@ async function main() {
     await login(A, 'sim-a')
     await A.waitFor('A restored the group from cache', `return !!document.querySelector('#pane-groups .contact')`, 20_000)
     step('the group reappeared from cache after reload')
+    // §10: the group state on disk must be encrypted — an ec-gcache blob, not the
+    // readable ec-groups plaintext, and not JSON we can eyeball group_secret out of.
+    const cacheShape = await A.eval<{ enc: boolean; plaintext: boolean; readable: boolean }>(`
+      const keys = Object.keys(localStorage);
+      const encK = keys.find((k) => k.startsWith('ec-gcache-sim-a-'));
+      return { enc: !!encK, plaintext: keys.includes('ec-groups-sim-a'),
+               readable: encK ? localStorage.getItem(encK).trim().startsWith('{') : false };
+    `)
+    if (!cacheShape.enc) throw new Error('no encrypted ec-gcache blob after reload')
+    if (cacheShape.plaintext) throw new Error('a B1 plaintext ec-groups blob is still present')
+    if (cacheShape.readable) throw new Error('the group cache blob is readable JSON — not encrypted')
+    step('the group cache on disk is §10-encrypted (no plaintext group_secret at rest)')
     const gmsg2 = `po-reload-${Date.now().toString(36)}`
     let delivered2 = false
     for (let i = 0; i < 10 && !delivered2; i++) {
