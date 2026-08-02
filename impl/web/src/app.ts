@@ -822,7 +822,7 @@ function renderGroups() {
     const b = document.createElement('button'); b.className = 'contact' + (activeGid === gu.gid ? ' active' : '') + (gu.unseen ? ' unread' : '')
     const pill = gu.unseen ? `<span class="c-unread">${gu.unseen > 99 ? '99+' : gu.unseen}</span>` : ''
     b.innerHTML = `<div class="avatar">👥</div><div class="c-info"><div class="c-name">${escapeHtml(groupDisplay(gu))}</div>`
-      + `<div class="c-sub">${gu.members.length} członków · 🔐 Sender Keys</div></div>` + pill
+      + `<div class="c-sub">${gu.members.length} członków · 🔐 szyfrowana</div></div>` + pill
     b.addEventListener('click', () => void activateGroup(gu.gid))
     pane.appendChild(b)
   }
@@ -845,8 +845,8 @@ async function activateGroup(gid: string) {
   $('peer-avatar').textContent = '👥'
   $('peer-name').textContent = groupDisplay(gu); $('peer-name').title = ''
   $('peer-dot').className = 'dot ok'; $('peer-status').textContent = `${gu.members.length} członków`
-  $('e2e-badge').className = 'badge direct'; $('e2e-badge').textContent = '🔐 Sender Keys'
-  $('e2e-badge').title = 'Grupa — sender keys + per-recipient HMAC (deniable, §8)'
+  $('e2e-badge').className = 'badge direct'; $('e2e-badge').textContent = '🔐 Szyfrowana'
+  $('e2e-badge').title = 'Grupa — Sender Keys + per-recipient HMAC (deniable, §8)'
   $('transport-badge').className = 'badge relay'; $('transport-badge').textContent = '⚪ Relay (grupa)'
   $('transport-badge').title = 'Grupa idzie przez relay (GossipSub) — nie WebRTC'
   $('sess-peerid').textContent = gid.slice(0, 12) + '…'
