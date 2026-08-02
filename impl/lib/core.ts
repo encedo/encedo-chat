@@ -685,7 +685,13 @@ async function openRoom(
     onIsolated: host.onIsolated,
     onForeign: (p) => { log(`foreign peer in the room: ${p.slice(0, 12)}… — its handshake does not verify`); opts.onForeign?.(p) },
   })
-  if (opts.webrtc) plane = attachWebRTC(room, self, { onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
+  // Feature-detect the webview's WebRTC: WebKitGTK (the Tauri shell on Linux) ships
+  // without RTCPeerConnection, so attaching the plane would throw `new
+  // RTCPeerConnection` mid-handshake. Without it, content simply stays on the relay
+  // (GossipSub) — the fallback the plane would have used anyway.
+  const webRtcOk = typeof RTCPeerConnection !== 'undefined'
+  if (opts.webrtc && webRtcOk) plane = attachWebRTC(room, self, { onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
+  else if (opts.webrtc) log('WebRTC unavailable in this webview — content stays on the relay')
   const unregister = host.register(room)
 
   let typingSent = false
