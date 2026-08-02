@@ -165,4 +165,12 @@ export class SenderReceiver {
   }
 
   stats(): { n: number; skipped: number } { return { n: this.n, skipped: this.skipped.size } }
+
+  /** The live chain position for persistence (§10). Skipped keys are intentionally
+   *  dropped — a restore loses only in-flight out-of-order frames, never the chain. */
+  snapshot(): { key: Uint8Array; n: number } { return { key: this.key.slice(), n: this.n } }
+  /** Rebuild a receiver at a saved chain position (raw bytes; caller deserializes). */
+  static from(key: Uint8Array, n: number, opts: ReceiverOpts = {}): SenderReceiver {
+    const r = new SenderReceiver(key, opts); r.n = n; return r
+  }
 }

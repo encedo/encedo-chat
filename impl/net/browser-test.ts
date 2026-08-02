@@ -828,6 +828,25 @@ async function main() {
     if (!groupDelivered) throw new Error('group broadcast did not reach the member')
     step('a broadcast on the group topic reached the member (with the sender label)')
 
+    scenario('a group survives a reload (persisted crypto state)')
+    // The group is in-memory only until persisted; a reload must bring it back
+    // from the cache AND keep the chains, so A can still broadcast to B.
+    const groupsBefore = await A.eval<number>(`return document.querySelectorAll('#pane-groups .contact').length`)
+    if (groupsBefore === 0) throw new Error('precondition: A has no group to persist')
+    await A.reload(APP_URL)
+    await login(A, 'sim-a')
+    await A.waitFor('A restored the group from cache', `return !!document.querySelector('#pane-groups .contact')`, 20_000)
+    step('the group reappeared from cache after reload')
+    const gmsg2 = `po-reload-${Date.now().toString(36)}`
+    let delivered2 = false
+    for (let i = 0; i < 10 && !delivered2; i++) {
+      await A.eval(`const g = document.querySelector('#pane-groups .contact'); if (g) g.click(); document.getElementById('msg-input').value = ${JSON.stringify(gmsg2)}; document.getElementById('send').click(); return 1`)
+      await sleep(4_000)
+      delivered2 = await B.eval<boolean>(`const g = document.querySelector('#pane-groups .contact'); if (g) g.click(); return document.getElementById('messages').textContent.includes(${JSON.stringify(gmsg2)})`)
+    }
+    if (!delivered2) throw new Error('after reload, A could not broadcast to the group (chain state lost?)')
+    step('after reload the send chain continued — A still broadcasts to the member')
+
     scenario('wipeout clears local state and returns to login')
     // The §10 WIPE: a device reset. It must delete every ec-* key (identity +
     // contacts) and drop back to the login form — nothing local survives.

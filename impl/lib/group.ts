@@ -158,6 +158,20 @@ export class GroupSession {
   }
   hasSenderKey(memberPub: string): boolean { return this.receivers.has(memberPub) }
 
+  /** Full chain state for persistence (§10): my send chain + every receiving
+   *  chain. Raw bytes — the manager serializes. Skipped keys are dropped. */
+  exportChains(): { send: { key: Uint8Array; n: number }; receivers: { pub: string; key: Uint8Array; n: number }[] } {
+    const receivers = [...this.receivers.entries()].map(([pub, r]) => { const s = r.snapshot(); return { pub, key: s.key, n: s.n } })
+    return { send: { key: this.send_.key.slice(), n: this.send_.n }, receivers }
+  }
+  /** Restore the chains produced by exportChains onto a freshly-created session. */
+  importChains(state: { send: { key: Uint8Array; n: number }; receivers: { pub: string; key: Uint8Array; n: number }[] }): void {
+    this.send_ = sendChainFrom(state.send.key)
+    this.send_.n = state.send.n
+    this.receivers.clear()
+    for (const r of state.receivers) this.receivers.set(r.pub, SenderReceiver.from(r.key, r.n, this.receiverOpts))
+  }
+
   private async macKeyFor(memberPub: string): Promise<Uint8Array> {
     let mk = this.macKeyCache.get(memberPub)
     if (!mk) {
@@ -220,6 +234,17 @@ export class GroupSession {
 // ---------------------------------------------------------------------------
 
 interface GroupRec { session: GroupSession; gkPub: Uint8Array; secret: Uint8Array; roster: Member[]; epoch: number }
+
+/** A group serialized for the persistence cache (§10) — full state, base64 bytes. */
+export interface GroupSnapshot {
+  gid: string        // group_id
+  gkPub: string      // GK_pub
+  epoch: number
+  secret: string     // group_secret (seeds the topic)
+  roster: Member[]
+  send: { key: string; n: number }                       // my sending chain
+  receivers: { pub: string; key: string; n: number }[]   // every known member's receiving chain
+}
 
 /**
  * Holds every group I am in, and turns Sender-Key Distribution in/out. A group is
@@ -300,5 +325,40 @@ export class GroupManager {
       secret: b64(rec.secret), chain: b64(rec.session.mySenderKey()),
       roster: rec.roster.map((m) => m.pub),
     }
+  }
+
+  /** Every group serialized for the persistence cache (§10) — full state, including
+   *  the other members' receiving keys. Synchronous, so it is safe to call from a
+   *  pagehide / visibility-hidden flush. The caller stores the JSON (plaintext in
+   *  v1; §10-encrypted later — see the web app's persistGroups). */
+  snapshot(): GroupSnapshot[] {
+    const out: GroupSnapshot[] = []
+    for (const rec of this.recs.values()) {
+      const c = rec.session.exportChains()
+      out.push({
+        gid: b64(rec.session.gid), gkPub: b64(rec.gkPub), epoch: rec.epoch, secret: b64(rec.secret),
+        roster: rec.roster.map((m) => ({ pub: m.pub, kid: m.kid })),
+        send: { key: b64(c.send.key), n: c.send.n },
+        receivers: c.receivers.map((r) => ({ pub: r.pub, key: b64(r.key), n: r.n })),
+      })
+    }
+    return out
+  }
+
+  /** Rebuild every group from a snapshot: admit the material, then restore the
+   *  chains (my send position + each member's receiving position). Returns the gid
+   *  hexes restored, so the app can re-open (re-subscribe) each. */
+  async restore(snaps: GroupSnapshot[]): Promise<string[]> {
+    const gids: string[] = []
+    for (const s of snaps) {
+      const gid = unb64(s.gid)
+      const session = await this.admit({ gid, gkPub: unb64(s.gkPub), epoch: s.epoch, secret: unb64(s.secret), roster: s.roster })
+      session.importChains({
+        send: { key: unb64(s.send.key), n: s.send.n },
+        receivers: s.receivers.map((r) => ({ pub: r.pub, key: unb64(r.key), n: r.n })),
+      })
+      gids.push(hex(gid))
+    }
+    return gids
   }
 }

@@ -93,6 +93,7 @@ interface Room {
 const rooms = new Map<string, Room>() // key = contact.pub
 let activePub: string | null = null
 let activeGid: string | null = null // a group is on screen instead of a 1:1 (see the groups module)
+let wiping = false // wipeout in progress — block the unload flush from re-persisting groups
 const activeRoom = (): Room | null => (activePub ? rooms.get(activePub) ?? null : null)
 /** Am I actually LOOKING at this room? Being `activePub` is not enough — the
  *  mobile back-arrow leaves the room active but hides its pane (removes
@@ -236,7 +237,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
       $('peer-status').textContent = 'sesja zamknięta (duplikat)'
     },
   })
-  clientReady.then((c) => { client = c }, (e: any) => {
+  clientReady.then((c) => { client = c; void restoreGroups() }, (e: any) => {
     ecLog(`session failed to start: ${e?.message ?? e}`)
     toast('Brak połączenia z przekaźnikiem — odśwież stronę')
   })
@@ -386,6 +387,8 @@ $('btn-wipeout').addEventListener('click', async () => {
   // rooms so peers see us go, drop the transport), then delete every ec-* key we
   // own, then reload to login. HEM-held keys live in the HSM and are untouched.
   ecLog('WIPEOUT — clearing all local state')
+  wiping = true // stop persistGroups: the reload below fires unload handlers that would re-save
+  clearTimeout(persistTimer)
   try { for (const r of rooms.values()) r.conv?.leave() } catch {}
   try { client?.close() } catch {}
   for (const k of Object.keys(localStorage)) { if (k.startsWith('ec-')) localStorage.removeItem(k) }
@@ -833,6 +836,46 @@ function recordGroup(gu: GroupUI, ev: Ev) {
   gu.log.push(ev); if (gu.log.length > LOG_CAP) gu.log.shift()
   if (activeGid === gu.gid && $('app').classList.contains('chat-open')) applyEv(ev)
   else if (ev.t === 'msg' && ev.kind === 'peer') { gu.unseen++; renderGroups() }
+  if (ev.t === 'msg') schedulePersist() // a send/receive advanced a chain — persist it (debounced)
+}
+
+// ---- persistence: the group's full state survives a reload (§10) -----------
+// Stores every group's material + my sending chain + EVERY member's receiving key,
+// so a reload continues without re-distribution. v1 writes it PLAINTEXT.
+// SECURITY: `group_secret` and the chain keys sit unencrypted in localStorage — a
+// deliberate, temporary at-rest exposure. Wrap this blob with the §10 cache key
+// (HKDF(ECDH(IK, emp_pub), info=gid), one HEM call per session) before wide use.
+const groupsKey = () => 'ec-groups-' + (session?.handle ?? '')
+let persistTimer: any
+function persistGroups() {
+  if (!client || !session || wiping) return // a wipeout must not be undone by the unload flush
+  try {
+    const blob = { groups: client.groups.snapshot(), names: [...groupsUI].map(([gid, gu]) => [gid, gu.name]) }
+    localStorage.setItem(groupsKey(), JSON.stringify(blob))
+  } catch (e: any) { ecLog('group persist failed: ' + (e?.message ?? e), 'debug') }
+}
+// Message activity advances chains constantly; debounce so we write once the burst
+// settles, not per message. Key/membership changes call persistGroups() directly,
+// and a tab-hide / pagehide forces a final flush (that is the reload case).
+function schedulePersist() { clearTimeout(persistTimer); persistTimer = setTimeout(persistGroups, 1500) }
+async function restoreGroups() {
+  if (!client || !session) return
+  let blob: any
+  try { blob = JSON.parse(localStorage.getItem(groupsKey()) || 'null') } catch { return }
+  if (!blob?.groups?.length) return
+  const names = new Map<string, string>(blob.names ?? [])
+  let gids: string[] = []
+  try { gids = await client.groups.restore(blob.groups) } catch (e: any) { ecLog('group restore failed: ' + (e?.message ?? e), 'debug'); return }
+  for (let i = 0; i < gids.length; i++) { // restore() preserves snapshot order
+    const gid = gids[i]; const snap = blob.groups[i]
+    if (groupsUI.has(gid)) continue
+    const members = (snap.roster as { pub: string }[]).map((m) => ({ pub: m.pub, name: memberName(m.pub) }))
+    const gu: GroupUI = { gid, name: names.get(gid) || 'Grupa', epoch: snap.epoch, members, log: [], unseen: 0, room: null }
+    groupsUI.set(gid, gu)
+    gu.room = await client.openGroup(gid, groupHandlers(gid))
+  }
+  renderGroups()
+  ecLog(`restored ${gids.length} group(s) from cache`)
 }
 
 /** Show a group in the chat pane (reuses #messages; sender labels via `who`). */
@@ -902,6 +945,7 @@ async function onGroupInvite(_from: string, skd: GroupSkdEnv) {
     }
   }
   renderGroups()
+  persistGroups() // key/membership changed — flush now, not on the debounce
 }
 
 // ---- create-group modal ----
@@ -934,6 +978,7 @@ $('group-create').addEventListener('click', async () => {
     closeGroupModal()
     await activateGroup(gid)
     void distributeGroup(gid, name) // send the invite (keys) to each member over 1:1
+    persistGroups() // the new group must survive a reload immediately
     toast(`Grupa „${name}" utworzona — rozsyłam zaproszenia…`)
   } catch (e: any) { setMsg('group-msg', 'Błąd: ' + (e?.message ?? e), 'err') }
 })
@@ -945,6 +990,7 @@ document.addEventListener('visibilitychange', () => {
   // throttled while hidden, so our Announce heartbeat went quiet and the peer may
   // already have written us off — speak up now instead of waiting for the tick.
   for (const r of rooms.values()) { if (document.hidden) r.conv?.noteAway(); else r.conv?.refresh() }
+  if (document.hidden) persistGroups() // reliable on mobile, unlike beforeunload — this is the reload/close flush
 })
 /**
  * Phone layout: one pane at a time (see the ≤720px rules in index.html). The
@@ -1000,7 +1046,7 @@ window.addEventListener('online', () => {
 // Leaving the page ends the whole session, not just the open room: the §9.1
 // watch has to stop announcing, or the next window sees a rival that is already
 // gone and closes itself for nothing.
-window.addEventListener('beforeunload', () => { for (const r of rooms.values()) r.conv?.leave(); client?.close() })
+window.addEventListener('beforeunload', () => { persistGroups(); for (const r of rooms.values()) r.conv?.leave(); client?.close() })
 
 // ---- room rotation countdown (next UTC midnight) ----
 function startRotation() {
