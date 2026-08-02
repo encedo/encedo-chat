@@ -827,6 +827,39 @@ async function main() {
     }
     if (!groupDelivered) throw new Error('group broadcast did not reach the member')
     step('a broadcast on the group topic reached the member (with the sender label)')
+    // A group broadcast has no acks — it must read "wysłano", never hang on "wysyłam…".
+    const groupSent = await A.eval<boolean>(`return document.getElementById('messages').textContent.includes('wysłano') && !document.getElementById('messages').textContent.includes('wysyłam')`)
+    if (!groupSent) throw new Error('a group message should show "wysłano", not hang on "wysyłam"')
+    step('a sent group message reads "wysłano" (no perpetual "wysyłam")')
+
+    scenario('a SECOND group also works (not just the first)')
+    // Reported: only the first group worked. Make a second group with the same
+    // member and prove a broadcast in IT reaches B too.
+    await A.eval(`document.getElementById('tab-groups').click(); document.querySelector('#pane-groups .add-btn').click(); return 1`)
+    await A.waitFor('the new-group modal (2nd)', `return document.getElementById('group-modal').classList.contains('open')`, 6_000)
+    await A.eval(`
+      document.getElementById('group-name').value = 'Testowa2';
+      const cb = [...document.querySelectorAll('#group-members .gmember')].find((r) => r.textContent.includes('sim-b'))?.querySelector('input');
+      if (!cb) throw new Error('sim-b is not selectable');
+      cb.checked = true;
+      document.getElementById('group-create').click(); return 1;
+    `)
+    await A.waitFor('A opened the 2nd group view', `return document.getElementById('peer-name').textContent.includes('Testowa2')`, 10_000)
+    await B.waitFor('B received the 2nd group invite', `return document.querySelectorAll('#pane-groups .contact').length >= 2`, 40_000)
+    step('second group created on A, invite delivered to B')
+    const g2msg = `grupa2-${Date.now().toString(36)}`
+    let delivered2b = false
+    for (let i = 0; i < 10 && !delivered2b; i++) {
+      await A.eval(`document.getElementById('msg-input').value = ${JSON.stringify(g2msg)}; document.getElementById('send').click(); return 1`)
+      await sleep(4_000)
+      delivered2b = await B.eval<boolean>(`
+        const g = [...document.querySelectorAll('#pane-groups .contact')].find((c) => c.querySelector('.c-name')?.textContent === 'Testowa2');
+        if (g) g.click();
+        return document.getElementById('messages').textContent.includes(${JSON.stringify(g2msg)});
+      `)
+    }
+    if (!delivered2b) throw new Error('the SECOND group broadcast did not reach the member')
+    step('a broadcast in the second group reached the member too')
 
     scenario('a group survives a reload (persisted crypto state)')
     // The group is in-memory only until persisted; a reload must bring it back
@@ -850,11 +883,14 @@ async function main() {
     if (cacheShape.readable) throw new Error('the group cache blob is readable JSON — not encrypted')
     step('the group cache on disk is §10-encrypted (no plaintext group_secret at rest)')
     const gmsg2 = `po-reload-${Date.now().toString(36)}`
+    // A now has two groups; target "Testowa" by exact name on BOTH sides so the two
+    // browsers are provably in the same room (a bare .contact could pick different ones).
+    const pickTestowa = `const g = [...document.querySelectorAll('#pane-groups .contact')].find((c) => c.querySelector('.c-name')?.textContent === 'Testowa'); if (g) g.click();`
     let delivered2 = false
     for (let i = 0; i < 10 && !delivered2; i++) {
-      await A.eval(`const g = document.querySelector('#pane-groups .contact'); if (g) g.click(); document.getElementById('msg-input').value = ${JSON.stringify(gmsg2)}; document.getElementById('send').click(); return 1`)
+      await A.eval(`${pickTestowa} document.getElementById('msg-input').value = ${JSON.stringify(gmsg2)}; document.getElementById('send').click(); return 1`)
       await sleep(4_000)
-      delivered2 = await B.eval<boolean>(`const g = document.querySelector('#pane-groups .contact'); if (g) g.click(); return document.getElementById('messages').textContent.includes(${JSON.stringify(gmsg2)})`)
+      delivered2 = await B.eval<boolean>(`${pickTestowa} return document.getElementById('messages').textContent.includes(${JSON.stringify(gmsg2)})`)
     }
     if (!delivered2) throw new Error('after reload, A could not broadcast to the group (chain state lost?)')
     step('after reload the send chain continued — A still broadcasts to the member')

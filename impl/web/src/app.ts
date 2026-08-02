@@ -72,7 +72,7 @@ let linkState: 'online' | 'reconnecting' | 'offline' = 'online'
 // another. The module-level render state (msgEls/stateEls/security DOM, the
 // scroll counter) always describes whichever room is on screen.
 type Ev =
-  | { t: 'msg'; kind: 'me' | 'peer'; text: string; ts: number; id?: string; ooo?: boolean; who?: string }
+  | { t: 'msg'; kind: 'me' | 'peer'; text: string; ts: number; id?: string; ooo?: boolean; who?: string; sent?: boolean }
   | { t: 'react'; id: string; emoji: string }
   | { t: 'delivery'; id: string; state: 'ok' | 'lost' | 'late'; ms?: number }
   | { t: 'sys'; text: string }
@@ -533,7 +533,7 @@ function insertByTime(box: HTMLElement, row: HTMLElement, ts: number) {
   box.insertBefore(row, at)
 }
 
-function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string, outOfOrder = false, who?: string) {
+function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string, outOfOrder = false, who?: string, sent = false) {
   const box = $('messages')
   if (kind === 'sys') {
     const stick = atBottom()
@@ -558,10 +558,16 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   if (kind === 'me' && id) {
     // Delivery state for our own messages. Instant-only: this says the peer's
     // client holds it, never that anyone read it.
-    const st = document.createElement('span'); st.className = 'b-state'; st.textContent = ' · wysyłam…'
-    st.title = 'Czekam na potwierdzenie od klienta rozmówcy'
+    const st = document.createElement('span'); st.className = 'b-state'
+    if (sent) {
+      // A group broadcast: fire-and-forget over GossipSub, no per-recipient acks —
+      // so it is "sent", never the 1:1 "sending…→delivered" that would hang here.
+      st.textContent = ' · wysłano'; st.title = 'Wysłane do grupy (broadcast — bez potwierdzeń doręczenia)'
+    } else {
+      st.textContent = ' · wysyłam…'; st.title = 'Czekam na potwierdzenie od klienta rozmówcy'
+      stateEls.set(id, st) // only 1:1 gets delivery updates
+    }
     m.appendChild(st)
-    stateEls.set(id, st)
   }
   const rx = document.createElement('div'); rx.className = 'b-reactions'
   bub.append(t, m, rx); row.appendChild(bub)
@@ -657,7 +663,7 @@ const record = (room: Room, ev: Ev) => {
   else if (ev.t === 'msg' && ev.kind === 'peer') { room.unseen++; renderContacts() }
 }
 function applyEv(ev: Ev) {
-  if (ev.t === 'msg') appendMsg(ev.kind, ev.text, ev.ts, ev.id, ev.ooo, ev.who)
+  if (ev.t === 'msg') appendMsg(ev.kind, ev.text, ev.ts, ev.id, ev.ooo, ev.who, ev.sent)
   else if (ev.t === 'react') addReaction(ev.id, ev.emoji)
   else if (ev.t === 'delivery') setDelivery(ev.id, ev.state, ev.ms)
   else appendMsg('sys', ev.text)
@@ -793,7 +799,7 @@ function sendComposer() {
   if (activeGid) { // a group is on screen — broadcast to it
     const gu = groupsUI.get(activeGid); if (!gu?.room) return
     inp.value = ''
-    gu.room.sendText(t).then((id) => recordGroup(gu, { t: 'msg', kind: 'me', text: t, ts: nowMs(), id })).catch((e) => ecLog('group send failed: ' + (e?.message ?? e)))
+    gu.room.sendText(t).then((id) => recordGroup(gu, { t: 'msg', kind: 'me', text: t, ts: nowMs(), id, sent: true })).catch((e) => ecLog('group send failed: ' + (e?.message ?? e)))
     return
   }
   const room = activeRoom(); if (!room?.conv) return
