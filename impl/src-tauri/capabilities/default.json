@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for the main window. The app talks to the relay and HEM over the network from the webview itself, so no extra Tauri command permissions are needed for the test build.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
