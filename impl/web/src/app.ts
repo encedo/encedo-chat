@@ -317,6 +317,11 @@ async function syncPresence() {
 }
 function renderContacts() {
   const pane = $('pane-contacts'); pane.innerHTML = ''
+  // Add-peer lives INSIDE the contacts pane (like "+ Nowa grupa" in groups), so it
+  // only shows on this tab — and above the empty-state, since that is when you need it.
+  const add = document.createElement('div'); add.className = 'add-row'
+  const addBtn = document.createElement('button'); addBtn.className = 'add-btn'; addBtn.textContent = '+ Dodaj peera'
+  addBtn.addEventListener('click', () => openModal()); add.appendChild(addBtn); pane.appendChild(add)
   const filter = val('contact-search').toLowerCase()
   const list = contactsCache.filter((c) => !filter || c.name.toLowerCase().includes(filter))
   if (!list.length) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = filter ? '(brak dopasowań)' : '(brak kontaktów — dodaj peera)'; pane.appendChild(e); return }
@@ -352,7 +357,6 @@ $('contact-search').addEventListener('input', renderContacts)
 // ---- add-peer modal ----
 const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; ;(document.querySelector('input[name="store"][value="hem"]') as HTMLInputElement).checked = true; $('add-name').focus() }
 const closeModal = () => { $('scrim').classList.remove('open'); $('add-modal').classList.remove('open') }
-$('btn-add').addEventListener('click', openModal)
 $('add-cancel').addEventListener('click', closeModal)
 $('add-save').addEventListener('click', async () => {
   if (!session) return
