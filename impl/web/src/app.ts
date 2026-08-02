@@ -230,7 +230,12 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     onGroupSkd: (from, skd) => { void onGroupInvite(from, skd) }, // a group invite arrived over a 1:1
 
     onLog: ecLog,
-    onLink: (state) => { linkState = state; paintStatus() },
+    onLink: (state) => {
+      linkState = state; paintStatus()
+      // The relay came back: 1:1 rooms are refreshed by core, but groups are passive
+      // and not registered there — re-warm their meshes so they don't stay silently dead.
+      if (state === 'online') for (const gu of groupsUI.values()) gu.room?.refresh()
+    },
     onSessionTakenOver: () => {
       // §9.1/§9.2: a second window of this identity showed up, so BOTH stand
       // down — the other one is doing exactly this too. The transport is gone
