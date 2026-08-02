@@ -380,6 +380,17 @@ $('chip-profile').addEventListener('click', openDrawer)
 $('btn-close-drawer').addEventListener('click', closeDrawer)
 $('scrim').addEventListener('click', () => { closeModal(); closeDrawer() })
 $('btn-logout').addEventListener('click', () => location.reload())
+$('btn-wipeout').addEventListener('click', async () => {
+  if (!confirm('Wipeout: skasować lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki?\n\nTego nie da się cofnąć — Twój klucz publiczny się zmieni, więc Ty i rozmówcy musicie wymienić się nowymi kluczami. Klucze w HSM (login HEM) zostają nietknięte.')) return
+  // §10 WIPE — reset like a new machine. Tear the live session down first (leave
+  // rooms so peers see us go, drop the transport), then delete every ec-* key we
+  // own, then reload to login. HEM-held keys live in the HSM and are untouched.
+  ecLog('WIPEOUT — clearing all local state')
+  try { for (const r of rooms.values()) r.conv?.leave() } catch {}
+  try { client?.close() } catch {}
+  for (const k of Object.keys(localStorage)) { if (k.startsWith('ec-')) localStorage.removeItem(k) }
+  location.reload()
+})
 
 // ---- copy my pubkey ----
 let toastT: any

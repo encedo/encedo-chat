@@ -828,6 +828,21 @@ async function main() {
     if (!groupDelivered) throw new Error('group broadcast did not reach the member')
     step('a broadcast on the group topic reached the member (with the sender label)')
 
+    scenario('wipeout clears local state and returns to login')
+    // The §10 WIPE: a device reset. It must delete every ec-* key (identity +
+    // contacts) and drop back to the login form — nothing local survives.
+    const beforeKeys = await B.eval<number>(`return Object.keys(localStorage).filter((k) => k.startsWith('ec-')).length`)
+    if (beforeKeys === 0) throw new Error('precondition: B has no ec-* state to wipe')
+    await B.eval(`document.getElementById('btn-settings').click(); return 1`)
+    await B.waitFor('the settings drawer', `return document.getElementById('drawer').classList.contains('open')`, 5_000)
+    // confirm() is auto-accepted; the handler then wipes and reloads, so this eval
+    // may lose its context to the navigation — tolerate that, the waitFor confirms it.
+    await B.eval(`window.confirm = () => true; document.getElementById('btn-wipeout').click(); return 1`).catch(() => {})
+    await B.waitFor('B back at the login form', `return !!document.getElementById('go-soft') && document.getElementById('app').hidden`, 15_000)
+    const afterKeys = await B.eval<number>(`return Object.keys(localStorage).filter((k) => k.startsWith('ec-')).length`)
+    if (afterKeys !== 0) throw new Error(`wipeout left ${afterKeys} ec-* key(s) behind`)
+    step(`wipeout cleared ${beforeKeys} ec-* key(s) and returned to login`)
+
     if (GROUP_ONLY) {
       console.log(`\nPASS — group scenario (GROUP_ONLY: the WebRTC/other scenarios were skipped)`)
       process.exitCode = 0
