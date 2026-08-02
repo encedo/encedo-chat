@@ -110,6 +110,15 @@ function paintStatus() {
     txt.textContent = linkState === 'reconnecting' ? 'wznawiam połączenie…' : 'brak połączenia z przekaźnikiem'
     return
   }
+  if (activeGid) {
+    // A group is on screen: its header is "N członków", not a 1:1 peer label. Without
+    // this, every onLink/refresh repainted it as `activeRoom()?.peerLabel ?? 'łączę…'`
+    // — activeRoom() is null for a group — so the group header flickered "łączę…".
+    const gu = groupsUI.get(activeGid)
+    dot.className = 'dot ok'
+    txt.textContent = gu ? `${gu.members.length} członków` : ''
+    return
+  }
   const lp = activeRoom()?.lastPresence
   dot.className = 'dot ' + (lp === 'join' || lp === 'active' ? 'ok' : lp === 'away' || lp === 'quiet' ? 'away' : '')
   txt.textContent = activeRoom()?.peerLabel ?? 'łączę…'
