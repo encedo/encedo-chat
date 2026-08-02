@@ -14,6 +14,7 @@
 
 import { topicFromSecret, announceMacKey, todayUTC, rotationOffsetSec, type RvParams } from './rendezvous.ts'
 import { joinChat, type RoomKeys, type ChatOpts, type Eh2Options } from './room.ts'
+import type { SkdFields } from './envelope.ts'
 import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { createMqttPeer } from '../net/mqtt-node.ts'
@@ -263,6 +264,8 @@ export interface Conversation {
   /** Send a message marked undelivered again, keeping its id. False = nothing to resend. */
   resend(id: string): boolean
   sendReaction(toId: string, emoji: string): void
+  /** Hand a group's Sender-Key Distribution to this contact over the ratchet (§8). */
+  sendGroupSkd(skd: SkdFields): void
   noteActivity(): void // UI calls on user input → drives "typing" + resets "away"
   noteAway(): void // UI calls on blur/tab-hidden → "away" now
   refresh(): void | Promise<void> // UI calls when the tab becomes visible again (throttled/frozen)
@@ -563,9 +566,15 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       presence.delete(peer.pub)
       const conv = await openRoom(id, peer, node, self, liveParams, {
         ...roomOpts,
-        // A group SKD on this 1:1 room feeds the group manager (§8); the app is
-        // notified after, so it can surface the group.
-        onGroupSkd: (from, skd) => { void groups.applySkd(from, skd); roomOpts.onGroupSkd?.(from, skd); opts.onGroupSkd?.(from, skd) },
+        // A group SKD on this 1:1 room feeds the group manager (§8), then the app
+        // is told — but only AFTER applySkd resolves: the app's handler calls
+        // openGroup, which needs the session applySkd creates. Racing them (fire
+        // applySkd, notify synchronously) throws "unknown group" on the invite.
+        // applySkd is keyed by the SENDER'S IDENTITY (IK pub), which the group's
+        // `receive` uses to find the sender key (senderId = SHA-256(IK_pub)[0:8]).
+        // `from` here is the transport PeerId, not the IK pub — so pass peer.pub:
+        // this 1:1 room IS with peer, and the ratchet authenticated the SKD as its.
+        onGroupSkd: async (from, skd) => { await groups.applySkd(peer.pub, skd); roomOpts.onGroupSkd?.(from, skd); opts.onGroupSkd?.(from, skd) },
       }, {
         log,
         onIsolated: () => { setLink('reconnecting'); void reconnect(true) },
@@ -644,6 +653,10 @@ async function openRoom(
     onReaction: opts.onReaction,
     onFile: opts.onFile,
     onSignal: (from, env) => plane?.onSignal(from, env),
+    // Group Sender-Key Distribution rides this 1:1 ratchet (it authenticates
+    // the invite); without forwarding it the invite reaches the room, decodes,
+    // and dies in the default no-op — the receiver never surfaces the group.
+    onGroupSkd: opts.onGroupSkd,
     // The peer reloaded: rebind the data plane onto the PeerId that is alive.
     onPeerReplaced: (old, now) => { log(`peer ${old.slice(0, 12)}… is now ${now.slice(0, 12)}… — rebinding the data plane`); plane?.onPeer(now) },
     heartbeatMs: opts.heartbeatMs,
@@ -681,6 +694,7 @@ async function openRoom(
     sendText: (body) => { const mid = room.sendText(body); stopTyping(); return mid },
     resend: (mid) => room.resend(mid),
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),
+    sendGroupSkd: (skd) => room.sendGroupSkd(skd),
     noteActivity,
     noteAway,
     refresh: async () => {

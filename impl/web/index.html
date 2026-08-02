@@ -116,6 +116,7 @@
   .bubble{max-width:62%;padding:10px 14px;border-radius:10px;box-shadow:var(--shadow)}
   .mrow.in .bubble{background:var(--bubble-in);border-bottom-left-radius:2px}
   .mrow.out .bubble{background:var(--bubble-out);border-bottom-right-radius:2px}
+  .bubble .b-who{font-size:11px;font-weight:600;color:var(--accent);margin-bottom:2px}
   .bubble .b-text{color:var(--text);overflow-wrap:break-word;white-space:pre-wrap}
   .bubble .b-meta{font-size:11px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums}
   .mrow.out .b-meta{text-align:right}
@@ -145,6 +146,10 @@
   .modal .msub{font-size:12px;color:var(--muted);margin-bottom:8px}
   .store-opts{display:flex;flex-direction:column;gap:6px;margin-top:4px}
   .store-opt{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);cursor:pointer;padding:7px 10px;border:1px solid var(--border);border-radius:8px}
+  .group-members{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;margin-top:4px}
+  .gmember{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);cursor:pointer;padding:6px 8px;border-radius:6px}
+  .gmember:hover{background:var(--bg)}
+  .gavatar{width:34px;height:34px;border-radius:8px;flex-shrink:0;display:grid;place-items:center;font-weight:600;font-size:12px;color:var(--accent);background:var(--accent-soft)}
   .store-opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
   .store-opt input{width:auto;margin:0;accent-color:var(--accent)}
   .src{font-size:11px;opacity:.75}
@@ -250,11 +255,11 @@
       <div class="search-wrap"><input id="contact-search" type="text" placeholder="Szukaj kontaktu…" autocomplete="off"></div>
       <div class="tabs">
         <button class="tab active" id="tab-contacts">Kontakty</button>
-        <button class="tab ph" id="tab-groups" title="Wkrótce">Grupy</button>
+        <button class="tab" id="tab-groups">Grupy</button>
         <button class="tab ph" id="tab-network" title="Wkrótce">Sieć</button>
       </div>
       <div class="pane" id="pane-contacts"></div>
-      <div class="pane" id="pane-groups" hidden><div class="pane-label">Grupy — wkrótce</div></div>
+      <div class="pane" id="pane-groups" hidden></div>
       <div class="pane" id="pane-network" hidden><div class="pane-label">Sieć — wkrótce (lista węzłów, latencje)</div></div>
       <div class="add-row"><button class="add-btn" id="btn-add">+ Dodaj peera</button></div>
       <div class="profile-strip"><span class="lbl">Profil bezpieczeństwa</span><button class="chip" id="chip-profile" title="Profil — wkrótce">P1 · prywatny</button></div>
@@ -304,6 +309,16 @@
     </div>
     <div class="msg" id="add-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="add-save" style="flex:1;border-radius:8px">Zapisz</button><button class="btn-ghost" id="add-cancel">Anuluj</button></div>
+  </div>
+
+  <div class="modal" id="group-modal">
+    <h2>Nowa grupa</h2>
+    <div class="msub">Nazwa + członkowie. Tylko kontakty — każdy dostaje zaproszenie (klucze) przez Wasz kanał 1:1.</div>
+    <label>Nazwa grupy</label><input id="group-name" type="text" placeholder="np. Zespół" autocomplete="off">
+    <label>Członkowie</label>
+    <div class="group-members" id="group-members"></div>
+    <div class="msg" id="group-msg"></div>
+    <div class="modal-actions"><button class="btn-send" id="group-create" style="flex:1;border-radius:8px">Utwórz</button><button class="btn-ghost" id="group-cancel">Anuluj</button></div>
   </div>
 
   <aside class="drawer" id="drawer" aria-label="Ustawienia">

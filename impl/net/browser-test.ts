@@ -67,6 +67,9 @@ function serveDist(): Server {
 const CHROME = process.env.CHROME ?? '/usr/bin/chromium-browser'
 const FIREFOX = process.env.FIREFOX ?? '/usr/bin/firefox'
 const HEADFUL = process.env.HEADFUL === '1'
+// Debug fast-path: GROUP_ONLY=1 runs setup (login + EH-2) then jumps straight to
+// the group scenario, skipping the middle scenarios — cheaper to iterate on.
+const GROUP_ONLY = process.env.GROUP_ONLY === '1'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -517,6 +520,8 @@ async function main() {
     const [ba, bb] = await Promise.all([A.waitFor<string>('EH-2 on A', BADGE_GREEN, 45_000), B.waitFor<string>('EH-2 on B', BADGE_GREEN, 45_000)])
     step(`EH-2 established in both: "${ba.trim()}" / "${bb.trim()}"`)
 
+    let direct = false
+    if (!GROUP_ONLY) {
     scenario('messages both ways, with delivery confirmations')
     await roundTrip(A, B, 'first')
     await A.waitFor('delivery mark on A', `return document.getElementById('messages').textContent.includes('dostarczone')`, 20_000)
@@ -524,7 +529,7 @@ async function main() {
     step('both sides show ✓ dostarczone (ack path works in a browser)')
 
     scenario('transport upgrade to a direct DataChannel')
-    let direct = (await A.eval<string>(`return document.getElementById('transport-badge').textContent`)).includes('Direct')
+    direct = (await A.eval<string>(`return document.getElementById('transport-badge').textContent`)).includes('Direct')
     if (!direct) {
       try {
         await A.waitFor('WebRTC direct', `return document.getElementById('transport-badge').textContent.includes('Direct')`, 25_000)
@@ -791,18 +796,55 @@ async function main() {
     }
     await B.resize(1200, 800)
 
-    console.log(`\nPASS — all scenarios${direct ? ' (content over WebRTC Direct)' : ' — but WebRTC never came up, see above'}`)
-    if (!direct) {
-      // Staying on the relay is a result, not a crash, so nothing would have
-      // printed — and then the one question worth answering ("why?") needs a
-      // whole rerun. The signalling trace is what answers it.
-      for (const b of [A, B]) {
-        const lines = b.console.filter((l) => /webrtc|rtc|signal|ice|probe/i.test(l))
-        console.log(`\n--- ${b.name}: signalling trace ---`)
-        console.log(lines.slice(-25).join('\n') || '(nothing — the plane never said a word)')
-      }
+    } // end !GROUP_ONLY
+
+    scenario('a group: create, invite over 1:1, and a broadcast reaches the member')
+    // A makes a group with sim-b. The Sender-Key Distribution rides the existing
+    // A↔B 1:1 ratchet; B joins and hands its own key back; then A's broadcast on
+    // the group topic reaches B (§8, all-ECDH, deniable).
+    await A.eval(`document.getElementById('tab-groups').click(); document.querySelector('#pane-groups .add-btn').click(); return 1`)
+    await A.waitFor('the new-group modal', `return document.getElementById('group-modal').classList.contains('open')`, 6_000)
+    await A.eval(`
+      document.getElementById('group-name').value = 'Testowa';
+      const cb = [...document.querySelectorAll('#group-members .gmember')].find((r) => r.textContent.includes('sim-b'))?.querySelector('input');
+      if (!cb) throw new Error('sim-b is not selectable as a member');
+      cb.checked = true;
+      document.getElementById('group-create').click(); return 1;
+    `)
+    await A.waitFor('A opened the group view', `return document.getElementById('peer-name').textContent.includes('Testowa')`, 10_000)
+    await B.waitFor('B received the group invite', `return !!document.querySelector('#pane-groups .contact')`, 40_000)
+    step('group created on A, invite delivered to B over the 1:1 ratchet')
+
+    const gmsg = `grupa-${Date.now().toString(36)}`
+    let groupDelivered = false
+    for (let i = 0; i < 10 && !groupDelivered; i++) {
+      await A.eval(`document.getElementById('msg-input').value = ${JSON.stringify(gmsg)}; document.getElementById('send').click(); return 1`)
+      await sleep(4_000)
+      groupDelivered = await B.eval<boolean>(`
+        const g = document.querySelector('#pane-groups .contact'); if (g) g.click();
+        return document.getElementById('messages').textContent.includes(${JSON.stringify(gmsg)});
+      `)
     }
-    process.exitCode = direct ? 0 : 1
+    if (!groupDelivered) throw new Error('group broadcast did not reach the member')
+    step('a broadcast on the group topic reached the member (with the sender label)')
+
+    if (GROUP_ONLY) {
+      console.log(`\nPASS — group scenario (GROUP_ONLY: the WebRTC/other scenarios were skipped)`)
+      process.exitCode = 0
+    } else {
+      console.log(`\nPASS — all scenarios${direct ? ' (content over WebRTC Direct)' : ' — but WebRTC never came up, see above'}`)
+      if (!direct) {
+        // Staying on the relay is a result, not a crash, so nothing would have
+        // printed — and then the one question worth answering ("why?") needs a
+        // whole rerun. The signalling trace is what answers it.
+        for (const b of [A, B]) {
+          const lines = b.console.filter((l) => /webrtc|rtc|signal|ice|probe/i.test(l))
+          console.log(`\n--- ${b.name}: signalling trace ---`)
+          console.log(lines.slice(-25).join('\n') || '(nothing — the plane never said a word)')
+        }
+      }
+      process.exitCode = direct ? 0 : 1
+    }
   } catch (e: any) {
     console.log(`\nFAIL — ${e?.message ?? e}`)
     for (const b of [A, B]) {

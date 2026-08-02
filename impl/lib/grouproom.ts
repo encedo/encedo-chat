@@ -36,7 +36,10 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
   const handler = async (evt: any) => {
     if (stopped || evt.detail.topic !== topic) return
     const opened = await session.receive(evt.detail.data)
-    if (!opened) return // not ours, unknown sender, forged/tampered MAC, replay, or no sender key
+    // null = our own echo, an unknown sender, a forged/tampered MAC, a replay, or
+    // no sender key yet — all normal enough not to surface, but a persistent drop
+    // is how a distribution gap looks, so trace it under debug.
+    if (!opened) { log(`dropped a ${evt.detail.data.length} B frame (not ours / bad MAC / no sender key)`); return }
     const env = decodeEnvelope(opened.pt)
     if (!env) return
     if (env.t === 'msg') opts.onMessage?.(opened.from, env as MsgEnv)
@@ -50,7 +53,13 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
 
   const broadcast = async (bytes: Uint8Array) => {
     const frame = await session.send(bytes)
-    await node.services.pubsub.publish(topic, frame)
+    try {
+      const r = await node.services.pubsub.publish(topic, frame)
+      log(`published ${frame.length} B → ${topic.slice(0, 8)}… (recipients: ${r?.recipients?.length ?? '?'})`)
+    } catch (e: any) {
+      log(`publish FAILED on ${topic.slice(0, 8)}…: ${e?.message ?? e}`)
+      throw e
+    }
   }
 
   return {

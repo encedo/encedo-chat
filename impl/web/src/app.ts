@@ -14,6 +14,10 @@
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
+import { generateX25519 } from '../../lib/x25519.ts'
+import { unb64 } from '../../lib/wc.ts'
+import type { GroupRoom } from '../../lib/grouproom.ts'
+import type { GroupSkdEnv } from '../../lib/envelope.ts'
 
 const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
 /**
@@ -67,7 +71,7 @@ let linkState: 'online' | 'reconnecting' | 'offline' = 'online'
 // another. The module-level render state (msgEls/stateEls/security DOM, the
 // scroll counter) always describes whichever room is on screen.
 type Ev =
-  | { t: 'msg'; kind: 'me' | 'peer'; text: string; ts: number; id?: string; ooo?: boolean }
+  | { t: 'msg'; kind: 'me' | 'peer'; text: string; ts: number; id?: string; ooo?: boolean; who?: string }
   | { t: 'react'; id: string; emoji: string }
   | { t: 'delivery'; id: string; state: 'ok' | 'lost' | 'late'; ms?: number }
   | { t: 'sys'; text: string }
@@ -88,6 +92,7 @@ interface Room {
 }
 const rooms = new Map<string, Room>() // key = contact.pub
 let activePub: string | null = null
+let activeGid: string | null = null // a group is on screen instead of a 1:1 (see the groups module)
 const activeRoom = (): Room | null => (activePub ? rooms.get(activePub) ?? null : null)
 /** Am I actually LOOKING at this room? Being `activePub` is not enough — the
  *  mobile back-arrow leaves the room active but hides its pane (removes
@@ -211,6 +216,8 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     transport: USE_MQTT ? 'mqtt' : 'libp2p',
     broker: BROKER,
     forcedRotationSec: FORCED_ROTATION_SEC,
+    onGroupSkd: (from, skd) => { void onGroupInvite(from, skd) }, // a group invite arrived over a 1:1
+
     onLog: ecLog,
     onLink: (state) => { linkState = state; paintStatus() },
     onSessionTakenOver: () => {
@@ -398,6 +405,7 @@ for (const [tab, pane] of [['tab-contacts', 'contacts'], ['tab-groups', 'groups'
   $(tab).addEventListener('click', () => {
     for (const t of ['tab-contacts', 'tab-groups', 'tab-network']) $(t).classList.toggle('active', t === tab)
     for (const p of ['contacts', 'groups', 'network']) $('pane-' + p).hidden = (p !== pane)
+    if (pane === 'groups') renderGroups()
   })
 }
 
@@ -510,7 +518,7 @@ function insertByTime(box: HTMLElement, row: HTMLElement, ts: number) {
   box.insertBefore(row, at)
 }
 
-function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string, outOfOrder = false) {
+function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string, outOfOrder = false, who?: string) {
   const box = $('messages')
   if (kind === 'sys') {
     const stick = atBottom()
@@ -522,6 +530,7 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   const row = document.createElement('div'); row.className = 'mrow ' + (kind === 'me' ? 'out' : 'in')
   row.dataset.ts = String(ts ?? nowMs())
   const bub = document.createElement('div'); bub.className = 'bubble'
+  if (who && kind === 'peer') { const w = document.createElement('div'); w.className = 'b-who'; w.textContent = who; bub.appendChild(w) }
   const t = document.createElement('div'); t.className = 'b-text'; t.textContent = text
   const m = document.createElement('div'); m.className = 'b-meta'; m.textContent = utcHHMM(ts ?? nowMs()) + ' UTC'
   if (outOfOrder) {
@@ -633,7 +642,7 @@ const record = (room: Room, ev: Ev) => {
   else if (ev.t === 'msg' && ev.kind === 'peer') { room.unseen++; renderContacts() }
 }
 function applyEv(ev: Ev) {
-  if (ev.t === 'msg') appendMsg(ev.kind, ev.text, ev.ts, ev.id, ev.ooo)
+  if (ev.t === 'msg') appendMsg(ev.kind, ev.text, ev.ts, ev.id, ev.ooo, ev.who)
   else if (ev.t === 'react') addReaction(ev.id, ev.emoji)
   else if (ev.t === 'delivery') setDelivery(ev.id, ev.state, ev.ms)
   else appendMsg('sys', ev.text)
@@ -649,7 +658,7 @@ function applyEv(ev: Ev) {
  */
 async function activateRoom(pub: string) {
   const room = rooms.get(pub); if (!room) return
-  activePub = pub
+  activePub = pub; activeGid = null // a 1:1 takes the screen — no group is active
   room.unseen = 0
   $('chat-empty').hidden = true; $('chat-view').hidden = false
   showChatPane(true)
@@ -765,8 +774,14 @@ async function closeRoom(pub: string) {
 
 // The composer targets whichever room is on screen — wired once, not per open.
 function sendComposer() {
-  const room = activeRoom(); if (!room?.conv) return
   const inp = $('msg-input') as HTMLInputElement; const t = inp.value.trim(); if (!t) return
+  if (activeGid) { // a group is on screen — broadcast to it
+    const gu = groupsUI.get(activeGid); if (!gu?.room) return
+    inp.value = ''
+    gu.room.sendText(t).then((id) => recordGroup(gu, { t: 'msg', kind: 'me', text: t, ts: nowMs(), id })).catch((e) => ecLog('group send failed: ' + (e?.message ?? e)))
+    return
+  }
+  const room = activeRoom(); if (!room?.conv) return
   const id = room.conv.sendText(t)
   ecLog(`sent "${t.slice(0, 40)}" (id ${id}); secured peers: ${room.conv.secured().length}`)
   record(room, { t: 'msg', kind: 'me', text: t, ts: nowMs(), id }); inp.value = ''
@@ -774,6 +789,143 @@ function sendComposer() {
 ;($('send') as HTMLButtonElement).onclick = sendComposer
 ;($('msg-input') as HTMLInputElement).oninput = () => activeRoom()?.conv?.noteActivity()
 ;($('msg-input') as HTMLInputElement).onkeydown = (e: any) => { if (e.key === 'Enter') sendComposer() }
+
+// ---- groups (§8: Sender Keys over the shared topic) ------------------------
+// A group is another kind of room in the same chat pane. It reuses the transcript
+// (with sender labels via `who`); membership + keys are the engine's (session.groups).
+interface GroupUI { gid: string; name: string; epoch: number; members: { pub: string; name: string }[]; room: GroupRoom | null; log: Ev[]; unseen: number }
+const groupsUI = new Map<string, GroupUI>()
+
+const memberName = (pub: string): string =>
+  session && pub === session.pub ? 'Ty' : (contactsCache.find((c) => c.pub === pub)?.name ?? (fpCache.get(pub) ?? pub.slice(0, 8)))
+const groupDisplay = (gu: GroupUI): string =>
+  gu.name || gu.members.filter((m) => m.pub !== session?.pub).map((m) => m.name).join(', ') || 'Grupa'
+
+function renderGroups() {
+  const pane = $('pane-groups'); pane.innerHTML = ''
+  const add = document.createElement('div'); add.className = 'add-row'
+  const btn = document.createElement('button'); btn.className = 'add-btn'; btn.textContent = '+ Nowa grupa'
+  btn.addEventListener('click', openGroupModal); add.appendChild(btn); pane.appendChild(add)
+  if (!groupsUI.size) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = '(brak grup — utwórz)'; pane.appendChild(e); return }
+  for (const gu of groupsUI.values()) {
+    const b = document.createElement('button'); b.className = 'contact' + (activeGid === gu.gid ? ' active' : '') + (gu.unseen ? ' unread' : '')
+    const pill = gu.unseen ? `<span class="c-unread">${gu.unseen > 99 ? '99+' : gu.unseen}</span>` : ''
+    b.innerHTML = `<div class="avatar">👥</div><div class="c-info"><div class="c-name">${escapeHtml(groupDisplay(gu))}</div>`
+      + `<div class="c-sub">${gu.members.length} członków · 🔐 Sender Keys</div></div>` + pill
+    b.addEventListener('click', () => void activateGroup(gu.gid))
+    pane.appendChild(b)
+  }
+}
+
+/** Record a group event: render if the group is on screen, else count it (dot). */
+function recordGroup(gu: GroupUI, ev: Ev) {
+  gu.log.push(ev); if (gu.log.length > LOG_CAP) gu.log.shift()
+  if (activeGid === gu.gid && $('app').classList.contains('chat-open')) applyEv(ev)
+  else if (ev.t === 'msg' && ev.kind === 'peer') { gu.unseen++; renderGroups() }
+}
+
+/** Show a group in the chat pane (reuses #messages; sender labels via `who`). */
+async function activateGroup(gid: string) {
+  const gu = groupsUI.get(gid); if (!gu) return
+  activeGid = gid; activePub = null // a group takes over — no 1:1 is "active"
+  gu.unseen = 0
+  $('chat-empty').hidden = true; $('chat-view').hidden = false
+  showChatPane(true)
+  $('peer-avatar').textContent = '👥'
+  $('peer-name').textContent = groupDisplay(gu); $('peer-name').title = ''
+  $('peer-dot').className = 'dot ok'; $('peer-status').textContent = `${gu.members.length} członków`
+  $('e2e-badge').className = 'badge direct'; $('e2e-badge').textContent = '🔐 Sender Keys'
+  $('e2e-badge').title = 'Grupa — sender keys + per-recipient HMAC (deniable, §8)'
+  $('transport-badge').className = 'badge relay'; $('transport-badge').textContent = '⚪ Relay (grupa)'
+  $('transport-badge').title = 'Grupa idzie przez relay (GossipSub) — nie WebRTC'
+  $('sess-peerid').textContent = gid.slice(0, 12) + '…'
+  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false)
+  for (const ev of gu.log) applyEv(ev)
+  startRotation(); renderGroups()
+}
+
+const groupHandlers = (gid: string) => ({
+  onMessage: (from: string, env: { body: string; ts: number; id: string }) =>
+    recordGroup(groupsUI.get(gid)!, { t: 'msg', kind: from === session?.pub ? 'me' : 'peer', text: env.body, ts: env.ts, id: env.id, who: memberName(from) }),
+  onReaction: (_from: string, r: { to: string; emoji: string }) =>
+    recordGroup(groupsUI.get(gid)!, { t: 'react', id: r.to, emoji: r.emoji }),
+  onLog: (m: string) => ecLog('group: ' + m, 'debug'),
+})
+
+/** Hand my SKD for `gid` (with the display name) to every other member over 1:1. */
+async function distributeGroup(gid: string, name: string) {
+  const skd = client?.groups.skdFor(gid); if (!skd) return
+  const payload = { ...skd, name }
+  for (const m of groupsUI.get(gid)?.members ?? []) {
+    if (m.pub === session?.pub) continue
+    const contact = contactsCache.find((c) => c.pub === m.pub) ?? { name: m.name, pub: m.pub, source: 'local' as const }
+    await openRoomFor(contact, false) // ensure a background 1:1 room; sendGroupSkd queues until it is up
+    const conv = rooms.get(m.pub)?.conv
+    if (conv) conv.sendGroupSkd(payload); else ecLog(`group: 1:1 to ${m.name} not ready — SKD not sent yet`)
+  }
+}
+
+/** An SKD arrived over some 1:1 (already applied to the engine): join a new group
+ *  (and hand my key back once), or update an existing one on a rekey. */
+async function onGroupInvite(_from: string, skd: GroupSkdEnv) {
+  if (!client) return
+  const gid = client.groups.gidHexOf(unb64(skd.gid))
+  const members = skd.roster.map((pub) => ({ pub, name: memberName(pub) }))
+  let gu = groupsUI.get(gid)
+  if (!gu) {
+    gu = { gid, name: skd.name || 'Grupa', epoch: skd.epoch, members, log: [], unseen: 0, room: null }
+    groupsUI.set(gid, gu)
+    gu.room = await client.openGroup(gid, groupHandlers(gid))
+    toast(`Dołączono do grupy „${groupDisplay(gu)}"`)
+    void distributeGroup(gid, gu.name) // hand my sender key to everyone, once
+  } else {
+    gu.members = members; if (skd.name) gu.name = skd.name
+    // A newer epoch means a rekey → a new group_secret → a new topic, so the room
+    // must re-join. A *same-epoch* SKD is just a member handing us its sender key
+    // (already applied to the engine): keep the live room — tearing it down here
+    // churns the mesh on every member's join-back and can drop in-flight frames.
+    if (skd.epoch > gu.epoch) {
+      gu.epoch = skd.epoch
+      gu.room?.stop(); gu.room = await client.openGroup(gid, groupHandlers(gid))
+      if (activeGid === gid) void activateGroup(gid)
+    }
+  }
+  renderGroups()
+}
+
+// ---- create-group modal ----
+function openGroupModal() {
+  const list = $('group-members'); list.innerHTML = ''
+  if (!contactsCache.length) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = 'Najpierw dodaj kontakty — członkowie grupy muszą być kontaktami.'; list.appendChild(e) }
+  for (const c of contactsCache) {
+    const row = document.createElement('label'); row.className = 'gmember'
+    row.innerHTML = `<input type="checkbox" value="${escapeHtml(c.pub)}"><div class="gavatar">${escapeHtml(initials(c.name))}</div><span>${escapeHtml(c.name)}</span>`
+    list.appendChild(row)
+  }
+  ;($('group-name') as HTMLInputElement).value = ''; clr('group-msg')
+  $('scrim').classList.add('open'); $('group-modal').classList.add('open'); $('group-name').focus()
+}
+const closeGroupModal = () => { $('scrim').classList.remove('open'); $('group-modal').classList.remove('open') }
+$('group-cancel').addEventListener('click', closeGroupModal)
+$('group-create').addEventListener('click', async () => {
+  if (!client || !session) return
+  const name = val('group-name')
+  const picked = [...document.querySelectorAll('#group-members input:checked')].map((el) => (el as HTMLInputElement).value)
+  if (!name) { setMsg('group-msg', 'Podaj nazwę grupy.', 'err'); return }
+  if (!picked.length) { setMsg('group-msg', 'Wybierz co najmniej jednego członka.', 'err'); return }
+  try {
+    const gk = await generateX25519()
+    const roster = [{ pub: session.pub }, ...picked.map((pub) => ({ pub }))]
+    const gid = await client.groups.createGroup(gk.pub, roster)
+    const gu: GroupUI = { gid, name, epoch: 0, members: roster.map((m) => ({ pub: m.pub, name: memberName(m.pub) })), log: [], unseen: 0, room: null }
+    groupsUI.set(gid, gu)
+    gu.room = await client.openGroup(gid, groupHandlers(gid))
+    closeGroupModal()
+    await activateGroup(gid)
+    void distributeGroup(gid, name) // send the invite (keys) to each member over 1:1
+    toast(`Grupa „${name}" utworzona — rozsyłam zaproszenia…`)
+  } catch (e: any) { setMsg('group-msg', 'Błąd: ' + (e?.message ?? e), 'err') }
+})
 
 document.addEventListener('visibilitychange', () => {
   ecLog(document.hidden ? 'tab hidden — browser will throttle our timers' : 'tab visible — re-announcing')

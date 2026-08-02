@@ -69,6 +69,7 @@ export interface GroupSkdEnv extends BaseEnv {
   chain: string    // the sender's sending-chain key (32 B)
   roster: string[] // member IK_pub, incl. admin & self
   rmac?: string    // roster MAC (rk_i), present when the sender is the admin
+  name?: string    // human group name (app metadata; the crypto ignores it)
 }
 /** A valid envelope whose `t` this build doesn't know — carried for forward-compat. */
 export interface UnknownEnv extends BaseEnv { [k: string]: unknown }
