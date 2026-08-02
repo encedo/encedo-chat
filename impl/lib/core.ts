@@ -380,7 +380,21 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     : await createPeer()
   /** Dial, or re-dial. The two transports differ here and nowhere else. */
   const redial = () => (viaMqtt ? node.reconnect() : dial(node, opts.relay))
-  if (!viaMqtt) await redial()
+  // The FIRST dial must be as resilient as re-dialing. A phone on a flaky/slow
+  // mobile link — or one whose battery saver is throttling the tab — routinely
+  // drops the opening connection, and a single attempt turned that into a hard
+  // "login failed, refresh". Retry with backoff (~15 s budget), then surface the
+  // error so a genuinely unreachable relay still fails rather than hanging.
+  if (!viaMqtt) {
+    const FIRST_DIAL_BACKOFF = [500, 1_000, 2_000, 4_000, 8_000]
+    for (let i = 0; ; i++) {
+      try { await redial(); break } catch (e: any) {
+        if (i >= FIRST_DIAL_BACKOFF.length) throw e
+        log(`initial dial failed (${e?.message ?? e}) — retry ${i + 1}/${FIRST_DIAL_BACKOFF.length} in ${FIRST_DIAL_BACKOFF[i]} ms`)
+        await new Promise((r) => setTimeout(r, FIRST_DIAL_BACKOFF[i]))
+      }
+    }
+  }
   const self = node.peerId.toString()
   log(`session up over ${viaMqtt ? 'MQTT' : 'libp2p'} in ${Date.now() - dialT0} ms as ${self.slice(0, 12)}…`)
 
