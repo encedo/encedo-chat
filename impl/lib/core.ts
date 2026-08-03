@@ -380,6 +380,12 @@ export interface SessionOpts {
   /** Our own transport state — see `LinkState`. */
   onLink?: (state: LinkState) => void
   /**
+   * The active relay changed — a failover to a fallback node, or a return to the
+   * preferred one. Carries the new relay multiaddr. Lets the app note it (toast,
+   * repaint the Network tab). Not fired when the first dial lands on the primary.
+   */
+  onRelay?: (addr: string) => void
+  /**
    * Another window of THIS identity appeared, so both stand down (§9.1). By the
    * time this fires the transport is gone and every room is stopped; the UI
    * should clear what it shows. Omit it and the self-topic watch is not started.
@@ -441,8 +447,11 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   const redial = async () => {
     if (viaMqtt) return node.reconnect()
     const connectedTo = await failoverDial(candidates, (addr, signal) => dial(node, addr, { signal }))
-    if (connectedTo !== activeRelay) log(`failover: łączę przez ${connectedTo.slice(0, 46)}…`)
-    activeRelay = connectedTo
+    if (connectedTo !== activeRelay) {
+      log(`failover: łączę przez ${connectedTo.slice(0, 46)}…`)
+      activeRelay = connectedTo
+      opts.onRelay?.(connectedTo)
+    }
   }
   // The FIRST dial must be as resilient as re-dialing. A phone on a flaky/slow
   // mobile link — or one whose battery saver is throttling the tab — routinely

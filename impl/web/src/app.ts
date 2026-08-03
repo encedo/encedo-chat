@@ -36,6 +36,16 @@ function saveNodes(list: NodeEntry[]) { try { localStorage.setItem('ec-nodes', J
 /** The relay to dial this session — the first enabled node, or bs1 as a floor. */
 function chosenRelay(): string { return loadNodes().find((n) => n.enabled)?.addr || RELAY }
 /**
+ * All enabled nodes in list order — the failover candidates (3b). The first is
+ * the preferred relay; if it is down the session falls through to the next.
+ * Because the relays are meshed this does not split users. Never empty: bs1 is
+ * the floor so a login with every node unchecked still has something to dial.
+ */
+function chosenRelays(): string[] {
+  const on = loadNodes().filter((n) => n.enabled).map((n) => n.addr)
+  return on.length ? on : [RELAY]
+}
+/**
  * Transport. libp2p is the default; `?mqtt=1` switches to the broker (fall-back
  * transport — README has the trade-offs), `?mqtt=wss://host/mqtt` points it
  * somewhere else. Everything above the transport is identical either way.
@@ -274,6 +284,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   // (it also blocked the first automated run of this app outright).
   clientReady = startSession(id, {
     relay: chosenRelay(),
+    relays: chosenRelays(),   // 3b: fall through the enabled node list if one is down
     transport: USE_MQTT ? 'mqtt' : 'libp2p',
     broker: BROKER,
     forcedRotationSec: FORCED_ROTATION_SEC,
@@ -285,6 +296,15 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
       // The relay came back: 1:1 rooms are refreshed by core, but groups are passive
       // and not registered there — re-warm their meshes so they don't stay silently dead.
       if (state === 'online') for (const gu of groupsUI.values()) gu.room?.refresh()
+    },
+    onRelay: (addr) => {
+      // Failed over to another node (or returned to the primary). Tell the user
+      // which node is carrying them now, and refresh the Network tab if it is open.
+      const name = loadNodes().find((n) => n.addr === addr)?.name
+        ?? (addr.match(/dns4\/([^/]+)/) ?? addr.match(/ip6\/([^/]+)/) ?? [, addr.slice(0, 24)])[1]
+      const primary = chosenRelays()[0]
+      toast(addr === primary ? `Wróciłem na węzeł ${name}` : `Przełączono na węzeł ${name} (poprzedni niedostępny)`)
+      renderNetwork()
     },
     onSessionTakenOver: () => {
       // §9.1/§9.2: a second window of this identity showed up, so BOTH stand
@@ -533,15 +553,30 @@ function renderNetwork() {
   const online = s.link === 'online' && s.connected
   const linkTxt = online ? 'połączony' : s.link === 'reconnecting' ? 'wznawiam…' : s.link === 'offline' ? 'offline' : 'łączę…'
   const linkCls = online ? 'ok' : s.link === 'reconnecting' ? 'away' : 'bad'
+  // Failover view (3b): the candidate node list, with the live one marked. A
+  // failover is simply "the active relay is not the first choice".
+  const nodeName = (a: string) => loadNodes().find((n) => n.addr === a)?.name
+    ?? (a.match(/dns4\/([^/]+)/) ?? a.match(/ip6\/([^/]+)/) ?? [, a.slice(0, 28)])[1] as string
+  const candidates = chosenRelays()
+  const isFailover = candidates.length > 1 && s.relay !== candidates[0]
+  const nodesRow = candidates.length > 1
+    ? `<div class="net-row"><span class="k">Lista węzłów</span><span class="v net-nodes">${candidates.map((a) => {
+        const act = a === s.relay
+        return `<span class="net-node${act ? ' act' : ''}" title="${escapeHtml(a)}">${act ? '●' : '○'} ${escapeHtml(nodeName(a))}</span>`
+      }).join('')}</span></div>`
+    : ''
   pane.innerHTML = `<div class="net-card">
     <div class="net-row"><span class="k">Status</span><span class="v"><span class="dot ${linkCls}"></span> ${linkTxt}${s.peers ? ` · ${s.peers} poł.` : ''}</span></div>
     <div class="net-row"><span class="k">Transport</span><span class="v">${escapeHtml(s.transport)}</span></div>
-    <div class="net-row"><span class="k">Węzeł (relay)</span><span class="v" title="${escapeHtml(s.relay)}">${escapeHtml(relayHost)}</span></div>
+    <div class="net-row"><span class="k">Węzeł (relay)</span><span class="v" title="${escapeHtml(s.relay)}">${escapeHtml(relayHost)}${isFailover ? ' <span class="net-tag">failover</span>' : ''}</span></div>
+    ${nodesRow}
     ${relayPeer ? `<div class="net-row"><span class="k">PeerId węzła</span><span class="v mono">${escapeHtml(relayPeer.slice(0, 14))}…</span></div>` : ''}
     <div class="net-row"><span class="k">Twój PeerId</span><span class="v mono">${escapeHtml(s.self.slice(0, 14))}…</span></div>
     <div class="net-row"><span class="k">Topiki</span><span class="v">${s.topics.length} <span class="net-sub">(grupy: ${gCount} · pary/self: ${s.topics.length - gCount})</span></span></div>
   </div>
-  <div class="net-note">Wszystkie topiki na jednym połączeniu. Węzeł tylko do odczytu — edytowalna lista węzłów w oknie logowania (wkrótce).</div>`
+  <div class="net-note">${candidates.length > 1
+    ? 'Failover po liście węzłów: gdy pierwszy węzeł nie odpowiada, sesja przechodzi na następny. Węzły są zmeshowane, więc przełączenie nie dzieli rozmówców.'
+    : 'Wszystkie topiki na jednym połączeniu. Więcej węzłów (i failover) dodasz z edytowalnej listy w oknie logowania.'}</div>`
 }
 function startNetwork() { renderNetwork(); clearInterval(netTimer); netTimer = setInterval(renderNetwork, 2500) }
 function stopNetwork() { clearInterval(netTimer); netTimer = null }
