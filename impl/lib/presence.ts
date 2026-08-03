@@ -140,6 +140,20 @@ export function rendezvousDay(now: number, offsetMs: number): string {
 }
 
 /**
+ * The next instant this pair's topic rotates (`midnight + offset`, §5.4), as an
+ * epoch-ms timestamp strictly after `now`. Shift the clock back by the offset so
+ * the rotation lands on a plain UTC midnight, take the next UTC midnight, then
+ * shift forward again. With `offsetMs=0` this is the next 00:00-UTC boundary.
+ * Pure — the UI drives a per-pair rotation countdown off it, not a global midnight.
+ */
+export function nextRotationAfter(now: number, offsetMs: number): number {
+  const shifted = now - offsetMs
+  const d = new Date(shifted)
+  const nextShiftedMidnight = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1)
+  return nextShiftedMidnight + offsetMs
+}
+
+/**
  * Which day-topics should be LIVE for this pair at `now`. Normally just the
  * current rendezvous day; within ±`overlapMs` of the pair's rotation instant
  * (`midnight + offset`), that day AND the adjacent one, so the two members cross

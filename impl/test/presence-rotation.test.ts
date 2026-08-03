@@ -10,7 +10,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { activeDatesForOffset, rendezvousDay, watchPresenceRotating } from '../lib/presence.ts'
+import { activeDatesForOffset, rendezvousDay, nextRotationAfter, watchPresenceRotating } from '../lib/presence.ts'
 import { rotationOffsetSec, announceMacKey } from '../lib/rendezvous.ts'
 import { buildAnnounce } from '../lib/announce.ts'
 import { T_MSG1 } from '../eh2/wire.ts'
@@ -147,4 +147,40 @@ test('an incoming handshake is surfaced with the day it arrived on', async () =>
   await sleep(30)
   assert.equal(gotDate, '2026-07-31', 'upgrade is pinned to the topic the handshake used')
   me.stop()
+})
+
+// nextRotationAfter: the per-pair countdown instant used by the UI badge. The
+// topic rotates at `midnight + offset`; this is where rendezvousDay increments.
+test('nextRotationAfter: offset 0 → the next plain 00:00 UTC boundary', () => {
+  const now = Date.UTC(2026, 7, 3, 12, 0, 0) // 2026-08-03 12:00 UTC
+  assert.equal(nextRotationAfter(now, 0), Date.UTC(2026, 7, 4, 0, 0, 0))
+})
+
+test('nextRotationAfter: an offset earlier in the day → rotation is TOMORROW at midnight+offset', () => {
+  const now = Date.UTC(2026, 7, 3, 12, 0, 0)
+  // pair rotates at 06:00 UTC; 12:00 is past it, so next is tomorrow 06:00
+  assert.equal(nextRotationAfter(now, 6 * 3600 * 1000), Date.UTC(2026, 7, 4, 6, 0, 0))
+})
+
+test('nextRotationAfter: an offset later in the day → rotation is still TODAY', () => {
+  const now = Date.UTC(2026, 7, 3, 12, 0, 0)
+  // pair rotates at 18:00 UTC; 12:00 is before it, so next is today 18:00
+  assert.equal(nextRotationAfter(now, 18 * 3600 * 1000), Date.UTC(2026, 7, 3, 18, 0, 0))
+})
+
+test('nextRotationAfter: strictly after now, and it is exactly where rendezvousDay flips', () => {
+  const now = Date.UTC(2026, 7, 3, 9, 17, 42)
+  for (const offH of [0, 6, 13, 23]) {
+    const off = offH * 3600 * 1000
+    const next = nextRotationAfter(now, off)
+    assert.ok(next > now, `offset ${offH}h: next must be after now`)
+    // the day is the same 1 ms before the instant and different at/after it
+    assert.notEqual(rendezvousDay(next, off), rendezvousDay(next - 1, off),
+      `offset ${offH}h: the rendezvous day must change exactly at the rotation instant`)
+  }
+})
+
+test('nextRotationAfter: two different offsets give different instants (spread, not a spike)', () => {
+  const now = Date.UTC(2026, 7, 3, 12, 0, 0)
+  assert.notEqual(nextRotationAfter(now, 3 * 3600 * 1000), nextRotationAfter(now, 15 * 3600 * 1000))
 })

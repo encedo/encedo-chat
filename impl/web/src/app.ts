@@ -14,6 +14,7 @@
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
+import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519 } from '../../lib/x25519.ts'
 import { unb64, b64 } from '../../lib/wc.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
@@ -1289,14 +1290,23 @@ window.addEventListener('online', () => {
 // gone and closes itself for nothing.
 window.addEventListener('beforeunload', () => { void persistGroups(); for (const r of rooms.values()) r.conv?.leave(); client?.close() })
 
-// ---- room rotation countdown (next UTC midnight) ----
+// ---- room rotation countdown — the ACTIVE pair's real instant (midnight+offset) ----
+// The topic rotates per pair at `UTC-midnight + rotationOffsetSec` (§5.4), so the
+// old "time to next UTC midnight" was both wrong and identical for every contact.
+// Each tick reads the on-screen conversation's offset and counts to its rotation.
+// Groups rotate per epoch (membership change), not daily, so the badge is hidden
+// while a group is on screen.
 function startRotation() {
   if (rotTimer) return
   const tick = () => {
     const el = document.getElementById('rot'); if (!el) return
-    const now = new Date()
-    const next = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
-    let s = Math.floor((next - now.getTime()) / 1000)
+    const badge = el.closest('.badge.rotate') as HTMLElement | null
+    const conv = activeGid ? null : activeRoom()?.conv
+    if (!conv) { if (badge) badge.style.display = 'none'; return }
+    if (badge) badge.style.display = ''
+    const now = Date.now()
+    const next = nextRotationAfter(now, (conv.rotationOffsetSec ?? 0) * 1000)
+    let s = Math.max(0, Math.floor((next - now) / 1000))
     const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60
     el.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
   }

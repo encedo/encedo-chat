@@ -273,6 +273,11 @@ export interface NetStatus {
 export interface Conversation {
   peerId: string
   topic: string
+  /** This pair's rotation offset in seconds-of-day (§5.4): the topic rotates at
+   *  `UTC-midnight + rotationOffsetSec`, so the UI can show the pair's real next
+   *  rotation instead of a global midnight. Equals `forcedRotationSec` when set.
+   *  Optional because `openRoom` does not know it — `session.open` fills it in. */
+  rotationOffsetSec?: number
   sendText(body: string): string // returns the sent message id (for reactions)
   /** Send a message marked undelivered again, keeping its id. False = nothing to resend. */
   resend(id: string): boolean
@@ -640,9 +645,10 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       // by a day). The session's networkId is preserved.
       const pending = upgradeDate.get(peer.pub)
       upgradeDate.delete(peer.pub)
+      const offsetSec = await offsetSecFor(peer) // §5.4 per-pair rotation offset (or forced)
       const dateUTC = pending && Date.now() - pending.at < UPGRADE_DATE_TTL
         ? pending.date
-        : rendezvousDay(Date.now(), (await offsetSecFor(peer)) * 1000)
+        : rendezvousDay(Date.now(), offsetSec * 1000)
       const liveParams = { ...params, dateUTC }
       // Upgrade: the full room does presence too, so retire the light watch while
       // the conversation is open — but HAND OFF the topic (keep the subscription
@@ -670,6 +676,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       })
       return {
         ...conv,
+        rotationOffsetSec: offsetSec,
         leave: async () => { await conv.leave(); if (wasWatched && !closed) await startWatch(peer) },
       }
     },
