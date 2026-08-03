@@ -172,15 +172,22 @@ setInterval(() => {
 relay.addEventListener('peer:connect', (evt) => console.log('[+]', evt.detail.toString().slice(0, 16) + '...'))
 relay.addEventListener('peer:disconnect', (evt) => console.log('[-]', evt.detail.toString().slice(0, 16) + '...'))
 
+// Keep the inter-relay links UP. A one-shot dial is a lottery — it can time out
+// ("operation was aborted") or the link can drop later, and with no re-dial the
+// mesh silently never forms. So dial each peer, then re-check every 10 s and
+// re-dial whenever we are not connected to it.
 if (PEERS.length > 0) {
-  console.log(`\nŁączę z ${PEERS.length} innymi relay...`)
+  console.log(`\nŁączę z ${PEERS.length} innymi relay (keep-alive z ponawianiem)...`)
   for (const addr of PEERS) {
-    try {
-      await relay.dial(multiaddr(addr))
-      console.log(`  ✓ ${addr.slice(0, 60)}`)
-    } catch (e) {
-      console.log(`  ✗ ${addr.slice(0, 60)} (${e.message})`)
+    const ma = multiaddr(addr)
+    const pid = ma.getPeerId()
+    const ensure = async () => {
+      if (pid && relay.getConnections().some((c) => c.remotePeer.toString() === pid)) return
+      try { await relay.dial(ma); console.log(`  ✓ ${addr.slice(0, 60)}`) }
+      catch (e) { console.log(`  ✗ ${addr.slice(0, 50)}… (${e.message}) — ponawiam`) }
     }
+    await ensure()
+    setInterval(() => { void ensure() }, 10_000)
   }
 }
 
