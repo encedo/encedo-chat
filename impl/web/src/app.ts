@@ -15,8 +15,8 @@ import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
-import { generateX25519 } from '../../lib/x25519.ts'
-import { unb64, b64 } from '../../lib/wc.ts'
+import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
+import { unb64, b64, randomBytes } from '../../lib/wc.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
@@ -1207,14 +1207,16 @@ const groupHandlers = (gid: string) => ({
 
 /** Hand my SKD for `gid` (with the display name) to every other member over 1:1. */
 async function distributeGroup(gid: string, name: string) {
-  const skd = client?.groups.skdFor(gid); if (!skd) return
-  const payload = { ...skd, name }
+  if (!client) return
   for (const m of groupsUI.get(gid)?.members ?? []) {
     if (m.pub === session?.pub) continue
+    // Per recipient: when I am the admin, skdFor attaches THIS member's roster MAC
+    // (rk from ECDH(GK_priv, IK_m)); a member's own redistribution carries none.
+    const skd = await client.groups.skdFor(gid, m.pub); if (!skd) return
     const contact = contactsCache.find((c) => c.pub === m.pub) ?? { name: m.name, pub: m.pub, source: 'local' as const }
     await openRoomFor(contact, false) // ensure a background 1:1 room; sendGroupSkd queues until it is up
     const conv = rooms.get(m.pub)?.conv
-    if (conv) conv.sendGroupSkd(payload); else ecLog(`group: 1:1 to ${m.name} not ready — SKD not sent yet`)
+    if (conv) conv.sendGroupSkd({ ...skd, name }); else ecLog(`group: 1:1 to ${m.name} not ready — SKD not sent yet`)
   }
 }
 
@@ -1273,9 +1275,10 @@ $('group-create').addEventListener('click', async () => {
   if (!name) { setMsg('group-msg', 'Podaj nazwę grupy.', 'err'); return }
   if (!picked.length) { setMsg('group-msg', 'Wybierz co najmniej jednego członka.', 'err'); return }
   try {
-    const gk = await generateX25519()
+    const gkPriv = randomBytes(32)
+    const gk = await x25519FromPriv(gkPriv) // admin GK — persistable priv so I can MAC the roster (bucket B)
     const roster = [{ pub: session.pub }, ...picked.map((pub) => ({ pub }))]
-    const gid = await client.groups.createGroup(gk.pub, roster)
+    const gid = await client.groups.createGroup(gk.pub, roster, gkPriv)
     const gu: GroupUI = { gid, name, epoch: 0, members: roster.map((m) => ({ pub: m.pub, name: memberName(m.pub) })), log: [], unseen: 0, room: null }
     groupsUI.set(gid, gu)
     gu.room = await client.openGroup(gid, groupHandlers(gid))
