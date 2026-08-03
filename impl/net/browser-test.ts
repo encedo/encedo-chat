@@ -71,6 +71,14 @@ const HEADFUL = process.env.HEADFUL === '1'
 // the group scenario, skipping the middle scenarios — cheaper to iterate on.
 const GROUP_ONLY = process.env.GROUP_ONLY === '1'
 
+// Failover fast-path: FAILOVER=1 gives browser A a node list whose FIRST node is
+// unreachable, so A can only meet B by falling through to the working relay (3b).
+// The dead node is a well-formed multiaddr at 127.0.0.1:1 (connection refused,
+// fast) — the sweep skips it and dials the next.
+const FAILOVER = process.env.FAILOVER === '1'
+const BS1 = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
+const DEAD_RELAY = '/ip4/127.0.0.1/tcp/1/ws/p2p/12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y'
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 /**
@@ -530,8 +538,17 @@ async function main() {
       // RELAY_NODE forces both browsers onto one node; RELAY_A / RELAY_B put each on
       // its own node (mesh test: do A on bs1 and B on bs2 meet through the --peers bridge?).
       const relay = (b === A ? process.env.RELAY_A : process.env.RELAY_B) ?? process.env.RELAY_NODE
-      if (relay)
+      if (FAILOVER && b === A) {
+        // A's first node is DEAD, the second is the working relay B is on. A must
+        // fall through to it to meet B — proving 3b failover end-to-end.
+        const working = relay ?? BS1 // B, unseeded, uses the app default = bs1
+        await b.eval(`localStorage.setItem('ec-nodes', JSON.stringify([
+          {name:'martwy', addr:${JSON.stringify(DEAD_RELAY)}, enabled:true},
+          {name:'dobry', addr:${JSON.stringify(working)}, enabled:true}
+        ])); return 1`)
+      } else if (relay) {
         await b.eval(`localStorage.setItem('ec-nodes', JSON.stringify([{name:'test', addr:${JSON.stringify(relay)}, enabled:true}])); return 1`)
+      }
       await b.eval(`(document.getElementById('handle')).value = ${JSON.stringify(handle)}; document.getElementById('go-soft').click();`)
       await b.waitFor('app shell', `return document.getElementById('app') && !document.getElementById('app').hidden`)
     }
@@ -550,6 +567,22 @@ async function main() {
     await Promise.all([openContact(A, 'sim-b'), openContact(B, 'sim-a')])
     const [ba, bb] = await Promise.all([A.waitFor<string>('EH-2 on A', BADGE_GREEN, 45_000), B.waitFor<string>('EH-2 on B', BADGE_GREEN, 45_000)])
     step(`EH-2 established in both: "${ba.trim()}" / "${bb.trim()}"`)
+
+    if (FAILOVER) {
+      // A's first node is unreachable, so EH-2 could only complete over the
+      // fallback — meeting B at all already proves failover. Confirm the Network
+      // tab agrees: the failover tag is up and the live node is 'dobry', not the
+      // dead 'martwy'. waitFor throws on timeout, so it is the assertion.
+      scenario('failover (3b): A behind a dead first node reached B via the fallback')
+      await A.eval(`document.getElementById('tab-network').click(); return 1`)
+      await A.waitFor('A Network tab shows failover to the working node', `
+        const p = document.getElementById('pane-network');
+        const t = p ? p.textContent : '';
+        return t.includes('failover') && /●\\s*dobry/.test(t) && /○\\s*martwy/.test(t);
+      `, 15_000)
+      step('A is on the fallback node (Network tab: failover, ● dobry / ○ martwy) — 3b end-to-end OK')
+      await A.eval(`document.getElementById('tab-contacts').click(); return 1`) // back to the chat
+    }
 
     let direct = false
     if (!GROUP_ONLY) {
