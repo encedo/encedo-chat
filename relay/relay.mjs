@@ -58,6 +58,10 @@ const V6HOST = get('--v6-host', '::')
 // clients' ~15 s Announce heartbeat (below it, live rooms would be evicted).
 const MAX_TOPICS = parseInt(get('--max-topics', '250'))
 const IDLE_TTL = parseInt(get('--idle-ttl', '120')) * 1000
+// Connection ceiling, a flag so stress tests raise it from ExecStart instead of
+// editing this file (a local edit conflicts on every git pull). Default sized for
+// 512 clients + inter-relay headroom; a load test passes e.g. --max-connections 50000.
+const MAX_CONNS = parseInt(get('--max-connections', '520'))
 
 const seed    = createHash('sha256').update(PASS).digest()
 const privKey = await generateKeyPairFromSeed('Ed25519', seed)
@@ -83,7 +87,7 @@ const relay = await createLibp2p({
   streamMuxers: [yamux()],
   connectionGater: { denyDialMultiaddr: () => false },
   connectionManager: {
-    maxConnections: 520,  // 512 clients + headroom for inter-relay connections
+    maxConnections: MAX_CONNS,  // default 520 (512 clients + inter-relay headroom); --max-connections for load tests
 
     // Behind nginx, EVERY client arrives from 127.0.0.1 — so any limit libp2p
     // applies "per host" is really a limit on the whole network. Its defaults
@@ -209,6 +213,7 @@ console.log(`\n✅ Relay uruchomiony na porcie ${PORT}`)
 // Print the topic budget: it is the setting that decides whether a room forms
 // at all, and after a deploy it is the one line that proves which build is up.
 console.log(`📦 Tematy: limit ${MAX_TOPICS} równoczesnych, eviction po ${IDLE_TTL / 1000}s ciszy (sweep ${SWEEP_MS / 1000}s)`)
+console.log(`🔌 Połączenia: limit ${MAX_CONNS}`)
 if (HOST) {
   console.log(`📋 Adres produkcyjny (WSS przez nginx):`)
   console.log(`   /dns4/${HOST}/tcp/443/wss/http-path/%2Frelay/p2p/${peerId.toString()}`)
