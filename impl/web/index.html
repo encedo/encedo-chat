@@ -84,6 +84,15 @@
   .member-row .gavatar{width:28px;height:28px}
   .member-row .m-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:13px}
   .member-row .m-you{font-size:11px;color:var(--muted)}
+  .member-row .m-rm{margin-left:2px;flex-shrink:0;width:22px;height:22px;border:none;border-radius:6px;background:transparent;color:var(--muted);font-size:16px;line-height:1;cursor:pointer}
+  .member-row .m-rm:hover{background:var(--danger-soft,#fde8e8);color:var(--danger,#c0392b)}
+  .m-add-wrap{border-top:1px solid var(--border);margin-top:4px;padding-top:4px}
+  .m-add-toggle{width:100%;text-align:left;padding:8px;border:none;border-radius:8px;background:transparent;color:var(--accent,#3b82f6);font-size:13px;font-weight:600;cursor:pointer}
+  .m-add-toggle:hover{background:var(--bubble-out)}
+  .m-add-list{display:flex;flex-direction:column;gap:2px;max-height:160px;overflow-y:auto;padding:2px}
+  .m-add-list .m-add-pub{text-align:left;padding:7px 8px;border:none;border-radius:8px;background:transparent;color:var(--text);font-size:13px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .m-add-list .m-add-pub:hover{background:var(--bubble-out)}
+  .m-add-list .m-add-empty{padding:8px;font-size:12px;color:var(--muted)}
   .me{display:flex;align-items:center;gap:10px;padding:16px;border-bottom:1px solid var(--border)}
   .me .info{flex:1;min-width:0}.me .name{font-weight:600;color:var(--text)}
   .fp{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

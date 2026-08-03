@@ -511,6 +511,20 @@ document.addEventListener('click', (e: any) => {
   const pop = $('members-pop')
   if (!pop.hidden && !pop.contains(e.target) && !$('members-cluster').contains(e.target)) pop.hidden = true
 })
+// Admin actions inside the members popover (event-delegated — the pop is rebuilt
+// on every open). stopPropagation so the outside-click close above does not fire.
+$('members-pop').addEventListener('click', (e: any) => {
+  const gu = activeGid ? groupsUI.get(activeGid) : null
+  if (!gu) return
+  const rm = (e.target as HTMLElement).closest('[data-rm]') as HTMLElement | null
+  if (rm) { e.stopPropagation(); const pub = rm.getAttribute('data-rm')!
+    void changeMembers(gu.gid, gu.members.filter((m) => m.pub !== pub), `${memberName(pub)} usunięty z grupy`); return }
+  const tog = (e.target as HTMLElement).closest('[data-addmember]') as HTMLElement | null
+  if (tog) { e.stopPropagation(); const list = $('members-pop').querySelector('.m-add-list') as HTMLElement | null; if (list) list.hidden = !list.hidden; return }
+  const add = (e.target as HTMLElement).closest('[data-add-pub]') as HTMLElement | null
+  if (add) { e.stopPropagation(); const pub = add.getAttribute('data-add-pub')!
+    void changeMembers(gu.gid, [...gu.members, { pub, name: memberName(pub) }], `${memberName(pub)} dodany do grupy`); return }
+})
 
 // ---- copy my pubkey ----
 let toastT: any
@@ -987,14 +1001,57 @@ function avatarClusterHTML(members: { pub: string; name: string }[], max = 5): s
   if (members.length > max) html += `<span class="ga more">+${members.length - max}</span>`
   return html
 }
-// Fill the group members popover: each participant with an online dot (known for contacts).
+/** I am the group admin iff I am roster[0] — the creator (createGroup puts self
+ *  first, and that order is preserved on the wire, in snapshots and across rekeys). */
+const isGroupAdmin = (gu: GroupUI): boolean => !!session && gu.members[0]?.pub === session.pub
+
+// Fill the group members popover: each participant with an online dot. The admin
+// (roster[0]) also gets a remove "×" per other member and an add-member picker.
 function renderMembersPop(gu: GroupUI) {
-  $('members-pop').innerHTML = `<div class="m-head">${gu.members.length} członków</div>` + gu.members.map((m) => {
+  const admin = isGroupAdmin(gu)
+  const rows = gu.members.map((m) => {
     const you = m.pub === session?.pub, online = you || onlinePubs.has(m.pub) // you are, by definition, here
     return `<div class="member-row"><div class="gavatar">${escapeHtml(initials(m.name))}</div>`
       + `<span class="m-name">${escapeHtml(m.name)}</span>`
-      + `<span class="dot ${online ? 'ok' : ''}" title="${online ? 'online' : 'offline / nieznany'}"></span></div>`
+      + `<span class="dot ${online ? 'ok' : ''}" title="${online ? 'online' : 'offline / nieznany'}"></span>`
+      + (admin && !you ? `<button class="m-rm" data-rm="${escapeHtml(m.pub)}" title="Usuń z grupy">×</button>` : '')
+      + `</div>`
   }).join('')
+  let addUI = ''
+  if (admin) {
+    const eligible = contactsCache.filter((c) => !gu.members.some((m) => m.pub === c.pub))
+    const opts = eligible.length
+      ? eligible.map((c) => `<button class="m-add-pub" data-add-pub="${escapeHtml(c.pub)}">${escapeHtml(initials(c.name))} ${escapeHtml(c.name)}</button>`).join('')
+      : '<div class="m-add-empty">wszystkie kontakty już w grupie</div>'
+    addUI = `<div class="m-add-wrap"><button class="m-add-toggle" data-addmember="1">+ Dodaj członka</button>`
+      + `<div class="m-add-list" hidden>${opts}</div></div>`
+  }
+  $('members-pop').innerHTML = `<div class="m-head">${gu.members.length} członków</div>` + rows + addUI
+}
+
+/**
+ * Admin changes the roster: rekey (epoch++, new group_secret → new topic, fresh
+ * sending key), re-open the group on the new topic, redistribute the SKD to the
+ * NEW roster (a removed member is never sent it → cannot derive the new topic or
+ * open new messages), and persist. roster[0] (the admin) is preserved so
+ * admin-ness stays stable. The other members redistribute their own fresh keys
+ * when they receive the new epoch (see onGroupInvite).
+ */
+async function changeMembers(gid: string, newMembers: { pub: string; name: string }[], note: string) {
+  const gu = groupsUI.get(gid); if (!gu || !client) return
+  $('members-pop').hidden = true
+  try {
+    await client.groups.rekey(gid, newMembers.map((m) => ({ pub: m.pub })))
+    gu.room?.stop()
+    gu.members = newMembers
+    gu.epoch++
+    gu.room = await client.openGroup(gid, groupHandlers(gid))
+    recordGroup(gu, { t: 'sys', text: note })
+    await distributeGroup(gid, gu.name) // new roster only → removed member is locked out
+    await persistGroups()
+    if (activeGid === gid) activateGroup(gid); else renderGroups()
+    toast(note)
+  } catch (e: any) { ecLog('group rekey failed: ' + (e?.message ?? e)); toast('Nie udało się zmienić składu grupy') }
 }
 
 function renderGroups() {
@@ -1184,6 +1241,11 @@ async function onGroupInvite(_from: string, skd: GroupSkdEnv) {
       gu.epoch = skd.epoch
       gu.room?.stop(); gu.room = await client.openGroup(gid, groupHandlers(gid))
       if (activeGid === gid) void activateGroup(gid)
+      // A rekey gave the engine a FRESH sending key for us at this epoch, so hand
+      // it to the new roster — otherwise only the admin (who redistributed) would
+      // be readable after an add/remove. Same-epoch SKDs (the others doing the
+      // same) hit the else-branch and do not re-trigger, so this converges.
+      void distributeGroup(gid, gu.name)
     }
   }
   renderGroups()
