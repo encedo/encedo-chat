@@ -7,8 +7,8 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { generateX25519 } from '../lib/x25519.ts'
-import { b64, unb64 } from '../lib/wc.ts'
+import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
+import { b64, unb64, randomBytes } from '../lib/wc.ts'
 import { GroupManager, type GroupId, type Member } from '../lib/group.ts'
 import { envGroupSkd, encodeEnvelope, decodeEnvelope, type GroupSkdEnv } from '../lib/envelope.ts'
 
@@ -21,17 +21,19 @@ async function softId(): Promise<GroupId> {
   return { pub: b64(k.pub), ecdh: async (peerPubB64: string) => k.dh(unb64(peerPubB64)) }
 }
 async function distribute(from: { id: GroupId; mgr: GroupManager }, gidHex: string, to: { id: GroupId; mgr: GroupManager }[]) {
-  const skd = from.mgr.skdFor(gidHex)!
-  const bytes = encodeEnvelope(envGroupSkd(0, skd))
-  for (const r of to) await r.mgr.applySkd(from.id.pub, decodeEnvelope(bytes) as GroupSkdEnv)
+  for (const r of to) {
+    const skd = (await from.mgr.skdFor(gidHex, r.id.pub))! // per-recipient (roster MAC per member)
+    await r.mgr.applySkd(from.id.pub, decodeEnvelope(encodeEnvelope(envGroupSkd(0, skd))) as GroupSkdEnv)
+  }
 }
 
 test('snapshot -> JSON -> restore keeps the full group state (send + all receivers)', async () => {
   const A = await softId(), B = await softId(), C = await softId()
   const mA = new GroupManager(A, P), mB = new GroupManager(B, P), mC = new GroupManager(C, P)
-  const gk = await generateX25519()
+  const gkPriv = randomBytes(32)
+  const gk = await x25519FromPriv(gkPriv)
   const roster: Member[] = [{ pub: A.pub }, { pub: B.pub }, { pub: C.pub }]
-  const gid = await mA.createGroup(gk.pub, roster)
+  const gid = await mA.createGroup(gk.pub, roster, gkPriv)
   const wA = { id: A, mgr: mA }, wB = { id: B, mgr: mB }, wC = { id: C, mgr: mC }
   await distribute(wA, gid, [wB, wC]); await distribute(wB, gid, [wA, wC]); await distribute(wC, gid, [wA, wB])
 
@@ -59,8 +61,9 @@ test('snapshot -> JSON -> restore keeps the full group state (send + all receive
 test('a restored member does not reuse a spent send counter', async () => {
   const A = await softId(), B = await softId()
   const mA = new GroupManager(A, P), mB = new GroupManager(B, P)
-  const gk = await generateX25519()
-  const gid = await mA.createGroup(gk.pub, [{ pub: A.pub }, { pub: B.pub }])
+  const gkPriv = randomBytes(32)
+  const gk = await x25519FromPriv(gkPriv)
+  const gid = await mA.createGroup(gk.pub, [{ pub: A.pub }, { pub: B.pub }], gkPriv)
   await distribute({ id: A, mgr: mA }, gid, [{ id: B, mgr: mB }])
   await distribute({ id: B, mgr: mB }, gid, [{ id: A, mgr: mA }])
 

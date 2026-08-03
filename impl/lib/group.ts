@@ -26,6 +26,7 @@ import { subtle, hkdfBits, sha256, unb64, b64, concat, randomBytes } from './wc.
 import type { RvParams } from './rendezvous.ts'
 import { groupTopicFromSecret } from './rendezvous.ts'
 import { seal, sendChainFrom, newSendChain, SenderReceiver, tag, verify, type SendChain, type ReceiverOpts } from './senderkey.ts'
+import { x25519FromPriv } from './x25519.ts'
 import type { SkdFields } from './envelope.ts'
 
 const enc = new TextEncoder()
@@ -65,6 +66,19 @@ export async function rosterMacKeyFromSecret(ss: Uint8Array, gid: Uint8Array, ep
   return hkdfBits(ss, ROSTER_MAC_INFO, macInfo(gid, epoch), 32)
 }
 
+/** Canonical roster bytes for the roster MAC — the member pubs sorted, so the MAC
+ *  does not depend on the order the roster happens to be listed in. */
+function rosterBytes(roster: string[]): Uint8Array { return enc.encode([...roster].sort().join('\n')) }
+/** HMAC(rk_i, roster) — the admin's per-recipient attestation of the membership. */
+async function rosterMac(rk: Uint8Array, roster: string[]): Promise<Uint8Array> {
+  const key = await subtle.importKey('raw', rk, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  return new Uint8Array(await subtle.sign('HMAC', key, rosterBytes(roster)))
+}
+async function verifyRosterMac(rk: Uint8Array, roster: string[], mac: Uint8Array): Promise<boolean> {
+  const key = await subtle.importKey('raw', rk, { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'])
+  return subtle.verify('HMAC', key, mac, rosterBytes(roster))
+}
+
 // ---------------------------------------------------------------------------
 // header wire
 // ---------------------------------------------------------------------------
@@ -82,6 +96,7 @@ function decodeHeader(b: Uint8Array): Header {
   return { gid: b.slice(0, 16), senderId: b.slice(16, 24), epoch: dv.getUint32(24, false), ctr: dv.getUint32(28, false) }
 }
 const hex = (u: Uint8Array) => Array.from(u, (x) => x.toString(16).padStart(2, '0')).join('')
+const bytesEq = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i])
 
 // ---------------------------------------------------------------------------
 // the session
@@ -233,7 +248,7 @@ export class GroupSession {
 // manager: all of my groups + the distribution glue
 // ---------------------------------------------------------------------------
 
-interface GroupRec { session: GroupSession; gkPub: Uint8Array; secret: Uint8Array; roster: Member[]; epoch: number }
+interface GroupRec { session: GroupSession; gkPub: Uint8Array; secret: Uint8Array; roster: Member[]; epoch: number; gkPriv?: Uint8Array }
 
 /** A group serialized for the persistence cache (§10) — full state, base64 bytes. */
 export interface GroupSnapshot {
@@ -242,6 +257,7 @@ export interface GroupSnapshot {
   epoch: number
   secret: string     // group_secret (seeds the topic)
   roster: Member[]
+  gkPriv?: string    // GK private half — present only for groups I admin (roster-MAC key); secret
   send: { key: string; n: number }                       // my sending chain
   receivers: { pub: string; key: string; n: number }[]   // every known member's receiving chain
 }
@@ -265,40 +281,66 @@ export class GroupManager {
   groups(): string[] { return [...this.recs.keys()] }
 
   /** Create a group I own: I generate `group_secret`, take the roster, and get a
-   *  fresh sending key. `gkPub` is the group identity key (its private half stays
-   *  with me as admin, out of scope here). Returns the gid hex. */
-  async createGroup(gkPub: Uint8Array, roster: Member[]): Promise<string> {
+   *  fresh sending key. `gkPub` is the group identity key; as admin I also keep
+   *  `gkPriv` so I can MAC the roster (per recipient, §8 roster auth). Returns the
+   *  gid hex. Holding gkPriv is what makes this rec the admin's. */
+  async createGroup(gkPub: Uint8Array, roster: Member[], gkPriv?: Uint8Array): Promise<string> {
     const gid = await groupIdFromGK(gkPub)
-    await this.admit({ gid, gkPub, epoch: 0, secret: randomBytes(32), roster })
+    await this.admit({ gid, gkPub, epoch: 0, secret: randomBytes(32), roster, gkPriv })
     return hex(gid)
   }
 
   /** Establish or update a group from its shared material. New group or a newer
    *  epoch → a fresh session (new sending key). Same epoch → keep the session
    *  (never reset my own chain), only refresh the roster. */
-  async admit(m: { gid: Uint8Array; gkPub: Uint8Array; epoch: number; secret: Uint8Array; roster: Member[] }): Promise<GroupSession> {
+  async admit(m: { gid: Uint8Array; gkPub: Uint8Array; epoch: number; secret: Uint8Array; roster: Member[]; gkPriv?: Uint8Array }): Promise<GroupSession> {
     const gh = hex(m.gid)
     const cur = this.recs.get(gh)
     if (cur && cur.epoch >= m.epoch) {
-      cur.roster = m.roster
-      await cur.session.setMembers(m.roster)
+      // Same-or-older epoch: NOT a roster change. The roster is the admin's,
+      // fixed for this epoch — only a valid admin roster-MAC advances it (see
+      // applySkd). Keep the session and the trusted roster; a member's sender key
+      // is recorded by applySkd, not here.
       return cur.session
     }
     const session = await GroupSession.create({
       id: this.id, gid: m.gid, epoch: m.epoch, groupSecret: m.secret, members: m.roster, params: this.params,
     })
-    this.recs.set(gh, { session, gkPub: m.gkPub, secret: m.secret.slice(), roster: m.roster, epoch: m.epoch })
+    // Preserve gkPriv across a rekey (admit with a newer epoch): the admin keeps
+    // GK for the group's life. Members never have it, so they never become admin.
+    this.recs.set(gh, { session, gkPub: m.gkPub, secret: m.secret.slice(), roster: m.roster, epoch: m.epoch, gkPriv: m.gkPriv ?? cur?.gkPriv })
     return session
   }
 
   /** Apply an SKD received from `from` over a 1:1 session: establish/update the
    *  group, then store `from`'s sending key. */
   async applySkd(from: string, skd: SkdFields): Promise<void> {
-    const session = await this.admit({
-      gid: unb64(skd.gid), gkPub: unb64(skd.gkPub), epoch: skd.epoch,
-      secret: unb64(skd.secret), roster: skd.roster.map((pub) => ({ pub })),
-    })
-    session.setSenderKey(from, unb64(skd.chain))
+    const gid = unb64(skd.gid), gh = hex(gid)
+    const cur = this.recs.get(gh)
+    if (!cur || skd.epoch > cur.epoch) {
+      // Advancing the epoch/roster is the ADMIN's authority. STRICT: require a
+      // roster MAC the admin computed for ME — rk from ECDH(IK_me, GK_pub), which
+      // equals the admin's ECDH(GK_priv, IK_me). No MAC, or one that does not
+      // verify → reject (do not adopt the roster or the new topic). Only the admin
+      // holds GK_priv, so no member can forge this to a third member.
+      // Bind the group id to its GK: gid == SHA-256(GK_pub)[0:16]. Without this an
+      // attacker could pair the real gid with a fake GK it holds the private half
+      // of, MAC a forged roster with it, and have it verify — hijacking the group.
+      if (!bytesEq(gid, await groupIdFromGK(unb64(skd.gkPub)))) throw new Error('group id does not match its GK — rejected')
+      if (!skd.rmac) throw new Error('group SKD advances the epoch without a roster MAC — rejected')
+      const ss = await this.id.ecdh(skd.gkPub)
+      const rk = await rosterMacKeyFromSecret(ss, gid, skd.epoch)
+      if (!(await verifyRosterMac(rk, skd.roster, unb64(skd.rmac)))) throw new Error('group roster MAC does not verify — rejected')
+      const session = await this.admit({
+        gid, gkPub: unb64(skd.gkPub), epoch: skd.epoch, secret: unb64(skd.secret), roster: skd.roster.map((pub) => ({ pub })),
+      })
+      session.setSenderKey(from, unb64(skd.chain))
+    } else {
+      // Same-or-older epoch: a member redistributing its own sending key. It does
+      // NOT change the roster (admin authority), and we accept the key only from a
+      // sender already in the admin-attested roster.
+      if (cur.roster.some((m) => m.pub === from)) cur.session.setSenderKey(from, unb64(skd.chain))
+    }
   }
 
   /**
@@ -315,16 +357,25 @@ export class GroupManager {
     await this.admit({ gid: rec.session.gid, gkPub: rec.gkPub, epoch: rec.epoch + 1, secret: randomBytes(32), roster: newRoster })
   }
 
-  /** Build the SKD to hand to another member (same for all recipients — the 1:1
-   *  session authenticates it). Null if I am not in that group. */
-  skdFor(gidHex: string): SkdFields | null {
+  /** Build the SKD to hand to another member. The body is the same for everyone
+   *  (the 1:1 session authenticates delivery); when I am the admin (I hold gkPriv)
+   *  and a recipient is named, I also attach that recipient's roster MAC so they
+   *  can verify the roster is admin-attested. Null if I am not in that group. */
+  async skdFor(gidHex: string, forPub?: string): Promise<SkdFields | null> {
     const rec = this.recs.get(gidHex)
     if (!rec) return null
-    return {
+    const skd: SkdFields = {
       gid: b64(rec.session.gid), gkPub: b64(rec.gkPub), epoch: rec.epoch,
       secret: b64(rec.secret), chain: b64(rec.session.mySenderKey()),
       roster: rec.roster.map((m) => m.pub),
     }
+    if (rec.gkPriv && forPub) {
+      const gk = await x25519FromPriv(rec.gkPriv)
+      const ss = await gk.dh(unb64(forPub))
+      const rk = await rosterMacKeyFromSecret(ss, rec.session.gid, rec.epoch)
+      skd.rmac = b64(await rosterMac(rk, skd.roster))
+    }
+    return skd
   }
 
   /** Every group serialized for the persistence cache (§10) — full state, including
@@ -338,6 +389,7 @@ export class GroupManager {
       out.push({
         gid: b64(rec.session.gid), gkPub: b64(rec.gkPub), epoch: rec.epoch, secret: b64(rec.secret),
         roster: rec.roster.map((m) => ({ pub: m.pub, kid: m.kid })),
+        gkPriv: rec.gkPriv ? b64(rec.gkPriv) : undefined, // admin only — the roster-MAC key material (§10-encrypted by the caller)
         send: { key: b64(c.send.key), n: c.send.n },
         receivers: c.receivers.map((r) => ({ pub: r.pub, key: b64(r.key), n: r.n })),
       })
@@ -352,7 +404,7 @@ export class GroupManager {
     const gids: string[] = []
     for (const s of snaps) {
       const gid = unb64(s.gid)
-      const session = await this.admit({ gid, gkPub: unb64(s.gkPub), epoch: s.epoch, secret: unb64(s.secret), roster: s.roster })
+      const session = await this.admit({ gid, gkPub: unb64(s.gkPub), epoch: s.epoch, secret: unb64(s.secret), roster: s.roster, gkPriv: s.gkPriv ? unb64(s.gkPriv) : undefined })
       session.importChains({
         send: { key: unb64(s.send.key), n: s.send.n },
         receivers: s.receivers.map((r) => ({ pub: r.pub, key: unb64(r.key), n: r.n })),

@@ -7,7 +7,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { generateX25519 } from '../lib/x25519.ts'
+import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
 import { b64, unb64, randomBytes } from '../lib/wc.ts'
 import { GroupManager, groupIdFromGK, type GroupId, type Member } from '../lib/group.ts'
 import { envGroupSkd, encodeEnvelope, decodeEnvelope, type GroupSkdEnv } from '../lib/envelope.ts'
@@ -24,10 +24,9 @@ async function softId(): Promise<GroupId> {
 /** `from` hands its SKD for `gid` to each recipient — over the wire (envelope
  *  encode → decode), exactly as the 1:1 ratchet would carry it. */
 async function distribute(from: { id: GroupId; mgr: GroupManager }, gidHex: string, to: { id: GroupId; mgr: GroupManager }[]) {
-  const skd = from.mgr.skdFor(gidHex)!
-  const bytes = encodeEnvelope(envGroupSkd(0, skd))
   for (const r of to) {
-    const e = decodeEnvelope(bytes) as GroupSkdEnv
+    const skd = (await from.mgr.skdFor(gidHex, r.id.pub))! // per-recipient: the roster MAC is per member
+    const e = decodeEnvelope(encodeEnvelope(envGroupSkd(0, skd))) as GroupSkdEnv
     assert.equal(e.t, 'group-skd')
     await r.mgr.applySkd(from.id.pub, e)
   }
@@ -36,11 +35,12 @@ async function distribute(from: { id: GroupId; mgr: GroupManager }, gidHex: stri
 test('3 members bootstrap via SKD, then broadcast on the shared topic', async () => {
   const A = await softId(), B = await softId(), C = await softId()
   const mA = new GroupManager(A, P), mB = new GroupManager(B, P), mC = new GroupManager(C, P)
-  const gk = await generateX25519()
+  const gkPriv = randomBytes(32)
+  const gk = await x25519FromPriv(gkPriv)
   const roster: Member[] = [{ pub: A.pub }, { pub: B.pub }, { pub: C.pub }]
 
   // A creates the group and distributes; then B and C distribute back.
-  const gid = await mA.createGroup(gk.pub, roster)
+  const gid = await mA.createGroup(gk.pub, roster, gkPriv)
   const wA = { id: A, mgr: mA }, wB = { id: B, mgr: mB }, wC = { id: C, mgr: mC }
   await distribute(wA, gid, [wB, wC])
   await distribute(wB, gid, [wA, wC])
@@ -66,8 +66,9 @@ test('3 members bootstrap via SKD, then broadcast on the shared topic', async ()
 test('before it receives an SKD, a member cannot open a broadcast', async () => {
   const A = await softId(), B = await softId()
   const mA = new GroupManager(A, P), mB = new GroupManager(B, P)
-  const gk = await generateX25519()
-  const gid = await mA.createGroup(gk.pub, [{ pub: A.pub }, { pub: B.pub }])
+  const gkPriv = randomBytes(32)
+  const gk = await x25519FromPriv(gkPriv)
+  const gid = await mA.createGroup(gk.pub, [{ pub: A.pub }, { pub: B.pub }], gkPriv)
   // A sent, but B never got A's SKD → B has no group at all.
   await distribute({ id: A, mgr: mA }, gid, []) // no-op recipient list
   assert.equal(mB.session(gid), undefined)

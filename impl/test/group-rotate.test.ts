@@ -7,8 +7,8 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { generateX25519 } from '../lib/x25519.ts'
-import { b64, unb64 } from '../lib/wc.ts'
+import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
+import { b64, unb64, randomBytes } from '../lib/wc.ts'
 import { GroupManager, type GroupId, type Member } from '../lib/group.ts'
 
 const P = { networkId: 'grot', dateUTC: '2026-08-01' }
@@ -20,15 +20,16 @@ async function softId(): Promise<GroupId> {
   return { pub: b64(k.pub), ecdh: async (p: string) => k.dh(unb64(p)) }
 }
 type Peer = { id: GroupId; mgr: GroupManager }
-const skd = async (from: Peer, gid: string, to: Peer[]) => { for (const r of to) await r.mgr.applySkd(from.id.pub, from.mgr.skdFor(gid)!) }
+const skd = async (from: Peer, gid: string, to: Peer[]) => { for (const r of to) await r.mgr.applySkd(from.id.pub, (await from.mgr.skdFor(gid, r.id.pub))!) }
 
 /** Bootstrap n members (member[0] = admin) at epoch 0, all sender keys shared. */
 async function boot(n: number): Promise<{ gid: string; gk: Awaited<ReturnType<typeof generateX25519>>; peers: Peer[] }> {
   const peers: Peer[] = []
   for (let i = 0; i < n; i++) { const id = await softId(); peers.push({ id, mgr: new GroupManager(id, P) }) }
-  const gk = await generateX25519()
+  const gkPriv = randomBytes(32)
+  const gk = await x25519FromPriv(gkPriv) // admin's GK — persistable priv so it can MAC the roster
   const roster: Member[] = peers.map((p) => ({ pub: p.id.pub }))
-  const gid = await peers[0].mgr.createGroup(gk.pub, roster)
+  const gid = await peers[0].mgr.createGroup(gk.pub, roster, gkPriv)
   await skd(peers[0], gid, peers.slice(1))
   for (const s of peers) await skd(s, gid, peers.filter((p) => p !== s))
   return { gid, gk, peers }
