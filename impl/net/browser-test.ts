@@ -907,6 +907,58 @@ async function main() {
       step(`screenshots → ${dir}/{group-view,network-view}.png`)
     }
 
+    scenario('group membership: admin removes a member (locked out), then re-adds (rejoins)')
+    // A is the admin (roster[0], the creator). Removing sim-b rekeys the group to a
+    // NEW topic and does NOT send B the new SKD, so B stays on the old topic and
+    // stops receiving. Re-adding gives B a newer epoch → it rejoins and receives again.
+
+    // --- remove ---
+    await A.eval(`document.getElementById('members-cluster').click(); return 1`)
+    await A.waitFor('the remove button for sim-b', `
+      return [...document.querySelectorAll('#members-pop .member-row')].some((r) => r.textContent.includes('sim-b') && r.querySelector('.m-rm'));
+    `, 6_000)
+    await A.eval(`
+      [...document.querySelectorAll('#members-pop .member-row')].find((r) => r.textContent.includes('sim-b')).querySelector('.m-rm').click(); return 1;
+    `)
+    await A.waitFor('A group shrank to 1 member', `return document.getElementById('peer-status').textContent.trim().startsWith('1 ')`, 12_000)
+    step('admin removed sim-b — the group rekeyed to a new topic, A now shows 1 member')
+
+    const afterRm = `removed-${Date.now().toString(36)}`
+    await A.eval(`document.getElementById('msg-input').value = ${JSON.stringify(afterRm)}; document.getElementById('send').click(); return 1`)
+    await sleep(6_000)
+    const leaked = await B.eval<boolean>(`
+      const g = document.querySelector('#pane-groups .contact'); if (g) g.click();
+      return document.getElementById('messages').textContent.includes(${JSON.stringify(afterRm)});
+    `)
+    if (leaked) throw new Error('a removed member still received a group message — lockout failed')
+    step('a message sent after removal did NOT reach the removed member (locked out)')
+
+    // --- re-add ---
+    await A.eval(`document.getElementById('members-cluster').click(); return 1`)
+    await A.waitFor('the add-member toggle', `return !!document.querySelector('#members-pop .m-add-toggle')`, 8_000)
+    await A.eval(`document.querySelector('#members-pop .m-add-toggle').click(); return 1`)
+    await A.waitFor('sim-b in the add picker', `
+      return [...document.querySelectorAll('#members-pop .m-add-pub')].some((b) => b.textContent.includes('sim-b'));
+    `, 6_000)
+    await A.eval(`
+      [...document.querySelectorAll('#members-pop .m-add-pub')].find((b) => b.textContent.includes('sim-b')).click(); return 1;
+    `)
+    await A.waitFor('A group back to 2 members', `return document.getElementById('peer-status').textContent.trim().startsWith('2 ')`, 12_000)
+    step('admin re-added sim-b — the group rekeyed again, A shows 2 members')
+
+    const afterAdd = `readded-${Date.now().toString(36)}`
+    let rejoined = false
+    for (let i = 0; i < 12 && !rejoined; i++) {
+      await A.eval(`document.getElementById('msg-input').value = ${JSON.stringify(afterAdd + '-' + i)}; document.getElementById('send').click(); return 1`)
+      await sleep(1_500)
+      rejoined = await B.eval<boolean>(`
+        const g = document.querySelector('#pane-groups .contact'); if (g) g.click();
+        return document.getElementById('messages').textContent.includes(${JSON.stringify(afterAdd)});
+      `)
+    }
+    if (!rejoined) throw new Error('re-added member did not receive group messages after rejoining')
+    step('re-added member rejoined on the new epoch and received a broadcast again')
+
     scenario('a SECOND group also works (not just the first)')
     // Reported: only the first group worked. Make a second group with the same
     // member and prove a broadcast in IT reaches B too.
