@@ -226,6 +226,8 @@ const FLUSH_MS = 250 // let the leave reach the relay before teardown
 
 export interface OpenOpts extends ChatOpts {
   relay: string
+  /** See `SessionOpts.relays` — ordered relay candidates for failover (libp2p). */
+  relays?: string[]
   /** See `SessionOpts` — the fall-back transport, chosen per session. */
   transport?: 'libp2p' | 'mqtt'
   broker?: string
@@ -343,6 +345,17 @@ export interface SessionOpts {
   /** libp2p relay multiaddr — ignored when `transport` is `'mqtt'`. */
   relay: string
   /**
+   * Ordered relay candidates for failover (libp2p only). When set, every dial —
+   * the first one and every re-dial — sweeps this list from the top and the
+   * first node that connects wins, so an unreachable or hung node falls through
+   * to the next. Sweeping from the top means the primary (index 0) is preferred:
+   * once it recovers, the next re-dial returns to it. `relay` stays the
+   * single-node shorthand and the fallback when this is empty. Because the
+   * relays are meshed, failing over does NOT partition users (a client on the
+   * fallback still reaches everyone), which is what makes this safe.
+   */
+  relays?: string[]
+  /**
    * Which transport carries rendezvous, presence and signalling.
    *
    * `libp2p` (default) is the main one. `mqtt` is the **fall-back**: same
@@ -378,6 +391,29 @@ export interface SessionOpts {
 export type RoomOpts = Omit<OpenOpts, 'relay' | 'params' | 'onLink' | 'onSessionTakenOver'>
 
 const REDIAL_BACKOFF = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000]
+const DIAL_TIMEOUT_MS = 8_000
+
+/**
+ * Try each relay candidate in order; the first that connects wins and its addr
+ * is returned. A per-dial timeout (an AbortSignal per candidate) means a node
+ * that hangs rather than fast-fails — exactly the "operation was aborted"
+ * behaviour a blocked path shows — falls through to the next instead of
+ * stalling the whole sweep. Throws the last error if none connect. Pure over an
+ * injected `dialOne`, so the failover order and time-out fall-through are unit
+ * tested without a real transport.
+ */
+export async function failoverDial(
+  candidates: string[],
+  dialOne: (addr: string, signal: AbortSignal) => Promise<void>,
+  timeoutMs: number = DIAL_TIMEOUT_MS,
+): Promise<string> {
+  let lastErr: unknown
+  for (const addr of candidates) {
+    try { await dialOne(addr, AbortSignal.timeout(timeoutMs)); return addr }
+    catch (e) { lastErr = e }
+  }
+  throw lastErr ?? new Error('failoverDial: no relay candidates')
+}
 
 export async function startSession(id: Identity, opts: SessionOpts): Promise<ClientSession> {
   const log = opts.onLog ?? (() => {})
@@ -388,11 +424,26 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   const viaMqtt = opts.transport === 'mqtt'
   if (viaMqtt && !opts.broker) throw new Error('transport "mqtt" needs a broker url')
   const dialT0 = Date.now()
+  // Relay candidates for failover (libp2p only). `relays` first, else the single
+  // `relay`. `activeRelay` tracks whichever we last connected through — netStatus
+  // reports it, and the app shows which node is live.
+  const candidates = (opts.relays?.length ? opts.relays : [opts.relay]).filter(Boolean)
+  if (!viaMqtt && candidates.length === 0) throw new Error('startSession: no relay to dial')
+  let activeRelay = candidates[0]
   const node: any = viaMqtt
     ? await createMqttPeer({ url: opts.broker!, onLog: opts.onLog })
     : await createPeer()
-  /** Dial, or re-dial. The two transports differ here and nowhere else. */
-  const redial = () => (viaMqtt ? node.reconnect() : dial(node, opts.relay))
+  /**
+   * Dial, or re-dial. MQTT reconnects its one broker; libp2p sweeps the relay
+   * candidates (first that connects wins) and remembers which one, so a dead or
+   * hung primary fails over to the next and a recovered primary is preferred again.
+   */
+  const redial = async () => {
+    if (viaMqtt) return node.reconnect()
+    const connectedTo = await failoverDial(candidates, (addr, signal) => dial(node, addr, { signal }))
+    if (connectedTo !== activeRelay) log(`failover: łączę przez ${connectedTo.slice(0, 46)}…`)
+    activeRelay = connectedTo
+  }
   // The FIRST dial must be as resilient as re-dialing. A phone on a flaky/slow
   // mobile link — or one whose battery saver is throttling the tab — routinely
   // drops the opening connection, and a single attempt turned that into a hard
@@ -623,7 +674,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       try { topics = [...(node.services?.pubsub?.getTopics?.() ?? [])] } catch {}
       let peers = 0
       try { peers = node.getConnections().length } catch {}
-      return { transport: viaMqtt ? 'mqtt' : 'libp2p', relay: viaMqtt ? (opts.broker ?? '') : opts.relay, self, link, connected: connected(), peers, topics }
+      return { transport: viaMqtt ? 'mqtt' : 'libp2p', relay: viaMqtt ? (opts.broker ?? '') : activeRelay, self, link, connected: connected(), peers, topics }
     },
     groups,
     async openGroup(gidHex: string, handlers: GroupRoomOpts) {
@@ -769,6 +820,7 @@ async function openRoom(
 export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts): Promise<Conversation> {
   const session = await startSession(id, {
     relay: opts.relay,
+    relays: opts.relays,
     transport: opts.transport,
     broker: opts.broker,
     params: opts.params,

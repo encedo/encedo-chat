@@ -37,6 +37,8 @@ export async function createPeer() {
   return node
 }
 
-export function dial(node, addr) {
-  return node.dial(multiaddr(addr))
+export function dial(node, addr, opts) {
+  // opts forwards libp2p dial options — notably `signal`, so a failover sweep can
+  // put a timeout on each candidate and move on instead of stalling on a hung node.
+  return node.dial(multiaddr(addr), opts)
 }
