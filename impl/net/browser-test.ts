@@ -507,8 +507,28 @@ async function main() {
     step(`launching ${PAIR[0]} + ${PAIR[1] ?? PAIR[0]} on ${APP_URL}`)
     await Promise.all([A.start(APP_URL), B.start(APP_URL)])
 
+    if (process.env.SHOT_LOGIN) { // capture the login node list (collapsed → expanded)
+      await A.resize(460, 760)
+      await A.waitFor('login form', `return !!document.getElementById('go-soft')`)
+      await A.eval(`localStorage.setItem('ec-nodes', JSON.stringify([
+        {name:'bs1.onchato.com', addr:'/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgc…', enabled:true},
+        {name:'bs2.onchato.com', addr:'/dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y', enabled:true},
+        {name:'vm-prywatna', addr:'/dns4/vm.local/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWXyZ789…', enabled:false}
+      ])); return 1`)
+      await A.reload(APP_URL)
+      await A.waitFor('login form', `return !!document.getElementById('go-soft')`)
+      await A.eval(`document.getElementById('nodes-toggle').click(); return 1`)
+      await sleep(350)
+      await A.screenshot(`${process.env.SHOT_DIR ?? '/tmp'}/login-nodes.png`)
+      step(`screenshot → ${process.env.SHOT_DIR ?? '/tmp'}/login-nodes.png`)
+      await A.eval(`localStorage.removeItem('ec-nodes'); return 1`) // don't leak demo nodes into the run
+      await A.reload(APP_URL)
+    }
+
     for (const [b, handle] of [[A, 'sim-a'], [B, 'sim-b']] as const) {
       await b.waitFor('login form', `return !!document.getElementById('go-soft')`)
+      if (process.env.RELAY_NODE) // run the whole test over a chosen node (e.g. bs2) instead of bs1
+        await b.eval(`localStorage.setItem('ec-nodes', JSON.stringify([{name:'test', addr:${JSON.stringify(process.env.RELAY_NODE)}, enabled:true}])); return 1`)
       await b.eval(`(document.getElementById('handle')).value = ${JSON.stringify(handle)}; document.getElementById('go-soft').click();`)
       await b.waitFor('app shell', `return document.getElementById('app') && !document.getElementById('app').hidden`)
     }

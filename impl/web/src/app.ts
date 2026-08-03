@@ -21,6 +21,20 @@ import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
 
 const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
+
+// ---- network nodes (relays): an editable list, chosen at login -------------
+// The user keeps a list of relay multiaddrs and ticks which to use this session;
+// the first enabled one is the relay we dial (bs1 by default). Full multiaddrs so
+// a node with its own PeerId (not derived from a pass) can be pasted in.
+interface NodeEntry { name: string; addr: string; enabled: boolean }
+const DEFAULT_NODES: NodeEntry[] = [{ name: 'bs1.onchato.com', addr: RELAY, enabled: true }]
+function loadNodes(): NodeEntry[] {
+  try { const v = JSON.parse(localStorage.getItem('ec-nodes') || 'null'); if (Array.isArray(v) && v.length) return v } catch {}
+  return DEFAULT_NODES.map((n) => ({ ...n }))
+}
+function saveNodes(list: NodeEntry[]) { try { localStorage.setItem('ec-nodes', JSON.stringify(list)) } catch {} }
+/** The relay to dial this session — the first enabled node, or bs1 as a floor. */
+function chosenRelay(): string { return loadNodes().find((n) => n.enabled)?.addr || RELAY }
 /**
  * Transport. libp2p is the default; `?mqtt=1` switches to the broker (fall-back
  * transport — README has the trade-offs), `?mqtt=wss://host/mqtt` points it
@@ -206,6 +220,42 @@ $('go-soft').addEventListener('click', async () => {
   } catch (e: any) { setMsg('msg', 'Błąd tożsamości software: ' + (e?.message ?? e), 'err') }
 })
 
+// ---- login: editable network-node list (collapsed; the "+" reveals it) ----
+function renderNodes() {
+  const list = loadNodes()
+  $('nodes-list').innerHTML = list.map((n, i) =>
+    `<label class="node-row"><input type="checkbox" data-i="${i}" ${n.enabled ? 'checked' : ''}>`
+    + `<span class="n-name" title="${escapeHtml(n.addr)}">${escapeHtml(n.name)}</span>`
+    + `<span class="n-x" data-rm="${i}" title="Usuń">×</span></label>`).join('')
+}
+$('nodes-toggle').addEventListener('click', () => {
+  const panel = $('nodes-panel'), open = panel.hidden
+  panel.hidden = !open; $('nodes-toggle').classList.toggle('open', open)
+  if (open) renderNodes()
+})
+$('nodes-list').addEventListener('change', (e: any) => {
+  const i = e.target?.dataset?.i; if (i == null) return
+  const list = loadNodes(); list[+i].enabled = e.target.checked
+  if (!list.some((n) => n.enabled)) { list[+i].enabled = true; e.target.checked = true; setMsg('msg', 'Przynajmniej jeden węzeł musi być aktywny.', 'err') }
+  saveNodes(list)
+})
+$('nodes-list').addEventListener('click', (e: any) => {
+  const rm = e.target?.dataset?.rm; if (rm == null) return
+  e.preventDefault()
+  const list = loadNodes()
+  if (list.length <= 1) { setMsg('msg', 'Musi zostać co najmniej jeden węzeł.', 'err'); return }
+  list.splice(+rm, 1); if (!list.some((n) => n.enabled)) list[0].enabled = true
+  saveNodes(list); renderNodes()
+})
+$('node-add').addEventListener('click', () => {
+  const addr = (prompt('Multiaddr węzła (np. /dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3Koo…):') || '').trim()
+  if (!addr) return
+  if (!addr.startsWith('/') || !addr.includes('/p2p/')) { setMsg('msg', 'To nie wygląda na multiaddr (…/p2p/<PeerId>).', 'err'); return }
+  const host = addr.match(/\/dns[46]\/([^/]+)/)?.[1] ?? addr.match(/\/ip[46]\/([^/]+)/)?.[1] ?? 'węzeł'
+  const name = (prompt('Nazwa węzła:', host) || host).trim()
+  const list = loadNodes(); list.push({ name, addr, enabled: true }); saveNodes(list); renderNodes()
+})
+
 function makeLocalBook(handle: string, storage: Storage) {
   const lsKey = 'ec-local-contacts-' + handle
   return localContactBook(
@@ -223,7 +273,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   // relay is network work, and a login screen that hangs on it looks broken
   // (it also blocked the first automated run of this app outright).
   clientReady = startSession(id, {
-    relay: RELAY,
+    relay: chosenRelay(),
     transport: USE_MQTT ? 'mqtt' : 'libp2p',
     broker: BROKER,
     forcedRotationSec: FORCED_ROTATION_SEC,
