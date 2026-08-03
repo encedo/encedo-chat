@@ -44,6 +44,15 @@ const PASS  = get('--pass', 'default-relay-pass')
 const PORT  = parseInt(get('--port', '9001'))
 const HOST  = get('--host', null)   // e.g. onchato.com — used to print the production WSS multiaddr
 const PEERS = getPeers()
+// Optional IPv6 listen port for inter-relay peering over a provider's private
+// network (where public IPv4 between VMs is blocked but IPv6 routes). Kept on a
+// SEPARATE port from PORT so the IPv4 nginx path (0.0.0.0:PORT) is untouched and
+// binds cleanly regardless of the host's bindv6only setting (`::` + 0.0.0.0 on the
+// SAME port collides when bindv6only=0). Only the dialed node (bs1) needs it.
+// --v6-host pins the listen to ONE address (e.g. bs1's public IPv6) so the peer
+// port is not also exposed over IPv4-mapped `::`; default `::` = any IPv6.
+const V6PORT = get('--v6-port', null)
+const V6HOST = get('--v6-host', '::')
 // Topic budget. Both are operational knobs, not protocol: raise MAX_TOPICS on a
 // busier node, shorten IDLE_TTL only if you are sure it stays well above the
 // clients' ~15 s Announce heartbeat (below it, live rooms would be evicted).
@@ -58,7 +67,12 @@ console.log(`\n🔑 Pass: "${PASS}" → PeerId: ${peerId.toString()}`)
 
 const relay = await createLibp2p({
   privateKey: privKey,
-  addresses: { listen: [`/ip4/0.0.0.0/tcp/${PORT}/ws`] },
+  // IPv4 on PORT for the nginx path (0.0.0.0 — unchanged, nginx→127.0.0.1:PORT).
+  // Optionally ALSO listen on IPv6 on a SEPARATE V6PORT for inter-relay peering
+  // over a provider's private network — never on PORT itself (`::` + 0.0.0.0 on
+  // one port collides when bindv6only=0). nginx is NOT on this path: a peer dials
+  // the raw ws port directly (/ip6/<addr>/tcp/<V6PORT>/ws), bypassing nginx/443.
+  addresses: { listen: [`/ip4/0.0.0.0/tcp/${PORT}/ws`, ...(V6PORT ? [`/ip6/${V6HOST}/tcp/${V6PORT}/ws`] : [])] },
   // Keep any ws/wss multiaddr INCLUDING the `/http-path/%2Frelay/` form the
   // production nodes advertise (WSS via nginx). The default `all` filter rejects
   // http-path when DIALING, so `--peers /dns4/bs1…/wss/http-path/…` failed with
@@ -200,4 +214,9 @@ if (HOST) {
   console.log(`   /dns4/${HOST}/tcp/443/wss/http-path/%2Frelay/p2p/${peerId.toString()}`)
 }
 console.log(`📋 Adres lokalny (WS bezpośredni):`)
-console.log(`   /ip4/127.0.0.1/tcp/${PORT}/ws/p2p/${peerId.toString()}\n`)
+console.log(`   /ip4/127.0.0.1/tcp/${PORT}/ws/p2p/${peerId.toString()}`)
+if (V6PORT) {
+  console.log(`📋 Adres IPv6 dla peerów (--peers na drugim relay, wstaw ten host IPv6):`)
+  console.log(`   /ip6/<ten-host-ipv6>/tcp/${V6PORT}/ws/p2p/${peerId.toString()}`)
+}
+console.log('')
