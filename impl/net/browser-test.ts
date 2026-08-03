@@ -29,7 +29,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir, homedir } from 'node:os'
 import { join, extname } from 'node:path'
@@ -96,6 +96,8 @@ abstract class Page {
    * instead of asserting against something that never happened.
    */
   async offline(_cut: boolean): Promise<boolean> { return false }
+  /** Capture a PNG (CDP only; a no-op where the protocol lacks it). */
+  async screenshot(_path: string): Promise<void> {}
 
   async waitFor<T>(what: string, expression: string, ms = 30_000): Promise<T> {
     const t0 = Date.now()
@@ -243,6 +245,12 @@ class Browser extends Page {
   async reload(url: string) {
     await this.send('Page.navigate', { url }, true)
     await sleep(1200)
+  }
+
+  /** Capture a PNG of the current page (Chromium only; a no-op elsewhere). */
+  async screenshot(path: string) {
+    const { data } = await this.send('Page.captureScreenshot', { format: 'png' }, true)
+    writeFileSync(path, Buffer.from(data, 'base64'))
   }
 
   async stop() {
@@ -831,6 +839,14 @@ async function main() {
     const groupSent = await A.eval<boolean>(`return document.getElementById('messages').textContent.includes('wysłano') && !document.getElementById('messages').textContent.includes('wysyłam')`)
     if (!groupSent) throw new Error('a group message should show "wysłano", not hang on "wysyłam"')
     step('a sent group message reads "wysłano" (no perpetual "wysyłam")')
+    if (process.env.SHOT) { // capture the group view (participant cluster + popover) at desktop width
+      await A.resize(1400, 860)
+      await A.eval(`document.getElementById('members-cluster')?.click(); return 1`)
+      await sleep(400)
+      const shot = `${process.env.SHOT_DIR ?? '/tmp'}/group-view.png`
+      await A.screenshot(shot)
+      step(`screenshot → ${shot}`)
+    }
 
     scenario('a SECOND group also works (not just the first)')
     // Reported: only the first group worked. Make a second group with the same

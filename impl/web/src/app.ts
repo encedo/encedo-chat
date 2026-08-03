@@ -414,6 +414,33 @@ $('btn-wipeout').addEventListener('click', async () => {
   location.reload()
 })
 
+// ---- resizable sidebar / chat splitter (desktop; hidden on phones) ----
+{
+  const SB_MIN = 260, SB_MAX = 560, SB_DEF = 330
+  const setW = (w: number) => document.documentElement.style.setProperty('--sidebar-w', w + 'px')
+  const saved = parseInt(localStorage.getItem('ec-sidebar-w') || '', 10)
+  if (saved >= SB_MIN && saved <= SB_MAX) setW(saved)
+  const splitter = $('splitter'); const sidebar = document.querySelector('.sidebar') as HTMLElement
+  let dragging = false
+  splitter.addEventListener('mousedown', (e: any) => { dragging = true; splitter.classList.add('drag'); e.preventDefault() })
+  window.addEventListener('mousemove', (e: any) => {
+    if (!dragging) return
+    const w = Math.max(SB_MIN, Math.min(SB_MAX, Math.round(e.clientX - sidebar.getBoundingClientRect().left)))
+    setW(w)
+  })
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return
+    dragging = false; splitter.classList.remove('drag')
+    localStorage.setItem('ec-sidebar-w', String(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w'), 10) || SB_DEF))
+  })
+  splitter.addEventListener('dblclick', () => { setW(SB_DEF); localStorage.setItem('ec-sidebar-w', String(SB_DEF)) })
+}
+// Close the group members popover on any outside click.
+document.addEventListener('click', (e: any) => {
+  const pop = $('members-pop')
+  if (!pop.hidden && !pop.contains(e.target) && !$('members-cluster').contains(e.target)) pop.hidden = true
+})
+
 // ---- copy my pubkey ----
 let toastT: any
 function toast(msg: string) {
@@ -698,6 +725,7 @@ function applyEv(ev: Ev) {
 async function activateRoom(pub: string) {
   const room = rooms.get(pub); if (!room) return
   activePub = pub; activeGid = null // a 1:1 takes the screen — no group is active
+  $('members-cluster').hidden = true; $('members-pop').hidden = true // group-only UI
   room.unseen = 0
   $('chat-empty').hidden = true; $('chat-view').hidden = false
   showChatPane(true)
@@ -840,6 +868,22 @@ const memberName = (pub: string): string =>
 const groupDisplay = (gu: GroupUI): string =>
   gu.name || gu.members.filter((m) => m.pub !== session?.pub).map((m) => m.name).join(', ') || 'Grupa'
 
+// Overlapping-avatar cluster (inner .ga spans; the caller wraps in .avatar-cluster).
+function avatarClusterHTML(members: { pub: string; name: string }[], max = 5): string {
+  let html = members.slice(0, max).map((m) => `<span class="ga" title="${escapeHtml(m.name)}">${escapeHtml(initials(m.name))}</span>`).join('')
+  if (members.length > max) html += `<span class="ga more">+${members.length - max}</span>`
+  return html
+}
+// Fill the group members popover: each participant with an online dot (known for contacts).
+function renderMembersPop(gu: GroupUI) {
+  $('members-pop').innerHTML = `<div class="m-head">${gu.members.length} członków</div>` + gu.members.map((m) => {
+    const you = m.pub === session?.pub, online = you || onlinePubs.has(m.pub) // you are, by definition, here
+    return `<div class="member-row"><div class="gavatar">${escapeHtml(initials(m.name))}</div>`
+      + `<span class="m-name">${escapeHtml(m.name)}</span>`
+      + `<span class="dot ${online ? 'ok' : ''}" title="${online ? 'online' : 'offline / nieznany'}"></span></div>`
+  }).join('')
+}
+
 function renderGroups() {
   const pane = $('pane-groups'); pane.innerHTML = ''
   const add = document.createElement('div'); add.className = 'add-row'
@@ -850,7 +894,7 @@ function renderGroups() {
     const b = document.createElement('button'); b.className = 'contact' + (activeGid === gu.gid ? ' active' : '') + (gu.unseen ? ' unread' : '')
     const pill = gu.unseen ? `<span class="c-unread">${gu.unseen > 99 ? '99+' : gu.unseen}</span>` : ''
     b.innerHTML = `<div class="avatar">👥</div><div class="c-info"><div class="c-name">${escapeHtml(groupDisplay(gu))}</div>`
-      + `<div class="c-sub">${gu.members.length} członków · 🔐 szyfrowana</div></div>` + pill
+      + `<div class="c-sub"><span class="avatar-cluster sm">${avatarClusterHTML(gu.members, 4)}</span> ${gu.members.length} · 🔐</div></div>` + pill
     b.addEventListener('click', () => void activateGroup(gu.gid))
     pane.appendChild(b)
   }
@@ -968,6 +1012,11 @@ async function activateGroup(gid: string) {
   $('peer-avatar').textContent = '👥'
   $('peer-name').textContent = groupDisplay(gu); $('peer-name').title = ''
   $('peer-dot').className = 'dot ok'; $('peer-status').textContent = `${gu.members.length} członków`
+  // Participant cluster in the header → click to see the full member list.
+  const cluster = $('members-cluster'); cluster.hidden = false; cluster.innerHTML = avatarClusterHTML(gu.members)
+  cluster.title = 'Uczestnicy grupy'
+  cluster.onclick = (e: any) => { e.stopPropagation(); const pop = $('members-pop'); const show = pop.hidden; if (show) renderMembersPop(gu); pop.hidden = !show }
+  $('members-pop').hidden = true
   $('e2e-badge').className = 'badge direct'; $('e2e-badge').textContent = '🔐 Szyfrowana'
   $('e2e-badge').title = 'Grupa — Sender Keys + per-recipient HMAC (deniable, §8)'
   $('transport-badge').className = 'badge relay'; $('transport-badge').textContent = '⚪ Relay (grupa)'

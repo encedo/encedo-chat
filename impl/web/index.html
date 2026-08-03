@@ -56,8 +56,23 @@
   .msg.ok{display:block;background:var(--good-soft);color:var(--good)}
 
   /* app shell */
-  .app{display:flex;gap:16px;max-width:1280px;margin:0 auto;padding:16px;height:100vh;min-height:560px}
-  .sidebar{width:330px;flex-shrink:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  .app{display:flex;gap:8px;max-width:1680px;margin:0 auto;padding:16px;height:100vh;min-height:560px}
+  .sidebar{width:var(--sidebar-w,330px);flex-shrink:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  /* Draggable divider between the contact list and the chat (desktop only). */
+  .splitter{flex:none;width:8px;align-self:stretch;cursor:col-resize;border-radius:6px;background:transparent;transition:background .15s}
+  .splitter:hover,.splitter.drag{background:var(--border)}
+  /* Group participants: a cluster of overlapping avatars + a popover of the full list. */
+  .avatar-cluster{display:inline-flex;align-items:center;cursor:pointer}
+  .avatar-cluster .ga{width:22px;height:22px;border-radius:50%;margin-left:-7px;border:2px solid var(--card);display:grid;place-items:center;font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-soft)}
+  .avatar-cluster .ga:first-child{margin-left:0}
+  .avatar-cluster .ga.more{color:var(--muted);background:var(--bg)}
+  .avatar-cluster.sm .ga{width:18px;height:18px;font-size:9px;margin-left:-6px}
+  .members-pop{position:absolute;top:58px;left:16px;z-index:12;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(18,38,63,.15);padding:6px;min-width:220px;max-width:min(320px,80vw);max-height:300px;overflow-y:auto}
+  .members-pop .m-head{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 8px}
+  .member-row{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:8px}
+  .member-row .gavatar{width:28px;height:28px}
+  .member-row .m-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:13px}
+  .member-row .m-you{font-size:11px;color:var(--muted)}
   .me{display:flex;align-items:center;gap:10px;padding:16px;border-bottom:1px solid var(--border)}
   .me .info{flex:1;min-width:0}.me .name{font-weight:600;color:var(--text)}
   .fp{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -192,6 +207,7 @@
      pushes the composer off screen. */
   @media (max-width:900px), (max-height:560px){
     .app{flex-direction:column;gap:0;padding:0;height:var(--app-h,100dvh);min-height:0;max-width:none}
+    .splitter{display:none}
     .sidebar,.chat{border-radius:0;border-left:none;border-right:none;box-shadow:none}
     .sidebar{width:100%;flex:1;min-height:0}
     .chat{display:none}
@@ -264,6 +280,8 @@
       <div class="profile-strip"><span class="lbl">Profil bezpieczeństwa</span><button class="chip" id="chip-profile" title="Profil — wkrótce">P1 · prywatny</button></div>
     </aside>
 
+    <div class="splitter" id="splitter" title="Przeciągnij, aby zmienić szerokość (dwuklik = reset)"></div>
+
     <main class="chat">
       <div class="empty" id="chat-empty">
         <div class="big">🌳</div>
@@ -276,7 +294,7 @@
           <div class="avatar" id="peer-avatar">··</div>
           <div class="who">
             <div class="name"><span id="peer-name">—</span></div>
-            <div class="sub"><span class="dot" id="peer-dot"></span> <span id="peer-status">poza pokojem</span></div>
+            <div class="sub"><span class="dot" id="peer-dot"></span> <span id="peer-status">poza pokojem</span> <span id="members-cluster" class="avatar-cluster" hidden></span></div>
           </div>
           <div class="badges">
             <span class="badge relay" id="transport-badge" title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi">⚪ Relay</span>
@@ -284,6 +302,7 @@
             <span class="badge rotate" title="Deterministyczna rotacja pokoju (00:00 UTC)">↻ <span id="rot">–:–:–</span></span>
           </div>
         </div>
+        <div class="members-pop" id="members-pop" hidden></div>
         <div class="messages" id="messages"></div>
         <button class="to-bottom" id="to-bottom" hidden title="Przejdź do najnowszej wiadomości">⬇<span class="unread" id="unread" hidden>0</span></button>
         <div class="typing" id="typing-ind"></div>
