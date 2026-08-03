@@ -527,8 +527,11 @@ async function main() {
 
     for (const [b, handle] of [[A, 'sim-a'], [B, 'sim-b']] as const) {
       await b.waitFor('login form', `return !!document.getElementById('go-soft')`)
-      if (process.env.RELAY_NODE) // run the whole test over a chosen node (e.g. bs2) instead of bs1
-        await b.eval(`localStorage.setItem('ec-nodes', JSON.stringify([{name:'test', addr:${JSON.stringify(process.env.RELAY_NODE)}, enabled:true}])); return 1`)
+      // RELAY_NODE forces both browsers onto one node; RELAY_A / RELAY_B put each on
+      // its own node (mesh test: do A on bs1 and B on bs2 meet through the --peers bridge?).
+      const relay = (b === A ? process.env.RELAY_A : process.env.RELAY_B) ?? process.env.RELAY_NODE
+      if (relay)
+        await b.eval(`localStorage.setItem('ec-nodes', JSON.stringify([{name:'test', addr:${JSON.stringify(relay)}, enabled:true}])); return 1`)
       await b.eval(`(document.getElementById('handle')).value = ${JSON.stringify(handle)}; document.getElementById('go-soft').click();`)
       await b.waitFor('app shell', `return document.getElementById('app') && !document.getElementById('app').hidden`)
     }

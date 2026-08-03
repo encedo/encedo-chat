@@ -15,7 +15,6 @@
 
 import { createLibp2p } from 'libp2p'
 import { webSockets } from '@libp2p/websockets'
-import { all } from '@libp2p/websockets/filters'
 import { noise } from '@chainsafe/libp2p-noise'
 import { yamux } from '@chainsafe/libp2p-yamux'
 import { circuitRelayServer } from '@libp2p/circuit-relay-v2'
@@ -60,7 +59,12 @@ console.log(`\n🔑 Pass: "${PASS}" → PeerId: ${peerId.toString()}`)
 const relay = await createLibp2p({
   privateKey: privKey,
   addresses: { listen: [`/ip4/0.0.0.0/tcp/${PORT}/ws`] },
-  transports: [webSockets({ filter: all })],
+  // Keep any ws/wss multiaddr INCLUDING the `/http-path/%2Frelay/` form the
+  // production nodes advertise (WSS via nginx). The default `all` filter rejects
+  // http-path when DIALING, so `--peers /dns4/bs1…/wss/http-path/…` failed with
+  // NoValidAddressesError — the relays never connected and the mesh never bridged.
+  // Same fix as the client's net/peer.ts.
+  transports: [webSockets({ filter: (addrs) => addrs.filter((ma) => /\/(wss?)(\/|$)/.test(ma.toString())) })],
   connectionEncrypters: [noise()],
   streamMuxers: [yamux()],
   connectionGater: { denyDialMultiaddr: () => false },
