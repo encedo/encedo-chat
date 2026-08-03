@@ -839,13 +839,16 @@ async function main() {
     const groupSent = await A.eval<boolean>(`return document.getElementById('messages').textContent.includes('wysłano') && !document.getElementById('messages').textContent.includes('wysyłam')`)
     if (!groupSent) throw new Error('a group message should show "wysłano", not hang on "wysyłam"')
     step('a sent group message reads "wysłano" (no perpetual "wysyłam")')
-    if (process.env.SHOT) { // capture the group view (participant cluster + popover) at desktop width
+    if (process.env.SHOT) { // capture the group view + Network tab at desktop width
+      const dir = process.env.SHOT_DIR ?? '/tmp'
       await A.resize(1400, 860)
       await A.eval(`document.getElementById('members-cluster')?.click(); return 1`)
       await sleep(400)
-      const shot = `${process.env.SHOT_DIR ?? '/tmp'}/group-view.png`
-      await A.screenshot(shot)
-      step(`screenshot → ${shot}`)
+      await A.screenshot(`${dir}/group-view.png`)
+      await A.eval(`document.getElementById('members-pop').hidden = true; document.getElementById('tab-network').click(); return 1`)
+      await sleep(2700) // let a refresh tick populate the status
+      await A.screenshot(`${dir}/network-view.png`)
+      step(`screenshots → ${dir}/{group-view,network-view}.png`)
     }
 
     scenario('a SECOND group also works (not just the first)')

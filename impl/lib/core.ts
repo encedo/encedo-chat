@@ -257,6 +257,17 @@ export interface OpenOpts extends ChatOpts {
   onSessionTakenOver?: (byPeer: string) => void
 }
 export type LinkState = 'online' | 'reconnecting' | 'offline'
+
+/** A read-only snapshot of the transport, for the Network tab. */
+export interface NetStatus {
+  transport: 'libp2p' | 'mqtt'
+  relay: string      // relay multiaddr (libp2p) or broker url (mqtt)
+  self: string       // our ephemeral PeerId
+  link: LinkState
+  connected: boolean // at least one live connection
+  peers: number      // live connections
+  topics: string[]   // topics we are subscribed to (pair + self + groups)
+}
 export interface Conversation {
   peerId: string
   topic: string
@@ -322,6 +333,8 @@ export interface ClientSession {
    * forces a hang-up and a fresh dial, because that zombie is still there.
    */
   setOffline(offline: boolean): void
+  /** A read-only transport snapshot for the Network tab (relay, link, topics…). */
+  netStatus(): NetStatus
   /** Stop every room and the transport. */
   close(): Promise<void>
 }
@@ -605,6 +618,13 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       for (const c of contacts) await startWatch(c)
     },
     unwatch(pub: string) { stopWatch(pub) },
+    netStatus() {
+      let topics: string[] = []
+      try { topics = [...(node.services?.pubsub?.getTopics?.() ?? [])] } catch {}
+      let peers = 0
+      try { peers = node.getConnections().length } catch {}
+      return { transport: viaMqtt ? 'mqtt' : 'libp2p', relay: viaMqtt ? (opts.broker ?? '') : opts.relay, self, link, connected: connected(), peers, topics }
+    },
     groups,
     async openGroup(gidHex: string, handlers: GroupRoomOpts) {
       const gs = groups.session(gidHex)

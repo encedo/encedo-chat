@@ -466,8 +466,35 @@ for (const [tab, pane] of [['tab-contacts', 'contacts'], ['tab-groups', 'groups'
     for (const t of ['tab-contacts', 'tab-groups', 'tab-network']) $(t).classList.toggle('active', t === tab)
     for (const p of ['contacts', 'groups', 'network']) $('pane-' + p).hidden = (p !== pane)
     if (pane === 'groups') renderGroups()
+    if (pane === 'network') startNetwork(); else stopNetwork()
   })
 }
+
+// ---- Network tab: a live, read-only view of the transport ----
+let netTimer: any = null
+function renderNetwork() {
+  const pane = $('pane-network'); if (!pane) return
+  if (!client) { pane.innerHTML = '<div class="pane-label">Brak sesji — zaloguj się.</div>'; return }
+  const s = client.netStatus()
+  const relayHost = (s.relay.match(/dns4\/([^/]+)/) ?? s.relay.match(/\/\/([^/:]+)/) ?? [, s.relay.slice(0, 40)])[1]
+  const relayPeer = (s.relay.match(/p2p\/([^/]+)/) ?? [, ''])[1]
+  const groupTopics = new Set([...groupsUI.values()].map((g) => g.room?.topic).filter(Boolean))
+  const gCount = s.topics.filter((t) => groupTopics.has(t)).length
+  const online = s.link === 'online' && s.connected
+  const linkTxt = online ? 'połączony' : s.link === 'reconnecting' ? 'wznawiam…' : s.link === 'offline' ? 'offline' : 'łączę…'
+  const linkCls = online ? 'ok' : s.link === 'reconnecting' ? 'away' : 'bad'
+  pane.innerHTML = `<div class="net-card">
+    <div class="net-row"><span class="k">Status</span><span class="v"><span class="dot ${linkCls}"></span> ${linkTxt}${s.peers ? ` · ${s.peers} poł.` : ''}</span></div>
+    <div class="net-row"><span class="k">Transport</span><span class="v">${escapeHtml(s.transport)}</span></div>
+    <div class="net-row"><span class="k">Węzeł (relay)</span><span class="v" title="${escapeHtml(s.relay)}">${escapeHtml(relayHost)}</span></div>
+    ${relayPeer ? `<div class="net-row"><span class="k">PeerId węzła</span><span class="v mono">${escapeHtml(relayPeer.slice(0, 14))}…</span></div>` : ''}
+    <div class="net-row"><span class="k">Twój PeerId</span><span class="v mono">${escapeHtml(s.self.slice(0, 14))}…</span></div>
+    <div class="net-row"><span class="k">Topiki</span><span class="v">${s.topics.length} <span class="net-sub">(grupy: ${gCount} · pary/self: ${s.topics.length - gCount})</span></span></div>
+  </div>
+  <div class="net-note">Wszystkie topiki na jednym połączeniu. Węzeł tylko do odczytu — edytowalna lista węzłów w oknie logowania (wkrótce).</div>`
+}
+function startNetwork() { renderNetwork(); clearInterval(netTimer); netTimer = setInterval(renderNetwork, 2500) }
+function stopNetwork() { clearInterval(netTimer); netTimer = null }
 
 // ---- chat ----
 const msgEls = new Map<string, HTMLElement>() // msg id → its reactions container (both directions share the id)
