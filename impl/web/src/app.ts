@@ -734,7 +734,7 @@ function ensureNetworkShell() {
   if ($('net-live')) return
   $('pane-network').innerHTML = `<div id="net-live"></div>
     <div class="nodes-panel net-nodes">
-      <div class="nodes-head"><span>Węzły sieci</span> <button class="node-add" id="net-node-add" type="button">+ dodaj</button></div>
+      <div class="nodes-head"><span>${tr('Węzły sieci')}</span> <button class="node-add" id="net-node-add" type="button">${tr('+ dodaj')}</button></div>
       <div id="net-nodes-list"></div>
       <div class="net-note" id="net-nodes-note">${NODES_NOTE}</div>
     </div>`
@@ -768,23 +768,23 @@ function renderNetwork() {
   const candidates = chosenRelays()
   const isFailover = candidates.length > 1 && s.relay !== candidates[0]
   const nodesRow = candidates.length > 1
-    ? `<div class="net-row wrap"><span class="k">Lista węzłów</span><span class="v net-nodes chips">${candidates.map((a) => {
+    ? `<div class="net-row wrap"><span class="k">${tr('Lista węzłów')}</span><span class="v net-nodes chips">${candidates.map((a) => {
         const act = a === s.relay
         return `<span class="net-node${act ? ' act' : ''}" title="${escapeHtml(a)}">${act ? '●' : '○'} ${escapeHtml(nodeName(a))}</span>`
       }).join('')}</span></div>`
     : ''
   $('net-live').innerHTML = `<div class="net-card">
-    <div class="net-row"><span class="k">Status</span><span class="v"><span class="dot ${linkCls}"></span> ${linkTxt}${s.peers ? ` · ${tr('{n} poł.', { n: s.peers })}` : ''}</span></div>
-    <div class="net-row"><span class="k">Transport</span><span class="v">${escapeHtml(s.transport)}${WEBRTC_OFF ? ' <span class="net-tag">bez WebRTC</span>' : ''}</span></div>
-    <div class="net-row"><span class="k">Węzeł (relay)</span><span class="v" title="${escapeHtml(s.relay)}">${escapeHtml(relayHost)}${isFailover ? ' <span class="net-tag">failover</span>' : ''}</span></div>
+    <div class="net-row"><span class="k">${tr('Status')}</span><span class="v"><span class="dot ${linkCls}"></span> ${linkTxt}${s.peers ? ` · ${tr('{n} poł.', { n: s.peers })}` : ''}</span></div>
+    <div class="net-row"><span class="k">${tr('Transport')}</span><span class="v">${escapeHtml(s.transport)}${WEBRTC_OFF ? ' <span class="net-tag">' + tr('bez WebRTC') + '</span>' : ''}</span></div>
+    <div class="net-row"><span class="k">${tr('Węzeł (relay)')}</span><span class="v" title="${escapeHtml(s.relay)}">${escapeHtml(relayHost)}${isFailover ? ' <span class="net-tag">' + tr('failover') + '</span>' : ''}</span></div>
     ${nodesRow}
     ${relayPeer ? `<div class="net-row"><span class="k">${tr('PeerId węzła')}</span><span class="v mono">${escapeHtml(relayPeer.slice(0, 14))}…</span></div>` : ''}
-    <div class="net-row"><span class="k">Twój PeerId</span><span class="v mono">${escapeHtml(s.self.slice(0, 14))}…</span></div>
+    <div class="net-row"><span class="k">${tr('Twój PeerId')}</span><span class="v mono">${escapeHtml(s.self.slice(0, 14))}…</span></div>
     ${capReport ? `<div class="net-row wrap"><span class="k">${tr('Platforma')}</span><span class="v chips" title="${escapeHtml(capReport.ua)}">`
       + capReport.caps.filter((c) => c.required || !c.ok).map((c) =>
           `<span class="net-node${c.ok ? ' act' : ''}">${c.ok ? '●' : c.required ? '✖' : '○'} ${escapeHtml(c.id)}</span>`).join('')
       + `</span></div>` : ''}
-    <div class="net-row"><span class="k">Topiki</span><span class="v">${s.topics.length} <span class="net-sub">(grupy: ${gCount} · pary/self: ${s.topics.length - gCount})</span></span></div>
+    <div class="net-row"><span class="k">${tr('Topiki')}</span><span class="v">${s.topics.length} <span class="net-sub">(grupy: ${gCount} · pary/self: ${s.topics.length - gCount})</span></span></div>
   </div>
   <div class="net-note">${candidates.length > 1
     ? tr('Failover po liście węzłów: gdy pierwszy węzeł nie odpowiada, sesja przechodzi na następny. Węzły są zmeshowane, więc przełączenie nie dzieli rozmówców.')
@@ -1012,8 +1012,8 @@ void (async () => {
   if (rep.ok) return
   const card = document.querySelector('.login-card')
   if (!card) return
-  card.innerHTML = `<h1>Ta przeglądarka nie wystarczy</h1>`
-    + `<div class="sub">Encedo Chat potrzebuje kilku funkcji, których tu brakuje. Bez nich nie da się nawet ustalić wspólnego pokoju, więc logowanie jest wyłączone.</div>`
+  card.innerHTML = `<h1>${escapeHtml(tr('Ta przeglądarka nie wystarczy'))}</h1>`
+    + `<div class="sub">${escapeHtml(tr('Encedo Chat potrzebuje kilku funkcji, których tu brakuje. Bez nich nie da się nawet ustalić wspólnego pokoju, więc logowanie jest wyłączone.'))}</div>`
     + rep.missing.map((m) => `<div class="msg err" style="display:block">${escapeHtml(m.id)} — ${escapeHtml(m.note ?? '')}</div>`).join('')
     + `<div class="nodes-hint" style="margin-top:14px">${escapeHtml(rep.ua)}</div>`
 })()
@@ -1300,18 +1300,26 @@ let popAnchor: HTMLElement | null = null
  * `activeGid` there would remove a member from the wrong group.
  */
 let popMembersGid: string | null = null
-function openMembersPopFor(gu: GroupUI, anchor: HTMLElement) {
+function openMembersPopFor(gu: GroupUI, anchor: HTMLElement, ev?: MouseEvent) {
   const pop = $('members-pop')
   if (!pop.hidden && popAnchor === anchor) { pop.hidden = true; popAnchor = null; return } // toggle
   popMembersGid = gu.gid
   renderMembersPop(gu)
-  // Fixed, against the anchor's rect — the popover is body-level, so there is no
-  // positioned ancestor to be absolute inside, and both openers behave the same.
+  // Open where the pointer is, not where the row starts. The anchor is a whole
+  // sidebar row, so its rect pinned the popover to the far left however far
+  // right the button actually was. A click gives a real position; touch and
+  // keyboard do not, and fall back to the button's own rect.
   const r = anchor.getBoundingClientRect()
-  pop.hidden = false // measure it: clamping needs its real height, not a guess
-  const h = Math.min(pop.offsetHeight || 300, 300)
-  pop.style.top = `${Math.max(8, Math.min(r.bottom + 6, window.innerHeight - h - 8))}px`
-  pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 340))}px`
+  const btn = (ev?.target as HTMLElement | undefined)?.getBoundingClientRect?.()
+  pop.hidden = false // measure first: clamping needs the real size, not a guess
+  const w = Math.min(pop.offsetWidth || 260, window.innerWidth - 16)
+  const h = Math.min(pop.offsetHeight || 300, window.innerHeight - 16)
+  const x = ev?.clientX ?? btn?.left ?? r.left
+  const y = ev?.clientY ?? btn?.bottom ?? r.bottom
+  // Centred under the pointer, then pulled back inside the viewport — the clamp
+  // is what keeps it on screen on a phone, where it is nearly as wide as the app.
+  pop.style.left = `${Math.max(8, Math.min(x - w / 2, window.innerWidth - w - 8))}px`
+  pop.style.top = `${Math.max(8, Math.min(y + 8, window.innerHeight - h - 8))}px`
   popAnchor = anchor
 }
 
@@ -1433,7 +1441,7 @@ function renderGroups() {
       if (d.mem) {
         e.stopPropagation()
         // Anchor the shared popover next to the row it was opened from.
-        openMembersPopFor(gu, b)
+        openMembersPopFor(gu, b, e as MouseEvent)
         return
       }
       if (e.target.classList.contains('c-x')) {
@@ -1571,7 +1579,7 @@ async function activateGroup(gid: string) {
   // Participant cluster in the header → click to see the full member list.
   const cluster = $('members-cluster'); cluster.hidden = false; cluster.innerHTML = avatarClusterHTML(gu.members)
   cluster.title = tr('Uczestnicy grupy')
-  cluster.onclick = (e: any) => { e.stopPropagation(); openMembersPopFor(gu, cluster) }
+  cluster.onclick = (e: any) => { e.stopPropagation(); openMembersPopFor(gu, cluster, e as MouseEvent) }
   $('members-pop').hidden = true
   $('e2e-badge').className = 'badge direct'; $('e2e-badge').textContent = tr('🔐 Szyfrowana')
   $('e2e-badge').title = tr('Grupa — Sender Keys + per-recipient HMAC (deniable, §8)')
