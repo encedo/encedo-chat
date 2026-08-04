@@ -296,13 +296,14 @@
   /* A short screen has no room for a wrapped header: keep it on one line. */
   @media (max-height:560px){
     .chat-head{flex-wrap:nowrap;overflow-x:auto;padding:8px 12px}
-    /* Three badges (security, transport, rotation) plus a name do not fit a phone
-       header. Hiding them would drop the security state — the one thing that
-       must stay visible — so the words collapse and the glyph carries it. The
-       full wording stays in the tooltip. */
+    /* Three badges plus a name do not fit a phone header, so the WORDS collapse
+       and the glyph carries the state — hiding a badge outright would drop the
+       security state, which must stay visible. The rotation badge keeps its
+       countdown: it is the one whose value IS the information, and the two
+       collapsed neighbours leave it the room. Full wording stays in tooltips. */
     .chat-head .badge{white-space:nowrap;padding:4px 8px;gap:0}
     .chat-head .badge .b-txt{display:none}
-    .chat-head .badge.rotate{display:none}
+    .chat-head .badge.rotate{gap:4px;font-size:11px}
   }
 
   /* Touch: no hover, so the reaction bar is revealed by TAPPING the bubble
