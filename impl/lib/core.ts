@@ -340,6 +340,18 @@ export interface ClientSession {
    * forces a hang-up and a fresh dial, because that zombie is still there.
    */
   setOffline(offline: boolean): void
+  /**
+   * Replace the failover candidate list on a LIVE session (libp2p only) — the
+   * node editor is reachable after login, not just on the way in.
+   *
+   * A running connection is not torn down for a reorder: the new order simply
+   * decides the next sweep, so preferring a different primary costs nothing
+   * until something reconnects anyway. The exception is the node we are
+   * actually on being dropped from the list — staying on a node the user just
+   * removed is the one outcome that would make the editor a lie — so that case
+   * hangs up and re-dials immediately.
+   */
+  setRelays(list: string[]): void
   /** A read-only transport snapshot for the Network tab (relay, link, topics…). */
   netStatus(): NetStatus
   /** Stop every room and the transport. */
@@ -438,7 +450,9 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // Relay candidates for failover (libp2p only). `relays` first, else the single
   // `relay`. `activeRelay` tracks whichever we last connected through — netStatus
   // reports it, and the app shows which node is live.
-  const candidates = (opts.relays?.length ? opts.relays : [opts.relay]).filter(Boolean)
+  // `let`, not `const`: the node editor can replace this on a live session
+  // (`setRelays`). Every dial reads it fresh, so a change lands on the next sweep.
+  let candidates = (opts.relays?.length ? opts.relays : [opts.relay]).filter(Boolean)
   if (!viaMqtt && candidates.length === 0) throw new Error('startSession: no relay to dial')
   let activeRelay = candidates[0]
   const node: any = viaMqtt
@@ -685,6 +699,20 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       for (const c of contacts) await startWatch(c)
     },
     unwatch(pub: string) { stopWatch(pub) },
+    setRelays(list: string[]) {
+      if (viaMqtt) return
+      const next = list.filter(Boolean)
+      if (!next.length) return // an empty list would leave nothing to dial
+      candidates = next
+      log(`node list updated (${next.length}): ${next.map((a) => a.match(/\/dns[46]\/([^/]+)/)?.[1] ?? a.slice(0, 24)).join(', ')}`)
+      // Only being dropped from the list forces a switch. A reorder is a
+      // preference for the next sweep, and hanging up a healthy connection to
+      // honour it would cost a re-handshake for nothing.
+      if (!next.includes(activeRelay)) {
+        log('the active node is no longer on the list — re-dialing')
+        void reconnect(true)
+      }
+    },
     netStatus() {
       let topics: string[] = []
       try { topics = [...(node.services?.pubsub?.getTopics?.() ?? [])] } catch {}
