@@ -544,7 +544,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     if (viaMqtt) return node.reconnect()
     const connectedTo = await failoverDial(candidates, (addr, signal) => dial(node, addr, { signal }))
     if (connectedTo !== activeRelay) {
-      log(`failover: łączę przez ${connectedTo.slice(0, 46)}…`)
+      log(`failover: connecting via ${connectedTo.slice(0, 46)}…`)
       activeRelay = connectedTo
       opts.onRelay?.(connectedTo)
     }

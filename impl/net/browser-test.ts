@@ -43,7 +43,7 @@ import { join, extname } from 'node:path'
  */
 const DIST = join(import.meta.dirname, '..', 'web', 'dist')
 const LOCAL_PORT = 9333
-const APP_URL = process.env.APP_URL ?? `http://127.0.0.1:${LOCAL_PORT}/?eh2=1&debug=1`
+const APP_URL = process.env.APP_URL ?? `http://127.0.0.1:${LOCAL_PORT}/?eh2=1&debug=1&lang=pl`
 const SERVE_LOCAL = !process.env.APP_URL
 
 const MIME: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.map': 'application/json' }

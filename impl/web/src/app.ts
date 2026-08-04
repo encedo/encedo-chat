@@ -14,6 +14,10 @@
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
 import type { GkBackend } from '../../lib/group.ts'
+// `t` is taken: this file uses it for text, topics, timers and DOM nodes, and a
+// local shadowing the translator fails at runtime with "t is not a function" —
+// which is exactly how it failed once. `tr` cannot collide.
+import { t as tr, setLocale, getLocale, applyDom } from './i18n.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
@@ -140,7 +144,7 @@ function paintStatus() {
   const dot = $('peer-dot'), txt = $('peer-status')
   if (linkState !== 'online') {
     dot.className = 'dot bad'
-    txt.textContent = linkState === 'reconnecting' ? 'wznawiam połączenie…' : 'brak połączenia z przekaźnikiem'
+    txt.textContent = linkState === 'reconnecting' ? tr('wznawiam połączenie…') : tr('brak połączenia z przekaźnikiem')
     return
   }
   if (activeGid) {
@@ -149,12 +153,12 @@ function paintStatus() {
     // — activeRoom() is null for a group — so the group header flickered "łączę…".
     const gu = groupsUI.get(activeGid)
     dot.className = 'dot ok'
-    txt.textContent = gu ? `${gu.members.length} członków` : ''
+    txt.textContent = gu ? tr('{n} członków', { n: gu.members.length }) : ''
     return
   }
   const lp = activeRoom()?.lastPresence
   dot.className = 'dot ' + (lp === 'join' || lp === 'active' ? 'ok' : lp === 'away' || lp === 'quiet' ? 'away' : '')
-  txt.textContent = activeRoom()?.peerLabel ?? 'łączę…'
+  txt.textContent = activeRoom()?.peerLabel ?? tr('łączę…')
 }
 let rotTimer: any = null
 
@@ -179,7 +183,7 @@ async function refreshStatus() {
   dot.className = 'dot'; hint.textContent = ''
   if (!url) return
   try { const v: any = await new HEM(url).getVersion(); dot.className = 'dot ok'; hint.textContent = `HEM ok — fw ${v?.fwv ?? '?'}` }
-  catch { dot.className = 'dot bad'; hint.textContent = 'HEM nieosiągalny (adres / CORS)' }
+  catch { dot.className = 'dot bad'; hint.textContent = tr('HEM nieosiągalny (adres / CORS)') }
 }
 $('hsm').addEventListener('blur', refreshStatus)
 
@@ -189,13 +193,13 @@ $('toggle').addEventListener('click', () => {
   const reg = mode === 'register'
   $('reg-handle-wrap').hidden = !reg
   $('go').textContent = reg ? 'Zarejestruj' : 'Zaloguj'
-  $('toggle-pre').textContent = reg ? 'Masz już konto?' : 'Nie masz konta?'
-  $('toggle').textContent = reg ? 'Zaloguj' : 'Zarejestruj tożsamość'
+  $('toggle-pre').textContent = reg ? tr('Masz już konto?') : 'Nie masz konta?'
+  $('toggle').textContent = reg ? 'Zaloguj' : tr('Zarejestruj tożsamość')
   clr('msg')
 })
 $('go').addEventListener('click', async () => {
   const url = val('hsm'), pass = val('pass')
-  if (!url || !pass) { setMsg('msg', 'Podaj adres HEM i hasło.', 'err'); return }
+  if (!url || !pass) { setMsg('msg', tr('Podaj adres HEM i hasło.'), 'err'); return }
   const btn = $('go') as HTMLButtonElement
   btn.disabled = true; btn.textContent = '…'; clr('msg')
   try {
@@ -211,13 +215,13 @@ $('go').addEventListener('click', async () => {
     } else {
       const listTok = await hem.authorizePassword(pass, 'keymgmt:list')
       const keys: any[] = await hem.searchKeys(listTok, 'ETSEIC:self,')
-      if (!keys.length) { setMsg('msg', 'Brak tożsamości czatu na tym HEM — zarejestruj.', 'err'); return }
+      if (!keys.length) { setMsg('msg', tr('Brak tożsamości czatu na tym HEM — zarejestruj.'), 'err'); return }
       const key = keys[0]; const handle = parseHandle(key.description)
       const use = await hem.authorizePassword(null, `keymgmt:use:${key.kid}`)
       const { pubkey } = await hem.getPubKey(use, key.kid)
       await enterApp(hemIdentityFrom(hem, key.kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM', key.kid, hemGkBackend(hem, key.kid))
     }
-  } catch (e: any) { setMsg('msg', 'Błąd: ' + (e?.message ?? e), 'err') }
+  } catch (e: any) { setMsg('msg', tr('Błąd: ') + (e?.message ?? e), 'err') }
   finally { const b = $('go') as HTMLButtonElement; b.disabled = false; b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj' }
 })
 $('pass').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') ($('go') as HTMLButtonElement).click() })
@@ -236,7 +240,7 @@ $('go-soft').addEventListener('click', async () => {
     const key = 'ec-soft-id-' + handle
     const id = await browserSoftwareIdentity(handle, () => localStorage.getItem(key), (v) => localStorage.setItem(key, v))
     await enterApp(id, localOnlyManager(makeLocalBook(id.handle, localStorage)), 'Software · dev')
-  } catch (e: any) { setMsg('msg', 'Błąd tożsamości software: ' + (e?.message ?? e), 'err') }
+  } catch (e: any) { setMsg('msg', tr('Błąd tożsamości software: ') + (e?.message ?? e), 'err') }
 })
 
 // ---- the node editor: ONE implementation, used at login and after it -------
@@ -251,10 +255,10 @@ $('go-soft').addEventListener('click', async () => {
 function nodeRowsHTML(list: NodeEntry[]): string {
   return list.map((n, i) =>
     `<label class="node-row"><input type="checkbox" data-i="${i}" ${n.enabled ? 'checked' : ''}>`
-    + `<span class="n-name" title="${escapeHtml(n.addr)}">${escapeHtml(n.name)}${i === 0 ? ' <span class="n-first">1. wybór</span>' : ''}</span>`
-    + `<span class="n-up${i === 0 ? ' off' : ''}" data-up="${i}" title="Wyżej (wyżej = wcześniej wybierany)">↑</span>`
-    + `<span class="n-dn${i === list.length - 1 ? ' off' : ''}" data-dn="${i}" title="Niżej">↓</span>`
-    + `<span class="n-x" data-rm="${i}" title="Usuń">×</span></label>`).join('')
+    + `<span class="n-name" title="${escapeHtml(n.addr)}">${escapeHtml(n.name)}${i === 0 ? ' <span class="n-first">' + tr('1. wybór') + '</span>' : ''}</span>`
+    + `<span class="n-up${i === 0 ? ' off' : ''}" data-up="${i}" title="${tr('Wyżej (wyżej = wcześniej wybierany)')}">↑</span>`
+    + `<span class="n-dn${i === list.length - 1 ? ' off' : ''}" data-dn="${i}" title="${tr('Niżej')}">↓</span>`
+    + `<span class="n-x" data-rm="${i}" title="${tr('Usuń')}">×</span></label>`).join('')
 }
 /**
  * Bind one editor. `warn` reports refusals, `onChange` is what the caller does
@@ -266,7 +270,7 @@ function bindNodeEditor(listId: string, addId: string, warn: (t: string) => void
   $(listId).addEventListener('change', (e: any) => {
     const i = e.target?.dataset?.i; if (i == null) return
     const list = loadNodes(); list[+i].enabled = e.target.checked
-    if (!list.some((n) => n.enabled)) { list[+i].enabled = true; e.target.checked = true; warn('Przynajmniej jeden węzeł musi być aktywny.'); return }
+    if (!list.some((n) => n.enabled)) { list[+i].enabled = true; e.target.checked = true; warn(tr('Przynajmniej jeden węzeł musi być aktywny.')); return }
     saveNodes(list); onChange()
   })
   $(listId).addEventListener('click', (e: any) => {
@@ -276,7 +280,7 @@ function bindNodeEditor(listId: string, addId: string, warn: (t: string) => void
     e.preventDefault() // the row is a <label>: ANY click inside it toggles the checkbox
     const list = loadNodes()
     if (rm != null) {
-      if (list.length <= 1) { warn('Musi zostać co najmniej jeden węzeł.'); return }
+      if (list.length <= 1) { warn(tr('Musi zostać co najmniej jeden węzeł.')); return }
       list.splice(+rm, 1); if (!list.some((n) => n.enabled)) list[0].enabled = true
     } else {
       const i = +(up ?? dn), j = up != null ? i - 1 : i + 1
@@ -288,8 +292,8 @@ function bindNodeEditor(listId: string, addId: string, warn: (t: string) => void
   $(addId).addEventListener('click', () => {
     const addr = (prompt('Multiaddr węzła (np. /dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3Koo…):') || '').trim()
     if (!addr) return
-    if (!addr.startsWith('/') || !addr.includes('/p2p/')) { warn('To nie wygląda na multiaddr (…/p2p/<PeerId>).'); return }
-    const host = addr.match(/\/dns[46]\/([^/]+)/)?.[1] ?? addr.match(/\/ip[46]\/([^/]+)/)?.[1] ?? 'węzeł'
+    if (!addr.startsWith('/') || !addr.includes('/p2p/')) { warn(tr('To nie wygląda na multiaddr (…/p2p/<PeerId>).')); return }
+    const host = addr.match(/\/dns[46]\/([^/]+)/)?.[1] ?? addr.match(/\/ip[46]\/([^/]+)/)?.[1] ?? tr('węzeł')
     const name = (prompt('Nazwa węzła:', host) || host).trim()
     const list = loadNodes(); list.push({ name, addr, enabled: true }); saveNodes(list); redraw(); onChange()
   })
@@ -342,7 +346,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
       const name = loadNodes().find((n) => n.addr === addr)?.name
         ?? (addr.match(/dns4\/([^/]+)/) ?? addr.match(/ip6\/([^/]+)/) ?? [, addr.slice(0, 24)])[1]
       const primary = chosenRelays()[0]
-      toast(addr === primary ? `Wróciłem na węzeł ${name}` : `Przełączono na węzeł ${name} (poprzedni niedostępny)`)
+      toast(addr === primary ? tr('Wróciłem na węzeł {name}', { name }) : tr('Przełączono na węzeł {name} (poprzedni niedostępny)', { name }))
       renderNetwork()
     },
     onSessionTakenOver: () => {
@@ -353,12 +357,12 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
       for (const r of rooms.values()) { r.conv = null; r.inRoom = false }
       $('messages').innerHTML = ''
       msgEls.clear(); stateEls.clear(); setTyping(false)
-      appendMsg('sys', 'Wykryto drugie okno zalogowane na tę samą tożsamość.'
-        + ' Obie sesje zostały zamknięte — jedna tożsamość, jedna aktywna sesja.'
-        + ' Zamknij nadmiarową kartę i odśwież tę, w której chcesz rozmawiać.')
+      appendMsg('sys', tr('Wykryto drugie okno zalogowane na tę samą tożsamość.')
+        + tr(' Obie sesje zostały zamknięte — jedna tożsamość, jedna aktywna sesja.')
+        + tr(' Zamknij nadmiarową kartę i odśwież tę, w której chcesz rozmawiać.'))
       linkState = 'offline'
       paintStatus()
-      $('peer-status').textContent = 'sesja zamknięta (duplikat)'
+      $('peer-status').textContent = tr('sesja zamknięta (duplikat)')
     },
   })
   clientReady.then((c) => { client = c; void restoreGroups() }, (e: any) => {
@@ -372,8 +376,8 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   $('me-fp').textContent = '🔑 ' + fp
   $('me-fp').title = kid ? `KID ${kid} · dwuklik = kopiuj klucz publiczny` : 'Dwuklik = kopiuj klucz publiczny'
   $('sess-id').textContent = sourceLabel + ' · ' + fp
-  $('sess-kid').textContent = kid ?? '— (klucz w przeglądarce)'
-  $('sess-kid').title = kid ?? 'Tożsamość programowa — brak klucza w HSM'
+  $('sess-kid').textContent = kid ?? tr('— (klucz w przeglądarce)')
+  $('sess-kid').title = kid ?? tr('Tożsamość programowa — brak klucza w HSM')
   refreshContacts()
 }
 
@@ -430,7 +434,7 @@ async function syncPresence() {
       // A dot lights on the contact; the user switches when they want.
       const contact = contactsCache.find((x) => x.pub === p.pub)
       if (!contact || rooms.has(p.pub)) return
-      toast(`${contact.name} chce rozmawiać…`)
+      toast(tr('{name} chce rozmawiać…', { name: contact.name }))
       void openRoomFor(contact, false)
     },
   })
@@ -447,14 +451,14 @@ function renderContacts() {
   addBtn.addEventListener('click', () => openModal()); add.appendChild(addBtn); pane.appendChild(add)
   const filter = val('contact-search').toLowerCase()
   const list = contactsCache.filter((c) => !filter || c.name.toLowerCase().includes(filter))
-  if (!list.length) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = filter ? '(brak dopasowań)' : '(brak kontaktów — dodaj peera)'; pane.appendChild(e); return }
+  if (!list.length) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = filter ? tr('(brak dopasowań)') : tr('(brak kontaktów — dodaj peera)'); pane.appendChild(e); return }
   for (const c of list) {
     const room = rooms.get(c.pub)
     const inRoom = !!room?.inRoom
     const online = onlinePubs.has(c.pub)
     const unseen = room?.unseen ?? 0
     const dotTitle = inRoom ? 'W rozmowie' : online ? 'Online (widoczny na Waszym topicu)' : 'Offline'
-    const src = c.source === 'hem' ? { i: '🔒', t: 'W HEM (trwałe, przenośne)' } : { i: '💻', t: 'Lokalnie (ta przeglądarka)' }
+    const src = c.source === 'hem' ? { i: '🔒', t: tr('W HEM (trwałe, przenośne)') } : { i: '💻', t: tr('Lokalnie (ta przeglądarka)') }
     const b = document.createElement('button'); b.className = 'contact' + (activePub === c.pub ? ' active' : '') + (unseen ? ' unread' : '')
     // The unread pill is the whole point of the background model: a message that
     // arrived while you were elsewhere lights here instead of yanking the view.
@@ -462,11 +466,11 @@ function renderContacts() {
     b.innerHTML = `<span class="dot ${inRoom || online ? 'ok' : ''}" title="${dotTitle}"></span><div class="avatar">${escapeHtml(initials(c.name))}</div>`
       + `<div class="c-info"><div class="c-name">${escapeHtml(c.name)} <span class="src" title="${src.t}">${src.i}</span></div>`
       + `<div class="c-sub" title="${escapeHtml(c.kid ? `KID ${c.kid}` : c.pub)}">🔑 ${escapeHtml(fpCache.get(c.pub) ?? '…')}${c.kid ? ' · KID ' + escapeHtml(shortKid(c.kid)) : ''}</div></div>`
-      + pill + `<button class="c-edit" title="Zmień nazwę">✎</button><span class="c-x" title="Usuń">×</span>`
+      + pill + `<button class="c-edit" title="${tr('Zmień nazwę')}">✎</button><span class="c-x" title="${tr('Usuń')}">×</span>`
     b.addEventListener('click', async (e: any) => {
       if (e.target.classList.contains('c-edit')) {
         e.stopPropagation()
-        const name = await promptName('Zmień nazwę kontaktu', `Widoczna tylko u Ciebie — ${c.name} nie zostanie o niej powiadomiony.`, c.name)
+        const name = await promptName(tr('Zmień nazwę kontaktu'), `Widoczna tylko u Ciebie — ${c.name} nie zostanie o niej powiadomiony.`, c.name)
         if (name) await renameContact(c, name)
         return
       }
@@ -474,8 +478,8 @@ function renderContacts() {
         e.stopPropagation()
         // Deleting a contact tears down the conversation and, on a HEM, removes
         // the imported key — not something to do on a mis-tap next to the name.
-        if (!await ask('Usunąć kontakt?', `„${c.name}" zniknie z listy, rozmowa zostanie zamknięta`
-          + `${c.source === 'hem' ? ', a klucz kontaktu zostanie usunięty z HEM' : ''}. Historia rozmowy i tak nie jest przechowywana.`, 'Usuń')) return
+        if (!await ask(tr('Usunąć kontakt?'), tr('„{name}” zniknie z listy, rozmowa zostanie zamknięta', { name: c.name })
+          + `${c.source === 'hem' ? tr(', a klucz kontaktu zostanie usunięty z HEM') : ''}. Historia rozmowy i tak nie jest przechowywana.`, tr('Usuń'))) return
         await closeRoom(c.pub)
         if (session) { try { await session.book.remove(c) } catch (err: any) { toast('Błąd usuwania: ' + (err?.message ?? err)) } }
         await refreshContacts(); return
@@ -533,7 +537,7 @@ function promptName(title: string, sub: string, current: string, label = 'Nazwa'
     }
     const onSave = () => {
       const v = input.value.trim()
-      if (!v) { setMsg('rename-msg', 'Nazwa nie może być pusta.', 'err'); return }
+      if (!v) { setMsg('rename-msg', tr('Nazwa nie może być pusta.'), 'err'); return }
       done(v === current ? null : v) // unchanged is the same as cancelled
     }
     const onCancel = () => done(null)
@@ -575,20 +579,20 @@ $('add-cancel').addEventListener('click', closeModal)
 $('add-save').addEventListener('click', async () => {
   if (!session) return
   const name = val('add-name'), pub = val('add-pub')
-  if (!name || !pub) { setMsg('add-msg', 'Podaj nazwę i klucz.', 'err'); return }
-  try { if (Uint8Array.from(atob(pub), (c) => c.charCodeAt(0)).length !== 32) { setMsg('add-msg', 'Klucz nie wygląda na 32-bajtowy X25519 (base64).', 'err'); return } }
+  if (!name || !pub) { setMsg('add-msg', tr('Podaj nazwę i klucz.'), 'err'); return }
+  try { if (Uint8Array.from(atob(pub), (c) => c.charCodeAt(0)).length !== 32) { setMsg('add-msg', tr('Klucz nie wygląda na 32-bajtowy X25519 (base64).'), 'err'); return } }
   catch { setMsg('add-msg', 'Klucz nie jest poprawnym base64.', 'err'); return }
   const store = (document.querySelector('input[name="store"]:checked') as HTMLInputElement | null)?.value ?? 'hem'
   if (store === 'none') { closeModal(); void openRoomFor({ name, pub, source: 'local' }, true); return } // ephemeral — nothing saved (HEM nor localStorage)
   const persistent = store !== 'local'
-  const btn = $('add-save') as HTMLButtonElement; btn.disabled = true; btn.textContent = 'Zapisuję…'
+  const btn = $('add-save') as HTMLButtonElement; btn.disabled = true; btn.textContent = tr('Zapisuję…')
   try {
     const dup = contactsCache.find((c) => c.name === name)
     if (dup) await session.book.remove(dup)   // upsert: replace an existing peer of the same name (any source)
     await session.book.add(name, pub, persistent)
     await refreshContacts()
     closeModal()
-  } catch (e: any) { setMsg('add-msg', 'Błąd zapisu: ' + (e?.message ?? e), 'err') }
+  } catch (e: any) { setMsg('add-msg', tr('Błąd zapisu: ') + (e?.message ?? e), 'err') }
   finally { btn.disabled = false; btn.textContent = 'Zapisz' }
 })
 
@@ -600,6 +604,21 @@ $('chip-profile').addEventListener('click', openDrawer)
 $('btn-close-drawer').addEventListener('click', closeDrawer)
 $('scrim').addEventListener('click', () => { closeModal(); closeDrawer() })
 $('btn-logout').addEventListener('click', () => location.reload())
+
+// ---- language ------------------------------------------------------------
+// The static markup carries its Polish as default content, so the app is
+// readable before this runs and stays readable if it throws. `applyDom`
+// translates it in place; switching repaints it without a reload, because the
+// transport and every open ratchet would not survive one.
+{
+  const sel = $('lang-select') as HTMLSelectElement
+  if (sel) {
+    sel.value = getLocale()
+    sel.addEventListener('change', () => { setLocale(sel.value); renderContacts(); renderGroups() })
+  }
+  document.documentElement.lang = getLocale()
+  applyDom()
+}
 $('btn-wipeout').addEventListener('click', async () => {
   if (!confirm('Wipeout: skasować lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki?\n\nTego nie da się cofnąć — Twój klucz publiczny się zmieni, więc Ty i rozmówcy musicie wymienić się nowymi kluczami. Klucze w HSM (login HEM) zostają nietknięte.')) return
   // §10 WIPE — reset like a new machine. Tear the live session down first (leave
@@ -655,7 +674,7 @@ $('members-pop').addEventListener('click', (e: any) => {
   if (!gu) return
   const rm = (e.target as HTMLElement).closest('[data-rm]') as HTMLElement | null
   if (rm) { e.stopPropagation(); const pub = rm.getAttribute('data-rm')!
-    void changeMembers(gu.gid, gu.members.filter((m) => m.pub !== pub), `${memberName(pub)} usunięty z grupy`); return }
+    void changeMembers(gu.gid, gu.members.filter((m) => m.pub !== pub), tr('{name} usunięty z grupy', { name: memberName(pub) })); return }
   const tog = (e.target as HTMLElement).closest('[data-addmember]') as HTMLElement | null
   if (tog) { e.stopPropagation(); const list = $('members-pop').querySelector('.m-add-list') as HTMLElement | null; if (list) list.hidden = !list.hidden; return }
   const add = (e.target as HTMLElement).closest('[data-add-pub]') as HTMLElement | null
@@ -694,7 +713,7 @@ for (const [tab, pane] of [['tab-contacts', 'contacts'], ['tab-groups', 'groups'
 
 // ---- Network tab: a live view of the transport, plus the node editor -------
 let netTimer: any = null
-const NODES_NOTE = 'Kolejność decyduje o wyborze: pierwszy aktywny węzeł jest podstawowy, kolejne to zapas. Zmiany działają natychmiast — bez wylogowania.'
+const NODES_NOTE = tr('Kolejność decyduje o wyborze: pierwszy aktywny węzeł jest podstawowy, kolejne to zapas. Zmiany działają natychmiast — bez wylogowania.')
 /**
  * The pane is built ONCE and only its live half repainted. The editor below it
  * holds a checkbox, arrows and prompt-driven input, and `renderNetwork` runs
@@ -722,7 +741,7 @@ function ensureNetworkShell() {
 }
 function renderNetwork() {
   const pane = $('pane-network'); if (!pane) return
-  if (!client) { pane.innerHTML = '<div class="pane-label">Brak sesji — zaloguj się.</div>'; return }
+  if (!client) { pane.innerHTML = `<div class="pane-label">${tr('Brak sesji — zaloguj się.')}</div>`; return }
   ensureNetworkShell()
   const s = client.netStatus()
   const relayHost = (s.relay.match(/dns4\/([^/]+)/) ?? s.relay.match(/\/\/([^/:]+)/) ?? [, s.relay.slice(0, 40)])[1]
@@ -730,7 +749,7 @@ function renderNetwork() {
   const groupTopics = new Set([...groupsUI.values()].map((g) => g.room?.topic).filter(Boolean))
   const gCount = s.topics.filter((t) => groupTopics.has(t)).length
   const online = s.link === 'online' && s.connected
-  const linkTxt = online ? 'połączony' : s.link === 'reconnecting' ? 'wznawiam…' : s.link === 'offline' ? 'offline' : 'łączę…'
+  const linkTxt = online ? tr('połączony') : s.link === 'reconnecting' ? 'wznawiam…' : s.link === 'offline' ? 'offline' : tr('łączę…')
   const linkCls = online ? 'ok' : s.link === 'reconnecting' ? 'away' : 'bad'
   // Failover view (3b): the candidate node list, with the live one marked. A
   // failover is simply "the active relay is not the first choice".
@@ -745,17 +764,17 @@ function renderNetwork() {
       }).join('')}</span></div>`
     : ''
   $('net-live').innerHTML = `<div class="net-card">
-    <div class="net-row"><span class="k">Status</span><span class="v"><span class="dot ${linkCls}"></span> ${linkTxt}${s.peers ? ` · ${s.peers} poł.` : ''}</span></div>
+    <div class="net-row"><span class="k">Status</span><span class="v"><span class="dot ${linkCls}"></span> ${linkTxt}${s.peers ? ` · ${tr('{n} poł.', { n: s.peers })}` : ''}</span></div>
     <div class="net-row"><span class="k">Transport</span><span class="v">${escapeHtml(s.transport)}${WEBRTC_OFF ? ' <span class="net-tag">bez WebRTC</span>' : ''}</span></div>
     <div class="net-row"><span class="k">Węzeł (relay)</span><span class="v" title="${escapeHtml(s.relay)}">${escapeHtml(relayHost)}${isFailover ? ' <span class="net-tag">failover</span>' : ''}</span></div>
     ${nodesRow}
-    ${relayPeer ? `<div class="net-row"><span class="k">PeerId węzła</span><span class="v mono">${escapeHtml(relayPeer.slice(0, 14))}…</span></div>` : ''}
+    ${relayPeer ? `<div class="net-row"><span class="k">${tr('PeerId węzła')}</span><span class="v mono">${escapeHtml(relayPeer.slice(0, 14))}…</span></div>` : ''}
     <div class="net-row"><span class="k">Twój PeerId</span><span class="v mono">${escapeHtml(s.self.slice(0, 14))}…</span></div>
     <div class="net-row"><span class="k">Topiki</span><span class="v">${s.topics.length} <span class="net-sub">(grupy: ${gCount} · pary/self: ${s.topics.length - gCount})</span></span></div>
   </div>
   <div class="net-note">${candidates.length > 1
-    ? 'Failover po liście węzłów: gdy pierwszy węzeł nie odpowiada, sesja przechodzi na następny. Węzły są zmeshowane, więc przełączenie nie dzieli rozmówców.'
-    : 'Wszystkie topiki na jednym połączeniu. Więcej węzłów (i failover) dodasz z edytowalnej listy w oknie logowania.'}</div>`
+    ? tr('Failover po liście węzłów: gdy pierwszy węzeł nie odpowiada, sesja przechodzi na następny. Węzły są zmeshowane, więc przełączenie nie dzieli rozmówców.')
+    : tr('Wszystkie topiki na jednym połączeniu. Więcej węzłów (i failover) dodasz z edytowalnej listy w oknie logowania.')}</div>`
 }
 function startNetwork() { renderNetwork(); clearInterval(netTimer); netTimer = setInterval(renderNetwork, 2500) }
 function stopNetwork() { clearInterval(netTimer); netTimer = null }
@@ -817,29 +836,29 @@ function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
   const el = stateEls.get(id)
   if (!el) return
   if (state === 'ok') {
-    el.textContent = ' · ✓ dostarczone'
-    el.title = `Klient rozmówcy potwierdził odbiór${ms !== undefined ? ` po ${ms} ms` : ''} — to nie jest „przeczytane"`
+    el.textContent = ' · ✓ ' + tr('dostarczone')
+    el.title = tr('Klient rozmówcy potwierdził odbiór{when} — to nie jest „przeczytane”', { when: ms !== undefined ? tr(' po {ms} ms', { ms }) : '' })
   } else if (state === 'late') {
     // It said ⚠, and it was wrong: the confirmation came in after we had given
     // up. Say so plainly rather than quietly flipping it to a clean ✓ — the
     // long gap is exactly the thing worth noticing.
-    el.textContent = ` · ⏱ dostarczone z opóźnieniem${ms !== undefined ? ` (${Math.round(ms / 1000)}s)` : ''}`
-    el.title = 'Potwierdzenie przyszło już po tym, jak przestaliśmy ponawiać — wiadomość jednak dotarła'
+    el.textContent = ` · ⏱ ${tr('dostarczone z opóźnieniem')}${ms !== undefined ? ` (${Math.round(ms / 1000)}s)` : ''}`
+    el.title = tr('Potwierdzenie przyszło już po tym, jak przestaliśmy ponawiać — wiadomość jednak dotarła')
     el.classList.add('late')
   } else {
     el.textContent = ' · ⚠ niedostarczone'
-    el.title = 'Brak potwierdzenia mimo ponowień — rozmówca prawdopodobnie tego nie dostał'
+    el.title = tr('Brak potwierdzenia mimo ponowień — rozmówca prawdopodobnie tego nie dostał')
     // The transport gave up; give the decision back to the user instead of
     // leaving a dead ⚠ that can only be fixed by retyping the message.
     const again = document.createElement('button')
     again.type = 'button'
     again.className = 'b-resend'
     again.textContent = '↻'
-    again.title = 'Wyślij ponownie'
+    again.title = tr('Wyślij ponownie')
     again.addEventListener('click', () => {
       if (!activeRoom()?.conv?.resend(id)) return
-      el.textContent = ' · wysyłam ponownie…'
-      el.title = 'Czekam na potwierdzenie od klienta rozmówcy'
+      el.textContent = tr(' · wysyłam ponownie…')
+      el.title = tr('Czekam na potwierdzenie od klienta rozmówcy')
     })
     el.appendChild(again)
   }
@@ -887,8 +906,8 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   if (outOfOrder) {
     // Same ⏱ as a late confirmation on our own side: one mark, one meaning —
     // "this one did not travel normally".
-    const late = document.createElement('span'); late.className = 'late-mark'; late.textContent = ' ⏱ spóźniona'
-    late.title = 'Dotarła po nowszych wiadomościach — wstawiona w miejscu, w którym została napisana'
+    const late = document.createElement('span'); late.className = 'late-mark'; late.textContent = tr(' ⏱ spóźniona')
+    late.title = tr('Dotarła po nowszych wiadomościach — wstawiona w miejscu, w którym została napisana')
     m.appendChild(late)
   }
   if (kind === 'me' && id) {
@@ -898,9 +917,9 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
     if (sent) {
       // A group broadcast: fire-and-forget over GossipSub, no per-recipient acks —
       // so it is "sent", never the 1:1 "sending…→delivered" that would hang here.
-      st.textContent = ' · wysłano'; st.title = 'Wysłane do grupy (broadcast — bez potwierdzeń doręczenia)'
+      st.textContent = tr(' · wysłano'); st.title = tr('Wysłane do grupy (broadcast — bez potwierdzeń doręczenia)')
     } else {
-      st.textContent = ' · wysyłam…'; st.title = 'Czekam na potwierdzenie od klienta rozmówcy'
+      st.textContent = tr(' · wysyłam…'); st.title = tr('Czekam na potwierdzenie od klienta rozmówcy')
       stateEls.set(id, st) // only 1:1 gets delivery updates
     }
     m.appendChild(st)
@@ -975,9 +994,9 @@ function paintSecurity(room: Room) {
   const best = states.includes('established') ? 'established'
     : states.includes('handshaking') ? 'handshaking' : states.length ? 'failed' : 'handshaking'
   const b = $('e2e-badge')
-  if (best === 'established') { b.className = 'badge direct'; b.textContent = '🔐 EH-2 + ratchet'; b.title = 'Handshake EH-2 uzgodniony — forward secrecy per wiadomość, hybryda PQ (ML-KEM-768)' }
+  if (best === 'established') { b.className = 'badge direct'; b.textContent = '🔐 EH-2 + ratchet'; b.title = tr('Handshake EH-2 uzgodniony — forward secrecy per wiadomość, hybryda PQ (ML-KEM-768)') }
   else if (best === 'handshaking') { b.className = 'badge e2e'; b.textContent = '🤝 EH-2 handshake…'; b.title = 'Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)' }
-  else { b.className = 'badge e2e'; b.textContent = '⚠️ EH-2 nieudany'; b.title = 'Handshake nie doszedł do skutku — ponowi się przy następnym Announce' }
+  else { b.className = 'badge e2e'; b.textContent = '⚠️ EH-2 nieudany'; b.title = tr('Handshake nie doszedł do skutku — ponowi się przy następnym Announce') }
 }
 
 function noteTransport(room: Room, state: string) {
@@ -986,8 +1005,8 @@ function noteTransport(room: Room, state: string) {
 }
 function paintTransport(room: Room) {
   const b = $('transport-badge')
-  if (room.transport.startsWith('conn=connected')) { b.className = 'badge direct'; b.textContent = '🟢 WebRTC Direct'; b.title = 'Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing' }
-  else { b.className = 'badge relay'; b.textContent = '⚪ Relay'; b.title = 'Treść przez relay (GossipSub)' }
+  if (room.transport.startsWith('conn=connected')) { b.className = 'badge direct'; b.textContent = '🟢 WebRTC Direct'; b.title = tr('Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing') }
+  else { b.className = 'badge relay'; b.textContent = '⚪ Relay'; b.title = tr('Treść przez relay (GossipSub)') }
 }
 
 /** Record one event on a room's log; render it if that room is on screen,
@@ -1053,10 +1072,10 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
 
   const room: Room = {
     contact, conv: null, log: [], unseen: 0, inRoom: false,
-    security: new Map([['', 'handshaking']]), transport: '', peerLabel: 'łączę…', lastPresence: null,
+    security: new Map([['', 'handshaking']]), transport: '', peerLabel: tr('łączę…'), lastPresence: null,
   }
   rooms.set(contact.pub, room)
-  record(room, { t: 'sys', text: `Pokój otwarty — czekam na ${contact.name}…` })
+  record(room, { t: 'sys', text: tr('Pokój otwarty — czekam na {name}…', { name: contact.name }) })
   if (foreground) await activateRoom(contact.pub)
   else renderContacts()
 
@@ -1086,21 +1105,21 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
       },
       onTyping: (_from, state) => { peerTyping = state === 'start'; if (room === activeRoom()) setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => record(room, { t: 'react', id: r.to, emoji: r.emoji }),
-      onFile: (_from, f) => record(room, { t: 'sys', text: `${contact.name} udostępnił plik: ${f.name} — interim (IPFS TODO)` }),
+      onFile: (_from, f) => record(room, { t: 'sys', text: tr('{who} udostępnił plik: {file} — interim (IPFS TODO)', { who: contact.name, file: f.name }) }),
       onForeign: () => {
         // The user is the only one who can fix this, so say it in the transcript
         // rather than in a console nobody has open. Two windows on one identity
         // is by far the common cause; a rotated contact key is the other.
         if (!warnedForeign) {
           warnedForeign = true
-          record(room, { t: 'sys', text: 'Uwaga: w tym pokoju jest ktoś, kto nie uwierzytelnia się jako ten kontakt'
-            + ' — najczęściej druga zakładka zalogowana na tę samą tożsamość. Zamknij jedną z nich.' })
+          record(room, { t: 'sys', text: tr('Uwaga: w tym pokoju jest ktoś, kto nie uwierzytelnia się jako ten kontakt')
+            + tr(' — najczęściej druga zakładka zalogowana na tę samą tożsamość. Zamknij jedną z nich.') })
         }
       },
       onPresence: (_peer, ev) => {
         room.inRoom = ev !== 'leave'
-        const label = ev === 'join' ? 'w pokoju' : ev === 'active' ? 'wrócił/a' : ev === 'away' ? 'nieobecny/a'
-          : ev === 'quiet' ? 'brak sygnału' : 'wyszedł/wyszła'
+        const label = ev === 'join' ? 'w pokoju' : ev === 'active' ? tr('wrócił/a') : ev === 'away' ? 'nieobecny/a'
+          : ev === 'quiet' ? tr('brak sygnału') : tr('wyszedł/wyszła')
         // Presence belongs in the header, not in the transcript. Every tab switch
         // flips away→active; only entering and leaving are worth a line, and only
         // when the state really changed.
@@ -1115,8 +1134,8 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
     room.conv = conv
     if (room === activeRoom()) $('sess-peerid').textContent = conv.peerId.slice(0, 16) + '…'
   } catch (e: any) {
-    record(room, { t: 'sys', text: 'Błąd: ' + (e?.message ?? e) })
-    if (room === activeRoom()) $('peer-status').textContent = 'błąd połączenia'
+    record(room, { t: 'sys', text: tr('Błąd: ') + (e?.message ?? e) })
+    if (room === activeRoom()) $('peer-status').textContent = tr('błąd połączenia')
   }
 }
 
@@ -1178,7 +1197,7 @@ function renderMembersPop(gu: GroupUI) {
     return `<div class="member-row"><div class="gavatar">${escapeHtml(initials(m.name))}</div>`
       + `<span class="m-name">${escapeHtml(m.name)}</span>`
       + `<span class="dot ${online ? 'ok' : ''}" title="${online ? 'online' : 'offline / nieznany'}"></span>`
-      + (admin && !you ? `<button class="m-rm" data-rm="${escapeHtml(m.pub)}" title="Usuń z grupy">×</button>` : '')
+      + (admin && !you ? `<button class="m-rm" data-rm="${escapeHtml(m.pub)}" title="${tr('Usuń z grupy')}">×</button>` : '')
       + `</div>`
   }).join('')
   let addUI = ''
@@ -1186,11 +1205,11 @@ function renderMembersPop(gu: GroupUI) {
     const eligible = contactsCache.filter((c) => !gu.members.some((m) => m.pub === c.pub))
     const opts = eligible.length
       ? eligible.map((c) => `<button class="m-add-pub" data-add-pub="${escapeHtml(c.pub)}">${escapeHtml(initials(c.name))} ${escapeHtml(c.name)}</button>`).join('')
-      : '<div class="m-add-empty">wszystkie kontakty już w grupie</div>'
-    addUI = `<div class="m-add-wrap"><button class="m-add-toggle" data-addmember="1">+ Dodaj członka</button>`
+      : `<div class="m-add-empty">${tr('wszystkie kontakty już w grupie')}</div>`
+    addUI = `<div class="m-add-wrap"><button class="m-add-toggle" data-addmember="1">${tr('+ Dodaj członka')}</button>`
       + `<div class="m-add-list" hidden>${opts}</div></div>`
   }
-  $('members-pop').innerHTML = `<div class="m-head">${gu.members.length} członków</div>` + rows + addUI
+  $('members-pop').innerHTML = `<div class="m-head">${escapeHtml(tr('{n} członków', { n: gu.members.length }))}</div>` + rows + addUI
 }
 
 /**
@@ -1302,7 +1321,7 @@ async function leaveGroup(gid: string) {
   if (activeGid === gid) { activeGid = null; $('chat-view').hidden = true; $('chat-empty').hidden = false; showChatPane(false) }
   await persistGroups()
   renderGroups()
-  toast(`Opuszczono grupę „${gu.name}"`)
+  toast(tr('Opuszczono grupę „{name}”', { name: gu.name }))
 }
 
 /**
@@ -1331,7 +1350,7 @@ async function deleteGroup(gid: string) {
     if (activeGid === gid) { activeGid = null; $('chat-view').hidden = true; $('chat-empty').hidden = false; showChatPane(false) }
     await persistGroups()
     renderGroups()
-    toast(`Grupa „${gu.name}" usunięta`)
+    toast(tr('Grupa „{name}” usunięta', { name: gu.name }))
   } catch (e: any) {
     ecLog('group delete failed: ' + (e?.message ?? e))
     toast('Nie udało się usunąć grupy: ' + (e?.message ?? e))
@@ -1343,7 +1362,7 @@ function renderGroups() {
   const add = document.createElement('div'); add.className = 'add-row'
   const btn = document.createElement('button'); btn.className = 'add-btn'; btn.textContent = '+ Nowa grupa'
   btn.addEventListener('click', openGroupModal); add.appendChild(btn); pane.appendChild(add)
-  if (!groupsUI.size) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = '(brak grup — utwórz)'; pane.appendChild(e); return }
+  if (!groupsUI.size) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = tr('(brak grup — utwórz)'); pane.appendChild(e); return }
   for (const gu of groupsUI.values()) {
     const b = document.createElement('button'); b.className = 'contact' + (activeGid === gu.gid ? ' active' : '') + (gu.unseen ? ' unread' : '')
     const pill = gu.unseen ? `<span class="c-unread">${gu.unseen > 99 ? '99+' : gu.unseen}</span>` : ''
@@ -1353,14 +1372,14 @@ function renderGroups() {
       // Admin-only affordances, on the list itself: no need to open a group to
       // manage it. The members button opens the SAME popover the chat header
       // uses — one implementation, so the two cannot drift.
-      + (admin ? `<button class="g-edit" data-ren="1" title="Zmień nazwę grupy">✎</button>` : '')
+      + (admin ? `<button class="g-edit" data-ren="1" title="${tr('Zmień nazwę grupy')}">✎</button>` : '')
       + (admin ? `<button class="g-edit" data-mem="1" title="Uczestnicy">👥</button>` : '')
-      + `<span class="c-x" title="${admin ? 'Usuń grupę' : 'Opuść grupę'}">×</span>`
+      + `<span class="c-x" title="${admin ? tr('Usuń grupę') : tr('Opuść grupę')}">×</span>`
     b.addEventListener('click', async (e: any) => {
       const d = e.target?.dataset ?? {}
       if (d.ren) {
         e.stopPropagation()
-        const name = await promptName('Zmień nazwę grupy', 'Nazwa zmieni się u wszystkich członków — klucze zostają bez zmian.', gu.name, 'Nazwa grupy')
+        const name = await promptName(tr('Zmień nazwę grupy'), tr('Nazwa zmieni się u wszystkich członków — klucze zostają bez zmian.'), gu.name, 'Nazwa grupy')
         if (name) await renameGroup(gu.gid, name)
         return
       }
@@ -1373,13 +1392,13 @@ function renderGroups() {
       if (e.target.classList.contains('c-x')) {
         e.stopPropagation()
         if (admin) {
-          if (!await ask('Usunąć grupę?', `Wszyscy członkowie „${gu.name}" stracą dostęp do nowych wiadomości,`
-            + ' a klucz grupy zostanie skasowany z HEM — grupy nie da się już przywrócić.'
-            + ' Ich dotychczasowa kopia rozmowy pozostanie u nich; nie da się jej usunąć zdalnie.', 'Usuń grupę')) return
+          if (!await ask(tr('Usunąć grupę?'), tr('Wszyscy członkowie „{name}” stracą dostęp do nowych wiadomości,', { name: gu.name })
+            + tr(' a klucz grupy zostanie skasowany z HEM — grupy nie da się już przywrócić.')
+            + tr(' Ich dotychczasowa kopia rozmowy pozostanie u nich; nie da się jej usunąć zdalnie.'), tr('Usuń grupę'))) return
           await deleteGroup(gu.gid)
         } else {
-          if (!await ask('Opuścić grupę?', `„${gu.name}" zniknie z tego urządzenia i przestaniesz odbierać wiadomości.`
-            + ' Pozostali członkowie zachowują grupę — nie da się jej usunąć u nich.', 'Opuść')) return
+          if (!await ask(tr('Opuścić grupę?'), tr('„{name}” zniknie z tego urządzenia i przestaniesz odbierać wiadomości.', { name: gu.name })
+            + tr(' Pozostali członkowie zachowują grupę — nie da się jej usunąć u nich.'), tr('Opuść'))) return
           await leaveGroup(gu.gid)
         }
         return
@@ -1501,7 +1520,7 @@ async function activateGroup(gid: string) {
   showChatPane(true)
   $('peer-avatar').textContent = '👥'
   $('peer-name').textContent = groupDisplay(gu); $('peer-name').title = ''
-  $('peer-dot').className = 'dot ok'; $('peer-status').textContent = `${gu.members.length} członków`
+  $('peer-dot').className = 'dot ok'; $('peer-status').textContent = tr('{n} członków', { n: gu.members.length })
   // Participant cluster in the header → click to see the full member list.
   const cluster = $('members-cluster'); cluster.hidden = false; cluster.innerHTML = avatarClusterHTML(gu.members)
   cluster.title = 'Uczestnicy grupy'
@@ -1556,7 +1575,7 @@ async function onGroupInvite(from: string, skd: GroupSkdEnv) {
     gu = { gid, name: skd.name || 'Grupa', epoch: skd.epoch, members, log: [], unseen: 0, room: null }
     groupsUI.set(gid, gu)
     gu.room = await client.openGroup(gid, groupHandlers(gid))
-    toast(`Dołączono do grupy „${groupDisplay(gu)}"`)
+    toast(tr('Dołączono do grupy „{name}”', { name: groupDisplay(gu) }))
     void distributeGroup(gid, gu.name) // hand my sender key to everyone, once
   } else {
     gu.members = members
@@ -1588,7 +1607,7 @@ async function onGroupInvite(from: string, skd: GroupSkdEnv) {
 // ---- create-group modal ----
 function openGroupModal() {
   const list = $('group-members'); list.innerHTML = ''
-  if (!contactsCache.length) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = 'Najpierw dodaj kontakty — członkowie grupy muszą być kontaktami.'; list.appendChild(e) }
+  if (!contactsCache.length) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = tr('Najpierw dodaj kontakty — członkowie grupy muszą być kontaktami.'); list.appendChild(e) }
   for (const c of contactsCache) {
     const row = document.createElement('label'); row.className = 'gmember'
     row.innerHTML = `<input type="checkbox" value="${escapeHtml(c.pub)}"><div class="gavatar">${escapeHtml(initials(c.name))}</div><span>${escapeHtml(c.name)}</span>`
@@ -1603,8 +1622,8 @@ $('group-create').addEventListener('click', async () => {
   if (!client || !session) return
   const name = val('group-name')
   const picked = [...document.querySelectorAll('#group-members input:checked')].map((el) => (el as HTMLInputElement).value)
-  if (!name) { setMsg('group-msg', 'Podaj nazwę grupy.', 'err'); return }
-  if (!picked.length) { setMsg('group-msg', 'Wybierz co najmniej jednego członka.', 'err'); return }
+  if (!name) { setMsg('group-msg', tr('Podaj nazwę grupy.'), 'err'); return }
+  if (!picked.length) { setMsg('group-msg', tr('Wybierz co najmniej jednego członka.'), 'err'); return }
   try {
     const roster = [{ pub: session.pub }, ...picked.map((pub) => ({ pub }))]
     // GK comes from whatever backs this identity (bucket A): a HEM identity mints
@@ -1618,8 +1637,8 @@ $('group-create').addEventListener('click', async () => {
     await activateGroup(gid)
     void distributeGroup(gid, name) // send the invite (keys) to each member over 1:1
     void persistGroups() // the new group must survive a reload immediately
-    toast(`Grupa „${name}" utworzona — rozsyłam zaproszenia…`)
-  } catch (e: any) { setMsg('group-msg', 'Błąd: ' + (e?.message ?? e), 'err') }
+    toast(tr('Grupa „{name}” utworzona — rozsyłam zaproszenia…', { name }))
+  } catch (e: any) { setMsg('group-msg', tr('Błąd: ') + (e?.message ?? e), 'err') }
 })
 
 document.addEventListener('visibilitychange', () => {

@@ -306,22 +306,22 @@
   <div class="login-wrap" id="login">
     <div class="login-card">
       <h1>⚡ Encedo Chat</h1>
-      <p class="sub">Zaloguj się swoim HEM. Klucz tożsamości nie opuszcza urządzenia.</p>
-      <label>Adres HEM</label>
+      <p class="sub" data-i18n="Zaloguj się swoim HEM. Klucz tożsamości nie opuszcza urządzenia.">Zaloguj się swoim HEM. Klucz tożsamości nie opuszcza urządzenia.</p>
+      <label data-i18n="Adres HEM">Adres HEM</label>
       <div class="row"><input id="hsm" type="text" value="https://my.ence.do" autocomplete="off"><span class="dot" id="status-dot" title="status HEM"></span></div>
       <div class="hint" id="status-hint"></div>
-      <label>Hasło</label>
+      <label data-i18n="Hasło">Hasło</label>
       <input id="pass" type="password" autocomplete="off">
-      <div id="reg-handle-wrap" hidden><label>Handle (widoczny dla kontaktów)</label><input id="handle" type="text" placeholder="np. alice" autocomplete="off"></div>
-      <button class="btn" id="go">Zaloguj</button>
-      <div class="toggle"><span id="toggle-pre">Nie masz konta?</span> <a id="toggle">Zarejestruj tożsamość</a></div>
-      <div class="toggle" style="margin-top:6px;font-size:12px;opacity:.85">bez HEM: <a id="go-soft">tożsamość software (dev)</a></div>
+      <div id="reg-handle-wrap" hidden><label data-i18n="Handle (widoczny dla kontaktów)">Handle (widoczny dla kontaktów)</label><input id="handle" type="text" placeholder="np. alice" autocomplete="off"></div>
+      <button class="btn" id="go" data-i18n="Zaloguj">Zaloguj</button>
+      <div class="toggle"><span id="toggle-pre" data-i18n="Nie masz konta?">Nie masz konta?</span> <a id="toggle" data-i18n="Zarejestruj tożsamość">Zarejestruj tożsamość</a></div>
+      <div class="toggle" style="margin-top:6px;font-size:12px;opacity:.85">bez HEM: <a id="go-soft" data-i18n="tożsamość software (dev)">tożsamość software (dev)</a></div>
       <div class="nodes-sec">
-        <button class="nodes-toggle" id="nodes-toggle" title="Węzły sieci — wybierz/edytuj">+</button>
+        <button class="nodes-toggle" id="nodes-toggle" title="Węzły sieci — wybierz/edytuj" data-i18n-title="Węzły sieci — wybierz/edytuj">+</button>
         <div class="nodes-panel" id="nodes-panel" hidden>
-          <div class="nodes-head"><span>Węzły sieci</span> <button class="node-add" id="node-add" type="button">+ dodaj</button></div>
+          <div class="nodes-head"><span data-i18n="Węzły sieci">Węzły sieci</span> <button class="node-add" id="node-add" type="button" data-i18n="+ dodaj">+ dodaj</button></div>
           <div id="nodes-list"></div>
-          <div class="nodes-hint">Zaznaczone węzły są używane w tej sesji (pierwszy zaznaczony jako główny).</div>
+          <div class="nodes-hint" data-i18n="Zaznaczone węzły są używane w tej sesji (pierwszy zaznaczony jako główny).">Zaznaczone węzły są używane w tej sesji (pierwszy zaznaczony jako główny).</div>
         </div>
       </div>
       <div class="msg" id="msg"></div>
@@ -337,43 +337,43 @@
       </div>
       <div class="search-wrap"><input id="contact-search" type="text" placeholder="Szukaj kontaktu…" autocomplete="off"></div>
       <div class="tabs">
-        <button class="tab active" id="tab-contacts">Kontakty</button>
-        <button class="tab" id="tab-groups">Grupy</button>
-        <button class="tab" id="tab-network" title="Status węzła sieci">Sieć</button>
+        <button class="tab active" id="tab-contacts" data-i18n="Kontakty">Kontakty</button>
+        <button class="tab" id="tab-groups" data-i18n="Grupy">Grupy</button>
+        <button class="tab" id="tab-network" title="Status węzła sieci" data-i18n-title="Status węzła sieci" data-i18n="Sieć">Sieć</button>
       </div>
       <div class="pane" id="pane-contacts"></div>
       <div class="pane" id="pane-groups" hidden></div>
-      <div class="pane" id="pane-network" hidden><div class="pane-label">Sieć — wkrótce (lista węzłów, latencje)</div></div>
-      <div class="profile-strip"><span class="lbl">Profil bezpieczeństwa</span><button class="chip" id="chip-profile" title="Profil — wkrótce">P1 · prywatny</button></div>
+      <div class="pane" id="pane-network" hidden><div class="pane-label" data-i18n="Sieć — wkrótce (lista węzłów, latencje)">Sieć — wkrótce (lista węzłów, latencje)</div></div>
+      <div class="profile-strip"><span class="lbl" data-i18n="Profil bezpieczeństwa">Profil bezpieczeństwa</span><button class="chip" id="chip-profile" title="Profil — wkrótce" data-i18n-title="Profil — wkrótce">P1 · prywatny</button></div>
     </aside>
 
-    <div class="splitter" id="splitter" title="Przeciągnij, aby zmienić szerokość (dwuklik = reset)"></div>
+    <div class="splitter" id="splitter" title="Przeciągnij, aby zmienić szerokość (dwuklik = reset)" data-i18n-title="Przeciągnij, aby zmienić szerokość (dwuklik = reset)"></div>
 
     <main class="chat">
       <div class="empty" id="chat-empty">
         <div class="big">🌳</div>
         <h3>Wybierz kontakt</h3>
-        <p>Wspólny pokój na dziś wyliczamy z Waszych kluczy i daty — nikt inny go nie zna. To spotkanie, nie skrzynka: wiadomości żyją tylko na ekranach uczestników.</p>
+        <p data-i18n="Wspólny pokój na dziś wyliczamy z Waszych kluczy i daty — nikt inny go nie zna. To spotkanie, nie skrzynka: wiadomości żyją tylko na ekranach uczestników.">Wspólny pokój na dziś wyliczamy z Waszych kluczy i daty — nikt inny go nie zna. To spotkanie, nie skrzynka: wiadomości żyją tylko na ekranach uczestników.</p>
       </div>
       <div id="chat-view" hidden style="display:flex;flex-direction:column;flex:1;min-height:0;position:relative">
         <div class="chat-head">
-          <button id="btn-back" title="Wróć do kontaktów" aria-label="Wróć do kontaktów">‹</button>
+          <button id="btn-back" title="Wróć do kontaktów" data-i18n-title="Wróć do kontaktów" aria-label="Wróć do kontaktów">‹</button>
           <div class="avatar" id="peer-avatar">··</div>
           <div class="who">
             <div class="name"><span id="peer-name">—</span></div>
-            <div class="sub"><span class="dot" id="peer-dot"></span> <span id="peer-status">poza pokojem</span> <span id="members-cluster" class="avatar-cluster" hidden></span></div>
+            <div class="sub"><span class="dot" id="peer-dot"></span> <span id="peer-status" data-i18n="poza pokojem">poza pokojem</span> <span id="members-cluster" class="avatar-cluster" hidden></span></div>
           </div>
           <div class="badges">
-            <span class="badge relay" id="transport-badge" title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi">⚪ Relay</span>
-            <span class="badge e2e" id="e2e-badge" title="Szyfrowane E2E — interim, EH-2 w drodze">🔒 E2E interim</span>
-            <span class="badge rotate" title="Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji">↻ <span id="rot">–:–:–</span></span>
+            <span class="badge relay" id="transport-badge" title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi" data-i18n-title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi">⚪ Relay</span>
+            <span class="badge e2e" id="e2e-badge" title="Szyfrowane E2E — interim, EH-2 w drodze" data-i18n="🔒 E2E interim">🔒 E2E interim</span>
+            <span class="badge rotate" title="Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji" data-i18n-title="Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji">↻ <span id="rot">–:–:–</span></span>
           </div>
         </div>
         <div class="members-pop" id="members-pop" hidden></div>
         <div class="messages" id="messages"></div>
-        <button class="to-bottom" id="to-bottom" hidden title="Przejdź do najnowszej wiadomości">⬇<span class="unread" id="unread" hidden>0</span></button>
+        <button class="to-bottom" id="to-bottom" hidden title="Przejdź do najnowszej wiadomości" data-i18n-title="Przejdź do najnowszej wiadomości">⬇<span class="unread" id="unread" hidden>0</span></button>
         <div class="typing" id="typing-ind"></div>
-        <div class="composer"><input id="msg-input" type="text" placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off"><button class="btn-send" id="send">Wyślij ➤</button></div>
+        <div class="composer"><input id="msg-input" type="text" placeholder="Wiadomość… (Enter = wyślij)" data-i18n-placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off"><button class="btn-send" id="send" data-i18n="Wyślij ➤">Wyślij ➤</button></div>
       </div>
     </main>
   </div>
@@ -382,28 +382,28 @@
   <div class="toast" id="toast"></div>
 
   <div class="modal" id="add-modal">
-    <h2>Dodaj peera</h2>
-    <div class="msub">Nazwa lokalna + jego klucz publiczny (base64, X25519).</div>
-    <label>Nazwa</label><input id="add-name" type="text" placeholder="np. bob" autocomplete="off">
-    <label>Klucz publiczny</label><textarea id="add-pub" placeholder="wklej pubkey kontaktu…"></textarea>
-    <label>Zapis</label>
+    <h2 data-i18n="Dodaj peera">Dodaj peera</h2>
+    <div class="msub" data-i18n="Nazwa lokalna + jego klucz publiczny (base64, X25519).">Nazwa lokalna + jego klucz publiczny (base64, X25519).</div>
+    <label data-i18n="Nazwa">Nazwa</label><input id="add-name" type="text" placeholder="np. bob" autocomplete="off">
+    <label data-i18n="Klucz publiczny">Klucz publiczny</label><textarea id="add-pub" placeholder="wklej pubkey kontaktu…"></textarea>
+    <label data-i18n="Zapis">Zapis</label>
     <div class="store-opts">
       <label class="store-opt"><input type="radio" name="store" value="hem" checked> 🔒 W HEM — trwałe, przenośne między urządzeniami</label>
       <label class="store-opt"><input type="radio" name="store" value="local"> 💻 Tylko lokalnie — ta przeglądarka, nic nie trafia do HEM</label>
       <label class="store-opt"><input type="radio" name="store" value="none"> ⚡ Jednorazowo — nie zapisuj nigdzie (tylko ten czat)</label>
     </div>
     <div class="msg" id="add-msg"></div>
-    <div class="modal-actions"><button class="btn-send" id="add-save" style="flex:1;border-radius:8px">Zapisz</button><button class="btn-ghost" id="add-cancel">Anuluj</button></div>
+    <div class="modal-actions"><button class="btn-send" id="add-save" style="flex:1;border-radius:8px" data-i18n="Zapisz">Zapisz</button><button class="btn-ghost" id="add-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
   <div class="modal" id="group-modal">
-    <h2>Nowa grupa</h2>
-    <div class="msub">Nazwa + członkowie. Tylko kontakty — każdy dostaje zaproszenie (klucze) przez Wasz kanał 1:1.</div>
-    <label>Nazwa grupy</label><input id="group-name" type="text" placeholder="np. Zespół" autocomplete="off">
-    <label>Członkowie</label>
+    <h2 data-i18n="Nowa grupa">Nowa grupa</h2>
+    <div class="msub" data-i18n="Nazwa + członkowie. Tylko kontakty — każdy dostaje zaproszenie (klucze) przez Wasz kanał 1:1.">Nazwa + członkowie. Tylko kontakty — każdy dostaje zaproszenie (klucze) przez Wasz kanał 1:1.</div>
+    <label data-i18n="Nazwa grupy">Nazwa grupy</label><input id="group-name" type="text" placeholder="np. Zespół" data-i18n-placeholder="np. Zespół" autocomplete="off">
+    <label data-i18n="Członkowie">Członkowie</label>
     <div class="group-members" id="group-members"></div>
     <div class="msg" id="group-msg"></div>
-    <div class="modal-actions"><button class="btn-send" id="group-create" style="flex:1;border-radius:8px">Utwórz</button><button class="btn-ghost" id="group-cancel">Anuluj</button></div>
+    <div class="modal-actions"><button class="btn-send" id="group-create" style="flex:1;border-radius:8px" data-i18n="Utwórz">Utwórz</button><button class="btn-ghost" id="group-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
   <!-- Confirm and rename: two small modals reused by every destructive or
@@ -411,42 +411,47 @@
        no window.confirm (which a mobile webview renders as a browser chrome
        dialog, outside the app's skin). -->
   <div class="modal" id="ask-modal" role="alertdialog" aria-modal="true" aria-labelledby="ask-title">
-    <h2 id="ask-title">Na pewno?</h2>
+    <h2 id="ask-title" data-i18n="Na pewno?">Na pewno?</h2>
     <div class="msub" id="ask-body"></div>
     <div class="modal-actions">
-      <button class="btn-send danger" id="ask-yes" style="flex:1;border-radius:8px">Tak</button>
-      <button class="btn-ghost" id="ask-no">Nie</button>
+      <button class="btn-send danger" id="ask-yes" style="flex:1;border-radius:8px" data-i18n="Tak">Tak</button>
+      <button class="btn-ghost" id="ask-no" data-i18n="Nie">Nie</button>
     </div>
   </div>
 
   <div class="modal" id="rename-modal">
-    <h2 id="rename-title">Zmień nazwę</h2>
+    <h2 id="rename-title" data-i18n="Zmień nazwę">Zmień nazwę</h2>
     <div class="msub" id="rename-sub"></div>
-    <label id="rename-label">Nazwa</label><input id="rename-input" type="text" autocomplete="off" maxlength="64">
+    <label id="rename-label" data-i18n="Nazwa">Nazwa</label><input id="rename-input" type="text" autocomplete="off" maxlength="64">
     <div class="msg" id="rename-msg"></div>
     <div class="modal-actions">
-      <button class="btn-send" id="rename-save" style="flex:1;border-radius:8px">Zapisz</button>
-      <button class="btn-ghost" id="rename-cancel">Anuluj</button>
+      <button class="btn-send" id="rename-save" style="flex:1;border-radius:8px" data-i18n="Zapisz">Zapisz</button>
+      <button class="btn-ghost" id="rename-cancel" data-i18n="Anuluj">Anuluj</button>
     </div>
   </div>
 
   <aside class="drawer" id="drawer" aria-label="Ustawienia">
-    <div class="d-head"><div><h2>Ustawienia</h2><div class="d-sub">Sesja + profil bezpieczeństwa</div></div><button class="icon-btn" id="btn-close-drawer" title="Zamknij">✕</button></div>
-    <div class="d-section">Profil bezpieczeństwa — wkrótce</div>
-    <div class="opt ph"><div><div class="o-name">P1 · Prywatny</div><div class="o-desc">WebRTC direct dozwolone. Rozmówca widzi Twoje IP.</div></div></div>
-    <div class="opt ph"><div><div class="o-name">P2 · Wrogie otoczenie</div><div class="o-desc">Wyłącznie relay — IP niewidoczne. (czeka na data plane §13)</div></div></div>
-    <div class="opt ph"><div><div class="o-name">P3 · Sieć własna</div><div class="o-desc">Relay-only na własnych węzłach z własnym kluczem podpisu.</div></div></div>
-    <div class="d-section">Sesja</div>
-    <div class="kv"><span class="k">Tożsamość</span><span class="v" id="sess-id" title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer">—</span></div>
-    <div class="kv"><span class="k">KID (klucz w HSM)</span><span class="v" id="sess-kid">—</span></div>
-    <div class="kv"><span class="k">Rozmówca</span><span class="v" id="sess-peer">—</span></div>
-    <div class="kv"><span class="k">PeerId (efemeryczny)</span><span class="v" id="sess-peerid">—</span></div>
-    <div class="kv"><span class="k">Rotacja pokoju</span><span class="v">codziennie 00:00 UTC</span></div>
-    <div class="kv"><span class="k">Historia</span><span class="v">brak — sesja efemeryczna</span></div>
-    <button class="btn" id="btn-logout" style="margin-top:18px;background:var(--accent-soft);color:var(--accent)">Wyloguj</button>
-    <div class="d-section" style="margin-top:22px">Reset urządzenia</div>
-    <div class="hint" style="margin-bottom:8px">Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.</div>
-    <button class="btn" id="btn-wipeout" style="margin-top:2px;background:none;color:var(--err);border:1px solid var(--err)">🧨 Wipeout — wyczyść wszystko</button>
+    <div class="d-head"><div><h2 data-i18n="Ustawienia">Ustawienia</h2><div class="d-sub" data-i18n="Sesja + profil bezpieczeństwa">Sesja + profil bezpieczeństwa</div></div><button class="icon-btn" id="btn-close-drawer" title="Zamknij">✕</button></div>
+    <div class="d-section" data-i18n="Profil bezpieczeństwa — wkrótce">Profil bezpieczeństwa — wkrótce</div>
+    <div class="opt ph"><div><div class="o-name" data-i18n="P1 · Prywatny">P1 · Prywatny</div><div class="o-desc" data-i18n="WebRTC direct dozwolone. Rozmówca widzi Twoje IP.">WebRTC direct dozwolone. Rozmówca widzi Twoje IP.</div></div></div>
+    <div class="opt ph"><div><div class="o-name" data-i18n="P2 · Wrogie otoczenie">P2 · Wrogie otoczenie</div><div class="o-desc" data-i18n="Wyłącznie relay — IP niewidoczne. (czeka na data plane §13)">Wyłącznie relay — IP niewidoczne. (czeka na data plane §13)</div></div></div>
+    <div class="opt ph"><div><div class="o-name" data-i18n="P3 · Sieć własna">P3 · Sieć własna</div><div class="o-desc" data-i18n="Relay-only na własnych węzłach z własnym kluczem podpisu.">Relay-only na własnych węzłach z własnym kluczem podpisu.</div></div></div>
+    <div class="d-section" data-i18n="Sesja">Sesja</div>
+    <div class="kv"><span class="k" data-i18n="Tożsamość">Tożsamość</span><span class="v" id="sess-id" title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer">—</span></div>
+    <div class="kv"><span class="k" data-i18n="KID (klucz w HSM)">KID (klucz w HSM)</span><span class="v" id="sess-kid">—</span></div>
+    <div class="kv"><span class="k" data-i18n="Rozmówca">Rozmówca</span><span class="v" id="sess-peer">—</span></div>
+    <div class="kv"><span class="k" data-i18n="PeerId (efemeryczny)">PeerId (efemeryczny)</span><span class="v" id="sess-peerid">—</span></div>
+    <div class="kv"><span class="k" data-i18n="Rotacja pokoju">Rotacja pokoju</span><span class="v" data-i18n="codziennie 00:00 UTC">codziennie 00:00 UTC</span></div>
+    <div class="kv"><span class="k" data-i18n="Historia">Historia</span><span class="v" data-i18n="brak — sesja efemeryczna">brak — sesja efemeryczna</span></div>
+    <label data-i18n="Język">Język</label>
+    <select id="lang-select" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px">
+      <option value="pl">Polski</option>
+      <option value="en">English</option>
+    </select>
+    <button class="btn" id="btn-logout" style="margin-top:18px;background:var(--accent-soft);color:var(--accent)" data-i18n="Wyloguj">Wyloguj</button>
+    <div class="d-section" style="margin-top:22px" data-i18n="Reset urządzenia">Reset urządzenia</div>
+    <div class="hint" style="margin-bottom:8px" data-i18n="Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.">Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.</div>
+    <button class="btn" id="btn-wipeout" style="margin-top:2px;background:none;color:var(--err);border:1px solid var(--err)" data-i18n="🧨 Wipeout — wyczyść wszystko">🧨 Wipeout — wyczyść wszystko</button>
   </aside>
 </body>
 </html>
