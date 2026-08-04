@@ -45,8 +45,19 @@ disagrees, the fix is `useHttpsScheme: true` in `tauri.conf.json` — know it,
 do not pre-apply it.
 
 iOS uses a custom scheme instead, and WebKit's treatment of those as secure
-contexts is the remaining unknown. The probe answers it in seconds on a real
-device; nothing else needs to be built first.
+contexts *was* the remaining unknown. **Answered 2026-08-04: it is fine.** The
+probe was run on a real iPhone against onchato.com and reported every required
+capability present — same WebKit WKWebView uses. Nothing about the crypto path
+is now in doubt on any of the three platforms:
+
+| platform | probe result |
+|---|---|
+| desktop (browser) | all required present |
+| Android 15, Chrome + Brave | all required present, WebRTC too |
+| **iOS, mobile Safari** | **all required present** |
+
+That closes the question the whole capability probe was written to answer, and
+it means `cargo tauri ios init` is worth the Mac's time.
 
 ---
 
@@ -124,7 +135,7 @@ red one saves the whole exercise.
 ## Sequence
 
 1. Deploy the web build with the probe. *(prerequisite for 2 and 3)*
-2. **iPhone, mobile Safari** — read the "Platforma" row. Free, minutes.
+2. ~~**iPhone, mobile Safari**~~ — **done 2026-08-04, green.**
 3. **Android toolchain** → debug APK → probe on the packaged app.
 4. **Decide the background model** (foreground service vs. foreground-only).
    Nothing beyond a demo APK is worth building before this.
