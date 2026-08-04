@@ -40,7 +40,7 @@ async function softId(): Promise<GroupId> {
  */
 function fakeHem() {
   const keys = new Map<string, { priv: Uint8Array; pub: Uint8Array; label: string; descr: string }>()
-  const calls = { ecdh: 0, createKeyPair: 0, getPubKey: 0, authorize: 0, updateKey: 0 }
+  const calls = { ecdh: 0, createKeyPair: 0, getPubKey: 0, authorize: 0, updateKey: 0, deleteKey: 0 }
   let n = 0
   return {
     calls,
@@ -59,6 +59,11 @@ function fakeHem() {
       calls.updateKey++
       const k = keys.get(kid); if (!k) throw new Error('no such kid')
       keys.set(kid, { ...k, label, descr })
+      return {}
+    },
+    async deleteKey(_t: string, kid: string) {
+      calls.deleteKey++
+      if (!keys.delete(kid)) throw new Error('no such kid')
       return {}
     },
     async getPubKey(_t: string, kid: string) {
@@ -246,4 +251,43 @@ test('a member cannot rewrite a marker: writeMarker is admin-only', async () => 
   const before = hem.calls.updateKey
   assert.equal(await B.mgr.writeMarker(gid, 'g'), false, 'B holds no GK, so it has no marker of its own to rewrite')
   assert.equal(hem.calls.updateKey, before)
+})
+
+test('deleting a group locks everyone out and destroys the HSM key', async () => {
+  const hem = fakeHem()
+  const A = await peer(hemGkBackend(hem, 'admin-kid-0000')), B = await peer()
+  const roster: Member[] = [{ pub: A.id.pub }, { pub: B.id.pub }]
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-doomed', roster, 'g')
+  await B.mgr.applySkd(A.id.pub, (await A.mgr.skdFor(gid, B.id.pub))!)
+  const topicBefore = await B.mgr.session(gid)!.topic()
+  const kid = [...hem.keys.keys()][0]
+
+  await A.mgr.deleteGroup(gid)
+
+  assert.equal(A.mgr.session(gid), undefined, 'the admin dropped its local state')
+  assert.equal(hem.keys.has(kid), false, 'the GK is gone from the HSM')
+  // B still HAS the group — nothing here reaches another device — but it is on
+  // the old topic, and the admin is on a new one B was never told about.
+  assert.ok(B.mgr.session(gid), 'the member keeps its copy; a delete is not remote')
+  assert.equal(await B.mgr.session(gid)!.topic(), topicBefore, 'and stays on the topic that is now abandoned')
+})
+
+test('a destroyed group cannot be revived: no GK, no roster MAC, no epoch', async () => {
+  const hem = fakeHem()
+  const A = await peer(hemGkBackend(hem, 'admin-kid-0000')), B = await peer()
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-doomed', [{ pub: A.id.pub }, { pub: B.id.pub }], 'g')
+  await A.mgr.deleteGroup(gid)
+  assert.equal(await A.mgr.skdFor(gid, B.id.pub), null, 'there is nothing left to distribute')
+  assert.equal(await A.mgr.writeMarker(gid, 'g'), false, 'and no marker to rewrite')
+})
+
+test('a member has no group to delete — leaving is a local act', async () => {
+  const hem = fakeHem()
+  const A = await peer(hemGkBackend(hem, 'admin-kid-0000')), B = await peer(hemGkBackend(hem, 'b-kid-0000'))
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-x', [{ pub: A.id.pub }, { pub: B.id.pub }], 'g')
+  await B.mgr.applySkd(A.id.pub, (await A.mgr.skdFor(gid, B.id.pub))!)
+  const kid = [...hem.keys.keys()][0]
+  await B.mgr.deleteGroup(gid) // B holds no GK: this drops B's state and nothing else
+  assert.ok(hem.keys.has(kid), 'a member cannot destroy the admin\'s group key')
+  assert.ok(A.mgr.session(gid), 'and the admin still has the group')
 })

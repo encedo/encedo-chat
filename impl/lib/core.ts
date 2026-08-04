@@ -87,6 +87,12 @@ export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
     async setMarker(kid: string, label: string, descr: string) {
       await hem.updateKey(await hem.authorizePassword(null, 'keymgmt:upd'), kid, label, asB64(descr))
     },
+    // Dissolving a group takes its marker with it: the portable group list is
+    // exactly the set of GK entries, so leaving one behind would keep listing a
+    // group nobody can rejoin.
+    async destroy(kid: string) {
+      await hem.deleteKey(await hem.authorizePassword(null, 'keymgmt:del'), kid)
+    },
   }
 }
 

@@ -284,6 +284,8 @@ export interface GkBackend {
   setMarker?(kid: string, label: string, descr: string): Promise<void>
   /** This identity's own KID, as the HSM issued it — the marker's `admin_KID`. */
   adminKid?: string
+  /** Destroy a group key. Absent on backends with no HSM object to destroy. */
+  destroy?(kid: string): Promise<void>
 }
 
 interface GroupRec {
@@ -523,6 +525,37 @@ export class GroupManager {
       skd.rmac = b64(await rosterMac(rk, skd.roster))
     }
     return skd
+  }
+
+  /**
+   * Dissolve a group I admin: lock every member out, then destroy the HSM
+   * object.
+   *
+   * The lockout is the ordinary membership change with the roster reduced to
+   * me — a new epoch, a new `group_secret`, a new topic, distributed to nobody.
+   * That is the strongest revocation this design has, and it is the same
+   * mechanism that removes one member, applied to all of them. What it is NOT
+   * is a delete on their devices: they keep their copy and their history, it
+   * simply goes silent. Nothing here can reach into someone else's client, and
+   * pretending otherwise in the UI would be a lie.
+   *
+   * Then the GK goes. After this the group cannot be revived — no GK means no
+   * roster MAC, so no epoch can ever be advanced again, which is exactly what
+   * "deleted" should mean. A member with no HSM object to destroy (or a
+   * software group) just drops its local state.
+   */
+  async deleteGroup(gidHex: string): Promise<void> {
+    const rec = this.recs.get(gidHex)
+    if (!rec) return
+    if (rec.gk) {
+      // Lock everyone out first: once GK is gone we could not rekey any more.
+      await this.rekey(gidHex, [{ pub: this.id.pub }])
+      const kid = rec.gk.kid
+      if (kid && this.gkBackend?.destroy) await this.gkBackend.destroy(kid)
+    }
+    this.recs.get(gidHex)?.ssCache.clear()
+    this.recs.delete(gidHex)
+    this.labels.delete(gidHex)
   }
 
   /** Every group serialized for the persistence cache (§10) — full state, including

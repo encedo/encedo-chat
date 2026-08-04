@@ -1305,6 +1305,39 @@ async function leaveGroup(gid: string) {
   toast(`Opuszczono grupę „${gu.name}"`)
 }
 
+/**
+ * Dissolve a group — admin only.
+ *
+ * Three steps, in this order for a reason. Say so on the topic while everyone
+ * can still read it; then rekey to a roster of just me, which is the ordinary
+ * membership change applied to all of them at once and leaves nobody able to
+ * derive the new topic; then destroy the GK, after which no epoch can ever be
+ * advanced again, so the group cannot be revived.
+ *
+ * What it does NOT do is delete anything on their devices — they keep their
+ * copy and it goes quiet. Nothing in this design reaches into another client,
+ * and the confirm text says so rather than promising a deletion we cannot
+ * perform. The notice is a courtesy, not a control: the lockout is the rekey.
+ */
+async function deleteGroup(gid: string) {
+  const gu = groupsUI.get(gid); if (!gu || !client) return
+  if (!iAmAdmin(gu)) { toast('Tylko administrator może usunąć grupę'); return }
+  try {
+    // While the old topic is still theirs to read.
+    try { await gu.room?.sendText('🛑 Grupa została usunięta przez administratora.') } catch {}
+    await client.groups.deleteGroup(gid)   // rekey to me alone, then destroy the GK
+    gu.room?.stop()
+    groupsUI.delete(gid)
+    if (activeGid === gid) { activeGid = null; $('chat-view').hidden = true; $('chat-empty').hidden = false; showChatPane(false) }
+    await persistGroups()
+    renderGroups()
+    toast(`Grupa „${gu.name}" usunięta`)
+  } catch (e: any) {
+    ecLog('group delete failed: ' + (e?.message ?? e))
+    toast('Nie udało się usunąć grupy: ' + (e?.message ?? e))
+  }
+}
+
 function renderGroups() {
   const pane = $('pane-groups'); pane.innerHTML = ''
   const add = document.createElement('div'); add.className = 'add-row'
@@ -1322,7 +1355,7 @@ function renderGroups() {
       // uses — one implementation, so the two cannot drift.
       + (admin ? `<button class="g-edit" data-ren="1" title="Zmień nazwę grupy">✎</button>` : '')
       + (admin ? `<button class="g-edit" data-mem="1" title="Uczestnicy">👥</button>` : '')
-      + `<span class="c-x" title="Opuść grupę">×</span>`
+      + `<span class="c-x" title="${admin ? 'Usuń grupę' : 'Opuść grupę'}">×</span>`
     b.addEventListener('click', async (e: any) => {
       const d = e.target?.dataset ?? {}
       if (d.ren) {
@@ -1339,9 +1372,16 @@ function renderGroups() {
       }
       if (e.target.classList.contains('c-x')) {
         e.stopPropagation()
-        if (!await ask('Opuścić grupę?', `„${gu.name}" zniknie z tego urządzenia i przestaniesz odbierać wiadomości.`
-          + ' Pozostali członkowie zachowują grupę — nie da się jej usunąć u nich.', 'Opuść')) return
-        await leaveGroup(gu.gid)
+        if (admin) {
+          if (!await ask('Usunąć grupę?', `Wszyscy członkowie „${gu.name}" stracą dostęp do nowych wiadomości,`
+            + ' a klucz grupy zostanie skasowany z HEM — grupy nie da się już przywrócić.'
+            + ' Ich dotychczasowa kopia rozmowy pozostanie u nich; nie da się jej usunąć zdalnie.', 'Usuń grupę')) return
+          await deleteGroup(gu.gid)
+        } else {
+          if (!await ask('Opuścić grupę?', `„${gu.name}" zniknie z tego urządzenia i przestaniesz odbierać wiadomości.`
+            + ' Pozostali członkowie zachowują grupę — nie da się jej usunąć u nich.', 'Opuść')) return
+          await leaveGroup(gu.gid)
+        }
         return
       }
       void activateGroup(gu.gid)
