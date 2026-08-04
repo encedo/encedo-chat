@@ -1,0 +1,87 @@
+# Tests on every push and PR.
+#
+# The browser job is the one that earns its minutes. `npm test` and `web:build`
+# are both green on code that cannot run: the web build strips types with Babel
+# and never type-checks, so a reference to an undefined variable ships happily
+# and only fails when the line executes. That has already happened once (a
+# renamed `_from` parameter took out the whole group receive path with both
+# other jobs green). Only the two-browser harness catches it.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # A new push supersedes the run in flight for the same ref.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: unit tests + web build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # hem-sdk-js is a submodule and `impl/web` imports it directly — without
+          # this the bundle fails to resolve it, which reads as a webpack error
+          # about a missing module rather than a missing checkout step.
+          submodules: recursive
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # the engine runs .ts directly — no build step for tests
+          cache: npm
+          cache-dependency-path: impl/package-lock.json
+
+      - run: npm ci
+        working-directory: impl
+
+      - name: Unit + offline integration tests
+        run: npm test
+        working-directory: impl
+
+      - name: Production web build
+        run: npm run web:build
+        working-directory: impl
+
+  browser:
+    name: two-browser harness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: impl/package-lock.json
+
+      - run: npm ci
+        working-directory: impl
+
+      # The harness drives real Chromium over CDP. Ubuntu runners ship one; the
+      # harness looks for a binary on PATH.
+      - name: Chromium
+        run: |
+          which chromium || which chromium-browser || sudo apt-get update && sudo apt-get install -y chromium-browser
+          chromium-browser --version || chromium --version
+
+      # It reaches the REAL relay (bs1.onchato.com) — this is an integration
+      # test, not a hermetic one. A relay outage fails the job, which is
+      # information, but it is why this does not gate merges on its own.
+      - name: Group + membership scenarios
+        run: GROUP_ONLY=1 npm run browser-test
+        working-directory: impl
+        timeout-minutes: 15
+
+      - name: Upload the log when it fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-log
+          path: impl/*.log
+          if-no-files-found: ignore
