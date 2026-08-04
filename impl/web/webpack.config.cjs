@@ -40,6 +40,22 @@ module.exports = (_env, argv) => {
       new HtmlWebpackPlugin({ template: './index.html', filename: 'index.html', chunks: ['app'] }),
       new HtmlWebpackPlugin({ template: './webrtc-test.html', filename: 'webrtc-test.html', chunks: ['webrtc-test'] }),
     ],
+    // Every build was cold, and the work is not small: the .js/.mjs rule below
+    // has no `exclude`, so ~920 node_modules files (libp2p, 3.3 MiB) go through
+    // Babel and then Terser each time — ~40 CPU-seconds, which is ~3 minutes on
+    // the 2-vCPU deploy host. Caching that costs nothing: same input, same
+    // output, just not recomputed.
+    //
+    // The directory is deliberately NOT the default (`node_modules/.cache`):
+    // deploying runs `npm ci`, which DELETES node_modules, so the default cache
+    // could never survive to the build that needs it. `buildDependencies` makes
+    // a change to this file invalidate everything, so the cache cannot serve a
+    // stale config.
+    cache: {
+      type: 'filesystem',
+      cacheDirectory: path.resolve(__dirname, '../.webpack-cache'),
+      buildDependencies: { config: [__filename] },
+    },
     optimization: { minimize: prod },
     performance: { hints: false },
     experiments: { topLevelAwait: true },

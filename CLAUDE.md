@@ -769,8 +769,20 @@ restart?), `systemctl cat onchato-relay | grep -E 'WorkingDirectory|ExecStart'`
 ```bash
 cd /opt/github/encedo-chat && git pull
 git submodule update --init --recursive     # hem-sdk-js: the build imports it directly
-cd impl && npm ci && npm run web:build      # → impl/web/dist (what nginx serves)
+cd impl && npm run web:deploy               # → impl/web/dist (what nginx serves)
 ```
+
+`web:deploy` is `npm ci` **only when `package-lock.json` actually changed**
+(compared against a stamp inside `node_modules`), then the build. Reinstalling
+598 packages to deploy a one-line UI change cost ~31 s of every deploy, and
+`npm ci` wipes `node_modules` to do it. Run `npm ci && npm run web:build` by
+hand if you ever need to force the install.
+
+The build also keeps a **filesystem cache in `impl/.webpack-cache`** (~100 MB,
+gitignored). The directory is outside `node_modules` on purpose: `npm ci`
+deletes `node_modules`, so webpack's default cache location could never survive
+to the build that needs it. Changing `webpack.config.cjs` invalidates it
+automatically (`buildDependencies`).
 
 `sudo systemctl reload nginx` only if you changed nginx config. Verify with
 `curl -s https://onchato.com/ | grep -o 'app\.[a-z0-9]*\.bundle\.js'` — the

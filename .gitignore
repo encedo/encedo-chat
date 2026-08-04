@@ -6,6 +6,10 @@ dist/
 build/
 *.tsbuildinfo
 
+# webpack's filesystem cache — outside node_modules on purpose, so that
+# `npm ci` (which wipes node_modules) does not throw it away on every deploy
+.webpack-cache/
+
 # logs
 *.log
 npm-debug.log*

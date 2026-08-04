@@ -20,6 +20,7 @@
     "alice": "node alice/alice.ts",
     "ec": "node cli/ec.ts",
     "web:build": "webpack --config web/webpack.config.cjs --mode production",
+    "web:deploy": "cmp -s package-lock.json node_modules/.lock-stamp || { npm ci && cp package-lock.json node_modules/.lock-stamp; } && npm run web:build",
     "web:dev": "webpack serve --config web/webpack.config.cjs --mode development",
     "room-sim": "node net/room-sim.ts",
     "browser-test": "node net/browser-test.ts",
