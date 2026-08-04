@@ -18,6 +18,7 @@ import type { GkBackend } from '../../lib/group.ts'
 // local shadowing the translator fails at runtime with "t is not a function" —
 // which is exactly how it failed once. `tr` cannot collide.
 import { t as tr, setLocale, getLocale, applyDom } from './i18n.ts'
+import { probeCapabilities, formatReport } from '../../lib/capabilities.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
@@ -972,6 +973,34 @@ function ecLog(msg: string, level: 'info' | 'debug' = 'info') {
 ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : 'libp2p'}`
   + ` rotation=${FORCED_ROTATION_SEC == null ? 'per-pair offset' : `forced ${String(Math.floor(FORCED_ROTATION_SEC / 3600)).padStart(2, '0')}:${String(Math.floor((FORCED_ROTATION_SEC % 3600) / 60)).padStart(2, '0')} UTC`};`
   + ' add ?debug=1 for the full trace, ?mqtt=1 for the broker transport, ?rot=<hour> to force the rollover time')
+
+/**
+ * What this platform can actually do, checked before anything needs it.
+ *
+ * WebKitGTK is why this exists: the desktop webview has X25519 but no WebRTC,
+ * and discovering that cost a debugging session instead of a line of output.
+ * Every webview is a different subset — Android's Chromium tracks the Play
+ * Store rather than the OS version, iOS is whatever WebKit the system shipped —
+ * so this asks the platform instead of inferring from a version number.
+ *
+ * A missing REQUIRED capability stops the app with the reason. Refusing to
+ * start is the honest outcome: without X25519 there is no rendezvous and no
+ * handshake, and carrying on presents as a conversation that never connects,
+ * which is indistinguishable from a network problem and sends the user hunting
+ * in the wrong place.
+ */
+void (async () => {
+  const rep = await probeCapabilities()
+  ecLog(formatReport(rep))
+  for (const d of rep.degraded) ecLog(`capability (degraded): ${d.id} — ${d.note}`)
+  if (rep.ok) return
+  const card = document.querySelector('.login-card')
+  if (!card) return
+  card.innerHTML = `<h1>Ta przeglądarka nie wystarczy</h1>`
+    + `<div class="sub">Encedo Chat potrzebuje kilku funkcji, których tu brakuje. Bez nich nie da się nawet ustalić wspólnego pokoju, więc logowanie jest wyłączone.</div>`
+    + rep.missing.map((m) => `<div class="msg err" style="display:block">${escapeHtml(m.id)} — ${escapeHtml(m.note ?? '')}</div>`).join('')
+    + `<div class="nodes-hint" style="margin-top:14px">${escapeHtml(rep.ua)}</div>`
+})()
 
 /**
  * Per-peer handshake state. The badge shows ONE thing, but a room can have more
