@@ -23,14 +23,14 @@ jobs:
     name: unit tests + web build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           # hem-sdk-js is a submodule and `impl/web` imports it directly — without
           # this the bundle fails to resolve it, which reads as a webpack error
           # about a missing module rather than a missing checkout step.
           submodules: recursive
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24 # the engine runs .ts directly — no build step for tests
           cache: npm
@@ -51,10 +51,10 @@ jobs:
     name: two-browser harness
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: recursive }
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -101,7 +101,7 @@ jobs:
 
       - name: Upload the log when it fails
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: browser-test-log
           path: impl/*.log

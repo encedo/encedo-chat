@@ -28,12 +28,12 @@ jobs:
           - { os: windows-latest,   label: windows }
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: recursive }
 
       # Tauri's beforeBuildCommand runs `npm run web:build`, so the frontend
       # toolchain has to be here before cargo is invoked.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -72,7 +72,7 @@ jobs:
           releaseDraft: true
           prerelease: false
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: bundles-${{ matrix.label }}
           path: |
