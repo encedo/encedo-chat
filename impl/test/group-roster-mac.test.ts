@@ -13,7 +13,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
 import { b64, unb64, randomBytes } from '../lib/wc.ts'
-import { GroupManager, type GroupId, type Member } from '../lib/group.ts'
+import { GroupManager, softwareGk, type GroupId, type Member } from '../lib/group.ts'
 import type { SkdFields } from '../lib/envelope.ts'
 
 const P = { networkId: 'grmac', dateUTC: '2026-08-03' }
@@ -27,10 +27,9 @@ async function peer(): Promise<Peer> { const id = await softId(); return { id, m
 /** Admin A creates a group {A, B}; returns A's SKD for B (carrying a roster MAC). */
 async function setup() {
   const A = await peer(), B = await peer()
-  const gkPriv = randomBytes(32)
-  const gk = await x25519FromPriv(gkPriv)
+  const { gk, pub: gkPub } = await softwareGk()
   const roster: Member[] = [{ pub: A.id.pub }, { pub: B.id.pub }]
-  const gid = await A.mgr.createGroup(gk.pub, roster, gkPriv)
+  const gid = await A.mgr.createGroup(gkPub, roster, gk)
   const skdB = (await A.mgr.skdFor(gid, B.id.pub))!
   return { A, B, gid, skdB }
 }

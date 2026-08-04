@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
 import { b64, unb64, randomBytes } from '../lib/wc.ts'
-import { GroupManager, type GroupId, type Member } from '../lib/group.ts'
+import { GroupManager, softwareGk, type GroupId, type Member } from '../lib/group.ts'
 import { joinGroup, type GroupRoom } from '../lib/grouproom.ts'
 
 const P = { networkId: 'groom', dateUTC: '2026-08-01' }
@@ -50,10 +50,9 @@ async function makeGroup(n: number): Promise<{ gid: string; topic: string; peers
     const id = await softId()
     peers.push({ id, mgr: new GroupManager(id, P), node: net.node('n' + i), recv: [], react: [] })
   }
-  const gkPriv = randomBytes(32)
-  const gk = await x25519FromPriv(gkPriv) // admin GK — persistable priv so it can MAC the roster
+  const { gk, pub: gkPub } = await softwareGk()
   const roster: Member[] = peers.map((p) => ({ pub: p.id.pub }))
-  const gid = await peers[0].mgr.createGroup(gk.pub, roster, gkPriv)
+  const gid = await peers[0].mgr.createGroup(gkPub, roster, gk)
   // pass 1: creator's SKD to everyone (so they establish the group) — per-recipient (roster MAC)
   for (const r of peers.slice(1)) await r.mgr.applySkd(peers[0].id.pub, (await peers[0].mgr.skdFor(gid, r.id.pub))!)
   // pass 2: everyone's SKD to everyone else (fills all sender keys)

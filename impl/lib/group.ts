@@ -248,7 +248,59 @@ export class GroupSession {
 // manager: all of my groups + the distribution glue
 // ---------------------------------------------------------------------------
 
-interface GroupRec { session: GroupSession; gkPub: Uint8Array; secret: Uint8Array; roster: Member[]; epoch: number; gkPriv?: Uint8Array }
+/**
+ * The admin's half of `GK` (§8) as a capability, not as bytes — the same move
+ * `Dh` makes for IK in `x25519.ts`, and for the same reason: with a HEM the
+ * private half does not exist here to be held.
+ *
+ * Two backings, one contract. HEM: `GK_priv` is a key in the HSM, `dh` is an
+ * `ecdh` call, and `kid` is what persistence stores — a REFERENCE, where bucket
+ * B had to store the scalar itself. Software (dev / no-HEM / tests): a raw
+ * scalar in `priv`, exactly what B did.
+ */
+export interface AdminGk {
+  /** Raw ECDH(GK_priv, peer) — the roster-MAC secret before HKDF. */
+  dh(peerPub: Uint8Array): Promise<Uint8Array>
+  /** HEM-backed: the HSM key id. Persisted instead of key material. */
+  kid?: string
+  /** Software-backed: the raw scalar. Persisted (secret) as in bucket B. */
+  priv?: Uint8Array
+}
+
+/**
+ * Where admin GKs come from. Injected so this module never imports a HEM — the
+ * repo's dependency-injection rule, and what keeps the group engine testable
+ * with a software backend and no HSM in sight.
+ */
+export interface GkBackend {
+  /** Mint a group key. `label` is for the HSM's own key list, not the protocol. */
+  create(label: string): Promise<{ gk: AdminGk; pub: Uint8Array }>
+  /** Rebuild the capability a snapshot referenced by kid. */
+  fromKid(kid: string): AdminGk
+}
+
+interface GroupRec {
+  session: GroupSession
+  gkPub: Uint8Array
+  secret: Uint8Array
+  roster: Member[]
+  epoch: number
+  /** Present iff I am the admin — holding this is what admin authority IS. */
+  gk?: AdminGk
+  /**
+   * ECDH(GK, member) memoised per member pubkey.
+   *
+   * This is the whole reason a membership change is cheap: the secret depends
+   * on (GK, member) and NOT on the epoch — the epoch enters afterwards, through
+   * HKDF — so re-MACing a roster for a new epoch costs ZERO HSM calls for
+   * everyone already present. Only a genuinely new member costs one `ecdh`.
+   *
+   * Deliberately RAM-only and absent from the §10 snapshot: it is re-derivable
+   * on demand, so persisting it would widen what a stolen cache yields in
+   * exchange for saving one call after a reload.
+   */
+  ssCache: Map<string, Uint8Array>
+}
 
 /** A group serialized for the persistence cache (§10) — full state, base64 bytes. */
 export interface GroupSnapshot {
@@ -257,9 +309,28 @@ export interface GroupSnapshot {
   epoch: number
   secret: string     // group_secret (seeds the topic)
   roster: Member[]
-  gkPriv?: string    // GK private half — present only for groups I admin (roster-MAC key); secret
+  gkKid?: string     // admin, HEM-backed: the HSM key id for GK — a reference, no key material
+  gkPriv?: string    // admin, software-backed: GK private half (secret). Also the bucket-B legacy field
   send: { key: string; n: number }                       // my sending chain
   receivers: { pub: string; key: string; n: number }[]   // every known member's receiving chain
+}
+
+/**
+ * A software GK — a raw scalar, the bucket-B behaviour. This is what runs
+ * without a HEM: dev, the CLI, every unit test, and the browser's software
+ * identity. It satisfies the same `AdminGk` contract as the HSM-backed one, so
+ * nothing above this line can tell them apart.
+ */
+export async function softwareGk(): Promise<{ gk: AdminGk; pub: Uint8Array }> {
+  const priv = randomBytes(32)
+  const gk = await softwareGkFromPriv(priv)
+  const dh = await x25519FromPriv(priv)
+  return { gk, pub: dh.pub }
+}
+
+async function softwareGkFromPriv(priv: Uint8Array): Promise<AdminGk> {
+  const dh = await x25519FromPriv(priv)
+  return { dh: (peerPub) => dh.dh(peerPub), priv }
 }
 
 /**
@@ -273,8 +344,26 @@ export class GroupManager {
   private id: GroupId
   private params: RvParams
   private recs = new Map<string, GroupRec>()
+  /** Where admin GKs come from (HEM or software). Absent → software-only. */
+  readonly gkBackend?: GkBackend
 
-  constructor(id: GroupId, params: RvParams) { this.id = id; this.params = params }
+  constructor(id: GroupId, params: RvParams, gkBackend?: GkBackend) {
+    this.id = id; this.params = params; this.gkBackend = gkBackend
+  }
+
+  /**
+   * ECDH(GK, member) for the admin, through the per-group memo.
+   *
+   * Every roster MAC goes through here, so this one function is what bounds the
+   * HSM traffic of a membership change to "one call per NEW member".
+   */
+  private async gkSecret(rec: GroupRec, memberPub: string): Promise<Uint8Array> {
+    const hit = rec.ssCache.get(memberPub)
+    if (hit) return hit
+    const ss = await rec.gk!.dh(unb64(memberPub))
+    rec.ssCache.set(memberPub, ss)
+    return ss
+  }
 
   gidHexOf(gid: Uint8Array): string { return hex(gid) }
   session(gidHex: string): GroupSession | undefined { return this.recs.get(gidHex)?.session }
@@ -284,16 +373,28 @@ export class GroupManager {
    *  fresh sending key. `gkPub` is the group identity key; as admin I also keep
    *  `gkPriv` so I can MAC the roster (per recipient, §8 roster auth). Returns the
    *  gid hex. Holding gkPriv is what makes this rec the admin's. */
-  async createGroup(gkPub: Uint8Array, roster: Member[], gkPriv?: Uint8Array): Promise<string> {
+  async createGroup(gkPub: Uint8Array, roster: Member[], gk?: AdminGk): Promise<string> {
     const gid = await groupIdFromGK(gkPub)
-    await this.admit({ gid, gkPub, epoch: 0, secret: randomBytes(32), roster, gkPriv })
+    await this.admit({ gid, gkPub, epoch: 0, secret: randomBytes(32), roster, gk })
     return hex(gid)
+  }
+
+  /**
+   * Mint a group key through the injected backend and create the group with it —
+   * the one call an app needs, so it never has to know whether GK ended up in a
+   * HSM or in a scalar. Falls back to a software GK when no backend is wired.
+   */
+  async createGroupWithNewKey(label: string, roster: Member[]): Promise<string> {
+    const made = this.gkBackend
+      ? await this.gkBackend.create(label)
+      : await softwareGk()
+    return this.createGroup(made.pub, roster, made.gk)
   }
 
   /** Establish or update a group from its shared material. New group or a newer
    *  epoch → a fresh session (new sending key). Same epoch → keep the session
    *  (never reset my own chain), only refresh the roster. */
-  async admit(m: { gid: Uint8Array; gkPub: Uint8Array; epoch: number; secret: Uint8Array; roster: Member[]; gkPriv?: Uint8Array }): Promise<GroupSession> {
+  async admit(m: { gid: Uint8Array; gkPub: Uint8Array; epoch: number; secret: Uint8Array; roster: Member[]; gk?: AdminGk }): Promise<GroupSession> {
     const gh = hex(m.gid)
     const cur = this.recs.get(gh)
     if (cur && cur.epoch >= m.epoch) {
@@ -306,9 +407,15 @@ export class GroupManager {
     const session = await GroupSession.create({
       id: this.id, gid: m.gid, epoch: m.epoch, groupSecret: m.secret, members: m.roster, params: this.params,
     })
-    // Preserve gkPriv across a rekey (admit with a newer epoch): the admin keeps
-    // GK for the group's life. Members never have it, so they never become admin.
-    this.recs.set(gh, { session, gkPub: m.gkPub, secret: m.secret.slice(), roster: m.roster, epoch: m.epoch, gkPriv: m.gkPriv ?? cur?.gkPriv })
+    // Preserve GK across a rekey (admit with a newer epoch): the admin keeps it
+    // for the group's life. Members never have it, so they never become admin.
+    // The ECDH memo rides along for the same reason — GK did not change, so
+    // every secret in it is still the right one, and a rekey re-MACs the roster
+    // without touching the HSM.
+    this.recs.set(gh, {
+      session, gkPub: m.gkPub, secret: m.secret.slice(), roster: m.roster, epoch: m.epoch,
+      gk: m.gk ?? cur?.gk, ssCache: cur?.ssCache ?? new Map(),
+    })
     return session
   }
 
@@ -369,9 +476,8 @@ export class GroupManager {
       secret: b64(rec.secret), chain: b64(rec.session.mySenderKey()),
       roster: rec.roster.map((m) => m.pub),
     }
-    if (rec.gkPriv && forPub) {
-      const gk = await x25519FromPriv(rec.gkPriv)
-      const ss = await gk.dh(unb64(forPub))
+    if (rec.gk && forPub) {
+      const ss = await this.gkSecret(rec, forPub)
       const rk = await rosterMacKeyFromSecret(ss, rec.session.gid, rec.epoch)
       skd.rmac = b64(await rosterMac(rk, skd.roster))
     }
@@ -389,7 +495,12 @@ export class GroupManager {
       out.push({
         gid: b64(rec.session.gid), gkPub: b64(rec.gkPub), epoch: rec.epoch, secret: b64(rec.secret),
         roster: rec.roster.map((m) => ({ pub: m.pub, kid: m.kid })),
-        gkPriv: rec.gkPriv ? b64(rec.gkPriv) : undefined, // admin only — the roster-MAC key material (§10-encrypted by the caller)
+        // Admin only. HEM-backed groups persist a KID; software-backed ones the
+        // scalar (§10-encrypted by the caller either way). The KID form is the
+        // point of bucket A — a stolen cache yields a reference that is useless
+        // without the HSM, where before it yielded the roster-MAC key itself.
+        gkKid: rec.gk?.kid,
+        gkPriv: rec.gk?.priv ? b64(rec.gk.priv) : undefined,
         send: { key: b64(c.send.key), n: c.send.n },
         receivers: c.receivers.map((r) => ({ pub: r.pub, key: b64(r.key), n: r.n })),
       })
@@ -404,7 +515,12 @@ export class GroupManager {
     const gids: string[] = []
     for (const s of snaps) {
       const gid = unb64(s.gid)
-      const session = await this.admit({ gid, gkPub: unb64(s.gkPub), epoch: s.epoch, secret: unb64(s.secret), roster: s.roster, gkPriv: s.gkPriv ? unb64(s.gkPriv) : undefined })
+      // A KID needs the backend to become usable again; a scalar is self-contained.
+      // Snapshots written before bucket A carry only `gkPriv`, so they keep working.
+      const gk: AdminGk | undefined = s.gkKid
+        ? this.gkBackend?.fromKid(s.gkKid)
+        : s.gkPriv ? await softwareGkFromPriv(unb64(s.gkPriv)) : undefined
+      const session = await this.admit({ gid, gkPub: unb64(s.gkPub), epoch: s.epoch, secret: unb64(s.secret), roster: s.roster, gk })
       session.importChains({
         send: { key: unb64(s.send.key), n: s.send.n },
         receivers: s.receivers.map((r) => ({ pub: r.pub, key: unb64(r.key), n: r.n })),

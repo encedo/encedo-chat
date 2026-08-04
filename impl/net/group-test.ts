@@ -13,7 +13,8 @@
 
 import { startSession, type Identity } from '../lib/core.ts'
 import { onchatoRelay } from './onchato.ts'
-import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
+import { generateX25519 } from '../lib/x25519.ts'
+import { softwareGk } from '../lib/group.ts'
 import { b64, unb64, randomBytes } from '../lib/wc.ts'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -31,10 +32,9 @@ const sessions = await Promise.all(ids.map((id) => startSession(id, { relay: REL
 console.log(`${N} software members up on ${RELAY.slice(0, 28)}…`)
 
 // Form the group: member 0 creates it, then everyone's SKD reaches everyone.
-const gkPriv = randomBytes(32)
-const gk = await x25519FromPriv(gkPriv) // admin GK — persistable priv so it can MAC the roster
+const { gk, pub: gkPub } = await softwareGk()
 const roster = ids.map((id) => ({ pub: id.pub }))
-const gid = await sessions[0].groups.createGroup(gk.pub, roster, gkPriv)
+const gid = await sessions[0].groups.createGroup(gkPub, roster, gk)
 for (let k = 1; k < N; k++) await sessions[k].groups.applySkd(ids[0].pub, (await sessions[0].groups.skdFor(gid, ids[k].pub))!)
 for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) if (i !== j) await sessions[j].groups.applySkd(ids[i].pub, (await sessions[i].groups.skdFor(gid, ids[j].pub))!)
 

@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
 import { b64, unb64, randomBytes } from '../lib/wc.ts'
-import { GroupManager, type GroupId, type Member } from '../lib/group.ts'
+import { GroupManager, softwareGk, type GroupId, type Member } from '../lib/group.ts'
 import { envGroupSkd, encodeEnvelope, decodeEnvelope, type GroupSkdEnv } from '../lib/envelope.ts'
 
 const enc = new TextEncoder()
@@ -30,10 +30,9 @@ async function distribute(from: { id: GroupId; mgr: GroupManager }, gidHex: stri
 test('snapshot -> JSON -> restore keeps the full group state (send + all receivers)', async () => {
   const A = await softId(), B = await softId(), C = await softId()
   const mA = new GroupManager(A, P), mB = new GroupManager(B, P), mC = new GroupManager(C, P)
-  const gkPriv = randomBytes(32)
-  const gk = await x25519FromPriv(gkPriv)
+  const { gk, pub: gkPub } = await softwareGk()
   const roster: Member[] = [{ pub: A.pub }, { pub: B.pub }, { pub: C.pub }]
-  const gid = await mA.createGroup(gk.pub, roster, gkPriv)
+  const gid = await mA.createGroup(gkPub, roster, gk)
   const wA = { id: A, mgr: mA }, wB = { id: B, mgr: mB }, wC = { id: C, mgr: mC }
   await distribute(wA, gid, [wB, wC]); await distribute(wB, gid, [wA, wC]); await distribute(wC, gid, [wA, wB])
 
@@ -61,9 +60,8 @@ test('snapshot -> JSON -> restore keeps the full group state (send + all receive
 test('a restored member does not reuse a spent send counter', async () => {
   const A = await softId(), B = await softId()
   const mA = new GroupManager(A, P), mB = new GroupManager(B, P)
-  const gkPriv = randomBytes(32)
-  const gk = await x25519FromPriv(gkPriv)
-  const gid = await mA.createGroup(gk.pub, [{ pub: A.pub }, { pub: B.pub }], gkPriv)
+  const { gk, pub: gkPub } = await softwareGk()
+  const gid = await mA.createGroup(gkPub, [{ pub: A.pub }, { pub: B.pub }], gk)
   await distribute({ id: A, mgr: mA }, gid, [{ id: B, mgr: mB }])
   await distribute({ id: B, mgr: mB }, gid, [{ id: A, mgr: mA }])
 

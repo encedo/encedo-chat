@@ -1,0 +1,195 @@
+/**
+ * GK inside the HEM (§8, bucket A) — the admin's group key as an HSM object.
+ *
+ * Bucket B made GK a raw scalar the client held and persisted. Bucket A moves
+ * it behind `AdminGk`: the private half lives in the HEM, `dh` is an `ecdh`
+ * call, and persistence stores a KID instead of key material. Members are
+ * unaffected — they verify with `ECDH(IK_i, GK_pub)` either way — so the two
+ * backings MUST be indistinguishable from outside, which is the first test here.
+ *
+ * The rest is about HSM traffic. Every roster MAC is an `ecdh`, and a
+ * membership change re-MACs the whole roster, so the naive version would call
+ * the device once per member per change. The secret depends on (GK, member) and
+ * NOT on the epoch, so it is memoised: a change costs one call per NEW member
+ * and nothing for anyone already there. That bound is a load-bearing property
+ * of this design, not an optimisation — it is what makes a 10-person group
+ * usable on a hardware token — so it is pinned here.
+ */
+
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
+import { b64, unb64, randomBytes } from '../lib/wc.ts'
+import { GroupManager, softwareGk, groupIdFromGK, type GroupId, type Member, type GkBackend } from '../lib/group.ts'
+import { hemGkBackend } from '../lib/core.ts'
+
+const P = { networkId: 'gkhem', dateUTC: '2026-08-04' }
+
+async function softId(): Promise<GroupId> {
+  const k = await generateX25519()
+  return { pub: b64(k.pub), ecdh: async (p: string) => k.dh(unb64(p)) }
+}
+
+/**
+ * A HEM that is real X25519 underneath and counts what it was asked to do.
+ * Real crypto matters: a stub returning fixed bytes would let a broken roster
+ * MAC pass, and the point of the first test is that members cannot tell the
+ * backings apart.
+ */
+function fakeHem() {
+  const keys = new Map<string, { priv: Uint8Array; pub: Uint8Array; label: string; descr: string }>()
+  const calls = { ecdh: 0, createKeyPair: 0, getPubKey: 0, authorize: 0 }
+  let n = 0
+  return {
+    calls,
+    keys,
+    async authorizePassword(_pw: string | null, scope: string) { calls.authorize++; return `tok:${scope}` },
+    async createKeyPair(_t: string, label: string, type: string, descr: string) {
+      calls.createKeyPair++
+      assert.equal(type, 'CURVE25519', 'GK must be an X25519 key')
+      const priv = randomBytes(32)
+      const pub = (await x25519FromPriv(priv)).pub
+      const kid = `kid-${++n}`
+      keys.set(kid, { priv, pub, label, descr })
+      return { kid }
+    },
+    async getPubKey(_t: string, kid: string) {
+      calls.getPubKey++
+      const k = keys.get(kid); if (!k) throw new Error('no such kid')
+      return { pubkey: b64(k.pub), type: 'CURVE25519', updated: 0 }
+    },
+    async ecdh(_t: string, kid: string, peerPubB64: string) {
+      calls.ecdh++
+      const k = keys.get(kid); if (!k) throw new Error('no such kid')
+      return (await x25519FromPriv(k.priv)).dh(unb64(peerPubB64))
+    },
+  }
+}
+
+type Peer = { id: GroupId; mgr: GroupManager }
+async function peer(backend?: GkBackend): Promise<Peer> {
+  const id = await softId()
+  return { id, mgr: new GroupManager(id, P, backend) }
+}
+
+test('a HEM-backed GK is indistinguishable from a software one to a member', async () => {
+  const hem = fakeHem()
+  const A = await peer(hemGkBackend(hem)), B = await peer()
+  const roster: Member[] = [{ pub: A.id.pub }, { pub: B.id.pub }]
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-test', roster)
+
+  const skdB = (await A.mgr.skdFor(gid, B.id.pub))!
+  assert.ok(skdB.rmac, 'the admin still MACs the roster — GK_priv being in the HSM is invisible here')
+  await B.mgr.applySkd(A.id.pub, skdB) // verifies with ECDH(IK_B, GK_pub); must not throw
+  assert.ok(B.mgr.session(gid), 'the member established the group')
+
+  // gid is still SHA-256(GK_pub)[0:16] — the HSM changed where the private half
+  // lives, not what identifies the group.
+  const gkPub = unb64(skdB.gkPub)
+  assert.equal(A.mgr.gidHexOf(await groupIdFromGK(gkPub)), gid)
+  assert.equal(hem.calls.createKeyPair, 1, 'one keypair per group')
+  assert.equal(hem.calls.getPubKey, 1, 'createKeyPair returns only a kid, so exactly one getPubKey')
+})
+
+test('GK_priv never leaves the HSM: nothing persisted is key material', async () => {
+  const hem = fakeHem()
+  const A = await peer(hemGkBackend(hem))
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-test', [{ pub: A.id.pub }])
+
+  const snap = A.mgr.snapshot().find((s) => A.mgr.gidHexOf(unb64(s.gid)) === gid)!
+  assert.ok(snap.gkKid, 'the snapshot references the HSM key')
+  assert.equal(snap.gkPriv, undefined, 'and carries NO private scalar — the bucket-A win')
+  // The scalar the HSM holds must not appear anywhere in what we would write to disk.
+  const priv = hem.keys.get(snap.gkKid!)!.priv
+  assert.ok(!JSON.stringify(snap).includes(b64(priv)), 'no GK scalar anywhere in the snapshot')
+})
+
+test('the roster-MAC secret is memoised: a rekey with the same members costs no HSM calls', async () => {
+  const hem = fakeHem()
+  const A = await peer(hemGkBackend(hem))
+  const B = await peer(), C = await peer()
+  const roster: Member[] = [{ pub: A.id.pub }, { pub: B.id.pub }, { pub: C.id.pub }]
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-test', roster)
+
+  // First distribution: one ecdh per recipient, unavoidable.
+  await A.mgr.skdFor(gid, B.id.pub)
+  await A.mgr.skdFor(gid, C.id.pub)
+  const afterFirst = hem.calls.ecdh
+  assert.equal(afterFirst, 2, 'one ecdh per member the first time')
+
+  // MACing the same members again — same epoch — must not touch the device.
+  await A.mgr.skdFor(gid, B.id.pub)
+  await A.mgr.skdFor(gid, C.id.pub)
+  assert.equal(hem.calls.ecdh, afterFirst, 'a repeat SKD is free')
+
+  // A membership change bumps the epoch and re-MACs the whole roster. The epoch
+  // enters through HKDF, AFTER the ECDH, so the memo still holds: removing C and
+  // re-MACing for B costs nothing.
+  await A.mgr.rekey(gid, [{ pub: A.id.pub }, { pub: B.id.pub }])
+  await A.mgr.skdFor(gid, B.id.pub)
+  assert.equal(hem.calls.ecdh, afterFirst, 'a rekey re-MACs an existing member without the HSM')
+
+  // Only a genuinely new member costs a call.
+  const D = await peer()
+  await A.mgr.rekey(gid, [{ pub: A.id.pub }, { pub: B.id.pub }, { pub: D.id.pub }])
+  await A.mgr.skdFor(gid, B.id.pub)
+  await A.mgr.skdFor(gid, D.id.pub)
+  assert.equal(hem.calls.ecdh, afterFirst + 1, 'exactly one new ecdh, for the new member only')
+})
+
+test('a memoised secret is still the RIGHT secret — the member verifies after a rekey', async () => {
+  const hem = fakeHem()
+  const A = await peer(hemGkBackend(hem)), B = await peer()
+  const roster: Member[] = [{ pub: A.id.pub }, { pub: B.id.pub }]
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-test', roster)
+  await B.mgr.applySkd(A.id.pub, (await A.mgr.skdFor(gid, B.id.pub))!)
+
+  // Rekey (the MAC key changes: same ECDH, new epoch through HKDF). If the memo
+  // leaked the epoch, this MAC would be stale and B would reject it.
+  const C = await peer()
+  await A.mgr.rekey(gid, [{ pub: A.id.pub }, { pub: B.id.pub }, { pub: C.id.pub }])
+  const skd2 = (await A.mgr.skdFor(gid, B.id.pub))!
+  await B.mgr.applySkd(A.id.pub, skd2) // must not throw
+  assert.equal(B.mgr.session(gid)!.epoch, 1, 'B moved to the new epoch')
+})
+
+test('a snapshot restores admin authority through the backend, not through key material', async () => {
+  const hem = fakeHem()
+  const backend = hemGkBackend(hem)
+  const A = await peer(backend), B = await peer()
+  const roster: Member[] = [{ pub: A.id.pub }, { pub: B.id.pub }]
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-test', roster)
+  const snaps = A.mgr.snapshot()
+
+  // A fresh manager — a reload — rebuilds the admin capability from the KID.
+  const A2 = new GroupManager(A.id, P, backend)
+  await A2.restore(snaps)
+  const skd = (await A2.skdFor(gid, B.id.pub))!
+  assert.ok(skd.rmac, 'the restored admin can still MAC a roster')
+  await B.mgr.applySkd(A.id.pub, skd) // and a member accepts it
+  assert.ok(B.mgr.session(gid), 'the member established the group from the restored admin')
+
+  // Without the backend the KID is inert — exactly the point of storing a
+  // reference: a stolen cache alone does not confer admin authority.
+  const A3 = new GroupManager(A.id, P)
+  await A3.restore(snaps)
+  const none = (await A3.skdFor(gid, B.id.pub))!
+  assert.equal(none.rmac, undefined, 'a KID without its HSM MACs nothing')
+})
+
+test('bucket-B snapshots still restore (software GK migration)', async () => {
+  const A = await peer(), B = await peer()
+  const { gk, pub: gkPub } = await softwareGk()
+  const roster: Member[] = [{ pub: A.id.pub }, { pub: B.id.pub }]
+  const gid = await A.mgr.createGroup(gkPub, roster, gk)
+  const snaps = A.mgr.snapshot()
+  assert.ok(snaps[0].gkPriv, 'a software admin still persists its scalar')
+  assert.equal(snaps[0].gkKid, undefined)
+
+  const A2 = new GroupManager(A.id, P) // no backend, as before bucket A
+  await A2.restore(snaps)
+  const skd = (await A2.skdFor(gid, B.id.pub))!
+  assert.ok(skd.rmac, 'a pre-bucket-A group keeps working')
+  await B.mgr.applySkd(A.id.pub, skd)
+  assert.ok(B.mgr.session(gid))
+})

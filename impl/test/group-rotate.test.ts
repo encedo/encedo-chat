@@ -9,7 +9,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
 import { b64, unb64, randomBytes } from '../lib/wc.ts'
-import { GroupManager, type GroupId, type Member } from '../lib/group.ts'
+import { GroupManager, softwareGk, type GroupId, type Member } from '../lib/group.ts'
 
 const P = { networkId: 'grot', dateUTC: '2026-08-01' }
 const enc = new TextEncoder()
@@ -26,10 +26,9 @@ const skd = async (from: Peer, gid: string, to: Peer[]) => { for (const r of to)
 async function boot(n: number): Promise<{ gid: string; gk: Awaited<ReturnType<typeof generateX25519>>; peers: Peer[] }> {
   const peers: Peer[] = []
   for (let i = 0; i < n; i++) { const id = await softId(); peers.push({ id, mgr: new GroupManager(id, P) }) }
-  const gkPriv = randomBytes(32)
-  const gk = await x25519FromPriv(gkPriv) // admin's GK — persistable priv so it can MAC the roster
+  const { gk, pub: gkPub } = await softwareGk()
   const roster: Member[] = peers.map((p) => ({ pub: p.id.pub }))
-  const gid = await peers[0].mgr.createGroup(gk.pub, roster, gkPriv)
+  const gid = await peers[0].mgr.createGroup(gkPub, roster, gk)
   await skd(peers[0], gid, peers.slice(1))
   for (const s of peers) await skd(s, gid, peers.filter((p) => p !== s))
   return { gid, gk, peers }

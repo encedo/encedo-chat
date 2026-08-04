@@ -12,7 +12,8 @@
  */
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
-import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
+import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
+import type { GkBackend } from '../../lib/group.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
@@ -206,7 +207,7 @@ $('go').addEventListener('click', async () => {
       const { kid } = await hem.createKeyPair(gen, `chat-ik-${handle}`, 'CURVE25519', btoa(`ETSEIC:self,${handle},ik,${iat}`))
       const use = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
       const { pubkey } = await hem.getPubKey(use, kid)
-      await enterApp(hemIdentityFrom(hem, kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM', kid)
+      await enterApp(hemIdentityFrom(hem, kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM', kid, hemGkBackend(hem))
     } else {
       const listTok = await hem.authorizePassword(pass, 'keymgmt:list')
       const keys: any[] = await hem.searchKeys(listTok, 'ETSEIC:self,')
@@ -214,7 +215,7 @@ $('go').addEventListener('click', async () => {
       const key = keys[0]; const handle = parseHandle(key.description)
       const use = await hem.authorizePassword(null, `keymgmt:use:${key.kid}`)
       const { pubkey } = await hem.getPubKey(use, key.kid)
-      await enterApp(hemIdentityFrom(hem, key.kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM', key.kid)
+      await enterApp(hemIdentityFrom(hem, key.kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM', key.kid, hemGkBackend(hem))
     }
   } catch (e: any) { setMsg('msg', 'Błąd: ' + (e?.message ?? e), 'err') }
   finally { const b = $('go') as HTMLButtonElement; b.disabled = false; b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj' }
@@ -314,7 +315,7 @@ function makeLocalBook(handle: string, storage: Storage) {
 /** Short form of an HSM key id — the full one is long and adds no meaning here. */
 const shortKid = (kid?: string) => (kid ? kid.slice(0, 8) + '…' : '')
 
-async function enterApp(id: Identity, book: ContactManager, sourceLabel: string, kid?: string) {
+async function enterApp(id: Identity, book: ContactManager, sourceLabel: string, kid?: string, gkBackend?: GkBackend) {
   session = { id, handle: id.handle, pub: id.pub, kid, book }
   // Start the transport, but do NOT make the app shell wait for it: dialing a
   // relay is network work, and a login screen that hangs on it looks broken
@@ -322,6 +323,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   clientReady = startSession(id, {
     relay: chosenRelay(),
     relays: chosenRelays(),   // 3b: fall through the enabled node list if one is down
+    gkBackend,                // §8 bucket A: a HEM identity mints GK in the HSM
     transport: USE_MQTT ? 'mqtt' : 'libp2p',
     broker: BROKER,
     forcedRotationSec: FORCED_ROTATION_SEC,
@@ -1338,10 +1340,11 @@ $('group-create').addEventListener('click', async () => {
   if (!name) { setMsg('group-msg', 'Podaj nazwę grupy.', 'err'); return }
   if (!picked.length) { setMsg('group-msg', 'Wybierz co najmniej jednego członka.', 'err'); return }
   try {
-    const gkPriv = randomBytes(32)
-    const gk = await x25519FromPriv(gkPriv) // admin GK — persistable priv so I can MAC the roster (bucket B)
     const roster = [{ pub: session.pub }, ...picked.map((pub) => ({ pub }))]
-    const gid = await client.groups.createGroup(gk.pub, roster, gkPriv)
+    // GK comes from whatever backs this identity (bucket A): a HEM identity mints
+    // it inside the HSM, a software one falls back to a scalar. The app does not
+    // choose — and must not, or the two paths drift.
+    const gid = await client.groups.createGroupWithNewKey(`chat-gk-${name}`.slice(0, 32), roster)
     const gu: GroupUI = { gid, name, epoch: 0, members: roster.map((m) => ({ pub: m.pub, name: memberName(m.pub) })), log: [], unseen: 0, room: null }
     groupsUI.set(gid, gu)
     gu.room = await client.openGroup(gid, groupHandlers(gid))

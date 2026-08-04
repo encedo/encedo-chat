@@ -21,7 +21,7 @@ import { createMqttPeer } from '../net/mqtt-node.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
 import { watchSelfSession, type SelfWatch } from './selfsession.ts'
 import { watchPresenceRotating, rendezvousDay, type PresenceWatch } from './presence.ts'
-import { GroupManager } from './group.ts'
+import { GroupManager, type AdminGk, type GkBackend } from './group.ts'
 import { joinGroup, type GroupRoom, type GroupRoomOpts } from './grouproom.ts'
 import { b64, unb64 } from './wc.ts'
 
@@ -44,6 +44,40 @@ export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: stri
       // HEM contact (imported → has a kid): two-KID ECDH, both operands in-device.
       // Local / one-off contact (no kid): raw peer pubkey.
       return peerKid ? hem.ecdhKid(t, kid, peerKid) : hem.ecdh(t, kid, peerPubB64)
+    },
+  }
+}
+
+/**
+ * Admin group keys minted INSIDE a HEM (§8, bucket A).
+ *
+ * What changes versus bucket B: `GK_priv` is generated in the HSM and never
+ * exists here, the roster-MAC ECDH runs in the device, and the §10 snapshot
+ * stores a KID instead of the scalar — so a stolen cache yields a reference
+ * that is useless without the HEM, where before it yielded the key itself.
+ *
+ * HSM traffic is deliberately small and bounded:
+ *   - group creation: `createKeyPair` + one `getPubKey` (createKeyPair returns
+ *     only a kid). Twice per group, ever.
+ *   - roster MAC: one `ecdh` per member, memoised by the group engine and
+ *     epoch-independent, so a membership change costs one call per NEW member
+ *     and nothing at all for everyone already there.
+ * The tokens are scoped per KID as the HEM requires; `authorizePassword(null,…)`
+ * reuses the cached password-derived key, so this is not a re-prompt per call.
+ */
+export function hemGkBackend(hem: any, descrFor?: (label: string) => string): GkBackend {
+  const use = (kid: string) => hem.authorizePassword(null, `keymgmt:use:${kid}`)
+  const fromKid = (kid: string): AdminGk => ({
+    kid,
+    async dh(peerPub: Uint8Array) { return new Uint8Array(await hem.ecdh(await use(kid), kid, b64(peerPub))) },
+  })
+  return {
+    fromKid,
+    async create(label: string) {
+      const gen = await hem.authorizePassword(null, 'keymgmt:gen')
+      const { kid } = await hem.createKeyPair(gen, label, 'CURVE25519', descrFor ? descrFor(label) : '')
+      const { pubkey } = await hem.getPubKey(await use(kid), kid)
+      return { gk: fromKid(kid), pub: unb64(pubkey) }
     },
   }
 }
@@ -373,6 +407,12 @@ export interface SessionOpts {
    */
   relays?: string[]
   /**
+   * Where admin group keys are minted (§8 GK). `hemGkBackend(hem)` puts GK_priv
+   * in the HSM; omitted, groups fall back to a software scalar. The front-end
+   * decides, because only it knows whether this identity has a HEM behind it.
+   */
+  gkBackend?: GkBackend
+  /**
    * Which transport carries rendezvous, presence and signalling.
    *
    * `libp2p` (default) is the main one. `mqtt` is the **fall-back**: same
@@ -443,7 +483,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   const params = opts.params ?? { networkId: 'main', dateUTC: todayUTC() }
   // Group Sender Keys (§8). Incoming SKDs on any 1:1 room feed this; `openGroup`
   // joins a group's topic. The manager is identity-scoped, like the self-topic watch.
-  const groups = new GroupManager(id, params)
+  const groups = new GroupManager(id, params, opts.gkBackend)
   const viaMqtt = opts.transport === 'mqtt'
   if (viaMqtt && !opts.broker) throw new Error('transport "mqtt" needs a broker url')
   const dialT0 = Date.now()
