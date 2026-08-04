@@ -14,6 +14,7 @@
     "eh2-test": "node net/eh2-chat-test.ts",
     "presence-test": "node net/presence-test.ts",
     "group-test": "node net/group-test.ts",
+    "hem-gk-test": "node net/hem-gk-test.ts",
     "gui-sim": "node net/gui-sim.ts",
     "bob": "node bob/bob.ts",
     "carl": "node carl/carl.ts",
