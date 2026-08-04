@@ -126,6 +126,15 @@ export interface ContactBook {
   list(): Promise<Contact[]>
   add(name: string, pubB64: string): Promise<void>
   remove(c: Contact): Promise<void>
+  /**
+   * Change a contact's display name, keeping the key it names.
+   *
+   * Not add()+remove(): on a HEM that would delete and re-import the key, and
+   * the KID is not decoration — it is the roster hint in a group marker (§8)
+   * and the operand of a two-KID ECDH. Rewriting the DESCR keeps the identity
+   * and costs one call instead of two.
+   */
+  rename(c: Contact, name: string): Promise<void>
 }
 
 const td = new TextDecoder()
@@ -162,6 +171,12 @@ export function hemContactBook(hem: any): ContactBook {
       const delTok = await hem.authorizePassword(null, 'keymgmt:del')
       await hem.deleteKey(delTok, c.kid)
     },
+    async rename(c: Contact, name: string) {
+      if (!c.kid) throw new Error('rename: this contact has no HEM key')
+      const updTok = await hem.authorizePassword(null, 'keymgmt:upd')
+      const descrB64 = b64(new TextEncoder().encode(`ETSEIC:peer,${name},ik`))
+      await hem.updateKey(updTok, c.kid, `chat-peer-${name}`.slice(0, 32), descrB64)
+    },
   }
 }
 
@@ -179,6 +194,11 @@ export function localContactBook(load: () => Array<{ name: string; pub: string }
       save(l)
     },
     async remove(c: Contact) { save(load().filter((x) => x.name !== c.name)) },
+    async rename(c: Contact, name: string) {
+      // Keyed by pub, not by name: renaming to a name that already exists must
+      // move THIS contact, not silently merge it with the other one.
+      save(load().map((x) => (x.pub === c.pub ? { ...x, name } : x)))
+    },
   }
 }
 
@@ -186,6 +206,7 @@ export interface ContactManager {
   list(): Promise<Contact[]>
   add(name: string, pubB64: string, persistent: boolean): Promise<void>
   remove(c: Contact): Promise<void>
+  rename(c: Contact, name: string): Promise<void>
 }
 
 /**
@@ -197,6 +218,7 @@ export function mergedContactBook(hem: ContactBook, local: ContactBook): Contact
     async list() { return [...(await hem.list()), ...(await local.list())] },
     add(name: string, pubB64: string, persistent: boolean) { return (persistent ? hem : local).add(name, pubB64) },
     remove(c: Contact) { return (c.source === 'hem' ? hem : local).remove(c) },
+    rename(c: Contact, name: string) { return (c.source === 'hem' ? hem : local).rename(c, name) },
   }
 }
 
@@ -206,6 +228,7 @@ export function localOnlyManager(local: ContactBook): ContactManager {
     list: () => local.list(),
     add: (name: string, pubB64: string, _persistent: boolean) => local.add(name, pubB64),
     remove: (c: Contact) => local.remove(c),
+    rename: (c: Contact, name: string) => local.rename(c, name),
   }
 }
 

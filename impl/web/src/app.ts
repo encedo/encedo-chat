@@ -462,10 +462,20 @@ function renderContacts() {
     b.innerHTML = `<span class="dot ${inRoom || online ? 'ok' : ''}" title="${dotTitle}"></span><div class="avatar">${escapeHtml(initials(c.name))}</div>`
       + `<div class="c-info"><div class="c-name">${escapeHtml(c.name)} <span class="src" title="${src.t}">${src.i}</span></div>`
       + `<div class="c-sub" title="${escapeHtml(c.kid ? `KID ${c.kid}` : c.pub)}">🔑 ${escapeHtml(fpCache.get(c.pub) ?? '…')}${c.kid ? ' · KID ' + escapeHtml(shortKid(c.kid)) : ''}</div></div>`
-      + pill + `<span class="c-x" title="Usuń">×</span>`
+      + pill + `<button class="c-edit" title="Zmień nazwę">✎</button><span class="c-x" title="Usuń">×</span>`
     b.addEventListener('click', async (e: any) => {
+      if (e.target.classList.contains('c-edit')) {
+        e.stopPropagation()
+        const name = await promptName('Zmień nazwę kontaktu', `Widoczna tylko u Ciebie — ${c.name} nie zostanie o niej powiadomiony.`, c.name)
+        if (name) await renameContact(c, name)
+        return
+      }
       if (e.target.classList.contains('c-x')) {
         e.stopPropagation()
+        // Deleting a contact tears down the conversation and, on a HEM, removes
+        // the imported key — not something to do on a mis-tap next to the name.
+        if (!await ask('Usunąć kontakt?', `„${c.name}" zniknie z listy, rozmowa zostanie zamknięta`
+          + `${c.source === 'hem' ? ', a klucz kontaktu zostanie usunięty z HEM' : ''}. Historia rozmowy i tak nie jest przechowywana.`, 'Usuń')) return
         await closeRoom(c.pub)
         if (session) { try { await session.book.remove(c) } catch (err: any) { toast('Błąd usuwania: ' + (err?.message ?? err)) } }
         await refreshContacts(); return
@@ -476,6 +486,87 @@ function renderContacts() {
   }
 }
 $('contact-search').addEventListener('input', renderContacts)
+
+// ---- ask / rename: two promise-shaped modals reused by every destructive or
+// editing action. Deliberately NOT window.confirm/prompt: a mobile webview
+// draws those as browser chrome outside the app's skin, and they block the
+// event loop — which here means the transport stops pumping while a dialog is
+// open. -------------------------------------------------------------------
+function ask(title: string, body: string, yes = 'Tak'): Promise<boolean> {
+  return new Promise((resolve) => {
+    $('ask-title').textContent = title
+    $('ask-body').textContent = body
+    $('ask-yes').textContent = yes
+    $('scrim').classList.add('open'); $('ask-modal').classList.add('open')
+    const done = (v: boolean) => {
+      $('scrim').classList.remove('open'); $('ask-modal').classList.remove('open')
+      $('ask-yes').removeEventListener('click', onYes)
+      $('ask-no').removeEventListener('click', onNo)
+      document.removeEventListener('keydown', onKey)
+      resolve(v)
+    }
+    const onYes = () => done(true), onNo = () => done(false)
+    // Escape cancels. A destructive dialog must have a way out that is not a click.
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') done(false); if (e.key === 'Enter') done(true) }
+    $('ask-yes').addEventListener('click', onYes)
+    $('ask-no').addEventListener('click', onNo)
+    document.addEventListener('keydown', onKey)
+    $('ask-no').focus() // the safe option is the one under the finger
+  })
+}
+
+function promptName(title: string, sub: string, current: string, label = 'Nazwa'): Promise<string | null> {
+  return new Promise((resolve) => {
+    $('rename-title').textContent = title
+    $('rename-sub').textContent = sub
+    $('rename-label').textContent = label
+    clr('rename-msg')
+    const input = $('rename-input') as HTMLInputElement
+    input.value = current
+    $('scrim').classList.add('open'); $('rename-modal').classList.add('open')
+    const done = (v: string | null) => {
+      $('scrim').classList.remove('open'); $('rename-modal').classList.remove('open')
+      $('rename-save').removeEventListener('click', onSave)
+      $('rename-cancel').removeEventListener('click', onCancel)
+      input.removeEventListener('keydown', onKey)
+      resolve(v)
+    }
+    const onSave = () => {
+      const v = input.value.trim()
+      if (!v) { setMsg('rename-msg', 'Nazwa nie może być pusta.', 'err'); return }
+      done(v === current ? null : v) // unchanged is the same as cancelled
+    }
+    const onCancel = () => done(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Enter') onSave(); if (e.key === 'Escape') onCancel() }
+    $('rename-save').addEventListener('click', onSave)
+    $('rename-cancel').addEventListener('click', onCancel)
+    input.addEventListener('keydown', onKey)
+    input.focus(); input.select()
+  })
+}
+
+/**
+ * Rename a contact. Local to this device by design: the name is how YOU refer
+ * to a key, it is not part of anyone's identity, and telling the peer would
+ * leak a label they never chose. The key, its KID and every open room survive —
+ * on a HEM this rewrites one DESCR rather than deleting and re-importing, so
+ * the KID (a roster hint in group markers, §8) does not move.
+ */
+async function renameContact(c: Contact, name: string) {
+  if (!session) return
+  try {
+    await session.book.rename(c, name)
+    // Anything already showing the old name: the contact list, the open room's
+    // header, and every group this contact is a member of.
+    for (const gu of groupsUI.values()) {
+      const m = gu.members.find((x) => x.pub === c.pub); if (m) m.name = name
+    }
+    await refreshContacts()
+    if (activePub === c.pub) $('peer-name').textContent = name
+    if (activeGid) renderGroups()
+    toast(`Kontakt to teraz „${name}"`)
+  } catch (e: any) { toast('Nie udało się zmienić nazwy: ' + (e?.message ?? e)) }
+}
 
 // ---- add-peer modal ----
 const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; ;(document.querySelector('input[name="store"][value="hem"]') as HTMLInputElement).checked = true; $('add-name').focus() }
@@ -547,12 +638,20 @@ $('btn-wipeout').addEventListener('click', async () => {
 // Close the group members popover on any outside click.
 document.addEventListener('click', (e: any) => {
   const pop = $('members-pop')
-  if (!pop.hidden && !pop.contains(e.target) && !$('members-cluster').contains(e.target)) pop.hidden = true
+  // The popover has two openers now (the chat header cluster and a row in the
+  // group list), so "outside" means outside the popover AND outside whichever
+  // element opened it.
+  if (pop.hidden) return
+  if (pop.contains(e.target)) return
+  if ($('members-cluster').contains(e.target)) return
+  if (popAnchor?.contains(e.target)) return
+  pop.hidden = true
 })
 // Admin actions inside the members popover (event-delegated — the pop is rebuilt
 // on every open). stopPropagation so the outside-click close above does not fire.
 $('members-pop').addEventListener('click', (e: any) => {
-  const gu = activeGid ? groupsUI.get(activeGid) : null
+  const gid = popMembersGid ?? activeGid
+  const gu = gid ? groupsUI.get(gid) : null
   if (!gu) return
   const rm = (e.target as HTMLElement).closest('[data-rm]') as HTMLElement | null
   if (rm) { e.stopPropagation(); const pub = rm.getAttribute('data-rm')!
@@ -1123,6 +1222,89 @@ async function changeMembers(gid: string, newMembers: { pub: string; name: strin
   } catch (e: any) { ecLog('group rekey failed: ' + (e?.message ?? e)); toast('Nie udało się zmienić składu grupy') }
 }
 
+/**
+ * Open the members popover against an arbitrary anchor — used by the group
+ * list, where the popover's default position (absolute, inside the chat header)
+ * would put it in the wrong pane entirely. Same content, same handlers: the
+ * popover is rendered by one function so the list and the header cannot drift.
+ */
+let popAnchor: HTMLElement | null = null
+/**
+ * Which group the popover is showing. It used to be implied by `activeGid`,
+ * which was fine while the only opener was the open group's own header — but
+ * the list can now open it for a group that is NOT on screen, and acting on
+ * `activeGid` there would remove a member from the wrong group.
+ */
+let popMembersGid: string | null = null
+function openMembersPopFor(gu: GroupUI, anchor: HTMLElement) {
+  const pop = $('members-pop')
+  if (!pop.hidden && popAnchor === anchor) { pop.hidden = true; popAnchor = null; return } // toggle
+  popMembersGid = gu.gid
+  renderMembersPop(gu)
+  const r = anchor.getBoundingClientRect()
+  pop.classList.add('floating')
+  pop.style.top = `${Math.min(r.bottom + 6, window.innerHeight - 320)}px`
+  pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 340))}px`
+  pop.hidden = false
+  popAnchor = anchor
+}
+
+/** Am I the admin of this group? roster[0] is the creator — the same rule the members popover uses. */
+const iAmAdmin = (gu: GroupUI) => gu.members[0]?.pub === session?.pub
+
+/**
+ * Rename a group, for everyone.
+ *
+ * No rekey. The name already travels in the SKD envelope (`name`, app metadata
+ * the crypto ignores), and a same-epoch SKD is the ordinary "here is my sender
+ * key again" handoff — so re-sending it carries the new name without a new
+ * epoch, a new topic, a re-subscribe, or throwing away forward-secret sending
+ * chains. Rotating keys to change a label would cost all of that and buy
+ * nothing: the label is not a key and is not what the roster MAC protects.
+ *
+ * Admin-only, and enforced on BOTH sides: any member may legitimately send a
+ * same-epoch SKD, so without the receive-side check in `onGroupInvite` any
+ * member could rename the group under everyone else.
+ */
+async function renameGroup(gid: string, name: string) {
+  const gu = groupsUI.get(gid); if (!gu || !client) return
+  if (!iAmAdmin(gu)) { toast('Tylko administrator grupy może zmienić jej nazwę'); return }
+  const before = gu.name
+  gu.name = name
+  try {
+    await distributeGroup(gid, name)   // same epoch: a key handoff that carries the label
+    client.groups.writeMarker(gid, name).catch((e) => ecLog('marker update failed: ' + (e?.message ?? e)))
+    await persistGroups()
+    recordGroup(gu, { t: 'sys', text: `Nazwa grupy zmieniona na „${name}"` })
+    if (activeGid === gid) activateGroup(gid); else renderGroups()
+    toast(`Grupa to teraz „${name}"`)
+  } catch (e: any) {
+    gu.name = before; renderGroups()
+    toast('Nie udało się zmienić nazwy grupy: ' + (e?.message ?? e))
+  }
+}
+
+/**
+ * Leave a group on THIS device.
+ *
+ * There is no "delete for everyone", and there deliberately is not: the others
+ * hold their own sender keys and their own copy of the group, and nothing in
+ * the design lets one client revoke that. Leaving is local — the room stops,
+ * the cache entry goes, and the remaining members carry on. Being removed FROM
+ * the group is a different act, it belongs to the admin, and it is what the
+ * members popover's × does.
+ */
+async function leaveGroup(gid: string) {
+  const gu = groupsUI.get(gid); if (!gu) return
+  gu.room?.stop()
+  groupsUI.delete(gid)
+  // Same reset the 1:1 path uses when the room on screen goes away.
+  if (activeGid === gid) { activeGid = null; $('chat-view').hidden = true; $('chat-empty').hidden = false; showChatPane(false) }
+  await persistGroups()
+  renderGroups()
+  toast(`Opuszczono grupę „${gu.name}"`)
+}
+
 function renderGroups() {
   const pane = $('pane-groups'); pane.innerHTML = ''
   const add = document.createElement('div'); add.className = 'add-row'
@@ -1132,9 +1314,38 @@ function renderGroups() {
   for (const gu of groupsUI.values()) {
     const b = document.createElement('button'); b.className = 'contact' + (activeGid === gu.gid ? ' active' : '') + (gu.unseen ? ' unread' : '')
     const pill = gu.unseen ? `<span class="c-unread">${gu.unseen > 99 ? '99+' : gu.unseen}</span>` : ''
+    const admin = iAmAdmin(gu)
     b.innerHTML = `<div class="avatar">👥</div><div class="c-info"><div class="c-name">${escapeHtml(groupDisplay(gu))}</div>`
       + `<div class="c-sub"><span class="avatar-cluster sm">${avatarClusterHTML(gu.members, 4)}</span> ${gu.members.length} · 🔐</div></div>` + pill
-    b.addEventListener('click', () => void activateGroup(gu.gid))
+      // Admin-only affordances, on the list itself: no need to open a group to
+      // manage it. The members button opens the SAME popover the chat header
+      // uses — one implementation, so the two cannot drift.
+      + (admin ? `<button class="g-edit" data-ren="1" title="Zmień nazwę grupy">✎</button>` : '')
+      + (admin ? `<button class="g-edit" data-mem="1" title="Uczestnicy">👥</button>` : '')
+      + `<span class="c-x" title="Opuść grupę">×</span>`
+    b.addEventListener('click', async (e: any) => {
+      const d = e.target?.dataset ?? {}
+      if (d.ren) {
+        e.stopPropagation()
+        const name = await promptName('Zmień nazwę grupy', 'Nazwa zmieni się u wszystkich członków — klucze zostają bez zmian.', gu.name, 'Nazwa grupy')
+        if (name) await renameGroup(gu.gid, name)
+        return
+      }
+      if (d.mem) {
+        e.stopPropagation()
+        // Anchor the shared popover next to the row it was opened from.
+        openMembersPopFor(gu, b)
+        return
+      }
+      if (e.target.classList.contains('c-x')) {
+        e.stopPropagation()
+        if (!await ask('Opuścić grupę?', `„${gu.name}" zniknie z tego urządzenia i przestaniesz odbierać wiadomości.`
+          + ' Pozostali członkowie zachowują grupę — nie da się jej usunąć u nich.', 'Opuść')) return
+        await leaveGroup(gu.gid)
+        return
+      }
+      void activateGroup(gu.gid)
+    })
     pane.appendChild(b)
   }
 }
@@ -1254,7 +1465,12 @@ async function activateGroup(gid: string) {
   // Participant cluster in the header → click to see the full member list.
   const cluster = $('members-cluster'); cluster.hidden = false; cluster.innerHTML = avatarClusterHTML(gu.members)
   cluster.title = 'Uczestnicy grupy'
-  cluster.onclick = (e: any) => { e.stopPropagation(); const pop = $('members-pop'); const show = pop.hidden; if (show) renderMembersPop(gu); pop.hidden = !show }
+  cluster.onclick = (e: any) => {
+    e.stopPropagation()
+    const pop = $('members-pop'); const show = pop.hidden
+    if (show) { popMembersGid = gu.gid; popAnchor = null; pop.classList.remove('floating'); pop.style.top = ''; pop.style.left = ''; renderMembersPop(gu) }
+    pop.hidden = !show
+  }
   $('members-pop').hidden = true
   $('e2e-badge').className = 'badge direct'; $('e2e-badge').textContent = '🔐 Szyfrowana'
   $('e2e-badge').title = 'Grupa — Sender Keys + per-recipient HMAC (deniable, §8)'
@@ -1291,7 +1507,7 @@ async function distributeGroup(gid: string, name: string) {
 
 /** An SKD arrived over some 1:1 (already applied to the engine): join a new group
  *  (and hand my key back once), or update an existing one on a rekey. */
-async function onGroupInvite(_from: string, skd: GroupSkdEnv) {
+async function onGroupInvite(from: string, skd: GroupSkdEnv) {
   if (!client) return
   const gid = client.groups.gidHexOf(unb64(skd.gid))
   const members = skd.roster.map((pub) => ({ pub, name: memberName(pub) }))
@@ -1303,7 +1519,13 @@ async function onGroupInvite(_from: string, skd: GroupSkdEnv) {
     toast(`Dołączono do grupy „${groupDisplay(gu)}"`)
     void distributeGroup(gid, gu.name) // hand my sender key to everyone, once
   } else {
-    gu.members = members; if (skd.name) gu.name = skd.name
+    gu.members = members
+    // The name is app metadata the roster MAC does NOT cover, and any member may
+    // legitimately send a same-epoch SKD (that is the ordinary sender-key
+    // handoff) — so without this check any member could rename the group under
+    // everyone else. The admin is roster[0]; who `from` is was authenticated by
+    // the 1:1 ratchet the SKD arrived on.
+    if (skd.name && from === members[0]?.pub) gu.name = skd.name
     // A newer epoch means a rekey → a new group_secret → a new topic, so the room
     // must re-join. A *same-epoch* SKD is just a member handing us its sender key
     // (already applied to the engine): keep the live room — tearing it down here

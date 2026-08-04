@@ -91,6 +91,10 @@
   .avatar-cluster .ga:first-child{margin-left:0}
   .avatar-cluster .ga.more{color:var(--muted);background:var(--bg)}
   .avatar-cluster.sm .ga{width:18px;height:18px;font-size:9px;margin-left:-6px}
+  /* Opened from the group list it is anchored to a sidebar row, which is in a
+     different stacking context than the chat header — so it goes fixed and is
+     positioned inline against the anchor's rect. */
+  .members-pop.floating{position:fixed;top:auto;left:auto}
   .members-pop{position:absolute;top:58px;left:16px;z-index:12;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:0 12px 30px rgba(18,38,63,.15);padding:6px;min-width:220px;max-width:min(320px,80vw);max-height:300px;overflow-y:auto}
   .members-pop .m-head{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:6px 8px}
   .member-row{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:8px}
@@ -194,6 +198,15 @@
   .composer{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--border)}
   .composer input{flex:1}
   .btn-send{background:var(--accent);color:var(--accent-ink);border:none;padding:0 22px;border-radius:8px;font-weight:600}
+  /* Destructive confirm: the affirmative button must not look like the safe
+     default, because "Tak" here deletes something. */
+  .btn-send.danger{background:var(--err,#c0392b);color:#fff}
+  /* An inline edit affordance next to a name. Hidden until the row is hovered
+     on a mouse, always visible on touch (no hover to reveal it). */
+  .c-edit,.g-edit{opacity:0;background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:2px 4px;line-height:1;flex-shrink:0}
+  .contact:hover .c-edit,.contact:hover .g-edit{opacity:1}
+  .c-edit:hover,.g-edit:hover{color:var(--text)}
+  @media (pointer:coarse){.c-edit,.g-edit{opacity:1;padding:6px}}
   .btn-send:hover{filter:brightness(1.08)}
   .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:32px;text-align:center}
   .empty .big{font-size:34px}.empty h3{margin:0;color:var(--text);font-size:16px}
@@ -391,6 +404,30 @@
     <div class="group-members" id="group-members"></div>
     <div class="msg" id="group-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="group-create" style="flex:1;border-radius:8px">Utwórz</button><button class="btn-ghost" id="group-cancel">Anuluj</button></div>
+  </div>
+
+  <!-- Confirm and rename: two small modals reused by every destructive or
+       editing action, so "are you sure?" looks the same everywhere and there is
+       no window.confirm (which a mobile webview renders as a browser chrome
+       dialog, outside the app's skin). -->
+  <div class="modal" id="ask-modal" role="alertdialog" aria-modal="true" aria-labelledby="ask-title">
+    <h2 id="ask-title">Na pewno?</h2>
+    <div class="msub" id="ask-body"></div>
+    <div class="modal-actions">
+      <button class="btn-send danger" id="ask-yes" style="flex:1;border-radius:8px">Tak</button>
+      <button class="btn-ghost" id="ask-no">Nie</button>
+    </div>
+  </div>
+
+  <div class="modal" id="rename-modal">
+    <h2 id="rename-title">Zmień nazwę</h2>
+    <div class="msub" id="rename-sub"></div>
+    <label id="rename-label">Nazwa</label><input id="rename-input" type="text" autocomplete="off" maxlength="64">
+    <div class="msg" id="rename-msg"></div>
+    <div class="modal-actions">
+      <button class="btn-send" id="rename-save" style="flex:1;border-radius:8px">Zapisz</button>
+      <button class="btn-ghost" id="rename-cancel">Anuluj</button>
+    </div>
   </div>
 
   <aside class="drawer" id="drawer" aria-label="Ustawienia">
