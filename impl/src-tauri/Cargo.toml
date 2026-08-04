@@ -1,9 +1,17 @@
 [package]
 name = "encedo-chat"
-version = "0.1.0"
+version = "0.1.1"
 description = "Encedo Chat desktop (Tauri 2) — a native shell over the web bundle"
 edition = "2021"
 rust-version = "1.77"
+
+# Mobile loads the Rust side as a shared object from Java, so the crate must
+# produce a library, not only a binary. `staticlib` is for iOS, `cdylib` for
+# Android, `rlib` so main.rs can link it on desktop. The `_lib` suffix avoids a
+# name clash with the binary target of the same package.
+[lib]
+name = "encedo_chat_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
