@@ -502,19 +502,25 @@ function ask(title: string, body: string, yes = 'Tak'): Promise<boolean> {
     $('ask-title').textContent = title
     $('ask-body').textContent = body
     $('ask-yes').textContent = yes
+    $('members-pop').hidden = true // nothing may stay clickable behind a modal
     $('scrim').classList.add('open'); $('ask-modal').classList.add('open')
     const done = (v: boolean) => {
       $('scrim').classList.remove('open'); $('ask-modal').classList.remove('open')
       $('ask-yes').removeEventListener('click', onYes)
       $('ask-no').removeEventListener('click', onNo)
+      $('scrim').removeEventListener('click', onScrim)
       document.removeEventListener('keydown', onKey)
       resolve(v)
     }
     const onYes = () => done(true), onNo = () => done(false)
+    // Clicking the backdrop is the third way out, alongside Escape and "Nie".
+    // A destructive dialog should be easy to leave and deliberate to confirm.
+    const onScrim = () => done(false)
     // Escape cancels. A destructive dialog must have a way out that is not a click.
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') done(false); if (e.key === 'Enter') done(true) }
     $('ask-yes').addEventListener('click', onYes)
     $('ask-no').addEventListener('click', onNo)
+    $('scrim').addEventListener('click', onScrim)
     document.addEventListener('keydown', onKey)
     $('ask-no').focus() // the safe option is the one under the finger
   })
@@ -528,11 +534,13 @@ function promptName(title: string, sub: string, current: string, label = 'Nazwa'
     clr('rename-msg')
     const input = $('rename-input') as HTMLInputElement
     input.value = current
+    $('members-pop').hidden = true
     $('scrim').classList.add('open'); $('rename-modal').classList.add('open')
     const done = (v: string | null) => {
       $('scrim').classList.remove('open'); $('rename-modal').classList.remove('open')
       $('rename-save').removeEventListener('click', onSave)
       $('rename-cancel').removeEventListener('click', onCancel)
+      $('scrim').removeEventListener('click', onCancel)
       input.removeEventListener('keydown', onKey)
       resolve(v)
     }
@@ -545,6 +553,7 @@ function promptName(title: string, sub: string, current: string, label = 'Nazwa'
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Enter') onSave(); if (e.key === 'Escape') onCancel() }
     $('rename-save').addEventListener('click', onSave)
     $('rename-cancel').addEventListener('click', onCancel)
+    $('scrim').addEventListener('click', onCancel)
     input.addEventListener('keydown', onKey)
     input.focus(); input.select()
   })
@@ -759,7 +768,7 @@ function renderNetwork() {
   const candidates = chosenRelays()
   const isFailover = candidates.length > 1 && s.relay !== candidates[0]
   const nodesRow = candidates.length > 1
-    ? `<div class="net-row"><span class="k">Lista węzłów</span><span class="v net-nodes">${candidates.map((a) => {
+    ? `<div class="net-row wrap"><span class="k">Lista węzłów</span><span class="v net-nodes chips">${candidates.map((a) => {
         const act = a === s.relay
         return `<span class="net-node${act ? ' act' : ''}" title="${escapeHtml(a)}">${act ? '●' : '○'} ${escapeHtml(nodeName(a))}</span>`
       }).join('')}</span></div>`
@@ -771,7 +780,7 @@ function renderNetwork() {
     ${nodesRow}
     ${relayPeer ? `<div class="net-row"><span class="k">${tr('PeerId węzła')}</span><span class="v mono">${escapeHtml(relayPeer.slice(0, 14))}…</span></div>` : ''}
     <div class="net-row"><span class="k">Twój PeerId</span><span class="v mono">${escapeHtml(s.self.slice(0, 14))}…</span></div>
-    ${capReport ? `<div class="net-row"><span class="k">${tr('Platforma')}</span><span class="v" title="${escapeHtml(capReport.ua)}">`
+    ${capReport ? `<div class="net-row wrap"><span class="k">${tr('Platforma')}</span><span class="v chips" title="${escapeHtml(capReport.ua)}">`
       + capReport.caps.filter((c) => c.required || !c.ok).map((c) =>
           `<span class="net-node${c.ok ? ' act' : ''}">${c.ok ? '●' : c.required ? '✖' : '○'} ${escapeHtml(c.id)}</span>`).join('')
       + `</span></div>` : ''}

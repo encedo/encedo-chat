@@ -756,9 +756,13 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
         // applySkd, notify synchronously) throws "unknown group" on the invite.
         // applySkd is keyed by the SENDER'S IDENTITY (IK pub), which the group's
         // `receive` uses to find the sender key (senderId = SHA-256(IK_pub)[0:8]).
-        // `from` here is the transport PeerId, not the IK pub — so pass peer.pub:
-        // this 1:1 room IS with peer, and the ratchet authenticated the SKD as its.
-        onGroupSkd: async (from, skd) => { await groups.applySkd(peer.pub, skd); roomOpts.onGroupSkd?.(from, skd); opts.onGroupSkd?.(from, skd) },
+        // `from` here is the transport PeerId, not the IK pub — so pass peer.pub.
+        // EVERY consumer gets peer.pub, not just applySkd: the app compares the
+        // sender against the roster (which is IK pubs) to decide whether a
+        // metadata change came from the admin, and a PeerId can never match one.
+        // Handing two different notions of "who" to two callers is how a group
+        // rename silently did nothing.
+        onGroupSkd: async (_from, skd) => { await groups.applySkd(peer.pub, skd); roomOpts.onGroupSkd?.(peer.pub, skd); opts.onGroupSkd?.(peer.pub, skd) },
       }, {
         log,
         onIsolated: () => { setLink('reconnecting'); void reconnect(true) },

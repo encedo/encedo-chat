@@ -141,6 +141,16 @@
   .net-row .k{color:var(--muted);flex-shrink:0}
   .net-row .v{color:var(--text);display:flex;align-items:center;gap:6px;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .net-row .v.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  /* Chip lists (node list, capability report) are the one thing in this card that
+     does not fit on one line on a phone. The row's nowrap+ellipsis silently cut
+     them off with nothing to scroll, so the answer the probe exists to give was
+     invisible on exactly the devices it was written for. */
+  .net-row.wrap{align-items:flex-start}
+  .net-row .v.chips{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px 6px;white-space:normal;overflow:visible;text-overflow:clip}
+  @media (max-width:900px),(max-height:560px){
+    .net-row.wrap{flex-direction:column;align-items:stretch;gap:6px}
+    .net-row .v.chips{justify-content:flex-start}
+  }
   .net-sub{color:var(--muted);font-size:11px}
   .net-tag{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:#fff;background:var(--warn,#c47f17);border-radius:6px;padding:1px 6px;margin-left:2px}
   .net-nodes{flex-wrap:wrap;justify-content:flex-end;white-space:normal}
@@ -212,9 +222,12 @@
   .empty .big{font-size:34px}.empty h3{margin:0;color:var(--text);font-size:16px}
   .empty p{margin:0;max-width:44ch;font-size:13px;color:var(--muted)}
 
-  .scrim{position:fixed;inset:0;background:rgba(18,38,63,.35);display:none;z-index:10}
+  /* Above EVERYTHING else that can be on screen — the members popover sits at 12
+     and the drawer at 11, so a scrim at 10 left both of them clickable behind a
+     dialog that is supposed to be modal. */
+  .scrim{position:fixed;inset:0;background:rgba(18,38,63,.35);display:none;z-index:30}
   .scrim.open{display:block}
-  .modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;max-width:92vw;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.2);padding:22px;z-index:11;display:none}
+  .modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;max-width:92vw;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.2);padding:22px;z-index:31;display:none}
   .modal.open{display:block}
   .modal h2{margin:0 0 4px;font-size:16px;color:var(--text)}
   .modal .msub{font-size:12px;color:var(--muted);margin-bottom:8px}
