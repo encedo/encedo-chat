@@ -110,6 +110,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'P3 · Sieć własna': 'P3 · Own network',
     'PeerId (efemeryczny)': 'PeerId (ephemeral)',
     'PeerId węzła': 'Node PeerId',
+    'Platforma': 'Platform',
     'Podaj adres HEM i hasło.': 'Enter the HEM address and password.',
     'Podaj nazwę grupy.': 'Enter a group name.',
     'Podaj nazwę i klucz.': 'Enter a name and a key.',

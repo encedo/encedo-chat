@@ -771,6 +771,10 @@ function renderNetwork() {
     ${nodesRow}
     ${relayPeer ? `<div class="net-row"><span class="k">${tr('PeerId węzła')}</span><span class="v mono">${escapeHtml(relayPeer.slice(0, 14))}…</span></div>` : ''}
     <div class="net-row"><span class="k">Twój PeerId</span><span class="v mono">${escapeHtml(s.self.slice(0, 14))}…</span></div>
+    ${capReport ? `<div class="net-row"><span class="k">${tr('Platforma')}</span><span class="v" title="${escapeHtml(capReport.ua)}">`
+      + capReport.caps.filter((c) => c.required || !c.ok).map((c) =>
+          `<span class="net-node${c.ok ? ' act' : ''}">${c.ok ? '●' : c.required ? '✖' : '○'} ${escapeHtml(c.id)}</span>`).join('')
+      + `</span></div>` : ''}
     <div class="net-row"><span class="k">Topiki</span><span class="v">${s.topics.length} <span class="net-sub">(grupy: ${gCount} · pary/self: ${s.topics.length - gCount})</span></span></div>
   </div>
   <div class="net-note">${candidates.length > 1
@@ -989,8 +993,11 @@ ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : 
  * which is indistinguishable from a network problem and sends the user hunting
  * in the wrong place.
  */
+let capReport: Awaited<ReturnType<typeof probeCapabilities>> | null = null
 void (async () => {
   const rep = await probeCapabilities()
+  capReport = rep
+  renderNetwork() // a phone has no console — the Network tab is where this is readable
   ecLog(formatReport(rep))
   for (const d of rep.degraded) ecLog(`capability (degraded): ${d.id} — ${d.note}`)
   if (rep.ok) return
