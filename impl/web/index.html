@@ -61,6 +61,19 @@
   .node-row input[type=checkbox]{width:auto;margin:0;flex-shrink:0}
   .node-row .n-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
   .node-row .n-x{color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px;flex-shrink:0}
+  /* Order is the failover order (row 1 = primary), so the arrows are a real
+     control, not decoration. Touch needs a finger-sized target — hence padding
+     rather than a bare glyph. `.off` is the end of the list: inert, still shown,
+     so the column does not jump as rows move. */
+  .node-row .n-up,.node-row .n-dn{color:var(--muted);cursor:pointer;font-size:13px;line-height:1;padding:4px 3px;flex-shrink:0;user-select:none;border-radius:4px}
+  .node-row .n-up:hover,.node-row .n-dn:hover{background:var(--border);color:var(--text)}
+  .node-row .n-up.off,.node-row .n-dn.off{opacity:.25;cursor:default;pointer-events:none}
+  .node-row .n-first{font-size:10px;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:0 5px;margin-left:6px;white-space:nowrap}
+  @media (pointer:coarse){.node-row .n-up,.node-row .n-dn{padding:8px 6px;font-size:15px}}
+  /* The same editor inside the Network tab: no login card around it, so it
+     supplies its own margin and drops the top one. */
+  .nodes-panel.net-nodes{margin:10px 8px 8px;width:auto}
+  .net-note.err{color:var(--err,#c0392b)}
   .nodes-hint{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.4}
   .msg{margin-top:14px;padding:9px 12px;border-radius:8px;font-size:13px;display:none}
   .msg.err{display:block;background:var(--warn-soft);color:var(--err)}

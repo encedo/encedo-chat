@@ -238,40 +238,69 @@ $('go-soft').addEventListener('click', async () => {
   } catch (e: any) { setMsg('msg', 'Błąd tożsamości software: ' + (e?.message ?? e), 'err') }
 })
 
-// ---- login: editable network-node list (collapsed; the "+" reveals it) ----
-function renderNodes() {
-  const list = loadNodes()
-  $('nodes-list').innerHTML = list.map((n, i) =>
+// ---- the node editor: ONE implementation, used at login and after it -------
+// It exists in two places (the login card and the Network tab) because both
+// questions are real: which nodes to dial before a session, and which to dial
+// while one is running. Two copies of this would drift, so the markup and the
+// handlers are shared and only the message sink and the "what now" differ.
+//
+// Order is not cosmetic: `failoverDial` sweeps the list from the top, so row 1
+// IS the primary and the rest are its fallbacks. Until the arrows existed the
+// order was insertion order, i.e. nobody could choose their primary at all.
+function nodeRowsHTML(list: NodeEntry[]): string {
+  return list.map((n, i) =>
     `<label class="node-row"><input type="checkbox" data-i="${i}" ${n.enabled ? 'checked' : ''}>`
-    + `<span class="n-name" title="${escapeHtml(n.addr)}">${escapeHtml(n.name)}</span>`
+    + `<span class="n-name" title="${escapeHtml(n.addr)}">${escapeHtml(n.name)}${i === 0 ? ' <span class="n-first">1. wybór</span>' : ''}</span>`
+    + `<span class="n-up${i === 0 ? ' off' : ''}" data-up="${i}" title="Wyżej (wyżej = wcześniej wybierany)">↑</span>`
+    + `<span class="n-dn${i === list.length - 1 ? ' off' : ''}" data-dn="${i}" title="Niżej">↓</span>`
     + `<span class="n-x" data-rm="${i}" title="Usuń">×</span></label>`).join('')
 }
+/**
+ * Bind one editor. `warn` reports refusals, `onChange` is what the caller does
+ * with a changed list (nothing at login — the list is read when the session
+ * starts; a live `setRelays` in the Network tab). Returns its redraw.
+ */
+function bindNodeEditor(listId: string, addId: string, warn: (t: string) => void, onChange: () => void) {
+  const redraw = () => { $(listId).innerHTML = nodeRowsHTML(loadNodes()) }
+  $(listId).addEventListener('change', (e: any) => {
+    const i = e.target?.dataset?.i; if (i == null) return
+    const list = loadNodes(); list[+i].enabled = e.target.checked
+    if (!list.some((n) => n.enabled)) { list[+i].enabled = true; e.target.checked = true; warn('Przynajmniej jeden węzeł musi być aktywny.'); return }
+    saveNodes(list); onChange()
+  })
+  $(listId).addEventListener('click', (e: any) => {
+    const d = e.target?.dataset ?? {}
+    const { rm, up, dn } = d
+    if (rm == null && up == null && dn == null) return
+    e.preventDefault() // the row is a <label>: ANY click inside it toggles the checkbox
+    const list = loadNodes()
+    if (rm != null) {
+      if (list.length <= 1) { warn('Musi zostać co najmniej jeden węzeł.'); return }
+      list.splice(+rm, 1); if (!list.some((n) => n.enabled)) list[0].enabled = true
+    } else {
+      const i = +(up ?? dn), j = up != null ? i - 1 : i + 1
+      if (j < 0 || j >= list.length) return // the end arrows are inert, not missing
+      ;[list[i], list[j]] = [list[j], list[i]]
+    }
+    saveNodes(list); redraw(); onChange()
+  })
+  $(addId).addEventListener('click', () => {
+    const addr = (prompt('Multiaddr węzła (np. /dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3Koo…):') || '').trim()
+    if (!addr) return
+    if (!addr.startsWith('/') || !addr.includes('/p2p/')) { warn('To nie wygląda na multiaddr (…/p2p/<PeerId>).'); return }
+    const host = addr.match(/\/dns[46]\/([^/]+)/)?.[1] ?? addr.match(/\/ip[46]\/([^/]+)/)?.[1] ?? 'węzeł'
+    const name = (prompt('Nazwa węzła:', host) || host).trim()
+    const list = loadNodes(); list.push({ name, addr, enabled: true }); saveNodes(list); redraw(); onChange()
+  })
+  return redraw
+}
+
+// ---- login: editable network-node list (collapsed; the "+" reveals it) ----
+const renderNodes = bindNodeEditor('nodes-list', 'node-add', (t) => setMsg('msg', t, 'err'), () => {})
 $('nodes-toggle').addEventListener('click', () => {
   const panel = $('nodes-panel'), open = panel.hidden
   panel.hidden = !open; $('nodes-toggle').classList.toggle('open', open)
   if (open) renderNodes()
-})
-$('nodes-list').addEventListener('change', (e: any) => {
-  const i = e.target?.dataset?.i; if (i == null) return
-  const list = loadNodes(); list[+i].enabled = e.target.checked
-  if (!list.some((n) => n.enabled)) { list[+i].enabled = true; e.target.checked = true; setMsg('msg', 'Przynajmniej jeden węzeł musi być aktywny.', 'err') }
-  saveNodes(list)
-})
-$('nodes-list').addEventListener('click', (e: any) => {
-  const rm = e.target?.dataset?.rm; if (rm == null) return
-  e.preventDefault()
-  const list = loadNodes()
-  if (list.length <= 1) { setMsg('msg', 'Musi zostać co najmniej jeden węzeł.', 'err'); return }
-  list.splice(+rm, 1); if (!list.some((n) => n.enabled)) list[0].enabled = true
-  saveNodes(list); renderNodes()
-})
-$('node-add').addEventListener('click', () => {
-  const addr = (prompt('Multiaddr węzła (np. /dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3Koo…):') || '').trim()
-  if (!addr) return
-  if (!addr.startsWith('/') || !addr.includes('/p2p/')) { setMsg('msg', 'To nie wygląda na multiaddr (…/p2p/<PeerId>).', 'err'); return }
-  const host = addr.match(/\/dns[46]\/([^/]+)/)?.[1] ?? addr.match(/\/ip[46]\/([^/]+)/)?.[1] ?? 'węzeł'
-  const name = (prompt('Nazwa węzła:', host) || host).trim()
-  const list = loadNodes(); list.push({ name, addr, enabled: true }); saveNodes(list); renderNodes()
 })
 
 function makeLocalBook(handle: string, storage: Storage) {
@@ -562,11 +591,38 @@ for (const [tab, pane] of [['tab-contacts', 'contacts'], ['tab-groups', 'groups'
   })
 }
 
-// ---- Network tab: a live, read-only view of the transport ----
+// ---- Network tab: a live view of the transport, plus the node editor -------
 let netTimer: any = null
+const NODES_NOTE = 'Kolejność decyduje o wyborze: pierwszy aktywny węzeł jest podstawowy, kolejne to zapas. Zmiany działają natychmiast — bez wylogowania.'
+/**
+ * The pane is built ONCE and only its live half repainted. The editor below it
+ * holds a checkbox, arrows and prompt-driven input, and `renderNetwork` runs
+ * every 2.5 s — rebuilding the editor under the user's cursor would swallow
+ * clicks and re-bind handlers on every tick.
+ */
+function ensureNetworkShell() {
+  if ($('net-live')) return
+  $('pane-network').innerHTML = `<div id="net-live"></div>
+    <div class="nodes-panel net-nodes">
+      <div class="nodes-head"><span>Węzły sieci</span> <button class="node-add" id="net-node-add" type="button">+ dodaj</button></div>
+      <div id="net-nodes-list"></div>
+      <div class="net-note" id="net-nodes-note">${NODES_NOTE}</div>
+    </div>`
+  const note = () => $('net-nodes-note')
+  bindNodeEditor('net-nodes-list', 'net-node-add',
+    (t) => { note().textContent = t; note().classList.add('err') },
+    () => {
+      note().textContent = NODES_NOTE; note().classList.remove('err')
+      // Live: the running session dials the new list from now on. Dropping the
+      // node we are ON re-dials at once; a reorder waits for the next sweep.
+      client?.setRelays(chosenRelays())
+      renderNetwork()
+    })()
+}
 function renderNetwork() {
   const pane = $('pane-network'); if (!pane) return
   if (!client) { pane.innerHTML = '<div class="pane-label">Brak sesji — zaloguj się.</div>'; return }
+  ensureNetworkShell()
   const s = client.netStatus()
   const relayHost = (s.relay.match(/dns4\/([^/]+)/) ?? s.relay.match(/\/\/([^/:]+)/) ?? [, s.relay.slice(0, 40)])[1]
   const relayPeer = (s.relay.match(/p2p\/([^/]+)/) ?? [, ''])[1]
@@ -587,7 +643,7 @@ function renderNetwork() {
         return `<span class="net-node${act ? ' act' : ''}" title="${escapeHtml(a)}">${act ? '●' : '○'} ${escapeHtml(nodeName(a))}</span>`
       }).join('')}</span></div>`
     : ''
-  pane.innerHTML = `<div class="net-card">
+  $('net-live').innerHTML = `<div class="net-card">
     <div class="net-row"><span class="k">Status</span><span class="v"><span class="dot ${linkCls}"></span> ${linkTxt}${s.peers ? ` · ${s.peers} poł.` : ''}</span></div>
     <div class="net-row"><span class="k">Transport</span><span class="v">${escapeHtml(s.transport)}${WEBRTC_OFF ? ' <span class="net-tag">bez WebRTC</span>' : ''}</span></div>
     <div class="net-row"><span class="k">Węzeł (relay)</span><span class="v" title="${escapeHtml(s.relay)}">${escapeHtml(relayHost)}${isFailover ? ' <span class="net-tag">failover</span>' : ''}</span></div>
