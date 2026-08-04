@@ -111,6 +111,43 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'PeerId (efemeryczny)': 'PeerId (ephemeral)',
     'PeerId węzła': 'Node PeerId',
     'Platforma': 'Platform',
+    ' · ⚠ niedostarczone': ' · ⚠ not delivered',
+    '+ Dodaj peera': '+ Add a peer',
+    '+ Nowa grupa': '+ New group',
+    'Brak połączenia z przekaźnikiem — odśwież stronę': 'No connection to the relay — reload the page',
+    'Błąd listy kontaktów: ': 'Contact list error: ',
+    'Błąd usuwania: ': 'Delete failed: ',
+    'Dwuklik = kopiuj klucz publiczny': 'Double-click to copy the public key',
+    'Grupa idzie przez relay (GossipSub) — nie WebRTC': 'Groups go over the relay (GossipSub), not WebRTC',
+    'Grupa — Sender Keys + per-recipient HMAC (deniable, §8)': 'Group — Sender Keys + per-recipient HMAC (deniable, §8)',
+    'Klucz nie jest poprawnym base64.': 'That key is not valid base64.',
+    'Nie udało się usunąć grupy: ': 'Could not delete the group: ',
+    'Nie udało się zmienić nazwy grupy: ': 'Could not rename the group: ',
+    'Nie udało się zmienić nazwy: ': 'Could not rename: ',
+    'Nie udało się zmienić składu grupy': 'Could not change the group membership',
+    'P1 · prywatny': 'P1 · private',
+    'Podaj handle.': 'Enter a handle.',
+    'Skopiowano klucz publiczny ✓': 'Public key copied ✓',
+    'Szukaj kontaktu…': 'Search contacts…',
+    'Szyfrowane E2E — interim, EH-2 w drodze': 'E2E encrypted — interim, EH-2 on the way',
+    'Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)': 'Agreeing the session key (msg1→msg2→msg3)',
+    'Tylko administrator grupy może zmienić jej nazwę': 'Only the group admin can rename it',
+    'Tylko administrator może usunąć grupę': 'Only the admin can delete the group',
+    'Uczestnicy': 'Members',
+    'Uczestnicy grupy': 'Group members',
+    'Wybierz kontakt': 'Choose a contact',
+    'Zamknij': 'Close',
+    'np. alice': 'e.g. alice',
+    'np. bob': 'e.g. bob',
+    'status HEM': 'HEM status',
+    'wklej pubkey kontaktu…': 'paste the contact\'s public key…',
+    '⚠️ EH-2 nieudany': '⚠️ EH-2 failed',
+    '⚪ Relay': '⚪ Relay',
+    '⚪ Relay (grupa)': '⚪ Relay (group)',
+    '🔐 EH-2 + ratchet': '🔐 EH-2 + ratchet',
+    '🔐 Szyfrowana': '🔐 Encrypted',
+    '🟢 WebRTC Direct': '🟢 WebRTC Direct',
+    '🤝 EH-2 handshake…': '🤝 EH-2 handshake…',
     'Podaj adres HEM i hasło.': 'Enter the HEM address and password.',
     'Podaj nazwę grupy.': 'Enter a group name.',
     'Podaj nazwę i klucz.': 'Enter a name and a key.',
@@ -223,11 +260,16 @@ function detect(): string {
     if (saved && SUPPORTED.includes(saved)) return saved
   } catch {}
   // `navigator.languages` is ordered by preference; take the first we speak.
-  for (const l of (navigator.languages ?? [navigator.language ?? 'pl'])) {
+  for (const l of (navigator.languages ?? [navigator.language ?? 'en'])) {
     const base = String(l).toLowerCase().split('-')[0]
     if (SUPPORTED.includes(base)) return base
   }
-  return 'pl'
+  // English by default: the source text is Polish, so a browser that asks for
+  // Polish still gets it above, and everyone else gets the language they are
+  // likelier to read. Note the consequence — an untranslated key falls back to
+  // its Polish source, so a new string added without a catalogue entry now
+  // shows Polish to an English user rather than the other way round.
+  return 'en'
 }
 
 let locale = detect()

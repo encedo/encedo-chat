@@ -202,11 +202,11 @@ $('go').addEventListener('click', async () => {
   const url = val('hsm'), pass = val('pass')
   if (!url || !pass) { setMsg('msg', tr('Podaj adres HEM i hasło.'), 'err'); return }
   const btn = $('go') as HTMLButtonElement
-  btn.disabled = true; btn.textContent = '…'; clr('msg')
+  btn.disabled = true; btn.textContent = tr('…'); clr('msg')
   try {
     const hem = new HEM(url); await hem.hemCheckin()
     if (mode === 'register') {
-      const handle = val('handle'); if (!handle) { setMsg('msg', 'Podaj handle.', 'err'); return }
+      const handle = val('handle'); if (!handle) { setMsg('msg', tr('Podaj handle.'), 'err'); return }
       const gen = await hem.authorizePassword(pass, 'keymgmt:gen')
       const iat = Math.floor(Date.now() / 1000)
       const { kid } = await hem.createKeyPair(gen, `chat-ik-${handle}`, 'CURVE25519', btoa(`ETSEIC:self,${handle},ik,${iat}`))
@@ -368,13 +368,13 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   })
   clientReady.then((c) => { client = c; void restoreGroups() }, (e: any) => {
     ecLog(`session failed to start: ${e?.message ?? e}`)
-    toast('Brak połączenia z przekaźnikiem — odśwież stronę')
+    toast(tr('Brak połączenia z przekaźnikiem — odśwież stronę'))
   })
   $('login').hidden = true; $('app').hidden = false
   $('me-avatar').textContent = initials(id.handle)
   $('me-handle').textContent = id.handle
   const fp = await fingerprint(id.pub)
-  $('me-fp').textContent = '🔑 ' + fp
+  $('me-fp').textContent = tr('🔑 ') + fp
   $('me-fp').title = kid ? `KID ${kid} · dwuklik = kopiuj klucz publiczny` : 'Dwuklik = kopiuj klucz publiczny'
   $('sess-id').textContent = sourceLabel + ' · ' + fp
   $('sess-kid').textContent = kid ?? tr('— (klucz w przeglądarce)')
@@ -390,7 +390,7 @@ const fpCache = new Map<string, string>()
 async function refreshContacts() {
   if (!session) return
   try { contactsCache = await session.book.list() }
-  catch (e: any) { toast('Błąd listy kontaktów: ' + (e?.message ?? e)) }
+  catch (e: any) { toast(tr('Błąd listy kontaktów: ') + (e?.message ?? e)) }
   for (const c of contactsCache) if (!fpCache.has(c.pub)) fpCache.set(c.pub, await fingerprint(c.pub))
   renderContacts()
   void syncPresence()
@@ -448,7 +448,7 @@ function renderContacts() {
   // Add-peer lives INSIDE the contacts pane (like "+ Nowa grupa" in groups), so it
   // only shows on this tab — and above the empty-state, since that is when you need it.
   const add = document.createElement('div'); add.className = 'add-row'
-  const addBtn = document.createElement('button'); addBtn.className = 'add-btn'; addBtn.textContent = '+ Dodaj peera'
+  const addBtn = document.createElement('button'); addBtn.className = 'add-btn'; addBtn.textContent = tr('+ Dodaj peera')
   addBtn.addEventListener('click', () => openModal()); add.appendChild(addBtn); pane.appendChild(add)
   const filter = val('contact-search').toLowerCase()
   const list = contactsCache.filter((c) => !filter || c.name.toLowerCase().includes(filter))
@@ -482,7 +482,7 @@ function renderContacts() {
         if (!await ask(tr('Usunąć kontakt?'), tr('„{name}” zniknie z listy, rozmowa zostanie zamknięta', { name: c.name })
           + `${c.source === 'hem' ? tr(', a klucz kontaktu zostanie usunięty z HEM') : ''}. Historia rozmowy i tak nie jest przechowywana.`, tr('Usuń'))) return
         await closeRoom(c.pub)
-        if (session) { try { await session.book.remove(c) } catch (err: any) { toast('Błąd usuwania: ' + (err?.message ?? err)) } }
+        if (session) { try { await session.book.remove(c) } catch (err: any) { toast(tr('Błąd usuwania: ') + (err?.message ?? err)) } }
         await refreshContacts(); return
       }
       void openRoomFor(c, true)
@@ -579,7 +579,7 @@ async function renameContact(c: Contact, name: string) {
     if (activePub === c.pub) $('peer-name').textContent = name
     if (activeGid) renderGroups()
     toast(`Kontakt to teraz „${name}"`)
-  } catch (e: any) { toast('Nie udało się zmienić nazwy: ' + (e?.message ?? e)) }
+  } catch (e: any) { toast(tr('Nie udało się zmienić nazwy: ') + (e?.message ?? e)) }
 }
 
 // ---- add-peer modal ----
@@ -591,7 +591,7 @@ $('add-save').addEventListener('click', async () => {
   const name = val('add-name'), pub = val('add-pub')
   if (!name || !pub) { setMsg('add-msg', tr('Podaj nazwę i klucz.'), 'err'); return }
   try { if (Uint8Array.from(atob(pub), (c) => c.charCodeAt(0)).length !== 32) { setMsg('add-msg', tr('Klucz nie wygląda na 32-bajtowy X25519 (base64).'), 'err'); return } }
-  catch { setMsg('add-msg', 'Klucz nie jest poprawnym base64.', 'err'); return }
+  catch { setMsg('add-msg', tr('Klucz nie jest poprawnym base64.'), 'err'); return }
   const store = (document.querySelector('input[name="store"]:checked') as HTMLInputElement | null)?.value ?? 'hem'
   if (store === 'none') { closeModal(); void openRoomFor({ name, pub, source: 'local' }, true); return } // ephemeral — nothing saved (HEM nor localStorage)
   const persistent = store !== 'local'
@@ -603,7 +603,7 @@ $('add-save').addEventListener('click', async () => {
     await refreshContacts()
     closeModal()
   } catch (e: any) { setMsg('add-msg', tr('Błąd zapisu: ') + (e?.message ?? e), 'err') }
-  finally { btn.disabled = false; btn.textContent = 'Zapisz' }
+  finally { btn.disabled = false; btn.textContent = tr('Zapisz') }
 })
 
 // ---- settings drawer ----
@@ -706,7 +706,7 @@ async function copyPub() {
     const ta = document.createElement('textarea'); ta.value = session.pub; ta.style.position = 'fixed'; ta.style.opacity = '0'
     document.body.appendChild(ta); ta.select(); try { document.execCommand('copy') } catch {} ta.remove()
   }
-  toast('Skopiowano klucz publiczny ✓')
+  toast(tr('Skopiowano klucz publiczny ✓'))
 }
 $('me-fp').addEventListener('dblclick', copyPub)       // double-click fingerprint → copy pubkey
 $('sess-id').addEventListener('dblclick', copyPub)     // double-click Tożsamość → copy pubkey
@@ -850,7 +850,7 @@ function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
   const el = stateEls.get(id)
   if (!el) return
   if (state === 'ok') {
-    el.textContent = ' · ✓ ' + tr('dostarczone')
+    el.textContent = tr(' · ✓ ') + tr('dostarczone')
     el.title = tr('Klient rozmówcy potwierdził odbiór{when} — to nie jest „przeczytane”', { when: ms !== undefined ? tr(' po {ms} ms', { ms }) : '' })
   } else if (state === 'late') {
     // It said ⚠, and it was wrong: the confirmation came in after we had given
@@ -860,14 +860,14 @@ function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
     el.title = tr('Potwierdzenie przyszło już po tym, jak przestaliśmy ponawiać — wiadomość jednak dotarła')
     el.classList.add('late')
   } else {
-    el.textContent = ' · ⚠ niedostarczone'
+    el.textContent = tr(' · ⚠ niedostarczone')
     el.title = tr('Brak potwierdzenia mimo ponowień — rozmówca prawdopodobnie tego nie dostał')
     // The transport gave up; give the decision back to the user instead of
     // leaving a dead ⚠ that can only be fixed by retyping the message.
     const again = document.createElement('button')
     again.type = 'button'
     again.className = 'b-resend'
-    again.textContent = '↻'
+    again.textContent = tr('↻')
     again.title = tr('Wyślij ponownie')
     again.addEventListener('click', () => {
       if (!activeRoom()?.conv?.resend(id)) return
@@ -1039,9 +1039,9 @@ function paintSecurity(room: Room) {
   const best = states.includes('established') ? 'established'
     : states.includes('handshaking') ? 'handshaking' : states.length ? 'failed' : 'handshaking'
   const b = $('e2e-badge')
-  if (best === 'established') { b.className = 'badge direct'; b.textContent = '🔐 EH-2 + ratchet'; b.title = tr('Handshake EH-2 uzgodniony — forward secrecy per wiadomość, hybryda PQ (ML-KEM-768)') }
-  else if (best === 'handshaking') { b.className = 'badge e2e'; b.textContent = '🤝 EH-2 handshake…'; b.title = 'Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)' }
-  else { b.className = 'badge e2e'; b.textContent = '⚠️ EH-2 nieudany'; b.title = tr('Handshake nie doszedł do skutku — ponowi się przy następnym Announce') }
+  if (best === 'established') { b.className = 'badge direct'; b.textContent = tr('🔐 EH-2 + ratchet'); b.title = tr('Handshake EH-2 uzgodniony — forward secrecy per wiadomość, hybryda PQ (ML-KEM-768)') }
+  else if (best === 'handshaking') { b.className = 'badge e2e'; b.textContent = tr('🤝 EH-2 handshake…'); b.title = tr('Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)') }
+  else { b.className = 'badge e2e'; b.textContent = tr('⚠️ EH-2 nieudany'); b.title = tr('Handshake nie doszedł do skutku — ponowi się przy następnym Announce') }
 }
 
 function noteTransport(room: Room, state: string) {
@@ -1050,8 +1050,8 @@ function noteTransport(room: Room, state: string) {
 }
 function paintTransport(room: Room) {
   const b = $('transport-badge')
-  if (room.transport.startsWith('conn=connected')) { b.className = 'badge direct'; b.textContent = '🟢 WebRTC Direct'; b.title = tr('Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing') }
-  else { b.className = 'badge relay'; b.textContent = '⚪ Relay'; b.title = tr('Treść przez relay (GossipSub)') }
+  if (room.transport.startsWith('conn=connected')) { b.className = 'badge direct'; b.textContent = tr('🟢 WebRTC Direct'); b.title = tr('Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing') }
+  else { b.className = 'badge relay'; b.textContent = tr('⚪ Relay'); b.title = tr('Treść przez relay (GossipSub)') }
 }
 
 /** Record one event on a room's log; render it if that room is on screen,
@@ -1090,9 +1090,9 @@ async function activateRoom(pub: string) {
   // fingerprint (comparable out of band) plus the HSM key id when it has one.
   const peerFp = fpCache.get(room.contact.pub) ?? await fingerprint(room.contact.pub)
   fpCache.set(room.contact.pub, peerFp)
-  $('sess-peer').textContent = '🔑 ' + peerFp + (room.contact.kid ? ' · KID ' + shortKid(room.contact.kid) : '')
+  $('sess-peer').textContent = tr('🔑 ') + peerFp + (room.contact.kid ? ' · KID ' + shortKid(room.contact.kid) : '')
   $('sess-peer').title = room.contact.kid ? `KID ${room.contact.kid}` : room.contact.pub
-  $('peer-name').title = '🔑 ' + peerFp + (room.contact.kid ? ` · KID ${room.contact.kid}` : '')
+  $('peer-name').title = tr('🔑 ') + peerFp + (room.contact.kid ? ` · KID ${room.contact.kid}` : '')
   $('sess-peerid').textContent = room.conv ? room.conv.peerId.slice(0, 16) + '…' : '…'
   // Rebuild the transcript from the log; the module render state (msgEls/stateEls)
   // now describes this room.
@@ -1283,7 +1283,7 @@ async function changeMembers(gid: string, newMembers: { pub: string; name: strin
     await persistGroups()
     if (activeGid === gid) activateGroup(gid); else renderGroups()
     toast(note)
-  } catch (e: any) { ecLog('group rekey failed: ' + (e?.message ?? e)); toast('Nie udało się zmienić składu grupy') }
+  } catch (e: any) { ecLog('group rekey failed: ' + (e?.message ?? e)); toast(tr('Nie udało się zmienić składu grupy')) }
 }
 
 /**
@@ -1305,11 +1305,13 @@ function openMembersPopFor(gu: GroupUI, anchor: HTMLElement) {
   if (!pop.hidden && popAnchor === anchor) { pop.hidden = true; popAnchor = null; return } // toggle
   popMembersGid = gu.gid
   renderMembersPop(gu)
+  // Fixed, against the anchor's rect — the popover is body-level, so there is no
+  // positioned ancestor to be absolute inside, and both openers behave the same.
   const r = anchor.getBoundingClientRect()
-  pop.classList.add('floating')
-  pop.style.top = `${Math.min(r.bottom + 6, window.innerHeight - 320)}px`
+  pop.hidden = false // measure it: clamping needs its real height, not a guess
+  const h = Math.min(pop.offsetHeight || 300, 300)
+  pop.style.top = `${Math.max(8, Math.min(r.bottom + 6, window.innerHeight - h - 8))}px`
   pop.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 340))}px`
-  pop.hidden = false
   popAnchor = anchor
 }
 
@@ -1332,7 +1334,7 @@ const iAmAdmin = (gu: GroupUI) => gu.members[0]?.pub === session?.pub
  */
 async function renameGroup(gid: string, name: string) {
   const gu = groupsUI.get(gid); if (!gu || !client) return
-  if (!iAmAdmin(gu)) { toast('Tylko administrator grupy może zmienić jej nazwę'); return }
+  if (!iAmAdmin(gu)) { toast(tr('Tylko administrator grupy może zmienić jej nazwę')); return }
   const before = gu.name
   gu.name = name
   try {
@@ -1344,7 +1346,7 @@ async function renameGroup(gid: string, name: string) {
     toast(`Grupa to teraz „${name}"`)
   } catch (e: any) {
     gu.name = before; renderGroups()
-    toast('Nie udało się zmienić nazwy grupy: ' + (e?.message ?? e))
+    toast(tr('Nie udało się zmienić nazwy grupy: ') + (e?.message ?? e))
   }
 }
 
@@ -1385,7 +1387,7 @@ async function leaveGroup(gid: string) {
  */
 async function deleteGroup(gid: string) {
   const gu = groupsUI.get(gid); if (!gu || !client) return
-  if (!iAmAdmin(gu)) { toast('Tylko administrator może usunąć grupę'); return }
+  if (!iAmAdmin(gu)) { toast(tr('Tylko administrator może usunąć grupę')); return }
   try {
     // While the old topic is still theirs to read.
     try { await gu.room?.sendText('🛑 Grupa została usunięta przez administratora.') } catch {}
@@ -1398,14 +1400,14 @@ async function deleteGroup(gid: string) {
     toast(tr('Grupa „{name}” usunięta', { name: gu.name }))
   } catch (e: any) {
     ecLog('group delete failed: ' + (e?.message ?? e))
-    toast('Nie udało się usunąć grupy: ' + (e?.message ?? e))
+    toast(tr('Nie udało się usunąć grupy: ') + (e?.message ?? e))
   }
 }
 
 function renderGroups() {
   const pane = $('pane-groups'); pane.innerHTML = ''
   const add = document.createElement('div'); add.className = 'add-row'
-  const btn = document.createElement('button'); btn.className = 'add-btn'; btn.textContent = '+ Nowa grupa'
+  const btn = document.createElement('button'); btn.className = 'add-btn'; btn.textContent = tr('+ Nowa grupa')
   btn.addEventListener('click', openGroupModal); add.appendChild(btn); pane.appendChild(add)
   if (!groupsUI.size) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = tr('(brak grup — utwórz)'); pane.appendChild(e); return }
   for (const gu of groupsUI.values()) {
@@ -1418,7 +1420,7 @@ function renderGroups() {
       // manage it. The members button opens the SAME popover the chat header
       // uses — one implementation, so the two cannot drift.
       + (admin ? `<button class="g-edit" data-ren="1" title="${tr('Zmień nazwę grupy')}">✎</button>` : '')
-      + (admin ? `<button class="g-edit" data-mem="1" title="Uczestnicy">👥</button>` : '')
+      + (admin ? `<button class="g-edit" data-mem="1" title="${tr('Uczestnicy')}">👥</button>` : '')
       + `<span class="c-x" title="${admin ? tr('Usuń grupę') : tr('Opuść grupę')}">×</span>`
     b.addEventListener('click', async (e: any) => {
       const d = e.target?.dataset ?? {}
@@ -1563,23 +1565,18 @@ async function activateGroup(gid: string) {
   gu.unseen = 0
   $('chat-empty').hidden = true; $('chat-view').hidden = false
   showChatPane(true)
-  $('peer-avatar').textContent = '👥'
+  $('peer-avatar').textContent = tr('👥')
   $('peer-name').textContent = groupDisplay(gu); $('peer-name').title = ''
   $('peer-dot').className = 'dot ok'; $('peer-status').textContent = tr('{n} członków', { n: gu.members.length })
   // Participant cluster in the header → click to see the full member list.
   const cluster = $('members-cluster'); cluster.hidden = false; cluster.innerHTML = avatarClusterHTML(gu.members)
-  cluster.title = 'Uczestnicy grupy'
-  cluster.onclick = (e: any) => {
-    e.stopPropagation()
-    const pop = $('members-pop'); const show = pop.hidden
-    if (show) { popMembersGid = gu.gid; popAnchor = null; pop.classList.remove('floating'); pop.style.top = ''; pop.style.left = ''; renderMembersPop(gu) }
-    pop.hidden = !show
-  }
+  cluster.title = tr('Uczestnicy grupy')
+  cluster.onclick = (e: any) => { e.stopPropagation(); openMembersPopFor(gu, cluster) }
   $('members-pop').hidden = true
-  $('e2e-badge').className = 'badge direct'; $('e2e-badge').textContent = '🔐 Szyfrowana'
-  $('e2e-badge').title = 'Grupa — Sender Keys + per-recipient HMAC (deniable, §8)'
-  $('transport-badge').className = 'badge relay'; $('transport-badge').textContent = '⚪ Relay (grupa)'
-  $('transport-badge').title = 'Grupa idzie przez relay (GossipSub) — nie WebRTC'
+  $('e2e-badge').className = 'badge direct'; $('e2e-badge').textContent = tr('🔐 Szyfrowana')
+  $('e2e-badge').title = tr('Grupa — Sender Keys + per-recipient HMAC (deniable, §8)')
+  $('transport-badge').className = 'badge relay'; $('transport-badge').textContent = tr('⚪ Relay (grupa)')
+  $('transport-badge').title = tr('Grupa idzie przez relay (GossipSub) — nie WebRTC')
   $('sess-peerid').textContent = gid.slice(0, 12) + '…'
   $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false)
   for (const ev of gu.log) applyEv(ev)
