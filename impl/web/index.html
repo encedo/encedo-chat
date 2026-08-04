@@ -296,7 +296,13 @@
   /* A short screen has no room for a wrapped header: keep it on one line. */
   @media (max-height:560px){
     .chat-head{flex-wrap:nowrap;overflow-x:auto;padding:8px 12px}
-    .chat-head .badge{white-space:nowrap}
+    /* Three badges (security, transport, rotation) plus a name do not fit a phone
+       header. Hiding them would drop the security state — the one thing that
+       must stay visible — so the words collapse and the glyph carries it. The
+       full wording stays in the tooltip. */
+    .chat-head .badge{white-space:nowrap;padding:4px 8px;gap:0}
+    .chat-head .badge .b-txt{display:none}
+    .chat-head .badge.rotate{display:none}
   }
 
   /* Touch: no hover, so the reaction bar is revealed by TAPPING the bubble

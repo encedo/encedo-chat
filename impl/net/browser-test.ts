@@ -460,7 +460,12 @@ function plain(v: any): any {
 const step = (msg: string) => console.log(`• ${msg}`)
 const scenario = (name: string) => console.log(`\n▸ ${name}`)
 
-const BADGE_GREEN = `return document.getElementById('e2e-badge').textContent.includes('ratchet') ? document.getElementById('e2e-badge').textContent : ''`
+// The badge reads "Secure" now, not "EH-2 + ratchet" — plain language in the UI,
+// the scheme in the tooltip. Assert on the CLASS as well, because `direct` is
+// what the code sets only once a session is established: text is a label and
+// labels get reworded, the class is the state.
+const BADGE_GREEN = `const b = document.getElementById('e2e-badge');
+  return b.classList.contains('direct') ? b.textContent : ''`
 const send = (b: Page, text: string) => b.eval(`
   const i = document.getElementById('msg-input'); i.value = ${JSON.stringify(text)};
   document.getElementById('send').click(); return 1;

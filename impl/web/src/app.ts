@@ -780,9 +780,8 @@ function renderNetwork() {
     ${nodesRow}
     ${relayPeer ? `<div class="net-row"><span class="k">${tr('PeerId węzła')}</span><span class="v mono">${escapeHtml(relayPeer.slice(0, 14))}…</span></div>` : ''}
     <div class="net-row"><span class="k">${tr('Twój PeerId')}</span><span class="v mono">${escapeHtml(s.self.slice(0, 14))}…</span></div>
-    ${capReport ? `<div class="net-row wrap"><span class="k">${tr('Platforma')}</span><span class="v chips" title="${escapeHtml(capReport.ua)}">`
-      + capReport.caps.filter((c) => c.required || !c.ok).map((c) =>
-          `<span class="net-node${c.ok ? ' act' : ''}">${c.ok ? '●' : c.required ? '✖' : '○'} ${escapeHtml(c.id)}</span>`).join('')
+    ${capReport && capReport.degraded.length ? `<div class="net-row wrap"><span class="k">${tr('Platforma')}</span><span class="v chips" title="${escapeHtml(capReport.ua)}">`
+      + capReport.degraded.map((c) => `<span class="net-node">○ ${escapeHtml(c.id)}</span>`).join('')
       + `</span></div>` : ''}
     <div class="net-row"><span class="k">${tr('Topiki')}</span><span class="v">${s.topics.length} <span class="net-sub">(grupy: ${gCount} · pary/self: ${s.topics.length - gCount})</span></span></div>
   </div>
@@ -1039,9 +1038,28 @@ function paintSecurity(room: Room) {
   const best = states.includes('established') ? 'established'
     : states.includes('handshaking') ? 'handshaking' : states.length ? 'failed' : 'handshaking'
   const b = $('e2e-badge')
-  if (best === 'established') { b.className = 'badge direct'; b.textContent = tr('🔐 EH-2 + ratchet'); b.title = tr('Handshake EH-2 uzgodniony — forward secrecy per wiadomość, hybryda PQ (ML-KEM-768)') }
-  else if (best === 'handshaking') { b.className = 'badge e2e'; b.textContent = tr('🤝 EH-2 handshake…'); b.title = tr('Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)') }
-  else { b.className = 'badge e2e'; b.textContent = tr('⚠️ EH-2 nieudany'); b.title = tr('Handshake nie doszedł do skutku — ponowi się przy następnym Announce') }
+  if (best === 'established') setBadge(b, 'badge direct', tr('🔐 Secure'), tr('Handshake EH-2 uzgodniony — forward secrecy per wiadomość, hybryda PQ (ML-KEM-768)'))
+  else if (best === 'handshaking') setBadge(b, 'badge e2e', tr('🤝 Securing…'), tr('Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)'))
+  else setBadge(b, 'badge e2e', tr('⚠️ Not secure'), tr('Handshake nie doszedł do skutku — ponowi się przy następnym Announce'))
+}
+
+/**
+ * Set a badge as icon + text, not one string.
+ *
+ * A phone header cannot fit three badges and a name, and hiding them outright
+ * would drop the security state — the one thing that must stay visible. Split
+ * so CSS can collapse the words on a narrow screen and leave the glyph; the
+ * full wording survives in the tooltip. (A `::first-letter` trick was tried and
+ * does not work: `.badge` is inline-flex, and that pseudo-element only applies
+ * to block containers.)
+ */
+function setBadge(el: HTMLElement, cls: string, label: string, title: string) {
+  const sp = label.indexOf(' ')
+  const icon = sp > 0 ? label.slice(0, sp) : label
+  const text = sp > 0 ? label.slice(sp + 1) : ''
+  el.className = cls
+  el.innerHTML = `<span class="b-ico">${escapeHtml(icon)}</span>${text ? `<span class="b-txt">${escapeHtml(text)}</span>` : ''}`
+  el.title = title
 }
 
 function noteTransport(room: Room, state: string) {
@@ -1050,8 +1068,8 @@ function noteTransport(room: Room, state: string) {
 }
 function paintTransport(room: Room) {
   const b = $('transport-badge')
-  if (room.transport.startsWith('conn=connected')) { b.className = 'badge direct'; b.textContent = tr('🟢 WebRTC Direct'); b.title = tr('Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing') }
-  else { b.className = 'badge relay'; b.textContent = tr('⚪ Relay'); b.title = tr('Treść przez relay (GossipSub)') }
+  if (room.transport.startsWith('conn=connected')) setBadge(b, 'badge direct', tr('🟢 Direct'), tr('Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing'))
+  else setBadge(b, 'badge relay', tr('⚪ Relay'), tr('Treść przez relay (GossipSub)'))
 }
 
 /** Record one event on a room's log; render it if that room is on screen,
@@ -1581,9 +1599,9 @@ async function activateGroup(gid: string) {
   cluster.title = tr('Uczestnicy grupy')
   cluster.onclick = (e: any) => { e.stopPropagation(); openMembersPopFor(gu, cluster, e as MouseEvent) }
   $('members-pop').hidden = true
-  $('e2e-badge').className = 'badge direct'; $('e2e-badge').textContent = tr('🔐 Szyfrowana')
+  setBadge($('e2e-badge'), 'badge direct', tr('🔐 Secure'), tr('Grupa — Sender Keys + per-recipient HMAC (deniable, §8)'))
   $('e2e-badge').title = tr('Grupa — Sender Keys + per-recipient HMAC (deniable, §8)')
-  $('transport-badge').className = 'badge relay'; $('transport-badge').textContent = tr('⚪ Relay (grupa)')
+  setBadge($('transport-badge'), 'badge relay', tr('⚪ Relay'), tr('Grupa idzie przez relay (GossipSub) — nie WebRTC'))
   $('transport-badge').title = tr('Grupa idzie przez relay (GossipSub) — nie WebRTC')
   $('sess-peerid').textContent = gid.slice(0, 12) + '…'
   $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false)
