@@ -282,6 +282,8 @@ export interface GkBackend {
   /** Rewrite the marker after a membership change. Absent on backends with no
    *  HSM to update (software) — then a group simply has no portable marker. */
   setMarker?(kid: string, label: string, descr: string): Promise<void>
+  /** This identity's own KID, as the HSM issued it — the marker's `admin_KID`. */
+  adminKid?: string
 }
 
 interface GroupRec {
@@ -402,10 +404,11 @@ export class GroupManager {
 
   /** The §8 marker DESCR for a roster I admin. Format and budget: `gmarker.ts`. */
   private async markerFor(roster: Member[], name?: string): Promise<string> {
+    // KIDs come from the HSM where a member carries one (imported contacts do);
+    // `kidOf` derives it from the public key otherwise. Same value either way.
     const { descr } = await buildMarker({
-      iat: Math.floor(Date.now() / 1000),
-      adminPub: unb64(this.id.pub),
-      rosterPubs: roster.map((m) => unb64(m.pub)),
+      admin: { kid: this.gkBackend?.adminKid, pub: unb64(this.id.pub) },
+      members: roster.map((m) => ({ kid: m.kid, pub: unb64(m.pub) })),
       name,
     })
     return descr

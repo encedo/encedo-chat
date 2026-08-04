@@ -15,7 +15,7 @@ import { generateX25519 } from '../lib/x25519.ts'
 import { randomBytes } from '../lib/wc.ts'
 import {
   buildMarker, parseMarker, resolveRoster, hemKid, crc32,
-  MARKER_PREFIX, DESCR_MAX, ROSTER_MAX, byteLen,
+  MARKER_PREFIX, DESCR_MAX, ROSTER_MAX, NAME_MAX, byteLen, kidOf,
 } from '../lib/gmarker.ts'
 
 async function pubs(n: number): Promise<Uint8Array[]> {
@@ -37,14 +37,12 @@ test('CRC32 matches the IEEE reference vector', () => {
 
 test('a marker round-trips through the DESCR', async () => {
   const members = await pubs(3)
-  const { descr, rosterIncluded, nameIncluded } = await buildMarker({
-    iat: 1780000000, adminPub: members[0], rosterPubs: members, name: 'Zespół',
+  const { descr, rosterIncluded, nameIncluded } = await buildMarker({ admin: { pub: members[0] }, members: members.map((p) => ({ pub: p })), name: 'Zespół',
   })
   assert.ok(rosterIncluded && nameIncluded)
   assert.ok(descr.startsWith(MARKER_PREFIX), 'key_search finds it by this prefix')
 
   const m = parseMarker(descr)!
-  assert.equal(m.iat, 1780000000)
   assert.equal(m.adminKid, await hemKid(members[0]))
   assert.equal(m.hints.length, 3)
   assert.equal(m.name, 'Zespół')
@@ -62,7 +60,7 @@ test('the DESCR never exceeds 128 BYTES, even at the roster maximum', async () =
       '🔐🔐🔐 grupa 🔐🔐🔐 z emoji poza BMP 🔐🔐🔐',
     ]) {
       const members = await pubs(n)
-      const { descr } = await buildMarker({ iat: 1799999999, adminPub: members[0], rosterPubs: members, name })
+      const { descr } = await buildMarker({ admin: { pub: members[0] }, members: members.map((p) => ({ pub: p })), name })
       assert.ok(byteLen(descr) <= DESCR_MAX, `${n} members / "${name.slice(0, 12)}…": ${byteLen(descr)} B`)
       assert.ok(parseMarker(descr), `${n} members: still parses`)
       assert.ok(!/�/.test(descr), 'a name is never cut mid-character')
@@ -72,8 +70,7 @@ test('the DESCR never exceeds 128 BYTES, even at the roster maximum', async () =
 
 test('the roster survives a squeeze; the name is what gets dropped', async () => {
   const members = await pubs(ROSTER_MAX)
-  const { descr, rosterIncluded, nameIncluded } = await buildMarker({
-    iat: 1799999999, adminPub: members[0], rosterPubs: members,
+  const { descr, rosterIncluded, nameIncluded } = await buildMarker({ admin: { pub: members[0] }, members: members.map((p) => ({ pub: p })),
     name: 'this name cannot possibly fit alongside ten members',
   })
   assert.ok(rosterIncluded, 'membership is load-bearing and stays')
@@ -83,7 +80,7 @@ test('the roster survives a squeeze; the name is what gets dropped', async () =>
 
 test('over the roster maximum the blob is omitted, not truncated', async () => {
   const members = await pubs(ROSTER_MAX + 2)
-  const { descr, rosterIncluded } = await buildMarker({ iat: 1, adminPub: members[0], rosterPubs: members })
+  const { descr, rosterIncluded } = await buildMarker({ admin: { pub: members[0] }, members: members.map((p) => ({ pub: p })) })
   assert.equal(rosterIncluded, false, 'a partial roster would be worse than none')
   const m = parseMarker(descr)!
   assert.equal(m.hints.length, 0)
@@ -92,42 +89,42 @@ test('over the roster maximum the blob is omitted, not truncated', async () => {
 
 test('hints resolve against the local key set, in roster order', async () => {
   const members = await pubs(4)
-  const { descr } = await buildMarker({ iat: 1, adminPub: members[0], rosterPubs: members })
+  const { descr } = await buildMarker({ admin: { pub: members[0] }, members: members.map((p) => ({ pub: p })) })
   const m = parseMarker(descr)!
   // The device holds these keys plus unrelated ones, in a different order.
-  const local = [...(await pubs(3)), ...[...members].reverse()]
+  const local = [...(await pubs(3)), ...[...members].reverse()].map((pub) => ({ pub }))
   const got = await resolveRoster(m, local)
   assert.ok(got, 'the roster reconstructed')
-  assert.deepEqual(got!.map((p) => [...p]), members.map((p) => [...p]), 'and in the ADMIN order, not the local one')
+  assert.deepEqual(got!.map((p) => [...p.pub!]), members.map((p) => [...p]), 'and in the ADMIN order, not the local one')
 })
 
 test('a member this device has never seen makes reconstruction fail, not guess', async () => {
   const members = await pubs(3)
-  const { descr } = await buildMarker({ iat: 1, adminPub: members[0], rosterPubs: members })
+  const { descr } = await buildMarker({ admin: { pub: members[0] }, members: members.map((p) => ({ pub: p })) })
   const m = parseMarker(descr)!
-  assert.equal(await resolveRoster(m, members.slice(0, 2)), null)
+  assert.equal(await resolveRoster(m, members.slice(0, 2).map((pub) => ({ pub }))), null)
 })
 
 test('the CRC rejects a set that resolved to the wrong key', async () => {
   const members = await pubs(3)
-  const { descr } = await buildMarker({ iat: 1, adminPub: members[0], rosterPubs: members })
+  const { descr } = await buildMarker({ admin: { pub: members[0] }, members: members.map((p) => ({ pub: p })) })
   const m = parseMarker(descr)!
   // Simulate a 4-byte hint collision: a different key answers one hint.
   const [impostor] = await pubs(1)
   const collided = m.hints.slice()
   const forged = { ...m, hints: collided }
-  const local = [members[0], members[1], impostor]
+  const local = [members[0], members[1], impostor].map((pub) => ({ pub }))
   // The impostor cannot answer member[2]'s hint, so this fails on resolution…
   assert.equal(await resolveRoster(forged, local), null)
   // …and a doctored CRC over a genuinely different set fails the check too.
   const wrongCrc = { ...m, crc: (m.crc ^ 0xffff) >>> 0 }
-  assert.equal(await resolveRoster(wrongCrc, members), null, 'CRC mismatch is a refusal, not a warning')
+  assert.equal(await resolveRoster(wrongCrc, members.map((pub) => ({ pub }))), null, 'CRC mismatch is a refusal, not a warning')
 })
 
 test('the marker carries no group secret and no sender key', async () => {
   const members = await pubs(3)
   const secret = randomBytes(32)
-  const { descr } = await buildMarker({ iat: 1, adminPub: members[0], rosterPubs: members, name: 'g' })
+  const { descr } = await buildMarker({ admin: { pub: members[0] }, members: members.map((p) => ({ pub: p })), name: 'g' })
   // Nothing in the DESCR is derived from group state — only identity hints.
   for (const pub of members) assert.ok(!descr.includes(Buffer.from(pub).toString('base64')), 'no member public key verbatim')
   assert.ok(!descr.includes(Buffer.from(secret).toString('base64')))
@@ -137,5 +134,63 @@ test('a DESCR that is not ours parses as null', () => {
   assert.equal(parseMarker('ETSEIC:self,chris,ik,1780000000'), null)
   assert.equal(parseMarker(''), null)
   assert.equal(parseMarker(MARKER_PREFIX + 'nonsense'), null)
-  assert.equal(parseMarker(MARKER_PREFIX + '1,notakid,,x'), null, 'a malformed admin KID is rejected')
+  assert.equal(parseMarker(MARKER_PREFIX + 'notakid,n,'), null, 'a malformed admin KID is rejected')
+})
+
+// ---- the four shape decisions (user review, 2026-08-04) --------------------
+
+test('no iat: the HSM timestamps its own key records, so the field is not repeated', async () => {
+  const members = await pubs(2)
+  const { descr } = await buildMarker({ admin: { pub: members[0] }, members: members.map((pub) => ({ pub })), name: 'g' })
+  const fields = descr.slice(MARKER_PREFIX.length).split(',')
+  assert.equal(fields.length, 3, 'admin KID, name, roster — and nothing else')
+  assert.ok(!/\b1[7-9]\d{8}\b/.test(descr), 'no unix timestamp anywhere in the marker')
+})
+
+test('the name is capped at 16 characters', async () => {
+  const members = await pubs(2)
+  const { descr } = await buildMarker({
+    admin: { pub: members[0] }, members: members.map((pub) => ({ pub })),
+    name: 'a group name far longer than sixteen characters',
+  })
+  assert.equal(parseMarker(descr)!.name.length, NAME_MAX)
+})
+
+test('the roster blob is last, so it is the field free to grow or vanish', async () => {
+  const members = await pubs(4)
+  const withRoster = await buildMarker({ admin: { pub: members[0] }, members: members.map((pub) => ({ pub })), name: 'g' })
+  const without = await buildMarker({ admin: { pub: members[0] }, name: 'g' })
+  assert.equal(without.rosterIncluded, false)
+  // Everything before the blob is byte-identical whether or not the blob is there.
+  const head = (d: string) => d.slice(0, d.lastIndexOf(',') + 1)
+  assert.equal(head(withRoster.descr), head(without.descr), 'the optional field disturbs nothing before it')
+  assert.ok(withRoster.descr.startsWith(head(without.descr)))
+})
+
+test('at ten members the roster still fits alongside a full-length name', async () => {
+  const members = await pubs(ROSTER_MAX)
+  const r = await buildMarker({
+    admin: { pub: members[0] }, members: members.map((pub) => ({ pub })), name: 'Zespół Projektowy Alfa',
+  })
+  assert.ok(r.rosterIncluded, 'the roster is never the field that yields at the maximum')
+  assert.equal(parseMarker(r.descr)!.name.length, NAME_MAX)
+  assert.ok(byteLen(r.descr) <= DESCR_MAX)
+})
+
+test('an HSM-issued KID is preferred over deriving one, and they agree', async () => {
+  const [pub] = await pubs(1)
+  const derived = await kidOf({ pub })
+  assert.equal(derived, await hemKid(pub), 'with only a public key we derive SHA1(pub)[0:16]')
+  // When the HSM gave us a KID, that is what is used — no second opinion.
+  assert.equal(await kidOf({ kid: 'AABBCCDDEEFF00112233445566778899', pub }), 'aabbccddeeff00112233445566778899')
+})
+
+test('a member with neither a KID nor a public key drops the whole blob', async () => {
+  const members = await pubs(3)
+  const { rosterIncluded } = await buildMarker({
+    admin: { pub: members[0] },
+    members: [{ pub: members[0] }, {}, { pub: members[2] }], // one unrepresentable
+    name: 'g',
+  })
+  assert.equal(rosterIncluded, false, 'half a roster reconstructs a wrong one')
 })

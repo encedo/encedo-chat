@@ -3,31 +3,70 @@
  *
  * The only per-group object in the HSM is the GK key entry; its DESCR is what
  * makes membership PORTABLE. `key_search` over the marker prefix yields the
- * group list on any device holding the same HEM, without a single byte of
- * group state having been stored anywhere on the network.
+ * group list on any device holding the same HEM, without a byte of group state
+ * having been stored anywhere on the network.
+ *
+ *     ETSEIC:chan,<admin_KID>,<name ≤16>,<roster blob>
  *
  * What it deliberately does NOT hold: `group_secret` (the topic seed) and
  * sender keys (content). Those are client-side and forward-secret; a HEM dump
  * must not hand over the ability to read anything.
  *
- * Optionally it carries a **compact roster**: a 4-byte KID hint per member plus
- * a CRC32 over the full concatenated KIDs. The hints are resolved by looking up
- * KID prefixes among keys the HEM already holds (your contacts), and the CRC
- * confirms the reconstructed set is the intended one — a 4-byte hint collides
- * rarely, but "rarely" is not "never". The CRC is **integrity, not
- * authenticity**: authenticity of a roster is and remains the admin's `rk_i`
- * MAC (§8). Anyone who can write this DESCR can write any CRC to match it.
+ * Four things about this layout are decisions, not accidents:
  *
- * The trade-off is explicit in the design: with the roster blob, one HEM dump
- * reveals the whole membership graph (hints plus your contacts, both in the
- * HEM); without it, a dump reveals only that a group exists. That is why
- * including it is a caller's choice, not this module's.
+ * - **No `iat`.** The HSM already timestamps its own key entries, and spending
+ *   ten of 128 bytes to repeat what the key record answers is not a trade worth
+ *   making.
+ * - **A KID is taken from the HEM when we hold one, and derived only when we do
+ *   not.** The HEM KID is `SHA1(pub)[0:16]` (GROUPS-DESIGN.md) — deterministic
+ *   and global, which is exactly why a hint the admin writes resolves on
+ *   someone else's device. Note it is SHA-**1**, and NOT the app fingerprint
+ *   `SHA-256(pub)` (§4.4), which is the human out-of-band check and a different
+ *   identifier entirely. Preferring the issued KID keeps this correct even if a
+ *   firmware ever stops deriving them that way; deriving covers a member we
+ *   hold a public key for but have not imported.
+ * - **The name is capped at 16 characters.** It is a label, it is held
+ *   client-side anyway, and the roster is what actually needs the room.
+ * - **The roster blob is LAST**, so it is the field that can grow, be truncated
+ *   by a shorter record, or be absent, without disturbing anything before it.
  *
- * Identifier note: HEM KID = SHA1(pub)[0:16] (key index — this file), which is
- * NOT the app fingerprint SHA-256(pub) used for out-of-band MITM checks (§4.4).
+ * The blob is a 4-byte KID hint per member plus a CRC32 over the concatenated
+ * full KIDs. Hints are resolved by KID-prefix lookup among keys the HEM already
+ * holds (your contacts), and the CRC confirms the reconstructed set — a 4-byte
+ * hint collides rarely, but "rarely" is not "never". The CRC is **integrity,
+ * not authenticity**: it catches a hint that resolved to the wrong key, it does
+ * not make a roster trustworthy. Authenticity is the admin's `rk_i` MAC (§8),
+ * always — anyone who can write this DESCR can write a matching CRC.
+ *
+ * Trade-off, stated in the design: with the roster blob, one HEM dump reveals
+ * the whole membership graph (hints plus your contacts, both in the HEM);
+ * without it, a dump reveals only that a group exists. Including it is the
+ * caller's choice.
  */
 
 import { subtle, b64, unb64 } from './wc.ts'
+
+/** Anyone this module can identify: an HSM-issued KID, a public key, or both. */
+export interface KeyRef { kid?: string; pub?: Uint8Array }
+
+/**
+ * The HEM KID: `SHA1(pub)[0:16]`, hex — deterministic and global, so the same
+ * public key yields the same KID on every HEM, which is what lets a hint
+ * written by the admin resolve on a member's device.
+ *
+ * SHA-**1**, deliberately: this is a key index. The app fingerprint is
+ * `SHA-256(pub)` (§4.4) and answers a different question (out-of-band MITM).
+ */
+export async function hemKid(pub: Uint8Array): Promise<string> {
+  const d = new Uint8Array(await subtle.digest('SHA-1', pub))
+  return hex(d.slice(0, 16))
+}
+
+/** Prefer what the HSM issued; derive only when we hold no KID. Equal by construction. */
+export async function kidOf(r: KeyRef): Promise<string | undefined> {
+  if (r.kid) return r.kid.toLowerCase()
+  return r.pub ? hemKid(r.pub) : undefined
+}
 
 /** `key_search` prefix — everything below is one DESCR field. */
 export const MARKER_PREFIX = 'ETSEIC:chan,'
@@ -41,6 +80,12 @@ export const MARKER_PREFIX = 'ETSEIC:chan,'
  * bytes as it has non-ASCII characters.
  */
 export const DESCR_MAX = 128
+/** A label, not a protocol field — the roster needs the room more than it does. */
+export const NAME_MAX = 16
+/** The spec bounds the compact roster at 10 members (~44 B). Beyond that it is omitted. */
+export const ROSTER_MAX = 10
+
+const HINT_HEX = 8 // 4 bytes of KID, as hex characters
 
 const enc = new TextEncoder()
 /** UTF-8 length — the only length this field is measured in. */
@@ -56,27 +101,13 @@ function sliceBytes(s: string, max: number): string {
   return out
 }
 
-/** The spec bounds the compact roster at 10 members (~44 B). Beyond that it is omitted. */
-export const ROSTER_MAX = 10
-
-const HINT_BYTES = 4
-
-/**
- * HEM KID: `SHA1(pub)[0:16]`, hex. Deterministic and global — the same public
- * key imported into two HEMs gets the same KID, which is what lets a hint
- * written by the admin resolve on a member's device.
- */
-export async function hemKid(pub: Uint8Array): Promise<string> {
-  const d = new Uint8Array(await subtle.digest('SHA-1', pub))
-  return hex(d.slice(0, 16))
-}
-
-function hex(b: Uint8Array): string { return [...b].map((x) => x.toString(16).padStart(2, '0')).join('') }
+const isHexKid = (k: string) => /^[0-9a-f]+$/i.test(k) && k.length >= HINT_HEX && k.length % 2 === 0
 function unhex(s: string): Uint8Array {
   const out = new Uint8Array(s.length >> 1)
   for (let i = 0; i < out.length; i++) out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16)
   return out
 }
+function hex(b: Uint8Array): string { return [...b].map((x) => x.toString(16).padStart(2, '0')).join('') }
 
 /** CRC-32 (IEEE), table built once. Integrity check only — never a MAC. */
 const CRC_TABLE = (() => {
@@ -95,113 +126,119 @@ export function crc32(bytes: Uint8Array): number {
 }
 
 export interface MarkerFields {
-  /** Unix seconds — when the group was founded. */
-  iat: number
-  /** Full KID of the admin: whom to ask for a re-sync. */
+  /** The admin's KID as the HSM issued it — whom to ask for a re-sync. */
   adminKid: string
-  /** 4-byte KID hints, one per member, in roster order. Empty = no roster blob. */
+  /** Display label, ≤16 characters. */
+  name: string
+  /** 4-byte KID hints (8 hex chars), one per member, in roster order. Empty = no blob. */
   hints: string[]
   /** CRC32 over the concatenated FULL KIDs, in the same order. 0 when no roster. */
   crc: number
-  /** Best-effort display name. Dropped first when the 128-byte field is tight. */
-  name: string
 }
 
 /**
  * Build the DESCR.
  *
- * Field order is a priority order, because 128 bytes does not fit everything at
- * ten members: identity and authority (`iat`, `adminKid`) always survive, the
- * roster blob is dropped if it would overrun, and the name — cosmetic, and held
- * client-side anyway — is truncated or dropped first. Callers are told what
- * actually made it in, so nothing silently disappears.
+ * Fields yield in priority order, because 128 bytes does not fit everything at
+ * ten members: the admin KID always survives, the name is capped and then
+ * truncated on a character boundary, and the roster blob — last, and the only
+ * optional field — is dropped WHOLE rather than partially, because half a
+ * roster reconstructs a wrong one. Callers are told what actually made it in.
+ *
+ * `memberKids` must be the KIDs the HSM issued. A member with no KID (a
+ * local-only contact never imported) cannot be represented, and the blob is
+ * omitted rather than silently written short.
  */
 export async function buildMarker(m: {
-  iat: number
-  adminPub: Uint8Array
-  /** Raw member public keys in roster order. Pass none to omit the roster blob. */
-  rosterPubs?: Uint8Array[]
+  admin: KeyRef
+  /** Members in roster order. Omit to skip the blob. */
+  members?: KeyRef[]
   name?: string
 }): Promise<{ descr: string; rosterIncluded: boolean; nameIncluded: boolean }> {
-  const adminKid = await hemKid(m.adminPub)
-  let hintsField = ''
-  let rosterIncluded = false
-  const pubs = m.rosterPubs ?? []
-  if (pubs.length && pubs.length <= ROSTER_MAX) {
-    const kids = await Promise.all(pubs.map(hemKid))
-    const blob = new Uint8Array(pubs.length * HINT_BYTES + 4)
-    kids.forEach((k, i) => blob.set(unhex(k).slice(0, HINT_BYTES), i * HINT_BYTES))
-    const full = unhex(kids.join(''))
-    const c = crc32(full)
-    const off = pubs.length * HINT_BYTES
-    blob[off] = (c >>> 24) & 0xff; blob[off + 1] = (c >>> 16) & 0xff
-    blob[off + 2] = (c >>> 8) & 0xff; blob[off + 3] = c & 0xff
-    hintsField = b64url(blob)
-    rosterIncluded = true
+  const adminKid = await kidOf(m.admin)
+  if (!adminKid) throw new Error('marker: the admin needs a KID or a public key')
+  const kids = await Promise.all((m.members ?? []).map(kidOf))
+  // A member we can neither name nor derive cannot be represented, and half a
+  // roster reconstructs a wrong one — so the blob is all or nothing.
+  const usable = kids.length > 0 && kids.length <= ROSTER_MAX
+    && kids.every((k): k is string => !!k && isHexKid(k))
+
+  let blob = ''
+  if (usable) {
+    const list = kids as string[]
+    const packed = new Uint8Array(list.length * 4 + 4)
+    list.forEach((k, i) => packed.set(unhex(k.slice(0, HINT_HEX)), i * 4))
+    const c = crc32(unhex(list.join('')))
+    const off = list.length * 4
+    packed[off] = (c >>> 24) & 0xff; packed[off + 1] = (c >>> 16) & 0xff
+    packed[off + 2] = (c >>> 8) & 0xff; packed[off + 3] = c & 0xff
+    blob = b64url(packed)
   }
-  const head = `${MARKER_PREFIX}${m.iat},${adminKid},`
-  let descr = `${head}${hintsField},`
-  if (byteLen(descr) > DESCR_MAX) { // the roster alone overruns: drop it whole
-    hintsField = ''; rosterIncluded = false
-    descr = `${head},`
+
+  // A comma would break the positional format, so it cannot survive in one.
+  let name = [...(m.name ?? '').replace(/,/g, ' ')].slice(0, NAME_MAX).join('')
+  const head = `${MARKER_PREFIX}${adminKid},`
+  name = sliceBytes(name, Math.max(0, DESCR_MAX - byteLen(head) - 1 - byteLen(blob)))
+  let descr = `${head}${name},${blob}`
+  let rosterIncluded = blob.length > 0
+  if (byteLen(descr) > DESCR_MAX) { // the blob no longer fits: drop it whole
+    rosterIncluded = false
+    descr = `${head}${name},`
   }
-  // Whatever is left goes to the name, measured in bytes. A comma would break
-  // the positional format, so it cannot survive in one.
-  const name = sliceBytes((m.name ?? '').replace(/,/g, ' '), Math.max(0, DESCR_MAX - byteLen(descr)))
-  return { descr: descr + name, rosterIncluded, nameIncluded: name.length > 0 }
+  return { descr, rosterIncluded, nameIncluded: name.length > 0 }
 }
 
 /** Parse a DESCR written by `buildMarker`. Null when it is not a group marker. */
 export function parseMarker(descr: string): MarkerFields | null {
   if (!descr.startsWith(MARKER_PREFIX)) return null
-  const rest = descr.slice(MARKER_PREFIX.length)
-  const parts = rest.split(',')
-  if (parts.length < 4) return null
-  const [iatS, adminKid, blobS] = parts
-  const name = parts.slice(3).join(',')
-  const iat = Number(iatS)
-  if (!Number.isFinite(iat) || !/^[0-9a-f]{32}$/.test(adminKid)) return null
-  let hints: string[] = []
+  const parts = descr.slice(MARKER_PREFIX.length).split(',')
+  if (parts.length < 3) return null
+  const adminKid = parts[0]
+  const name = parts[1]
+  const blobS = parts.slice(2).join(',') // the blob is last and base64url: no commas in it
+  if (!adminKid || !isHexKid(adminKid)) return null
+  const hints: string[] = []
   let crc = 0
   if (blobS) {
     const blob = unb64url(blobS)
-    if (blob.length < 4 || (blob.length - 4) % HINT_BYTES !== 0) return null
-    const n = (blob.length - 4) / HINT_BYTES
-    for (let i = 0; i < n; i++) hints.push(hex(blob.slice(i * HINT_BYTES, (i + 1) * HINT_BYTES)))
-    const o = n * HINT_BYTES
+    if (blob.length < 8 || (blob.length - 4) % 4 !== 0) return null
+    const n = (blob.length - 4) / 4
+    for (let i = 0; i < n; i++) hints.push(hex(blob.slice(i * 4, i * 4 + 4)))
+    const o = n * 4
     crc = ((blob[o] << 24) | (blob[o + 1] << 16) | (blob[o + 2] << 8) | blob[o + 3]) >>> 0
   }
-  return { iat, adminKid, hints, crc, name }
+  return { adminKid, name, hints, crc }
 }
 
 /**
- * Rebuild the roster from hints against public keys this device can see (the
- * HEM contact list). Returns the members in roster order, or null when the
- * result does not match the CRC — an unresolved hint, or a 4-byte collision
- * that picked the wrong key.
+ * Rebuild the roster from hints against keys this device can see — the HEM
+ * contact list, each entry carrying the KID the HSM issued for it. Returns the
+ * members in roster order, or null when the result does not match the CRC: an
+ * unresolved hint, or a 4-byte collision that picked the wrong key.
  *
  * Reconstruction only. A roster is trusted because the admin MAC'd it, never
  * because it came out of here.
  */
-export async function resolveRoster(
+export async function resolveRoster<T extends KeyRef>(
   m: MarkerFields,
-  candidates: Uint8Array[],
-): Promise<Uint8Array[] | null> {
+  candidates: T[],
+): Promise<T[] | null> {
   if (!m.hints.length) return null
-  const byHint = new Map<string, { pub: Uint8Array; kid: string }>()
-  for (const pub of candidates) {
-    const kid = await hemKid(pub)
-    const h = kid.slice(0, HINT_BYTES * 2)
-    if (!byHint.has(h)) byHint.set(h, { pub, kid }) // first wins; the CRC catches a wrong pick
+  const byHint = new Map<string, { c: T; kid: string }>()
+  for (const c of candidates) {
+    const kid = await kidOf(c)
+    if (!kid || !isHexKid(kid)) continue
+    const h = kid.slice(0, HINT_HEX)
+    if (!byHint.has(h)) byHint.set(h, { c, kid }) // first wins; the CRC catches a wrong pick
   }
-  const picked: { pub: Uint8Array; kid: string }[] = []
+  const picked: { c: T; kid: string }[] = []
   for (const h of m.hints) {
-    const hit = byHint.get(h)
+    const hit = byHint.get(h.toLowerCase())
     if (!hit) return null // a member this device has never imported
     picked.push(hit)
   }
   if (crc32(unhex(picked.map((p) => p.kid).join(''))) !== m.crc) return null
-  return picked.map((p) => p.pub)
+  return picked.map((p) => p.c)
 }
 
 // base64url without padding — the DESCR budget is tight enough that four

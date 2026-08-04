@@ -97,8 +97,25 @@ correction already applied to every other DESCR. `gid` is **not** stored: it is
 `SHA-256(GK_pub)[0:16]`, and `GK_pub` comes back with the key.
 
 ```
-ETSEIC:chan,<iat>,<admin_KID 32 hex>,<roster blob base64url>,<name>
+ETSEIC:chan,<admin_KID>,<name ≤16 chars>,<roster blob base64url>
 ```
+
+Four shape decisions (user review, 2026-08-04), each of which bought room:
+
+- **No `iat`.** The HSM already timestamps its own key records; spending ten of
+  128 bytes to repeat what the key entry answers is not a trade worth making.
+- **`admin_KID` is taken from the HEM**, and derived as `SHA1(pub)[0:16]` only
+  when we hold a public key but no imported entry — the two agree by
+  construction, which is exactly what makes a hint written by the admin resolve
+  on someone else's device. It is SHA-**1**; `SHA-256(pub)` is the app
+  fingerprint (§4.4), a different identifier for a different job.
+- **Name capped at 16 characters.** It is a label, held client-side anyway.
+- **Roster blob LAST**, so the one optional, variable-length, occasionally
+  absent field disturbs nothing before it.
+
+Measured with a 16-char name: 2 members 80 B, 5 → 96 B, 8 → 112 B, **10 → 123 B**.
+The roster now always fits at the maximum; before these four changes it hit the
+ceiling and the name was being eaten.
 
 **Budget — 128 BYTES, not characters.** The DESCR is a fixed 128-byte record, so
 an over-long marker does not error: it **truncates**, and a truncated roster blob

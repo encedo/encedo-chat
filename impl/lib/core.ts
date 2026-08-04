@@ -65,7 +65,7 @@ export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: stri
  * The tokens are scoped per KID as the HEM requires; `authorizePassword(null,…)`
  * reuses the cached password-derived key, so this is not a re-prompt per call.
  */
-export function hemGkBackend(hem: any): GkBackend {
+export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
   const use = (kid: string) => hem.authorizePassword(null, `keymgmt:use:${kid}`)
   const asB64 = (s: string) => b64(new TextEncoder().encode(s)) // DESCRs go to the HEM base64'd
   const fromKid = (kid: string): AdminGk => ({
@@ -73,6 +73,7 @@ export function hemGkBackend(hem: any): GkBackend {
     async dh(peerPub: Uint8Array) { return new Uint8Array(await hem.ecdh(await use(kid), kid, b64(peerPub))) },
   })
   return {
+    adminKid,
     fromKid,
     async create(label: string, descr: string) {
       const gen = await hem.authorizePassword(null, 'keymgmt:gen')
