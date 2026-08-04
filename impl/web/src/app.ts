@@ -70,6 +70,13 @@ function parseRotSec(v: string | null): number | undefined {
   return Number.isFinite(sec) && sec >= 0 && sec < 86400 ? sec : undefined
 }
 const FORCED_ROTATION_SEC = parseRotSec(new URLSearchParams(location.search).get('rot'))
+// `?webrtc=0` keeps content on GossipSub — the direct DataChannel is never
+// negotiated. Not a preference: a live Direct link carries the conversation
+// whatever the relay is doing, so it MASKS every relay-path test. Validating 3b
+// failover meant blocking `createOffer` from the browser console, which does not
+// survive a reload; the same applies to diagnosing a user ("turn Direct off and
+// see if it still works"). Absent or any other value = the default, Direct on.
+const WEBRTC_OFF = new URLSearchParams(location.search).get('webrtc') === '0'
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
@@ -582,7 +589,7 @@ function renderNetwork() {
     : ''
   pane.innerHTML = `<div class="net-card">
     <div class="net-row"><span class="k">Status</span><span class="v"><span class="dot ${linkCls}"></span> ${linkTxt}${s.peers ? ` · ${s.peers} poł.` : ''}</span></div>
-    <div class="net-row"><span class="k">Transport</span><span class="v">${escapeHtml(s.transport)}</span></div>
+    <div class="net-row"><span class="k">Transport</span><span class="v">${escapeHtml(s.transport)}${WEBRTC_OFF ? ' <span class="net-tag">bez WebRTC</span>' : ''}</span></div>
     <div class="net-row"><span class="k">Węzeł (relay)</span><span class="v" title="${escapeHtml(s.relay)}">${escapeHtml(relayHost)}${isFailover ? ' <span class="net-tag">failover</span>' : ''}</span></div>
     ${nodesRow}
     ${relayPeer ? `<div class="net-row"><span class="k">PeerId węzła</span><span class="v mono">${escapeHtml(relayPeer.slice(0, 14))}…</span></div>` : ''}
@@ -900,7 +907,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
     let peerTyping = false
     let warnedForeign = false
     const conv = await (await clientReady!).open({ pub: contact.pub, kid: contact.kid }, {
-      webrtc: true,
+      webrtc: !WEBRTC_OFF,
       onWebrtcState: (s) => noteTransport(room, s),
       onSecurity: (peer, state) => noteSecurity(room, peer, state),
       onLog: ecLog,
