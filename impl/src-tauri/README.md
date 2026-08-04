@@ -63,7 +63,7 @@ Artifacts land in:
 Install + run the `.deb`:
 
 ```bash
-sudo dpkg -i src-tauri/target/release/bundle/deb/encedo-chat_0.0.1_arm64.deb
+sudo dpkg -i "src-tauri/target/release/bundle/deb/Encedo Chat_0.1.0_arm64.deb"
 encedo-chat        # or launch "Encedo Chat" from the app menu
 ```
 
