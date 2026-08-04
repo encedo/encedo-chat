@@ -63,12 +63,33 @@ jobs:
       - run: npm ci
         working-directory: impl
 
-      # The harness drives real Chromium over CDP. Ubuntu runners ship one; the
-      # harness looks for a binary on PATH.
-      - name: Chromium
+      # The harness serves impl/web/dist and refuses to start without it. The
+      # unit job builds the bundle too, but jobs do not share a filesystem —
+      # each one starts from a fresh checkout.
+      - name: Build the web bundle
+        run: npm run web:build
+        working-directory: impl
+
+      # The harness drives a real Chromium over CDP and takes the binary from
+      # $CHROME (default /usr/bin/chromium-browser, which runners do not have).
+      # Resolve whatever is actually installed — runners ship Google Chrome —
+      # and only install if nothing is.
+      #
+      # The previous version of this step was `which a || which b || apt-get
+      # update && apt-get install`, which in bash parses as `((a||b)||c) && d`:
+      # it installed when a browser was already present and skipped when it was
+      # missing. Exactly backwards, and silent.
+      - name: Resolve a browser
         run: |
-          which chromium || which chromium-browser || sudo apt-get update && sudo apt-get install -y chromium-browser
-          chromium-browser --version || chromium --version
+          set -euo pipefail
+          BIN="$(command -v chromium-browser || command -v chromium || command -v google-chrome || true)"
+          if [ -z "$BIN" ]; then
+            sudo apt-get update
+            sudo apt-get install -y chromium-browser
+            BIN="$(command -v chromium-browser)"
+          fi
+          echo "CHROME=$BIN" >> "$GITHUB_ENV"
+          "$BIN" --version
 
       # It reaches the REAL relay (bs1.onchato.com) — this is an integration
       # test, not a hermetic one. A relay outage fails the job, which is

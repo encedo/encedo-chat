@@ -140,6 +140,12 @@ class Browser extends Page {
       `--user-data-dir=${this.dir}`,
       '--no-first-run', '--no-default-browser-check', '--disable-gpu',
       '--autoplay-policy=no-user-gesture-required',
+      // CI only, and deliberately not local. Ubuntu 24.04 restricts unprivileged
+      // user namespaces, which is what Chromium's sandbox needs, so on a runner
+      // it fails to start rather than falling back; and a container's /dev/shm
+      // is small enough that the renderer crashes partway through a run. Neither
+      // is true on a developer machine, where the sandbox should stay on.
+      ...(process.env.CI ? ['--no-sandbox', '--disable-dev-shm-usage'] : []),
       url,
     ], { stdio: ['ignore', 'ignore', 'pipe'] })
 
