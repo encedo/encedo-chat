@@ -22,8 +22,10 @@ import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
 import { b64, unb64, randomBytes } from '../lib/wc.ts'
 import { GroupManager, softwareGk, groupIdFromGK, type GroupId, type Member, type GkBackend } from '../lib/group.ts'
 import { hemGkBackend } from '../lib/core.ts'
+import { parseMarker, hemKid } from '../lib/gmarker.ts'
 
 const P = { networkId: 'gkhem', dateUTC: '2026-08-04' }
+const dec = (b64s: string) => new TextDecoder().decode(unb64(b64s))
 
 async function softId(): Promise<GroupId> {
   const k = await generateX25519()
@@ -38,7 +40,7 @@ async function softId(): Promise<GroupId> {
  */
 function fakeHem() {
   const keys = new Map<string, { priv: Uint8Array; pub: Uint8Array; label: string; descr: string }>()
-  const calls = { ecdh: 0, createKeyPair: 0, getPubKey: 0, authorize: 0 }
+  const calls = { ecdh: 0, createKeyPair: 0, getPubKey: 0, authorize: 0, updateKey: 0 }
   let n = 0
   return {
     calls,
@@ -52,6 +54,12 @@ function fakeHem() {
       const kid = `kid-${++n}`
       keys.set(kid, { priv, pub, label, descr })
       return { kid }
+    },
+    async updateKey(_t: string, kid: string, label: string, descr: string) {
+      calls.updateKey++
+      const k = keys.get(kid); if (!k) throw new Error('no such kid')
+      keys.set(kid, { ...k, label, descr })
+      return {}
     },
     async getPubKey(_t: string, kid: string) {
       calls.getPubKey++
@@ -192,4 +200,50 @@ test('bucket-B snapshots still restore (software GK migration)', async () => {
   assert.ok(skd.rmac, 'a pre-bucket-A group keeps working')
   await B.mgr.applySkd(A.id.pub, skd)
   assert.ok(B.mgr.session(gid))
+})
+
+test('the marker is written at creation and rewritten on every membership change', async () => {
+  const hem = fakeHem()
+  const A = await peer(hemGkBackend(hem)), B = await peer(), C = await peer()
+  const roster: Member[] = [{ pub: A.id.pub }, { pub: B.id.pub }]
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-zespol', roster, 'Zespół')
+
+  // 1. Born with a marker — no separate write.
+  const kid = [...hem.keys.keys()][0]
+  const born = parseMarker(dec(hem.keys.get(kid)!.descr))!
+  assert.ok(born, 'the DESCR is a group marker')
+  assert.equal(born.adminKid, await hemKid(unb64(A.id.pub)), 'admin KID = whom to re-sync from')
+  assert.equal(born.hints.length, 2, 'the roster blob is there from birth')
+  assert.equal(born.name, 'Zespół')
+  assert.equal(hem.calls.updateKey, 0, 'creation needs no update')
+
+  // 2. Membership change → exactly one rewrite, carrying the NEW roster.
+  await A.mgr.rekey(gid, [{ pub: A.id.pub }, { pub: B.id.pub }, { pub: C.id.pub }])
+  assert.equal(await A.mgr.writeMarker(gid, 'Zespół'), true)
+  assert.equal(hem.calls.updateKey, 1, 'one HSM call per change, not per member')
+  const after = parseMarker(dec(hem.keys.get(kid)!.descr))!
+  assert.equal(after.hints.length, 3, 'the blob follows the roster')
+  assert.notDeepEqual(after.hints, born.hints)
+
+  // 3. Message activity must never touch it.
+  const before = hem.calls.updateKey
+  await A.mgr.skdFor(gid, B.id.pub)
+  assert.equal(hem.calls.updateKey, before, 'sending keys are not marker business')
+})
+
+test('a software group has no HSM marker to write, and says so', async () => {
+  const A = await peer()
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-x', [{ pub: A.id.pub }], 'g')
+  assert.equal(await A.mgr.writeMarker(gid, 'g'), false, 'no backend, no marker — not an error')
+})
+
+test('a member cannot rewrite a marker: writeMarker is admin-only', async () => {
+  const hem = fakeHem()
+  const A = await peer(hemGkBackend(hem)), B = await peer(hemGkBackend(hem))
+  const roster: Member[] = [{ pub: A.id.pub }, { pub: B.id.pub }]
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-y', roster, 'g')
+  await B.mgr.applySkd(A.id.pub, (await A.mgr.skdFor(gid, B.id.pub))!)
+  const before = hem.calls.updateKey
+  assert.equal(await B.mgr.writeMarker(gid, 'g'), false, 'B holds no GK, so it has no marker of its own to rewrite')
+  assert.equal(hem.calls.updateKey, before)
 })

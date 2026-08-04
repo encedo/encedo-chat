@@ -65,19 +65,26 @@ export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: stri
  * The tokens are scoped per KID as the HEM requires; `authorizePassword(null,…)`
  * reuses the cached password-derived key, so this is not a re-prompt per call.
  */
-export function hemGkBackend(hem: any, descrFor?: (label: string) => string): GkBackend {
+export function hemGkBackend(hem: any): GkBackend {
   const use = (kid: string) => hem.authorizePassword(null, `keymgmt:use:${kid}`)
+  const asB64 = (s: string) => b64(new TextEncoder().encode(s)) // DESCRs go to the HEM base64'd
   const fromKid = (kid: string): AdminGk => ({
     kid,
     async dh(peerPub: Uint8Array) { return new Uint8Array(await hem.ecdh(await use(kid), kid, b64(peerPub))) },
   })
   return {
     fromKid,
-    async create(label: string) {
+    async create(label: string, descr: string) {
       const gen = await hem.authorizePassword(null, 'keymgmt:gen')
-      const { kid } = await hem.createKeyPair(gen, label, 'CURVE25519', descrFor ? descrFor(label) : '')
+      const { kid } = await hem.createKeyPair(gen, label, 'CURVE25519', asB64(descr))
       const { pubkey } = await hem.getPubKey(await use(kid), kid)
       return { gk: fromKid(kid), pub: unb64(pubkey) }
+    },
+    // The roster blob is stale the moment the roster moves, and a stale blob
+    // reconstructs the OLD member set on a recovering device. One call per
+    // membership change — not per member.
+    async setMarker(kid: string, label: string, descr: string) {
+      await hem.updateKey(await hem.authorizePassword(null, 'keymgmt:upd'), kid, label, asB64(descr))
     },
   }
 }

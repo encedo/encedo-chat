@@ -1113,6 +1113,10 @@ async function changeMembers(gid: string, newMembers: { pub: string; name: strin
     gu.room = await client.openGroup(gid, groupHandlers(gid))
     recordGroup(gu, { t: 'sys', text: note })
     await distributeGroup(gid, gu.name) // new roster only → removed member is locked out
+    // The HEM marker's roster blob is now stale, and a stale one reconstructs
+    // the OLD member set on a recovering device. One HSM call, best effort —
+    // a marker that failed to update must not undo a membership change that did.
+    client.groups.writeMarker(gid, gu.name).catch((e) => ecLog('marker update failed: ' + (e?.message ?? e)))
     await persistGroups()
     if (activeGid === gid) activateGroup(gid); else renderGroups()
     toast(note)
@@ -1344,7 +1348,7 @@ $('group-create').addEventListener('click', async () => {
     // GK comes from whatever backs this identity (bucket A): a HEM identity mints
     // it inside the HSM, a software one falls back to a scalar. The app does not
     // choose — and must not, or the two paths drift.
-    const gid = await client.groups.createGroupWithNewKey(`chat-gk-${name}`.slice(0, 32), roster)
+    const gid = await client.groups.createGroupWithNewKey(`chat-gk-${name}`.slice(0, 32), roster, name)
     const gu: GroupUI = { gid, name, epoch: 0, members: roster.map((m) => ({ pub: m.pub, name: memberName(m.pub) })), log: [], unseen: 0, room: null }
     groupsUI.set(gid, gu)
     gu.room = await client.openGroup(gid, groupHandlers(gid))

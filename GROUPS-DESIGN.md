@@ -83,6 +83,54 @@ additionally holds `GK_priv`. Small, portable, non-secret.
 - **DESCR** (≤128 B): `CHAT:channel:<gid>:admin=<admin_KID>[:roster=<blob>]`
   - `admin_KID` — whom to ask for re-sync (KID = **`SHA1(pub)[0:16]`** per HEM; global/deterministic — same importers get the same KID).
   - **roster (optional, ≤10 members):** per member `KID[0:4]` (4 B hint) + `CRC32(concat full KIDs)` (4 B). ~44 B for 10 members → fits. Reconstruct by **HEM KID-prefix lookup**; CRC validates the mapped set (disambiguates a rare 4 B collision). **Integrity only — authenticity is the admin's `rk_i` MAC.** Must be re-written on every membership change (bounded HEM churn).
+
+#### As implemented (`impl/lib/gmarker.ts`) — exact layout, budget, and write points
+
+The line above is the design; this is what the code writes, and it diverges in
+two places on purpose.
+
+**Layout** — positional comma format, matching the rest of the impl's DESCRs
+(`ETSEIC:self,…` / `ETSEIC:peer,…`) rather than the spec's `CHAT:channel:` colon
+form. Reason on record: the HEM's `allow_keysearch` matches the **first 6 bytes**,
+so `CHAT` (4) cannot be a search prefix while `ETSEIC` (6) can — the same
+correction already applied to every other DESCR. `gid` is **not** stored: it is
+`SHA-256(GK_pub)[0:16]`, and `GK_pub` comes back with the key.
+
+```
+ETSEIC:chan,<iat>,<admin_KID 32 hex>,<roster blob base64url>,<name>
+```
+
+**Budget — 128 BYTES, not characters.** The DESCR is a fixed 128-byte record, so
+an over-long marker does not error: it **truncates**, and a truncated roster blob
+decodes to a *different* roster. Names are user text, so the check must be in
+UTF-8 bytes — "Zespół" is 6 characters and 8 bytes, and measuring in
+`String.length` overran the field by exactly the count of non-ASCII characters.
+Measured: 2 members ≈ 95 B, 5 ≈ 111 B, 10 = the ceiling.
+
+**Fields yield in priority order**, so nothing load-bearing disappears silently:
+
+| field | when the field is tight |
+|---|---|
+| `iat`, `admin_KID` | always present — identity and whom to re-sync from |
+| roster blob | dropped **whole**, never partial (a partial roster is worse than none); omitted above 10 members |
+| `name` | truncated first, on a character boundary; cosmetic, and held client-side anyway |
+
+**When it is written** — three points, and only these:
+
+1. **Group creation** — `createKeyPair(…, descr)` carries the marker from birth.
+2. **Every membership change** — the roster blob is now stale, so `rekey` is
+   followed by `updateKey(kid, label, descr)`. This is the "bounded HEM churn"
+   above: one call per change, not per member.
+3. **Never on message activity** — epochs, sender keys and the topic move
+   constantly and none of them appear here.
+
+A **member's** copy is an `importPublicKey(GK_pub)` entry carrying the same
+marker, so `key_search` yields the group on their devices too.
+
+**What the CRC is not.** It catches a 4-byte hint that resolved to the wrong key
+and refuses (returns nothing rather than guessing). It does **not** make a roster
+trustworthy: anyone who can write this DESCR can write a matching CRC.
+Authenticity is the admin's `rk_i` MAC, always.
 - **Enables:** `key_search("CHAT:channel:")` → portable group list; `GK_pub` → stable id + roster-MAC verify; `admin_KID` → whom to re-sync from; roster → local offline reconstruction of the member set.
 - **Does NOT hold:** `group_secret` (topic), sender keys (content). **Leak profile:** `GK_pub` leak is harmless (group existence only); **with the roster blob, one HEM dump reveals the whole membership graph** (KID hints + your contacts, both in HEM) — the trade-off for a portable roster.
 - **All-wipe with roster-in-marker:** the full roster is known to everyone from their own marker → the admin can rebuild the **same** group with the complete set (no zombie), instead of founding a new one.

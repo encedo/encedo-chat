@@ -28,6 +28,7 @@ import { groupTopicFromSecret } from './rendezvous.ts'
 import { seal, sendChainFrom, newSendChain, SenderReceiver, tag, verify, type SendChain, type ReceiverOpts } from './senderkey.ts'
 import { x25519FromPriv } from './x25519.ts'
 import type { SkdFields } from './envelope.ts'
+import { buildMarker } from './gmarker.ts'
 
 const enc = new TextEncoder()
 const MSG_MAC_INFO = enc.encode('encedo-group-msg-mac')
@@ -273,10 +274,14 @@ export interface AdminGk {
  * with a software backend and no HSM in sight.
  */
 export interface GkBackend {
-  /** Mint a group key. `label` is for the HSM's own key list, not the protocol. */
-  create(label: string): Promise<{ gk: AdminGk; pub: Uint8Array }>
+  /** Mint a group key. `label` is for the HSM's own key list, not the protocol;
+   *  `descr` is the §8 marker, carried from birth. */
+  create(label: string, descr: string): Promise<{ gk: AdminGk; pub: Uint8Array }>
   /** Rebuild the capability a snapshot referenced by kid. */
   fromKid(kid: string): AdminGk
+  /** Rewrite the marker after a membership change. Absent on backends with no
+   *  HSM to update (software) — then a group simply has no portable marker. */
+  setMarker?(kid: string, label: string, descr: string): Promise<void>
 }
 
 interface GroupRec {
@@ -344,6 +349,8 @@ export class GroupManager {
   private id: GroupId
   private params: RvParams
   private recs = new Map<string, GroupRec>()
+  /** HSM key labels by gid — `updateKey` needs the label again on every marker rewrite. */
+  private labels = new Map<string, string>()
   /** Where admin GKs come from (HEM or software). Absent → software-only. */
   readonly gkBackend?: GkBackend
 
@@ -384,11 +391,42 @@ export class GroupManager {
    * the one call an app needs, so it never has to know whether GK ended up in a
    * HSM or in a scalar. Falls back to a software GK when no backend is wired.
    */
-  async createGroupWithNewKey(label: string, roster: Member[]): Promise<string> {
+  async createGroupWithNewKey(label: string, roster: Member[], name?: string): Promise<string> {
     const made = this.gkBackend
-      ? await this.gkBackend.create(label)
+      ? await this.gkBackend.create(label, await this.markerFor(roster, name))
       : await softwareGk()
-    return this.createGroup(made.pub, roster, made.gk)
+    const gid = await this.createGroup(made.pub, roster, made.gk)
+    this.labels.set(gid, label) // updateKey needs it again on the next membership change
+    return gid
+  }
+
+  /** The §8 marker DESCR for a roster I admin. Format and budget: `gmarker.ts`. */
+  private async markerFor(roster: Member[], name?: string): Promise<string> {
+    const { descr } = await buildMarker({
+      iat: Math.floor(Date.now() / 1000),
+      adminPub: unb64(this.id.pub),
+      rosterPubs: roster.map((m) => unb64(m.pub)),
+      name,
+    })
+    return descr
+  }
+
+  /**
+   * Rewrite the HEM marker for a group I admin. Called after a membership
+   * change — the roster blob is stale the moment the roster moves, and a stale
+   * blob reconstructs the OLD member set on a recovering device.
+   *
+   * One HSM call per change, not per member. Silent no-op when the group is not
+   * HEM-backed or not mine: a member's marker is written by their own import,
+   * and a software group has no HSM object at all.
+   */
+  async writeMarker(gidHex: string, name?: string): Promise<boolean> {
+    const rec = this.recs.get(gidHex)
+    const kid = rec?.gk?.kid
+    if (!rec || !kid || !this.gkBackend?.setMarker) return false
+    const label = this.labels.get(gidHex) ?? `chat-gk-${gidHex.slice(0, 8)}`
+    await this.gkBackend.setMarker(kid, label, await this.markerFor(rec.roster, name))
+    return true
   }
 
   /** Establish or update a group from its shared material. New group or a newer
