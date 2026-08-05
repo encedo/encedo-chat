@@ -119,7 +119,33 @@ blunt and reliable answer; it also stops the node fetching foreign content, so
 confirm that is what you want before setting it. **Verify against the running
 version** — these keys have moved between Kubo releases.
 
-**5. Install the expiry job.**
+**5. Install the expiry job.** Two forms, same logic — pick by where Kubo runs.
+
+*Kubo in a container (this deployment).* A sidecar on the same docker network,
+talking HTTP to the node:
+
+```yaml
+  ipfs-ttl:
+    image: alpine:3
+    depends_on: [ipfs1]
+    environment: { IPFS_API: "http://ipfs1:5001", TTL: "300" }
+    command: sh -c "apk add --no-cache curl >/dev/null && while :; do /opt/ttl.sh; sleep 60; done"
+    volumes: [ "./infra/ipfs-ttl-http.sh:/opt/ttl.sh:ro" ]
+    restart: unless-stopped
+```
+
+A `while` loop rather than cron: the image has no cron daemon, `sleep 60` does
+the same for less, and the output lands in `docker logs`.
+
+This is preferred over a host cron running `docker exec`, because that needs
+access to the docker socket — root on the host — which is a large privilege to
+hand a cleanup task. It works because **the RPC lockdown lives at HAProxy, not
+in Kubo**: `files/*` and `repo/gc` are refused from outside and remain reachable
+inside the network. Worth knowing rather than discovering: the lockdown protects
+against the world, not between containers. Putting `ipfs1` and `ipfs-ttl` on
+their own network closes that too, if it ever matters.
+
+*Kubo on the host.* The CLI form, from cron:
 
 ```bash
 install -m 755 infra/ipfs-ttl-gc.sh /usr/local/bin/ipfs-ttl-gc.sh
