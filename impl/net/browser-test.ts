@@ -640,6 +640,32 @@ async function main() {
     if (link.referrer !== 'no-referrer') throw new Error(`referrerpolicy is "${link.referrer}"`)
     step('a plain URL gets one arrow, opens in a new tab, and leaks no referrer')
 
+    // Clicking it must actually DO something. The attribute checks above all
+    // passed on a build where the arrow was inert: the confirm dialog's markup
+    // had not landed, the handler threw on a null element, and the click died
+    // after preventDefault — no dialog, no navigation, no error anyone saw.
+    // Asserting on the DOM a feature produces is not the same as asserting it works.
+    const dialog = await B.eval<any>(`
+      const rows = [...document.querySelectorAll('#messages .b-text')];
+      const el = rows.reverse().find((r) => r.textContent.includes(${JSON.stringify(linkTok)}));
+      el.querySelector('a.lnk').click();
+      const m = document.getElementById('ask-modal');
+      const open = document.getElementById('ask-open');
+      return {
+        shown: m.classList.contains('open'),
+        scrim: document.getElementById('scrim').classList.contains('open'),
+        openHref: open ? open.getAttribute('href') : null,
+        openVisible: open ? !open.hidden : false,
+        remember: !!document.getElementById('ask-remember'),
+      };
+    `)
+    if (!dialog.shown || !dialog.scrim) throw new Error('clicking the arrow opened no confirm dialog')
+    if (!dialog.openVisible) throw new Error('the confirm has no visible affirmative link')
+    if (dialog.openHref !== linkTok) throw new Error(`the confirm links to ${dialog.openHref}`)
+    if (!dialog.remember) throw new Error('the confirm offers no "do not ask again"')
+    await B.eval(`document.getElementById('ask-no').click(); return 1`)
+    step('clicking the arrow opens a confirm whose OWN link is the destination')
+
     // A scheme the message does not get to propose: rendered as text, no anchor.
     await send(A, 'klik javascript:alert(1) tutaj')
     await B.waitFor('the javascript: message arrived',

@@ -467,8 +467,16 @@
   <div class="modal" id="ask-modal" role="alertdialog" aria-modal="true" aria-labelledby="ask-title">
     <h2 id="ask-title" data-i18n="Na pewno?">Na pewno?</h2>
     <div class="msub" id="ask-body"></div>
+    <label class="ask-remember" id="ask-remember-wrap" hidden>
+      <input type="checkbox" id="ask-remember"><span data-i18n="Nie pokazuj tego ostrzeżenia ponownie">Nie pokazuj tego ostrzeżenia ponownie</span>
+    </label>
     <div class="modal-actions">
       <button class="btn-send danger" id="ask-yes" style="flex:1;border-radius:8px" data-i18n="Tak">Tak</button>
+      <!-- A LINK confirm affirms with a real anchor: a window opened after an
+           awaited dialog is outside the user gesture and browsers block it.
+           Clicking a link IS the gesture. -->
+      <a class="btn-send" id="ask-open" hidden target="_blank" rel="noopener noreferrer" referrerpolicy="no-referrer"
+         style="flex:1;border-radius:8px;text-align:center;line-height:38px;text-decoration:none">Otwórz</a>
       <button class="btn-ghost" id="ask-no" data-i18n="Nie">Nie</button>
     </div>
   </div>

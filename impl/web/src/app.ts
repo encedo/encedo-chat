@@ -498,23 +498,42 @@ $('contact-search').addEventListener('input', renderContacts)
 // draws those as browser chrome outside the app's skin, and they block the
 // event loop — which here means the transport stops pumping while a dialog is
 // open. -------------------------------------------------------------------
-function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string): Promise<{ ok: boolean; remember: boolean }> {
+function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string, href?: string): Promise<{ ok: boolean; remember: boolean }> {
   return new Promise((resolve) => {
     $('ask-title').textContent = title
     $('ask-body').textContent = body
     $('ask-yes').textContent = yes
     // The checkbox is opt-in per call: a destructive confirm must never offer to
     // stop asking, only an advisory one may.
-    const cb = $('ask-remember') as HTMLInputElement
-    cb.checked = false
-    $('ask-remember-wrap').hidden = !rememberLabel
-    if (rememberLabel) ($('ask-remember-wrap').querySelector('span') as HTMLElement).textContent = rememberLabel
+    // Both of these are OPTIONAL parts of the dialog, so they are read
+    // defensively: a confirm that cannot be dismissed is worse than one without
+    // a checkbox, and this exact shape failed once — the markup had not landed,
+    // `$()` returned null, the assignment threw, and the click died after
+    // preventDefault with no dialog and no navigation.
+    const cb = document.getElementById('ask-remember') as HTMLInputElement | null
+    const wrap = document.getElementById('ask-remember-wrap')
+    if (cb) cb.checked = false
+    if (wrap) {
+      wrap.hidden = !rememberLabel
+      const label = wrap.querySelector('span')
+      if (rememberLabel && label) label.textContent = rememberLabel
+    }
+    // A link confirm affirms with an anchor, so the navigation is the user's own
+    // click. `window.open` after an awaited dialog is outside the gesture and
+    // browsers block it.
+    const open = document.getElementById('ask-open') as HTMLAnchorElement | null
+    if (open) {
+      open.hidden = !href
+      if (href) { open.href = href; open.textContent = yes }
+    }
+    $('ask-yes').hidden = !!(href && open)
     $('members-pop').hidden = true // nothing may stay clickable behind a modal
     $('scrim').classList.add('open'); $('ask-modal').classList.add('open')
     const done = (v: boolean) => {
-      const remember = !!(rememberLabel && cb.checked)
+      const remember = !!(rememberLabel && cb?.checked)
       $('scrim').classList.remove('open'); $('ask-modal').classList.remove('open')
       $('ask-yes').removeEventListener('click', onYes)
+      document.getElementById('ask-open')?.removeEventListener('click', onYes)
       $('ask-no').removeEventListener('click', onNo)
       $('scrim').removeEventListener('click', onScrim)
       document.removeEventListener('keydown', onKey)
@@ -527,6 +546,7 @@ function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string): 
     // Escape cancels. A destructive dialog must have a way out that is not a click.
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') done(false); if (e.key === 'Enter') done(true) }
     $('ask-yes').addEventListener('click', onYes)
+    document.getElementById('ask-open')?.addEventListener('click', onYes) // navigates natively; this only closes
     $('ask-no').addEventListener('click', onNo)
     $('scrim').addEventListener('click', onScrim)
     document.addEventListener('keydown', onKey)
@@ -1119,7 +1139,13 @@ function renderBody(into: HTMLElement, text: string) {
     if (!l?.href) continue // refused (credentials, bad scheme): text only, no arrow
     const a = document.createElement('a')
     a.className = 'lnk' + (l.warn ? ' warn' : '')
-    a.textContent = '\u2192'
+    // The conventional "opens elsewhere" mark: a box with an arrow leaving it.
+    // Drawn, not typed — no font has a glyph everyone renders the same way, and
+    // this is our own constant markup, never message content.
+    a.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"'
+      + ' stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+      + '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/>'
+      + '<path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/></svg>'
     a.href = l.href
     a.target = '_blank'
     // noopener: the opened page must not reach back into this window.
@@ -1139,9 +1165,10 @@ function renderBody(into: HTMLElement, text: string) {
         : ''
       const r = await ask(tr('Otworzyć link?'),
         warn + tr('Wyjdziesz poza aplikację. Strona {host} pozna Twój adres IP i czas wejścia — tego rozmowa nie ujawnia.', { host }),
-        tr('Otwórz'), tr('Nie pokazuj tego ostrzeżenia ponownie'))
+        tr('Otwórz'), tr('Nie pokazuj tego ostrzeżenia ponownie'), l.href)
       if (r.remember) linkWarnMuted = true
-      if (r.ok) window.open(l.href, '_blank', 'noopener,noreferrer')
+      // Nothing opens here: the dialog's affirmative control IS the link, so the
+      // browser navigates on the user's click and no popup blocker is involved.
     })
     into.appendChild(a)
   }
