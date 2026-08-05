@@ -301,7 +301,7 @@
        security state, which must stay visible. The rotation badge keeps its
        countdown: it is the one whose value IS the information, and the two
        collapsed neighbours leave it the room. Full wording stays in tooltips. */
-    .chat-head .badge{white-space:nowrap;padding:4px 8px;gap:0}
+    .chat-head .badge{white-space:nowrap;padding:4px 8px;gap:0;max-width:3.2em;overflow:hidden}
     .chat-head .badge .b-txt{display:none}
     .chat-head .badge.rotate{gap:4px;font-size:11px}
   }
@@ -386,8 +386,8 @@
             <div class="sub"><span class="dot" id="peer-dot"></span> <span id="peer-status" data-i18n="poza pokojem">poza pokojem</span> <span id="members-cluster" class="avatar-cluster" hidden></span></div>
           </div>
           <div class="badges">
-            <span class="badge relay" id="transport-badge" title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi" data-i18n-title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi" data-i18n="⚪ Relay">⚪ Relay</span>
-            <span class="badge e2e" id="e2e-badge" title="Szyfrowane E2E — interim, EH-2 w drodze" data-i18n-title="Szyfrowane E2E — interim, EH-2 w drodze" data-i18n="🔒 E2E interim">🔒 E2E interim</span>
+            <span class="badge relay" id="transport-badge" title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi" data-i18n-title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi"><span class="b-ico">⚪</span><span class="b-txt">Relay</span></span>
+            <span class="badge e2e" id="e2e-badge" title="Szyfrowane E2E — interim, EH-2 w drodze" data-i18n-title="Szyfrowane E2E — interim, EH-2 w drodze"><span class="b-ico">🔒</span><span class="b-txt">E2E interim</span></span>
             <span class="badge rotate" title="Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji" data-i18n-title="Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji">↻ <span id="rot">–:–:–</span></span>
           </div>
         </div>

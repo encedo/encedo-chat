@@ -628,6 +628,12 @@ $('btn-logout').addEventListener('click', () => location.reload())
   }
   document.documentElement.lang = getLocale()
   applyDom()
+  // Paint the two header badges through the same helper the running app uses.
+  // Their markup carries the icon/text split from the start (so the phone rule
+  // has something to collapse before anything is painted), and this makes the
+  // wording translated from the first frame rather than after the first room.
+  setBadge($('transport-badge'), 'badge relay', tr('⚪ Relay'), tr('Treść przez relay (GossipSub)'))
+  setBadge($('e2e-badge'), 'badge e2e', tr('🔒 E2E interim'), tr('Szyfrowane E2E — interim, EH-2 w drodze'))
 }
 $('btn-wipeout').addEventListener('click', async () => {
   if (!confirm('Wipeout: skasować lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki?\n\nTego nie da się cofnąć — Twój klucz publiczny się zmieni, więc Ty i rozmówcy musicie wymienić się nowymi kluczami. Klucze w HSM (login HEM) zostają nietknięte.')) return
