@@ -576,7 +576,7 @@ async function renameContact(c: Contact, name: string) {
       const m = gu.members.find((x) => x.pub === c.pub); if (m) m.name = name
     }
     await refreshContacts()
-    if (activePub === c.pub) $('peer-name').textContent = name
+    if (activePub === c.pub) { $('peer-name').textContent = name; $('peer-name').title = name }
     if (activeGid) renderGroups()
     toast(`Kontakt to teraz „${name}"`)
   } catch (e: any) { toast(tr('Nie udało się zmienić nazwy: ') + (e?.message ?? e)) }
@@ -1119,7 +1119,9 @@ async function activateRoom(pub: string) {
   fpCache.set(room.contact.pub, peerFp)
   $('sess-peer').textContent = tr('🔑 ') + peerFp + (room.contact.kid ? ' · KID ' + shortKid(room.contact.kid) : '')
   $('sess-peer').title = room.contact.kid ? `KID ${room.contact.kid}` : room.contact.pub
-  $('peer-name').title = tr('🔑 ') + peerFp + (room.contact.kid ? ` · KID ${room.contact.kid}` : '')
+  // The name leads the tooltip now that the header can cut it short; the
+  // fingerprint (the out-of-band MITM check) follows, as before.
+  $('peer-name').title = `${room.contact.name} · ` + tr('🔑 ') + peerFp + (room.contact.kid ? ` · KID ${room.contact.kid}` : '')
   $('sess-peerid').textContent = room.conv ? room.conv.peerId.slice(0, 16) + '…' : '…'
   // Rebuild the transcript from the log; the module render state (msgEls/stateEls)
   // now describes this room.
@@ -1801,8 +1803,15 @@ function startRotation() {
     const next = nextRotationAfter(now, (conv.rotationOffsetSec ?? 0) * 1000)
     let s = Math.max(0, Math.floor((next - now) / 1000))
     const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60
-    el.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    // Hours and minutes only. This counts down to a DAILY rotation, so a ticking
+    // seconds field was three characters of header — the scarcest space on a
+    // phone — spent on precision nobody acts on. Rounded UP, so it never reads
+    // 00:00 while there is still time left.
+    const mm = s > 0 ? m + 1 : m
+    el.textContent = `${String(h + (mm === 60 ? 1 : 0)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`
   }
+  // Still every second: the value changes on a minute boundary, and polling for
+  // it is cheaper than computing when that boundary falls.
   tick(); rotTimer = setInterval(tick, 1000)
 }
 

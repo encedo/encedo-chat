@@ -604,10 +604,15 @@ async function main() {
     step('both sides show ✓ dostarczone (ack path works in a browser)')
 
     scenario('transport upgrade to a direct DataChannel')
-    direct = (await A.eval<string>(`return document.getElementById('transport-badge').textContent`)).includes('Direct')
+    // Assert on the CLASS, not the label. The harness runs with ?lang=pl, where
+    // this badge reads "Bezpośrednio" — so matching the English word reported
+    // "WebRTC never came up" for a run in which content was already flowing over
+    // the DataChannel. A label is wording and gets translated; the class is state.
+    const DIRECT = `return document.getElementById('transport-badge').classList.contains('direct')`
+    direct = await A.eval<boolean>(DIRECT)
     if (!direct) {
       try {
-        await A.waitFor('WebRTC direct', `return document.getElementById('transport-badge').textContent.includes('Direct')`, 25_000)
+        await A.waitFor('WebRTC direct', DIRECT, 25_000)
         direct = true
       } catch { /* reported at the end */ }
     }

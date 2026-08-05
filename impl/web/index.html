@@ -162,10 +162,17 @@
   .chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:20px;background:var(--accent-soft);color:var(--accent);border:none}
 
   .chat{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
-  .chat-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 20px;border-bottom:1px solid var(--border)}
-  .chat-head .who{flex:1;min-width:160px}
-  .chat-head .who .name{font-weight:600;font-size:15.5px;color:var(--text);display:flex;align-items:center;gap:8px}
-  .chat-head .who .sub{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+  .chat-head{display:flex;align-items:center;gap:12px;flex-wrap:nowrap;padding:14px 20px;border-bottom:1px solid var(--border)}
+  /* `min-width:0` is what actually lets a flex child shrink below its content:
+     without it the name pushed the header wider, wrapped to two lines and cost
+     ~40% of a 360px phone screen before the first message was visible. One line
+     with an ellipsis instead — the full name is in the title, on the contact
+     list, and in the conversation itself. */
+  .chat-head .who{flex:1;min-width:0}
+  .chat-head .who .name{font-weight:600;font-size:15.5px;color:var(--text);display:flex;align-items:center;gap:8px;min-width:0}
+  .chat-head .who .name > span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .chat-head .who .sub{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;min-width:0}
+  .chat-head .who .sub > span:not(.dot){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .b-state{opacity:.85}
   /* Delivery that limped in: late confirmation of ours, or a peer message that
      arrived after the ones that follow it. Same mark on both ends on purpose. */
@@ -286,7 +293,11 @@
        phone, two browsers, different toolbar heights, opposite results. */
     .chat-head .badge{white-space:nowrap;padding:4px 8px;gap:0;max-width:3.2em;overflow:hidden}
     .chat-head .badge .b-txt{display:none}
-    .chat-head .badge.rotate{gap:4px;font-size:11px}
+    /* The countdown is the only badge whose VALUE is the information, so on a
+       phone it drops the glyph instead of the words — the opposite trade to its
+       neighbours — and gives up the shared max-width so the time fits. */
+    .chat-head .badge.rotate{gap:0;font-size:11px;max-width:none;padding:4px 7px}
+    .chat-head .badge.rotate .b-ico{display:none}
     .app{flex-direction:column;gap:0;padding:0;height:var(--app-h,100dvh);min-height:0;max-width:none}
     .splitter{display:none}
     .sidebar,.chat{border-radius:0;border-left:none;border-right:none;box-shadow:none}
@@ -390,7 +401,7 @@
           <div class="badges">
             <span class="badge relay" id="transport-badge" title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi" data-i18n-title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi"><span class="b-ico">⚪</span><span class="b-txt">Relay</span></span>
             <span class="badge e2e" id="e2e-badge" title="Szyfrowane E2E — interim, EH-2 w drodze" data-i18n-title="Szyfrowane E2E — interim, EH-2 w drodze"><span class="b-ico">🔒</span><span class="b-txt">E2E interim</span></span>
-            <span class="badge rotate" title="Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji" data-i18n-title="Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji">↻ <span id="rot">–:–:–</span></span>
+            <span class="badge rotate" title="Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji" data-i18n-title="Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji"><span class="b-ico">↻</span><span id="rot">–:–</span></span>
           </div>
         </div>
         <div class="messages" id="messages"></div>

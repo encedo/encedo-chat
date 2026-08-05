@@ -29,6 +29,11 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const DEVICES = [
   { name: 'iphone16', width: 393, height: 852, dpr: 3 },
   { name: 'galaxy-s24', width: 360, height: 780, dpr: 3 },
+  // Measured on a real Android 15 phone: Chrome leaves 641 CSS px of
+  // viewport, Brave 545. The gap between them is browser chrome, and it is
+  // what made a max-height rule fire in one browser and not the other.
+  { name: 'android15-chrome', width: 360, height: 641, dpr: 3 },
+  { name: 'android15-brave', width: 360, height: 545, dpr: 3 },
   { name: 'galaxy-s24-ultra', width: 412, height: 915, dpr: 3 },
   // The one that broke: wider than any "phone" breakpoint, and 393 tall.
   { name: 'iphone16-landscape', width: 852, height: 393, dpr: 3 },
