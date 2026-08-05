@@ -603,6 +603,55 @@ async function main() {
     await B.waitFor('delivery mark on B', `return document.getElementById('messages').textContent.includes('dostarczone')`, 20_000)
     step('both sides show ✓ dostarczone (ack path works in a browser)')
 
+    // ---- links: found, but not clickable text -------------------------------
+    // The security properties are the point, not the decoration. The URL must
+    // stay OUTSIDE the anchor — a phishing link works by showing one thing and
+    // going to another, and an inert address cannot disagree with its target —
+    // and the anchor must not hand the destination a referrer or a window
+    // handle back into a live session.
+    scenario('a URL is offered, not embedded')
+    const linkTok = `https://example.org/x-${Date.now().toString(36)}`
+    await send(A, `zobacz ${linkTok} koniec`)
+    await B.waitFor('the link message arrived', `
+      return document.getElementById('messages').textContent.includes(${JSON.stringify(linkTok)});
+    `, 25_000)
+    const link = await B.eval<any>(`
+      const rows = [...document.querySelectorAll('#messages .b-text')];
+      const el = rows.reverse().find((r) => r.textContent.includes(${JSON.stringify(linkTok)}));
+      if (!el) return { found: false };
+      const a = el.querySelector('a.lnk');
+      return {
+        found: true,
+        hasArrow: !!a,
+        urlInsideAnchor: !!a && a.textContent.includes('example.org'),
+        href: a ? a.getAttribute('href') : '',
+        target: a ? a.getAttribute('target') : '',
+        rel: a ? a.getAttribute('rel') : '',
+        referrer: a ? a.getAttribute('referrerpolicy') : '',
+        anchors: el.querySelectorAll('a').length,
+      };
+    `)
+    if (!link.found) throw new Error('the link message was not rendered')
+    if (!link.hasArrow) throw new Error('no arrow was offered for a plain https URL')
+    if (link.urlInsideAnchor) throw new Error('the URL text is inside the anchor — it must stay inert')
+    if (link.href !== linkTok) throw new Error(`arrow points at ${link.href}, not the URL in the message`)
+    if (link.target !== '_blank') throw new Error('a link must not navigate away — it would tear down the session')
+    if (!String(link.rel).includes('noopener') || !String(link.rel).includes('noreferrer')) throw new Error(`rel is "${link.rel}"`)
+    if (link.referrer !== 'no-referrer') throw new Error(`referrerpolicy is "${link.referrer}"`)
+    step('a plain URL gets one arrow, opens in a new tab, and leaks no referrer')
+
+    // A scheme the message does not get to propose: rendered as text, no anchor.
+    await send(A, 'klik javascript:alert(1) tutaj')
+    await B.waitFor('the javascript: message arrived',
+      `return document.getElementById('messages').textContent.includes('javascript:alert(1)')`, 25_000)
+    const dangerous = await B.eval<number>(`
+      const rows = [...document.querySelectorAll('#messages .b-text')];
+      const el = rows.reverse().find((r) => r.textContent.includes('javascript:alert(1)'));
+      return el ? el.querySelectorAll('a').length : -1;
+    `)
+    if (dangerous !== 0) throw new Error(`javascript: URL produced ${dangerous} anchor(s) — it must produce none`)
+    step('a javascript: URL is shown as text and offered no arrow')
+
     scenario('transport upgrade to a direct DataChannel')
     // Assert on the CLASS, not the label. The harness runs with ?lang=pl, where
     // this badge reads "Bezpośrednio" — so matching the English word reported

@@ -19,6 +19,7 @@ import type { GkBackend } from '../../lib/group.ts'
 // which is exactly how it failed once. `tr` cannot collide.
 import { t as tr, setLocale, getLocale, applyDom } from './i18n.ts'
 import { probeCapabilities, formatReport } from '../../lib/capabilities.ts'
+import { splitByLinks } from '../../lib/linkify.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
@@ -479,8 +480,8 @@ function renderContacts() {
         e.stopPropagation()
         // Deleting a contact tears down the conversation and, on a HEM, removes
         // the imported key — not something to do on a mis-tap next to the name.
-        if (!await ask(tr('Usunąć kontakt?'), tr('„{name}” zniknie z listy, rozmowa zostanie zamknięta', { name: c.name })
-          + `${c.source === 'hem' ? tr(', a klucz kontaktu zostanie usunięty z HEM') : ''}. Historia rozmowy i tak nie jest przechowywana.`, tr('Usuń'))) return
+        if (!(await ask(tr('Usunąć kontakt?'), tr('„{name}” zniknie z listy, rozmowa zostanie zamknięta', { name: c.name })
+          + `${c.source === 'hem' ? tr(', a klucz kontaktu zostanie usunięty z HEM') : ''}. Historia rozmowy i tak nie jest przechowywana.`, tr('Usuń'))).ok) return
         await closeRoom(c.pub)
         if (session) { try { await session.book.remove(c) } catch (err: any) { toast(tr('Błąd usuwania: ') + (err?.message ?? err)) } }
         await refreshContacts(); return
@@ -497,20 +498,27 @@ $('contact-search').addEventListener('input', renderContacts)
 // draws those as browser chrome outside the app's skin, and they block the
 // event loop — which here means the transport stops pumping while a dialog is
 // open. -------------------------------------------------------------------
-function ask(title: string, body: string, yes = 'Tak'): Promise<boolean> {
+function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string): Promise<{ ok: boolean; remember: boolean }> {
   return new Promise((resolve) => {
     $('ask-title').textContent = title
     $('ask-body').textContent = body
     $('ask-yes').textContent = yes
+    // The checkbox is opt-in per call: a destructive confirm must never offer to
+    // stop asking, only an advisory one may.
+    const cb = $('ask-remember') as HTMLInputElement
+    cb.checked = false
+    $('ask-remember-wrap').hidden = !rememberLabel
+    if (rememberLabel) ($('ask-remember-wrap').querySelector('span') as HTMLElement).textContent = rememberLabel
     $('members-pop').hidden = true // nothing may stay clickable behind a modal
     $('scrim').classList.add('open'); $('ask-modal').classList.add('open')
     const done = (v: boolean) => {
+      const remember = !!(rememberLabel && cb.checked)
       $('scrim').classList.remove('open'); $('ask-modal').classList.remove('open')
       $('ask-yes').removeEventListener('click', onYes)
       $('ask-no').removeEventListener('click', onNo)
       $('scrim').removeEventListener('click', onScrim)
       document.removeEventListener('keydown', onKey)
-      resolve(v)
+      resolve({ ok: v, remember })
     }
     const onYes = () => done(true), onNo = () => done(false)
     // Clicking the backdrop is the third way out, alongside Escape and "Nie".
@@ -923,7 +931,7 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   row.dataset.ts = String(ts ?? nowMs())
   const bub = document.createElement('div'); bub.className = 'bubble'
   if (who && kind === 'peer') { const w = document.createElement('div'); w.className = 'b-who'; w.textContent = who; bub.appendChild(w) }
-  const t = document.createElement('div'); t.className = 'b-text'; t.textContent = text
+  const t = document.createElement('div'); t.className = 'b-text'; renderBody(t, text)
   const m = document.createElement('div'); m.className = 'b-meta'; m.textContent = utcHHMM(ts ?? nowMs()) + ' UTC'
   if (outOfOrder) {
     // Same ⏱ as a late confirmation on our own side: one mark, one meaning —
@@ -1083,6 +1091,60 @@ function paintTransport(room: Room) {
   const b = $('transport-badge')
   if (room.transport.startsWith('conn=connected')) setBadge(b, 'badge direct', tr('🟢 Direct'), tr('Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing'))
   else setBadge(b, 'badge relay', tr('⚪ Relay'), tr('Treść przez relay (GossipSub)'))
+}
+
+// ---- links in a message ---------------------------------------------------
+/**
+ * Whether the "you are leaving" warning has been silenced for this session.
+ *
+ * RAM only, by decision: reloading restores it. Persisting a dismissed security
+ * warning would outlive the reason someone dismissed it, and this product keeps
+ * nothing else across a reload either.
+ */
+let linkWarnMuted = false
+
+/**
+ * Render a message body with its URLs found but NOT clickable — an arrow beside
+ * each one opens it.
+ *
+ * Two properties follow from that split. The text stays a text node, so there
+ * is still no path from a message to markup. And what you read is what you
+ * would visit: a phishing link works by showing one thing and going to another,
+ * and here there is no separate label that could disagree with the target.
+ */
+function renderBody(into: HTMLElement, text: string) {
+  for (const part of splitByLinks(text)) {
+    into.appendChild(document.createTextNode(part.text))
+    const l = part.link
+    if (!l?.href) continue // refused (credentials, bad scheme): text only, no arrow
+    const a = document.createElement('a')
+    a.className = 'lnk' + (l.warn ? ' warn' : '')
+    a.textContent = '\u2192'
+    a.href = l.href
+    a.target = '_blank'
+    // noopener: the opened page must not reach back into this window.
+    // no-referrer: otherwise the destination learns you came from here, which is
+    // exactly the kind of metadata the rest of this app works to avoid.
+    a.rel = 'noopener noreferrer'
+    a.referrerPolicy = 'no-referrer'
+    const host = l.asciiHost ?? new URL(l.href).host
+    a.title = l.warn === 'idn'
+      ? tr('Otwórz — uwaga, adres używa znaków spoza ASCII; przeglądarka pójdzie do {host}', { host })
+      : tr('Otwórz {host} w nowej karcie', { host })
+    a.addEventListener('click', async (e) => {
+      if (linkWarnMuted) return // muted for this session: let the browser open it
+      e.preventDefault()
+      const warn = l.warn === 'idn'
+        ? tr('Ten adres używa znaków spoza ASCII i może udawać inny. Przeglądarka otworzy: {host}.', { host }) + ' '
+        : ''
+      const r = await ask(tr('Otworzyć link?'),
+        warn + tr('Wyjdziesz poza aplikację. Strona {host} pozna Twój adres IP i czas wejścia — tego rozmowa nie ujawnia.', { host }),
+        tr('Otwórz'), tr('Nie pokazuj tego ostrzeżenia ponownie'))
+      if (r.remember) linkWarnMuted = true
+      if (r.ok) window.open(l.href, '_blank', 'noopener,noreferrer')
+    })
+    into.appendChild(a)
+  }
 }
 
 /** Record one event on a room's log; render it if that room is on screen,
@@ -1480,13 +1542,13 @@ function renderGroups() {
       if (e.target.classList.contains('c-x')) {
         e.stopPropagation()
         if (admin) {
-          if (!await ask(tr('Usunąć grupę?'), tr('Wszyscy członkowie „{name}” stracą dostęp do nowych wiadomości,', { name: gu.name })
+          if (!(await ask(tr('Usunąć grupę?'), tr('Wszyscy członkowie „{name}” stracą dostęp do nowych wiadomości,', { name: gu.name })
             + tr(' a klucz grupy zostanie skasowany z HEM — grupy nie da się już przywrócić.')
-            + tr(' Ich dotychczasowa kopia rozmowy pozostanie u nich; nie da się jej usunąć zdalnie.'), tr('Usuń grupę'))) return
+            + tr(' Ich dotychczasowa kopia rozmowy pozostanie u nich; nie da się jej usunąć zdalnie.'), tr('Usuń grupę'))).ok) return
           await deleteGroup(gu.gid)
         } else {
-          if (!await ask(tr('Opuścić grupę?'), tr('„{name}” zniknie z tego urządzenia i przestaniesz odbierać wiadomości.', { name: gu.name })
-            + tr(' Pozostali członkowie zachowują grupę — nie da się jej usunąć u nich.'), tr('Opuść'))) return
+          if (!(await ask(tr('Opuścić grupę?'), tr('„{name}” zniknie z tego urządzenia i przestaniesz odbierać wiadomości.', { name: gu.name })
+            + tr(' Pozostali członkowie zachowują grupę — nie da się jej usunąć u nich.'), tr('Opuść'))).ok) return
           await leaveGroup(gu.gid)
         }
         return
