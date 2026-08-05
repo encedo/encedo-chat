@@ -15,6 +15,7 @@
     "presence-test": "node net/presence-test.ts",
     "group-test": "node net/group-test.ts",
     "hem-gk-test": "node net/hem-gk-test.ts",
+    "ipfs-test": "node net/ipfs-test.ts",
     "gui-sim": "node net/gui-sim.ts",
     "bob": "node bob/bob.ts",
     "carl": "node carl/carl.ts",
