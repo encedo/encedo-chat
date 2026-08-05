@@ -128,3 +128,38 @@ test('a demoted plane stays on the relay and stops negotiating', async () => {
   assert.equal(r.contentSend, null, 'and even an open channel does not get content back')
   plane.stop()
 })
+
+test('a channel that dies says so, so the badge cannot keep claiming Direct', async () => {
+  // The transport badge is a security indicator: Direct means the peer sees
+  // your IP, Relay means the node sees the metadata. Reported from a phone that
+  // left Wi-Fi — messages kept flowing over the relay while the badge still
+  // read Direct, because closing the channel handed content back to GossipSub
+  // and told nobody. Content falling back and the UI saying so must be one act.
+  const r = room()
+  const states: string[] = []
+  const { links, makeLink } = fakeLink()
+  const plane = attachWebRTC(r as any, 'peer-a', { makeLink, attemptMs: 10_000, onState: (s) => states.push(s) })
+  plane.onPeer('peer-b')
+  links[0].open()
+  assert.ok(r.contentSend, 'content is on the DataChannel once it opens')
+
+  links[0].opts.onClose?.()
+  assert.equal(r.contentSend, null, 'content went back to the relay')
+  assert.ok(states.some((s) => s.startsWith('conn=') && !s.startsWith('conn=connected')),
+    `the UI was told the channel is gone — got ${JSON.stringify(states)}`)
+})
+
+test('demoting also reports a state the UI acts on', async () => {
+  // `demoted=relay` was emitted but the app only matched a `conn=` prefix, so a
+  // stalled channel left the badge reading Direct for the rest of the
+  // conversation. The string is part of the contract, not just a log line.
+  const r = room()
+  const states: string[] = []
+  const { links, makeLink } = fakeLink()
+  const plane = attachWebRTC(r as any, 'peer-a', { makeLink, attemptMs: 10_000, onState: (s) => states.push(s) })
+  plane.onPeer('peer-b')
+  links[0].open()
+  plane.demote()
+  assert.equal(r.contentSend, null)
+  assert.ok(states.some((s) => s.startsWith('demoted=')), `got ${JSON.stringify(states)}`)
+})

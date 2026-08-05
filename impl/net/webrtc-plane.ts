@@ -95,7 +95,17 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: WebRTCPlan
         stopAttemptTimer()
         if (!demoted && linkPeer === peer) room.setContentSend((sealed) => link!.send(sealed))
       },
-      onClose: () => { if (linkPeer === peer) room.setContentSend(null) }, // fall back to GossipSub
+      onClose: () => {
+        // Tell the UI, not just the room. The badge is a security indicator —
+        // Direct means the peer sees your IP, Relay means the node sees the
+        // metadata — so a channel that died while the badge still reads Direct
+        // is stating something false about who can see what. Reported from a
+        // phone that left Wi-Fi: messages kept flowing over the relay while the
+        // badge insisted the content was going direct.
+        if (linkPeer !== peer) return
+        room.setContentSend(null) // fall back to GossipSub
+        opts.onState?.('conn=closed')
+      },
       onState: opts.onState,
     })
     // Only the offering side can restart a negotiation; the answering side has

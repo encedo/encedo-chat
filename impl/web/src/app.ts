@@ -1072,7 +1072,11 @@ function setBadge(el: HTMLElement, cls: string, label: string, title: string) {
 }
 
 function noteTransport(room: Room, state: string) {
-  if (state.startsWith('conn=connected') || state.startsWith('conn=failed') || state.startsWith('conn=disconnected') || state.startsWith('conn=closed')) room.transport = state
+  // `demoted=` belongs here too: a stall hands content back to GossipSub for the
+  // rest of the conversation, and the badge claimed Direct throughout because
+  // this matcher only knew the `conn=` vocabulary. Anything that is not
+  // `conn=connected` paints Relay, which is the safe direction to be wrong in.
+  if (/^(conn=(connected|failed|disconnected|closed)|demoted=)/.test(state)) room.transport = state
   if (room === activeRoom()) paintTransport(room)
 }
 function paintTransport(room: Room) {
