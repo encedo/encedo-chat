@@ -119,33 +119,41 @@ blunt and reliable answer; it also stops the node fetching foreign content, so
 confirm that is what you want before setting it. **Verify against the running
 version** — these keys have moved between Kubo releases.
 
-**5. Install the expiry job.** It runs on the **host**, from cron, and speaks the
-RPC over HTTP — which works whether Kubo is installed on the machine or running
-in a container, since either way it listens on `127.0.0.1:5001`. One script, no
-CLI variant to drift from it, and no need to give cron the docker socket (root
-on the host, for a job that deletes directory entries).
-
-```bash
-install -m 755 infra/ipfs-ttl.sh /usr/local/bin/ipfs-ttl.sh
-crontab -l 2>/dev/null | { cat; echo '*/1 * * * * IPFS_API=http://127.0.0.1:5001 TTL=300 /usr/local/bin/ipfs-ttl.sh >> /var/log/ipfs-ttl.log 2>&1'; } | crontab -
-```
-
-Check the host can reach the node first — `curl -sS -X POST
-http://127.0.0.1:5001/api/v0/version`. If that is refused, the container is not
-publishing 5001, and it should be published **bound to the loopback**:
+**5. Install the expiry job** as a sidecar on the docker network. Kubo's RPC is
+not published to the host, so this is the way in that does not require opening a
+port or handing cron the docker socket (root on the host, for a job that deletes
+directory entries).
 
 ```yaml
-  ipfs1:
-    ports: [ "127.0.0.1:5001:5001" ]     # not 0.0.0.0
+  ipfs-ttl:
+    image: alpine:3
+    depends_on: [ipfs1]
+    environment: { IPFS_API: "http://ipfs1:5001", TTL: "300" }
+    command: sh -c "apk add --no-cache curl >/dev/null && while :; do /opt/ttl.sh; sleep 60; done"
+    volumes: [ "./infra/ipfs-ttl.sh:/opt/ttl.sh:ro" ]
+    restart: unless-stopped
 ```
 
-The `127.0.0.1:` is the important part. Without it Docker opens the port on
-every interface and writes the rule straight into iptables, where the host
-firewall will not stop it — which would put the full admin RPC on the network
-and walk straight around the allow-list at the edge.
+A `while` loop rather than cron: the image has no cron daemon, `sleep 60` does
+the same for less, and the output lands in `docker logs` with the rest of the
+stack's.
 
-It cannot go through `rpc.ipfs.encedo.com`: `files/*` and `repo/gc` are refused
-there on purpose. Cleanup takes the local path, and that is the design.
+This works because **the RPC lockdown lives at HAProxy, not in Kubo** —
+`files/*` and `repo/gc` are refused from outside and remain reachable inside the
+network. Worth stating rather than rediscovering: that lockdown protects against
+the world, not between containers. Giving `ipfs1` and `ipfs-ttl` a network of
+their own is what would close that, if it ever matters.
+
+The script takes its address from `IPFS_API`, so nothing about it is
+container-specific; a host cron works too, wherever the API is reachable. What
+it must never be pointed at is `rpc.ipfs.encedo.com` — `files/*` and `repo/gc`
+are blocked there deliberately, and cleanup taking the internal path is the
+design rather than a workaround.
+
+```bash
+docker compose up -d ipfs-ttl
+docker compose logs -f ipfs-ttl        # first sweep clears anything already past its TTL
+```
 
 Why a ledger in MFS rather than `repo gc` on a timer: GC removes everything
 unpinned *whenever it runs*, so a file uploaded ten seconds before a sweep lives

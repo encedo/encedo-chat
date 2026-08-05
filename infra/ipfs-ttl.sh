@@ -1,18 +1,17 @@
 #!/bin/sh
 # ipfs-ttl.sh — give uploads a lifetime on a node that has no concept of one.
 #
-# Runs on the HOST, from cron, and speaks the RPC over HTTP. That works whether
-# Kubo is installed on the machine or running in a container, because either way
-# it listens on 127.0.0.1:5001 — so there is one script rather than a CLI
-# variant and an HTTP one drifting apart, and no need to give cron access to the
-# docker socket (which is root on the host, for a job that deletes directory
-# entries).
+# Speaks the RPC over HTTP and takes its address from IPFS_API, so it does not
+# care where it runs — a sidecar on the docker network in this deployment
+# (`http://ipfs1:5001`), a host cron if the API is ever reachable from there.
+# One script either way; a CLI variant alongside it would only drift.
 #
-#     IPFS_API=http://127.0.0.1:5001 TTL=300 sh ipfs-ttl.sh
+#     IPFS_API=http://ipfs1:5001 TTL=300 sh ipfs-ttl.sh
 #
-# It must go through the LOCAL api, not rpc.ipfs.encedo.com: `files/*` and
-# `repo/gc` are refused at the edge on purpose. The lockdown protects against
-# the world, not against this host.
+# It must reach the node DIRECTLY, never through rpc.ipfs.encedo.com: `files/*`
+# and `repo/gc` are refused at the edge on purpose. That lockdown protects
+# against the world, not within the docker network — which is what makes a
+# sidecar work, and worth knowing rather than discovering.
 #
 # IPFS has no TTL, and the usual workaround is not one: adding unpinned and
 # running `repo gc` on a timer removes everything unpinned whenever the timer
