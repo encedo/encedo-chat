@@ -25,15 +25,56 @@ location = /f {
     client_max_body_size 128m;
     proxy_request_buffering off;      # stream it; buffering 128 MB fills /tmp
     proxy_read_timeout 300s;
-    proxy_pass https://rpc.ipfs.encedo.com/api/v0/add?pin=false&to-files=/ec/$msec-$request_id;
+    proxy_send_timeout 300s;
+
+    proxy_set_header Origin     "";
+    proxy_set_header Referer    "";
+    proxy_set_header User-Agent "encedo-proxy";
+    proxy_ssl_server_name on;
+    rewrite ^ /api/v0/add?pin=false&to-files=/ec/$msec-$request_id break;
+    proxy_pass https://rpc.ipfs.encedo.com;
 }
 
 # Download by CID. The regex is the allow-list: nothing else reaches the node.
-location ~ ^/f/([A-Za-z0-9]+)$ {
+location ~ ^/f/(?<cid>[A-Za-z0-9]+)$ {
     limit_except GET { deny all; }
-    proxy_pass https://rpc.ipfs.encedo.com/api/v0/cat?arg=$1;
+    proxy_method POST;                # Kubo rejects GET on /api/v0/*
+    proxy_set_header Origin     "";
+    proxy_set_header Referer    "";
+    proxy_set_header User-Agent "encedo-proxy";
+    proxy_ssl_server_name on;
+    rewrite ^ /api/v0/cat?arg=$cid break;
+    proxy_pass https://rpc.ipfs.encedo.com;
 }
 ```
+
+### Four things here are not obvious, and each one cost a failed request
+
+**Strip every marker of browser identity.** Kubo refuses anything that looks
+like it came from a browser — an `Origin` it does not allow, a `Referer`, or a
+`User-Agent` beginning with `Mozilla`. That is its CSRF defence and it is
+correct: a browser must never drive an admin API. But this hop is
+server-to-server, so it should carry none of those. All three, or the request is
+refused with a bare `403 - Forbidden` from the node, which looks exactly like an
+nginx permission problem and is not one. Verified header by header:
+`Mozilla/5.0` is refused, `Chrome/150` is not, so it is the prefix.
+
+The alternative — adding onchato.com to Kubo's allowed origins — would open the
+RPC to a browser origin, which is the thing this whole arrangement exists to
+prevent.
+
+**`rewrite … break`, not variables in `proxy_pass`.** A variable in `proxy_pass`
+makes nginx resolve the host per request, which needs a `resolver` directive or
+it refuses to start. After a rewrite the target is constant and resolved once.
+
+**`proxy_method POST`.** Kubo has rejected `GET` on `/api/v0/*` since 0.5. The
+browser fetches `/f/<cid>` with GET, so without this every download is a 405.
+
+**A named capture, `(?<cid>…)`.** `rewrite ^ … $1` resets the positional
+captures — `$1` there refers to the *rewrite's* groups, and `^` has none, so the
+CID arrives empty and Kubo answers "path does not have enough components". A
+named capture survives, and it does not duplicate the pattern the way repeating
+the regex inside the rewrite would.
 
 `pin=false` matters: the MFS entry is what keeps a blob alive, so expiry is a
 `files rm` away rather than a pin to hunt down. `$msec-$request_id` is the
