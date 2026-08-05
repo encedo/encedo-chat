@@ -277,6 +277,16 @@
      desktop `min-height` has to be cancelled, or a keyboard-shrunk viewport
      pushes the composer off screen. */
   @media (max-width:900px), (max-height:560px){
+    /* Three badges plus a name do not fit a phone header, so the WORDS collapse
+       and the glyph carries the state — hiding a badge outright would drop the
+       security state, which must stay visible. The rotation badge keeps its
+       countdown: it is the one whose value IS the information.
+       This lives in the PHONE block (narrow OR short), not the short-only one:
+       it was in the latter, so it fired at 360x545 and not at 360x641 — same
+       phone, two browsers, different toolbar heights, opposite results. */
+    .chat-head .badge{white-space:nowrap;padding:4px 8px;gap:0;max-width:3.2em;overflow:hidden}
+    .chat-head .badge .b-txt{display:none}
+    .chat-head .badge.rotate{gap:4px;font-size:11px}
     .app{flex-direction:column;gap:0;padding:0;height:var(--app-h,100dvh);min-height:0;max-width:none}
     .splitter{display:none}
     .sidebar,.chat{border-radius:0;border-left:none;border-right:none;box-shadow:none}
@@ -296,14 +306,6 @@
   /* A short screen has no room for a wrapped header: keep it on one line. */
   @media (max-height:560px){
     .chat-head{flex-wrap:nowrap;overflow-x:auto;padding:8px 12px}
-    /* Three badges plus a name do not fit a phone header, so the WORDS collapse
-       and the glyph carries the state — hiding a badge outright would drop the
-       security state, which must stay visible. The rotation badge keeps its
-       countdown: it is the one whose value IS the information, and the two
-       collapsed neighbours leave it the room. Full wording stays in tooltips. */
-    .chat-head .badge{white-space:nowrap;padding:4px 8px;gap:0;max-width:3.2em;overflow:hidden}
-    .chat-head .badge .b-txt{display:none}
-    .chat-head .badge.rotate{gap:4px;font-size:11px}
   }
 
   /* Touch: no hover, so the reaction bar is revealed by TAPPING the bubble
