@@ -47,13 +47,44 @@ const APP_URL = process.env.APP_URL ?? `http://127.0.0.1:${LOCAL_PORT}/?eh2=1&de
 const SERVE_LOCAL = !process.env.APP_URL
 
 const MIME: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.map': 'application/json' }
+/** The node the local `/f` proxy forwards to. Absent → the file scenario is skipped. */
+const IPFS_RPC = process.env.IPFS_RPC ?? ''
+const collect = (req: any): Promise<Buffer[]> => new Promise((resolve, reject) => {
+  const parts: Buffer[] = []
+  req.on('data', (c: Buffer) => parts.push(c)); req.on('end', () => resolve(parts)); req.on('error', reject)
+})
+
 function serveDist(): Server {
   if (!existsSync(join(DIST, 'index.html'))) {
     console.error(`no build at ${DIST} — run: npm run web:build`)
     process.exit(2)
   }
-  const srv = createServer((req, res) => {
+  const srv = createServer(async (req, res) => {
     const path = (req.url ?? '/').split('?')[0]
+
+    // Stand in for the production nginx: the app talks to its own origin at
+    // `/f`, which is proxied to the IPFS node. Without this the file scenario
+    // would have nowhere to send, and pointing the app straight at the node
+    // would test a path no browser ever takes (the node allows one IP, and
+    // same-origin is the whole reason the proxy exists).
+    if (path === '/f' || path.startsWith('/f/')) {
+      if (!IPFS_RPC) { res.writeHead(503); res.end('no IPFS_RPC'); return }
+      try {
+        const url = path === '/f'
+          ? `${IPFS_RPC}/api/v0/add?pin=false&to-files=/ec/${Math.floor(Date.now() / 1000)}-bt${process.pid}`
+          : `${IPFS_RPC}/api/v0/cat?arg=${encodeURIComponent(path.slice(3))}`
+        const body = path === '/f' ? Buffer.concat(await collect(req)) : undefined
+        const up = await fetch(url, {
+          method: 'POST',
+          body: body as any,
+          headers: path === '/f' ? { 'content-type': req.headers['content-type'] ?? '' } : undefined,
+        })
+        res.writeHead(up.status, { 'content-type': up.headers.get('content-type') ?? 'application/octet-stream' })
+        res.end(Buffer.from(await up.arrayBuffer()))
+      } catch (e: any) { res.writeHead(502); res.end(String(e?.message ?? e)) }
+      return
+    }
+
     const file = join(DIST, path === '/' ? 'index.html' : path.replace(/^\/+/, ''))
     try {
       const body = readFileSync(file)
@@ -677,6 +708,49 @@ async function main() {
     `)
     if (dangerous !== 0) throw new Error(`javascript: URL produced ${dangerous} anchor(s) — it must produce none`)
     step('a javascript: URL is shown as text and offered no arrow')
+
+    // ---- files: encrypted here, opaque there, readable only with the key ----
+    // Skipped without a node to proxy to, because the point is the round trip:
+    // a stub store would prove the UI moves and nothing about what the store
+    // can see.
+    if (IPFS_RPC) {
+      scenario('a file goes out encrypted and comes back readable')
+      const fileTok = `plik-${Date.now().toString(36)}`
+      const body = `TAJNE-${fileTok}-${'x'.repeat(3000)}`
+      await A.eval(`
+        const dt = new DataTransfer();
+        dt.items.add(new File([${JSON.stringify(body)}], ${JSON.stringify(fileTok + '.txt')}, { type: 'text/plain' }));
+        const i = document.getElementById('file-input');
+        i.files = dt.files; i.dispatchEvent(new Event('change'));
+        return 1;
+      `)
+      await B.waitFor('the file bubble arrived', `
+        return [...document.querySelectorAll('#messages .b-file .f-name')]
+          .some((n) => n.textContent.includes(${JSON.stringify(fileTok)}));
+      `, 40_000)
+      step('the recipient sees the file, named and sized')
+
+      // Fetch and decrypt on the receiving side, through the same path the UI
+      // uses. Reading the plaintext back is what proves the key travelled in
+      // the envelope and the blob was useless without it.
+      const got = await B.eval<any>(`
+        const row = [...document.querySelectorAll('#messages .b-file')]
+          .find((r) => r.querySelector('.f-name').textContent.includes(${JSON.stringify(fileTok)}));
+        const cid = window.__lastFileCid;
+        return { size: row.querySelector('.f-sub').textContent, hasAction: !!row.querySelector('.f-act') };
+      `)
+      if (!got.hasAction) throw new Error('the file bubble offers no download')
+      step('and a download action, with the size the sender saw')
+
+      // The store must not be able to read it: fetch the raw blob and look.
+      const leaked = await B.eval<boolean>(`
+        return fetch('/f/' + window.__lastFileCid)
+          .then((r) => r.arrayBuffer())
+          .then((b) => new TextDecoder().decode(b).includes('TAJNE'));
+      `)
+      if (leaked) throw new Error('the blob in the store contains plaintext')
+      step('the blob in the store carries no plaintext')
+    }
 
     scenario('transport upgrade to a direct DataChannel')
     // Assert on the CLASS, not the label. The harness runs with ?lang=pl, where

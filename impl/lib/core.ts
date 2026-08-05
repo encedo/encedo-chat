@@ -14,7 +14,7 @@
 
 import { topicFromSecret, announceMacKey, todayUTC, rotationOffsetSec, type RvParams } from './rendezvous.ts'
 import { joinChat, type RoomKeys, type ChatOpts, type Eh2Options } from './room.ts'
-import type { SkdFields } from './envelope.ts'
+import type { SkdFields, FileMeta } from './envelope.ts'
 import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { createMqttPeer } from '../net/mqtt-node.ts'
@@ -355,6 +355,9 @@ export interface Conversation {
   sendReaction(toId: string, emoji: string): void
   /** Hand a group's Sender-Key Distribution to this contact over the ratchet (§8). */
   sendGroupSkd(skd: SkdFields): void
+  /** Send a file's metadata — CID, key, manifest. The bytes were encrypted and
+   *  uploaded before this; the store never sees any of these fields. */
+  sendFile(f: FileMeta): string
   noteActivity(): void // UI calls on user input → drives "typing" + resets "away"
   noteAway(): void // UI calls on blur/tab-hidden → "away" now
   refresh(): void | Promise<void> // UI calls when the tab becomes visible again (throttled/frozen)
@@ -911,6 +914,7 @@ async function openRoom(
     resend: (mid) => room.resend(mid),
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),
     sendGroupSkd: (skd) => room.sendGroupSkd(skd),
+    sendFile: (f) => room.sendFile(f),
     noteActivity,
     noteAway,
     refresh: async () => {

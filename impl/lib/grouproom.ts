@@ -17,7 +17,7 @@
  */
 
 import type { GroupSession } from './group.ts'
-import { envMsg, envReaction, encodeEnvelope, decodeEnvelope, type MsgEnv, type ReactionEnv } from './envelope.ts'
+import { envMsg, envReaction, envFile, encodeEnvelope, decodeEnvelope, type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta } from './envelope.ts'
 
 const T_GKEEPALIVE = 0x21 // a 1-byte mesh keepalive frame — NOT a group message (T_GMSG is 0x20)
 const KEEPALIVE = new Uint8Array([T_GKEEPALIVE])
@@ -27,6 +27,7 @@ const KEEPALIVE_JITTER_MS = 8_000
 export interface GroupRoomOpts {
   onMessage?: (from: string, env: MsgEnv) => void
   onReaction?: (from: string, env: ReactionEnv) => void
+  onFile?: (from: string, env: FileEnv) => void
   onLog?: (msg: string) => void
 }
 
@@ -35,6 +36,9 @@ export interface GroupRoom {
   sendText(body: string): Promise<string>
   /** Broadcast a reaction to a message id. */
   sendReaction(to: string, emoji: string): Promise<void>
+  /** Broadcast a file's metadata. Same envelope as 1:1 — the bytes are already
+   *  encrypted and uploaded, and every member can fetch them with the key here. */
+  sendFile(f: FileMeta): Promise<string>
   /** Re-warm the topic mesh after the transport reconnected (re-subscribe + a keepalive burst). */
   refresh(): void
   topic: string
@@ -60,6 +64,7 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
     if (!env) return
     if (env.t === 'msg') opts.onMessage?.(opened.from, env as MsgEnv)
     else if (env.t === 'reaction') opts.onReaction?.(opened.from, env as ReactionEnv)
+    else if (env.t === 'file') opts.onFile?.(opened.from, env as FileEnv)
     // unknown envelope types are ignored (forward-compat)
   }
 
@@ -98,6 +103,11 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
     topic,
     async sendText(body: string) {
       const env = envMsg(seq++, body)
+      await broadcast(encodeEnvelope(env))
+      return env.id
+    },
+    async sendFile(f: FileMeta) {
+      const env = envFile(seq++, f)
       await broadcast(encodeEnvelope(env))
       return env.id
     },

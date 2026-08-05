@@ -221,6 +221,18 @@
   .ask-remember input{width:auto;margin:0}
   /* The arrow is the only clickable part of a link: the URL itself stays inert
      text, so what you read is what you would visit. Finger-sized on touch. */
+  /* A file bubble: an icon, a name that may be long, and one action. The name
+     truncates rather than wrapping — a filename is not worth three lines of a
+     phone screen. */
+  .b-file{display:flex;align-items:center;gap:10px;min-width:0}
+  .b-file .f-ico{font-size:20px;flex-shrink:0}
+  .b-file .f-info{min-width:0;flex:1}
+  .b-file .f-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+  .b-file .f-sub{font-size:11.5px;color:var(--muted)}
+  .b-file .f-act{flex-shrink:0;border:none;background:var(--accent-soft);color:var(--accent);
+    border-radius:8px;padding:6px 12px;font-weight:600;font-size:12.5px;cursor:pointer}
+  .b-file .f-act[disabled]{opacity:.55;cursor:default}
+  .b-file.gone .f-name{text-decoration:line-through;opacity:.7}
   .b-text .lnk{display:inline-flex;align-items:center;justify-content:center;margin:0 2px;padding:0 4px;
     border-radius:6px;background:var(--accent-soft);color:var(--accent);text-decoration:none;
     font-weight:700;line-height:1.4;vertical-align:baseline}
@@ -423,7 +435,10 @@
         <div class="messages" id="messages"></div>
         <button class="to-bottom" id="to-bottom" hidden title="Przejdź do najnowszej wiadomości" data-i18n-title="Przejdź do najnowszej wiadomości">⬇<span class="unread" id="unread" hidden>0</span></button>
         <div class="typing" id="typing-ind"></div>
-        <div class="composer"><input id="msg-input" type="text" placeholder="Wiadomość… (Enter = wyślij)" data-i18n-placeholder="Wiadomość… (Enter = wyślij)" data-i18n-placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off"><button class="btn-send" id="send" data-i18n="Wyślij ➤">Wyślij ➤</button></div>
+        <div class="composer">
+          <input type="file" id="file-input" hidden>
+          <button class="icon-btn" id="btn-attach" title="Wyślij plik" data-i18n-title="Wyślij plik">📎</button>
+          <input id="msg-input" type="text" placeholder="Wiadomość… (Enter = wyślij)" data-i18n-placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off"><button class="btn-send" id="send" data-i18n="Wyślij ➤">Wyślij ➤</button></div>
       </div>
     </main>
   </div>

@@ -20,6 +20,9 @@ import type { GkBackend } from '../../lib/group.ts'
 import { t as tr, setLocale, getLocale, applyDom } from './i18n.ts'
 import { probeCapabilities, formatReport } from '../../lib/capabilities.ts'
 import { splitByLinks } from '../../lib/linkify.ts'
+import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
+import { putBlob, getBlob } from '../../net/ipfs.ts'
+import type { FileEnv } from '../../lib/envelope.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
@@ -115,6 +118,9 @@ type Ev =
   | { t: 'react'; id: string; emoji: string }
   | { t: 'delivery'; id: string; state: 'ok' | 'lost' | 'late'; ms?: number }
   | { t: 'sys'; text: string }
+  // A file is its own event, not a message with a marker: it carries what is
+  // needed to fetch and decrypt, and its bubble has an action rather than text.
+  | { t: 'file'; kind: 'me' | 'peer'; who?: string; ts: number; file: FileEnv }
 interface Room {
   contact: Contact
   conv: Conversation | null
@@ -643,6 +649,14 @@ $('btn-close-drawer').addEventListener('click', closeDrawer)
 $('scrim').addEventListener('click', () => { closeModal(); closeDrawer() })
 $('btn-logout').addEventListener('click', () => location.reload())
 
+// ---- attach a file --------------------------------------------------------
+$('btn-attach').addEventListener('click', () => ($('file-input') as HTMLInputElement).click())
+;($('file-input') as HTMLInputElement).addEventListener('change', (e: any) => {
+  const f = e.target.files?.[0]
+  e.target.value = '' // so picking the same file twice still fires
+  if (f) void attachFile(f)
+})
+
 // ---- language ------------------------------------------------------------
 // The static markup carries its Polish as default content, so the app is
 // readable before this runs and stays readable if it throws. `applyDom`
@@ -1113,6 +1127,118 @@ function paintTransport(room: Room) {
   else setBadge(b, 'badge relay', tr('⚪ Relay'), tr('Treść przez relay (GossipSub)'))
 }
 
+
+// ---- files ----------------------------------------------------------------
+/** A file bubble: icon, name, size, and one action. Rendered like any other
+ *  event so switching rooms replays it from the log. */
+function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string) {
+  const box = $('messages')
+  const row = document.createElement('div'); row.className = 'mrow ' + (kind === 'me' ? 'out' : 'in')
+  const bub = document.createElement('div'); bub.className = 'bubble'
+  if (who && kind === 'peer') {
+    const w = document.createElement('div'); w.className = 'b-who'; w.textContent = who; bub.appendChild(w)
+  }
+  const wrap = document.createElement('div'); wrap.className = 'b-file' + (fileGone(env) ? ' gone' : '')
+  const ico = document.createElement('span'); ico.className = 'f-ico'; ico.textContent = '📄'
+  const info = document.createElement('div'); info.className = 'f-info'
+  const name = document.createElement('div'); name.className = 'f-name'; name.textContent = env.name; name.title = env.name
+  const sub = document.createElement('div'); sub.className = 'f-sub'
+  sub.textContent = humanSize(env.size) + (fileGone(env) ? ' · ' + tr('wygasł') : '')
+  info.append(name, sub)
+  const act = document.createElement('button'); act.className = 'f-act'
+  act.textContent = fileGone(env) ? tr('Wygasł') : tr('Pobierz')
+  act.disabled = fileGone(env)
+  act.addEventListener('click', () => void downloadFile(env, act))
+  wrap.append(ico, info, act)
+  const meta = document.createElement('div'); meta.className = 'b-meta'; meta.textContent = utcHHMM(ts) + ' UTC'
+  bub.append(wrap, meta)
+  row.appendChild(bub); box.appendChild(row)
+  refreshJump()
+}
+
+
+/** How long the store keeps an upload. Advisory: the fetch is what decides, and
+ *  the node collects within a minute of expiry — so this is used to grey a
+ *  bubble out, never to claim precision the mechanism does not have. */
+const FILE_TTL_MS = 5 * 60_000
+
+const humanSize = (n: number) =>
+  n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} kB` : `${n} B`
+
+/**
+ * Encrypt a file, upload the ciphertext, and send the metadata down whichever
+ * conversation is on screen.
+ *
+ * The order is the point: the bytes are ciphertext before they leave the
+ * device, and everything needed to read them — key, name, type, chunking —
+ * travels in the envelope over the ratchet or a group sender key. The store
+ * gets a nameless blob and its size, and holds it for minutes.
+ */
+async function attachFile(f: File) {
+  const gid = activeGid
+  const room = gid ? null : activeRoom()
+  if (!gid && !room?.conv) return
+  if (f.size > MAX_FILE) { toast(tr('Plik jest za duży — limit to {mb} MB', { mb: Math.floor(MAX_FILE / 1024 / 1024) })); return }
+
+  const sys = (text: string) => gid ? recordGroup(groupsUI.get(gid)!, { t: 'sys', text }) : record(room!, { t: 'sys', text })
+  sys(tr('Szyfruję i wysyłam {name}…', { name: f.name }))
+  try {
+    const key = newFileKey()
+    const plain = new Uint8Array(await f.arrayBuffer())
+    const { manifest, cipher } = await encryptBytes(key, plain)
+    const { cid } = await putBlob(cipher)
+    ;(window as any).__lastFileCid = cid // read by the browser harness; harmless elsewhere
+    const meta = {
+      cid, name: f.name, size: f.size, mime: f.type || 'application/octet-stream',
+      key: b64(key), chunk: manifest.chunk, chunks: manifest.chunks, alg: manifest.alg,
+      exp: nowMs() + FILE_TTL_MS,
+    }
+    const env = { v: 1, t: 'file', id: '', ts: nowMs(), seq: 0, ...meta } as unknown as FileEnv
+    if (gid) {
+      const gu = groupsUI.get(gid)!
+      env.id = await gu.room!.sendFile(meta)
+      recordGroup(gu, { t: 'file', kind: 'me', ts: nowMs(), file: env })
+    } else {
+      env.id = room!.conv!.sendFile(meta)
+      record(room!, { t: 'file', kind: 'me', ts: nowMs(), file: env })
+    }
+  } catch (e: any) {
+    ecLog('file upload failed: ' + (e?.message ?? e))
+    sys(tr('Nie udało się wysłać pliku: {err}', { err: e?.message ?? String(e) }))
+  }
+}
+
+/** Has this file outlived the store's retention? Advisory — the fetch decides. */
+const fileGone = (f: FileEnv) => !!f.exp && nowMs() > f.exp
+
+/**
+ * Fetch, decrypt, and hand the result to the browser as a download.
+ *
+ * A file that is no longer there is not an error: this store drops uploads
+ * after minutes by design, so the user is told to ask for it again rather than
+ * to retry something that will never work.
+ */
+async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
+  const was = btn.textContent
+  btn.disabled = true; btn.textContent = tr('Pobieram…')
+  try {
+    const cipher = await getBlob(env.cid)
+    const plain = await decryptBytes(unb64(env.key), { alg: env.alg as any, chunk: env.chunk, chunks: env.chunks, size: env.size }, cipher)
+    const url = URL.createObjectURL(new Blob([plain as any], { type: env.mime }))
+    const a = document.createElement('a')
+    a.href = url; a.download = env.name; a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    btn.textContent = tr('Zapisano')
+  } catch (e: any) {
+    const gone = e?.name === 'ExpiredError'
+    btn.textContent = gone ? tr('Wygasł') : tr('Błąd')
+    btn.closest('.b-file')?.classList.toggle('gone', gone)
+    if (!gone) ecLog('file download failed: ' + (e?.message ?? e))
+    if (gone) toast(tr('Plik wygasł — poproś o ponowne wysłanie'))
+    setTimeout(() => { btn.disabled = false; btn.textContent = was ?? '' }, 2500)
+  }
+}
+
 // ---- links in a message ---------------------------------------------------
 /**
  * Whether the "you are leaving" warning has been silenced for this session.
@@ -1186,6 +1312,7 @@ function applyEv(ev: Ev) {
   if (ev.t === 'msg') appendMsg(ev.kind, ev.text, ev.ts, ev.id, ev.ooo, ev.who, ev.sent)
   else if (ev.t === 'react') addReaction(ev.id, ev.emoji)
   else if (ev.t === 'delivery') setDelivery(ev.id, ev.state, ev.ms)
+  else if (ev.t === 'file') appendFile(ev.kind, ev.file, ev.ts, ev.who)
   else appendMsg('sys', ev.text)
 }
 
@@ -1272,7 +1399,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
       },
       onTyping: (_from, state) => { peerTyping = state === 'start'; if (room === activeRoom()) setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => record(room, { t: 'react', id: r.to, emoji: r.emoji }),
-      onFile: (_from, f) => record(room, { t: 'sys', text: tr('{who} udostępnił plik: {file} — interim (IPFS TODO)', { who: contact.name, file: f.name }) }),
+      onFile: (_from, f) => record(room, { t: 'file', kind: 'peer', ts: nowMs(), file: f }),
       onForeign: () => {
         // The user is the only one who can fix this, so say it in the transcript
         // rather than in a console nobody has open. Two windows on one identity
@@ -1718,6 +1845,10 @@ const groupHandlers = (gid: string) => ({
     recordGroup(groupsUI.get(gid)!, { t: 'msg', kind: from === session?.pub ? 'me' : 'peer', text: env.body, ts: env.ts, id: env.id, who: memberName(from) }),
   onReaction: (_from: string, r: { to: string; emoji: string }) =>
     recordGroup(groupsUI.get(gid)!, { t: 'react', id: r.to, emoji: r.emoji }),
+  // A file in a group is the same envelope as in a 1:1 — every member holds the
+  // key it carries, so each fetches the blob itself within its short life.
+  onFile: (from: string, f: FileEnv) =>
+    recordGroup(groupsUI.get(gid)!, { t: 'file', kind: from === session?.pub ? 'me' : 'peer', ts: nowMs(), file: f, who: memberName(from) }),
   onLog: (m: string) => ecLog('group: ' + m, 'debug'),
 })
 
