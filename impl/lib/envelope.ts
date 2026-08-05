@@ -37,14 +37,37 @@ export interface MsgEnv extends BaseEnv { t: 'msg'; body: string; format: MsgFor
 export interface TypingEnv extends BaseEnv { t: 'typing'; state: TypingState }
 export interface PresenceEnv extends BaseEnv { t: 'presence'; state: PresenceState }
 export interface ReactionEnv extends BaseEnv { t: 'reaction'; to: string; emoji: string }
+/**
+ * A file. The bytes are encrypted BEFORE they are uploaded and this envelope
+ * carries everything needed to get them back — which is why it rides the
+ * ratchet (or a group sender key) like any other message, and why the node
+ * holding the blob learns nothing from it.
+ *
+ * Note what is in HERE rather than in the upload: the name, the type and the
+ * true length. The store sees a nameless blob of ciphertext and its size; it
+ * cannot tell a photo from a contract.
+ *
+ * `chunk` and `chunks` are wire fields, not conventions: the receiver cannot
+ * guess the chunking, and the chunk COUNT is bound into every chunk's AAD, so
+ * this is also what makes a truncated fetch detectable (`lib/filecrypto.ts`).
+ */
 export interface FileEnv extends BaseEnv {
   t: 'file'
-  cid: string // IPFS content id (content is encrypted BEFORE upload — see `key`)
-  name: string
-  size: number
+  cid: string   // content id of the CIPHERTEXT — also its hash, so this authenticates the blob
+  name: string  // original filename; never leaves this envelope
+  size: number  // PLAINTEXT length
   mime: string
-  exp?: number // expiry (epoch ms, UTC) — IPFS auto-drops after N hours
-  key?: string // content key to decrypt the fetched blob (reserved; design TBD)
+  /** Content key, base64. Single-use, generated per file. */
+  key: string
+  /** Plaintext bytes per chunk, as used when encrypting. */
+  chunk: number
+  /** How many chunks the ciphertext must contain. */
+  chunks: number
+  /** AEAD construction, so a future one can coexist. */
+  alg: string
+  /** When the store drops it (epoch ms, UTC). Advisory: the UI says "expired"
+   *  rather than pretending a dead link is alive. */
+  exp?: number
 }
 /**
  * Delivery confirmation. Instant-only product: this says "it reached the other
@@ -118,7 +141,14 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
     case 'typing': return TYPING.has(m.state) ? (m as TypingEnv) : null
     case 'presence': return PRESENCE.has(m.state) ? (m as PresenceEnv) : null
     case 'reaction': return (typeof m.to === 'string' && typeof m.emoji === 'string') ? (m as ReactionEnv) : null
-    case 'file': return (typeof m.cid === 'string' && typeof m.name === 'string' && typeof m.size === 'number' && typeof m.mime === 'string') ? (m as FileEnv) : null
+    // Every field is required: a file envelope missing its key, chunking or
+    // algorithm is not a partially useful message, it is an undecryptable one,
+    // and accepting it would put a permanently broken bubble in the transcript.
+    case 'file': return (typeof m.cid === 'string' && typeof m.name === 'string'
+      && typeof m.size === 'number' && m.size >= 0 && typeof m.mime === 'string'
+      && typeof m.key === 'string' && typeof m.alg === 'string'
+      && Number.isInteger(m.chunk) && m.chunk > 0
+      && Number.isInteger(m.chunks) && m.chunks > 0) ? (m as FileEnv) : null
     case 'rtc': return (typeof m.to === 'string' && m.sig != null) ? (m as RtcEnv) : null
     case 'ack': return (typeof m.ref === 'string' && typeof m.rts === 'number') ? (m as AckEnv) : null
     case 'group-skd': return (typeof m.gid === 'string' && typeof m.gkPub === 'string' && typeof m.epoch === 'number'

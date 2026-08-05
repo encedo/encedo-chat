@@ -16,7 +16,17 @@ test('typing / presence / reaction / file roundtrip', () => {
   assert.equal(rt(envTyping(2, 'start')).state, 'start')
   assert.equal(rt(envPresence(3, 'away')).state, 'away')
   const r = rt(envReaction(4, 'abc', '👍')); assert.equal(r.to, 'abc'); assert.equal(r.emoji, '👍')
-  const f = rt(envFile(5, { cid: 'Qm123', name: 'a.txt', size: 10, mime: 'text/plain' })); assert.equal(f.name, 'a.txt'); assert.equal(f.size, 10)
+  // A file envelope carries everything needed to decrypt what it points at: the
+  // single-use key, the chunking, the algorithm. All of it is REQUIRED — an
+  // envelope missing any of it describes a blob nobody can open, and accepting
+  // it would put a permanently broken bubble in the transcript.
+  const meta = { cid: 'Qm123', name: 'a.txt', size: 10, mime: 'text/plain', key: 'AAAA', chunk: 4096, chunks: 1, alg: 'A256GCM-chunked-v1' }
+  const f = rt(envFile(5, meta)); assert.equal(f.name, 'a.txt'); assert.equal(f.size, 10)
+  assert.equal(f.chunks, 1); assert.equal(f.key, 'AAAA')
+  for (const missing of ['key', 'chunk', 'chunks', 'alg']) {
+    const bad: any = { ...meta }; delete bad[missing]
+    assert.equal(rt(envFile(5, bad) as any), null, `a file envelope without ${missing} must not decode`)
+  }
 })
 
 test('every envelope carries v / id / ts / seq', () => {
