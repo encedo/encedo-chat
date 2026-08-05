@@ -166,6 +166,56 @@ Presence: Announce/HMAC (§5.5) stays for authenticated discovery/liveness;
 (relay blind). Ctrl+C and `/quit` → `presence:leave` last-will + clean
 `node.stop()`.
 
+### Links in a message — `lib/linkify.ts` + `renderBody` in the web app
+
+A URL in a message is **found but not made clickable**. The address stays inert
+text and a small arrow beside it opens the destination. That is the whole
+design, and both of its properties are the reason for it:
+
+- **The message never becomes markup.** `linkify.ts` returns *ranges* — offsets
+  into the body — and the UI builds text nodes from them. The `textContent`
+  invariant that has held since the envelope was written (`format:'plain'`,
+  never raw HTML) is untouched. Nothing in this path can be persuaded to
+  interpret a message.
+- **What you read is what you would visit.** A phishing link works by showing
+  one string and navigating to another. Here there is no separate label to
+  disagree with the target, because the URL *is* the text and the arrow carries
+  the destination. This is why the module has no notion of "link text".
+
+**What gets no arrow, and why.** These are decisions about what a *stranger's
+message* is allowed to propose, so they fail closed:
+
+| case | behaviour |
+|---|---|
+| any scheme but `http`/`https` | text only. `javascript:` is code execution, `data:` an arbitrary document, `file:` reads the device |
+| credentials in the authority | refused. `https://bank.example@attacker.tld` reads as the bank and goes to the attacker; no honest use in a chat |
+| non-ASCII host | arrow, but **flagged**, with the punycode the browser will resolve — `аpple.com` with a Cyrillic а renders identically to the real one |
+| bare `www.` / `example.com` | not detected. Guessing a scheme is guessing intent |
+| trailing `.,;:!?` and unbalanced brackets | trimmed back to the sentence; `…/X_(Y)` keeps its balanced pair |
+
+**Opening asks first, and says what it costs.** The destination learns your IP
+and the time you arrived — precisely the metadata the rest of the app works to
+avoid — so the dialog states that rather than opening silently. It carries a
+*don't show again* which **lives in RAM**: a dismissed security warning must not
+outlive the session in which it was dismissed, and nothing else here survives a
+reload either. The host is also in the arrow's tooltip, before any click.
+
+**Always a new tab.** Not a preference: navigating away from a live session
+tears down the transport and every ratchet with it. `rel="noopener noreferrer"`
+plus `referrerpolicy="no-referrer"` stop the destination reaching back into the
+window or learning where the visitor came from.
+
+**Deliberately absent: link previews.** Fetching a thumbnail means the *app*
+contacts a stranger's server for every message that contains a URL, before
+anyone has clicked anything. That is a metadata leak this product should not
+accept, and it is not a feature waiting on time.
+
+Covered by `test/linkify.test.ts` (the finder, including each refusal) and a
+`browser-test` scenario that asserts what actually matters in the DOM: the URL
+sits **outside** the anchor, the arrow points at exactly the URL in the message,
+`target`/`rel`/`referrerpolicy` are set, and a `javascript:` URL produces no
+anchor at all.
+
 ### Sessions and rooms — `lib/core.ts`
 
 **One transport per client, many rooms on it.** `startSession(id, …)` owns the
