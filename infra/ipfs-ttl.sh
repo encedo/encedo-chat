@@ -1,20 +1,32 @@
 #!/bin/sh
-# ipfs-ttl-http.sh — the expiry job, over the RPC instead of the CLI.
+# ipfs-ttl.sh — give uploads a lifetime on a node that has no concept of one.
 #
-# Same logic as ipfs-ttl-gc.sh; the difference is where it runs. Kubo lives in a
-# container, so rather than giving a host cron access to the docker socket —
-# which is root on the host, a large privilege for a cleanup task — this runs as
-# a sidecar on the same docker network and speaks HTTP to the node.
+# Runs on the HOST, from cron, and speaks the RPC over HTTP. That works whether
+# Kubo is installed on the machine or running in a container, because either way
+# it listens on 127.0.0.1:5001 — so there is one script rather than a CLI
+# variant and an HTTP one drifting apart, and no need to give cron access to the
+# docker socket (which is root on the host, for a job that deletes directory
+# entries).
 #
-# That works because the RPC lockdown lives at HAProxy, not in Kubo: `files/*`
-# and `repo/gc` are refused from outside and still reachable from inside the
-# network. Worth knowing rather than discovering: the lockdown protects against
-# the world, not between containers.
+#     IPFS_API=http://127.0.0.1:5001 TTL=300 sh ipfs-ttl.sh
 #
-#     IPFS_API=http://ipfs1:5001 TTL=300 sh ipfs-ttl-http.sh
+# It must go through the LOCAL api, not rpc.ipfs.encedo.com: `files/*` and
+# `repo/gc` are refused at the edge on purpose. The lockdown protects against
+# the world, not against this host.
 #
-# Why MFS holds the ledger, and why `repo gc` on a timer is not an expiry, are
-# explained in ipfs-ttl-gc.sh — that reasoning is unchanged.
+# IPFS has no TTL, and the usual workaround is not one: adding unpinned and
+# running `repo gc` on a timer removes everything unpinned whenever the timer
+# fires, so a file uploaded ten seconds before a sweep lives ten seconds. That
+# is a lottery.
+#
+# So the ledger lives in MFS. Every upload lands at /ec/<epoch>-<request-id>,
+# and an MFS entry keeps its blocks alive (the MFS root is pinned), so `repo gc`
+# cannot take a file while it is listed. The directory listing therefore IS the
+# upload log — CID and timestamp together, nothing beside it to fall out of
+# sync, nothing to restore if this script dies mid-run.
+#
+# Actual lifetime is TTL plus up to one sweep — "five minutes, collected within
+# a minute of expiring". The UI must not promise more precision than that.
 
 set -eu
 
