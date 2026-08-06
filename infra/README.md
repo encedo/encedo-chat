@@ -9,8 +9,14 @@ three spellings of one:
 - **`rpc.ipfs.encedo.com`** — the Kubo RPC, behind HAProxy: an IP allow-list,
   `POST` only, and an exact list of two paths (`/api/v0/add`, `/api/v0/cat`).
 - **`ipfs.encedo.com`** — the read gateway, and it is **deliberately public**.
-  Knowing a CID is the capability: the blob is ciphertext, and the key travels
-  in the envelope over the ratchet, never here.
+  Knowing a CID is the capability: for a chat file the blob is ciphertext and the
+  key travels in the envelope over the ratchet, never here.
+
+This node is not only the chat store. It is also the **source of truth for
+published content** — firmware and similar — which readers fetch by CID through
+whatever gateway they happen to use, ours or ipfs.io or Cloudflare. That second
+role is why it stays in the public network at all, and why announcing is tuned
+rather than switched off; see step 4.
 - **`webui.ipfs.encedo.com`** — the management console, on a narrower IP list
   plus HTTP basic auth. It reaches the **full** admin API, on purpose, because a
   console that cannot call `files` or `config` is not a console. The IP list and
@@ -121,48 +127,102 @@ metadata the rest of the product avoids. The content is useless without a key
 that never touches this host, and abuse is bounded by the size cap, the rate
 limit and a five-minute life.
 
-**4. Do not announce content to the public DHT.** The reason is not privacy —
-it is that **announcing breaks the TTL**. A provider record invites foreign
-nodes to fetch the blob and cache it, and once a copy exists elsewhere, `files
-rm` plus `repo gc` end *our* copy's life, not the file's. The five-minute lease
-is enforceable only while ours is the only copy. Announcing also ties this
-node's PeerID to a list of CIDs with timestamps, which is the transfer metadata
-the rest of the product goes out of its way not to keep.
+**4. Announce ONLY what is pinned.** This node has two jobs that want opposite
+settings, and the pin is what separates them.
 
-Nothing is lost by turning it off. Every reader comes through our own HTTP — the
-app via `/f/<cid>`, anyone else via the gateway — and neither path consults the
-DHT. Announcing serves only foreign peer-to-peer retrieval, which is exactly the
-traffic this node does not exist to serve.
+It is the **source of truth for published content** — firmware among other
+things — which is fetched by CID from whatever gateway the reader happens to
+use: ours, ipfs.io, Cloudflare. That only works if the node **announces**.
+A public gateway handed a CID asks the DHT who has it; with no provider record
+there is no way to find this node, and the fetch times out. Our own gateway
+would still answer, because it reads the local repository rather than the
+network — which makes this failure look like "works for me" from the inside.
 
-```bash
-docker exec ipfs1 ipfs config Gateway.NoFetch     # true: the gateway serves only what is local
-docker exec ipfs1 ipfs config Routing.Type        # "not found" = unset = the default, which is `auto`
-docker exec ipfs1 ipfs config show | grep -B2 -A10 -iE '"(provide|reprovider)"'
-```
+It is also the **short-lived store for chat files**, and there announcing is
+what breaks the five-minute lease: a provider record invites foreign nodes to
+fetch and cache a blob, and once a copy exists elsewhere, `files rm` plus
+`repo gc` end *our* copy's life, not the file's.
 
-**Check the key name against the running version rather than assuming it** — the
-announcing config moved from `Reprovider.*` to `Provide.*` between releases, and
-which one applies depends on the binary in front of you. `Reprovider.Interval 0`
-or `Provide.Enabled false` disables it; restart the container afterwards.
+The split is already built, so it costs nothing to use:
 
-If selective announcing is ever wanted, the strategies are `all`, `pinned`,
-`mfs` and `pinned+mfs`. **Granularity stops at the whole MFS — there is no
-per-path selector**, so `mfs` cannot be narrowed to `/ec`. Today `/ec` is all
-that MFS holds, which makes the two equivalent by accident rather than by
-guarantee: anything else ever written to MFS joins the announcement.
-
-`Routing.Type=none` is the blunt version and goes too far — it also stops the
-node *fetching*, which is how the WebUI got here (`ipfs pin add`, since
-`Gateway.NoFetch=true` stops the gateway but not bitswap). `autoclient` is the
-middle setting: still fetches, no longer answers strangers' DHT queries.
-
-Verify with a public gateway, before and after — a success proves you are
-discoverable, while a single failure proves little, since public gateways time
-out for their own reasons:
+| content | how it arrives | pinned? | announced? |
+|---|---|---|---|
+| firmware, the node list, the WebUI | `ipfs add --pin=true` | yes | yes |
+| chat files | `/f` → `add?pin=false&to-files=/ec/…` | no — an MFS entry keeps the blocks | no |
 
 ```bash
-curl -sI --max-time 25 https://dweb.link/ipfs/<cid> | head -1
+docker exec ipfs1 ipfs config --json Provide.Enabled true
+docker exec ipfs1 ipfs config Provide.Strategy pinned
+docker restart ipfs1 && sleep 30
+docker exec ipfs1 ipfs stats provide
 ```
+
+The strategies are `all`, `pinned`, `mfs` and `pinned+mfs`. **There is no
+per-path selector** — `mfs` cannot be narrowed to `/ec` — which is why the pin,
+and not the directory, carries the distinction.
+
+### Verifying it, which is not the same as the command succeeding
+
+Two checks that must give OPPOSITE answers. Either one alone proves nothing:
+
+```bash
+# published content: a THIRD-PARTY gateway must find it (-L: dweb.link and
+# ipfs.io redirect to a subdomain gateway, and -I alone stops at the 301)
+curl -sL -o /dev/null -w "%{http_code}\n" --max-time 60 https://ipfs.io/ipfs/<pinned-cid>
+
+# a chat file, WITHIN its five minutes: unreachable from outside, ours serves it
+curl -sL -o /dev/null -w "%{http_code}\n" --max-time 60 https://ipfs.io/ipfs/<file-cid>
+curl -s  -o /dev/null -w "%{http_code}\n" https://onchato.com/f/<file-cid>
+```
+
+Get the file CID from the app: open it with `?debug=1` and read the
+`file evidence` line the console prints on send.
+
+If both gateway checks succeed, the strategy did not take. If both fail,
+announcing is off altogether and published content is reachable only through
+our own gateway.
+
+### Three ways this lies to you
+
+**`ipfs config show` prints only what is explicitly set.** An empty grep for
+`Provide` or `Reprovider` means "running on defaults", not "disabled" — the same
+reason `Routing.Type` answers "not found" on a node that is very much routing.
+Read the behaviour, not the config.
+
+**`ipfs config` accepts any key name you give it**, including a misspelt or
+obsolete one. It writes it, the daemon ignores it, and the command reports
+success. The announcing config moved from `Reprovider.*` to `Provide.*` between
+releases, so this is a live trap rather than a hypothetical: on 0.42 the section
+is `Provide`, and if a change appears to do nothing, suspect the key name before
+suspecting the daemon.
+
+**`ipfs stats provide` is the ground truth.** With announcing off it does not
+return zero — it fails with `stats not available with current routing system
+*node.NoopProvider`, the provider having been replaced by a stub. That error IS
+the confirmation. With `pinned` it works again and `CIDs scheduled` reflects the
+pinned set: on this deployment it fell from 2,178 under the default to the
+handful that are actually pinned.
+
+**Records already published expire on their own**, on the order of a day, so a
+change to any of this is not retroactive.
+
+### What not to do
+
+`Routing.Type=none`, dropping the bootstrap peers, or a private swarm key would
+each cut the node off from the public network. For a node that only ever served
+its own users that would be tidy; for one that is the source of truth for
+firmware it removes the reason it exists. Leave it in the swarm.
+
+`Gateway.NoFetch=true` is correct and unrelated: it stops the GATEWAY pulling
+foreign content on request — which is what made disk disappear when this ran as
+a public gateway — while leaving bitswap able to fetch, which is how the WebUI
+was installed with `ipfs pin add`.
+
+The read gateway `ipfs.encedo.com` is public and unauthenticated **by design**:
+knowing the CID is the capability. For published content that is the point. For
+chat files it is acceptable because the CID only ever travels inside an
+authenticated envelope and the bytes are useless without a key that never
+reaches this machine.
 
 **5. Install the expiry job** as a sidecar on the docker network. Kubo's RPC is
 not published to the host, so this is the way in that does not require opening a
