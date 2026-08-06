@@ -1169,9 +1169,14 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string)
   sub.textContent = humanSize(env.size) + (fileGone(env) ? ' · ' + tr('wygasł') : '')
   info.append(name, sub)
   const act = document.createElement('button'); act.className = 'f-act'
-  act.textContent = fileGone(env) ? tr('Wygasł') : tr('Pobierz')
-  act.disabled = fileGone(env)
-  act.addEventListener('click', () => void downloadFile(env, act))
+  // No cid yet means it is still being encrypted or uploaded: the button shows
+  // that state instead of offering a download that cannot work. attachFile
+  // updates these two elements as it goes, via `fileEls`.
+  const pending = !env.cid
+  act.textContent = pending ? tr('Wysyłam…') : fileGone(env) ? tr('Wygasł') : tr('Pobierz')
+  act.disabled = pending || fileGone(env)
+  if (!pending) act.addEventListener('click', () => void downloadFile(env, act))
+  fileEls.set(env, { act, sub })
   wrap.append(ico, info, act)
   bub.appendChild(wrap)
 
@@ -1203,6 +1208,15 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string)
  *  bubble out, never to claim precision the mechanism does not have. */
 const FILE_TTL_MS = 5 * 60_000
 
+/**
+ * A pending file's action button and subtitle, so an upload in flight can keep
+ * them current. Keyed by the envelope OBJECT: the same object is what the room
+ * log holds, so mutating it in place and repainting these two elements is all
+ * it takes for the bubble to become the finished one — no id to reconcile, and
+ * nothing left behind if the room is switched away and replayed.
+ */
+const fileEls = new WeakMap<FileEnv, { act: HTMLButtonElement; sub: HTMLElement }>()
+
 const humanSize = (n: number) =>
   n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} kB` : `${n} B`
 
@@ -1228,13 +1242,34 @@ async function attachFile(f: File) {
   const caption = inp.value.trim()
   inp.value = ''
 
-  const sys = (text: string) => gid ? recordGroup(groupsUI.get(gid)!, { t: 'sys', text }) : record(room!, { t: 'sys', text })
-  sys(tr('Szyfruję i wysyłam {name}…', { name: f.name }))
+  // The bubble appears NOW, before any work — on an 80 MB file the encrypt and
+  // upload take long enough that a line of system text is indistinguishable
+  // from a freeze. It is the same bubble that will hold the finished file; only
+  // its action changes, from a progress label to Download.
+  const pending: FileEnv = {
+    v: 1, t: 'file', id: '', ts: nowMs(), seq: 0,
+    cid: '', name: f.name, size: f.size, mime: f.type || 'application/octet-stream',
+    key: '', chunk: 0, chunks: 0, alg: '',
+    ...(caption ? { body: caption } : {}),
+  } as unknown as FileEnv
+  if (gid) recordGroup(groupsUI.get(gid)!, { t: 'file', kind: 'me', ts: pending.ts, file: pending })
+  else record(room!, { t: 'file', kind: 'me', ts: pending.ts, file: pending })
+
+  const show = (label: string, sub?: string) => {
+    const els = fileEls.get(pending); if (!els) return
+    els.act.textContent = label
+    if (sub !== undefined) els.sub.textContent = sub
+  }
+  const pct = (a: number, b: number) => b > 0 ? Math.round((a / b) * 100) : 0
+
   try {
     const key = newFileKey()
     const plain = new Uint8Array(await f.arrayBuffer())
-    const { manifest, cipher } = await encryptBytes(key, plain)
-    const { cid } = await putBlob(cipher)
+    const { manifest, cipher } = await encryptBytes(key, plain, undefined,
+      (done, total) => show(tr('Szyfruję…'), `${humanSize(f.size)} · ${pct(done, total)}%`))
+    const { cid } = await putBlob(cipher, {
+      onProgress: (sent, total) => show(tr('Wysyłam…'), `${humanSize(f.size)} · ${pct(sent, total)}%`),
+    })
     ;(window as any).__lastFileCid = cid // read by the browser harness; harmless elsewhere
     const meta = {
       cid, name: f.name, size: f.size, mime: f.type || 'application/octet-stream',
@@ -1242,18 +1277,18 @@ async function attachFile(f: File) {
       exp: nowMs() + FILE_TTL_MS,
       ...(caption ? { body: caption } : {}),
     }
-    const env = { v: 1, t: 'file', id: '', ts: nowMs(), seq: 0, ...meta } as unknown as FileEnv
-    if (gid) {
-      const gu = groupsUI.get(gid)!
-      env.id = await gu.room!.sendFile(meta)
-      recordGroup(gu, { t: 'file', kind: 'me', ts: nowMs(), file: env })
-    } else {
-      env.id = room!.conv!.sendFile(meta)
-      record(room!, { t: 'file', kind: 'me', ts: nowMs(), file: env })
-    }
+    // Fill the SAME object the log already holds, so the pending bubble becomes
+    // the finished one and a replay after switching rooms shows the real file.
+    Object.assign(pending, meta)
+    pending.id = gid ? await groupsUI.get(gid)!.room!.sendFile(meta) : room!.conv!.sendFile(meta)
+    if (pending.id) msgEls.set(pending.id, fileEls.get(pending)?.act.closest('.bubble')?.querySelector('.b-reactions') as HTMLElement)
+    show(tr('Pobierz'), humanSize(f.size))
+    const els = fileEls.get(pending)
+    if (els) { els.act.disabled = false; els.act.onclick = () => void downloadFile(pending, els.act) }
   } catch (e: any) {
     ecLog('file upload failed: ' + (e?.message ?? e))
-    sys(tr('Nie udało się wysłać pliku: {err}', { err: e?.message ?? String(e) }))
+    show(tr('Błąd'), tr('nie wysłano'))
+    fileEls.get(pending)?.act.closest('.b-file')?.classList.add('gone')
   }
 }
 

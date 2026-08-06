@@ -52,22 +52,46 @@ export interface PutOpts {
  * whole blob for free, authenticated by the channel the envelope travelled on.
  */
 export async function putBlob(bytes: Uint8Array | Blob, opts: PutOpts = {}): Promise<PutResult> {
-  const f = opts.fetchImpl ?? fetch
   const body = new FormData()
   // Kubo's /add wants multipart. The name is a placeholder: the real one is in
   // the envelope, and the store has no business knowing it.
   body.append('file', bytes instanceof Blob ? bytes : new Blob([bytes as any]), 'b')
-  const res = await f(IPFS_PUT, { method: 'POST', body, signal: opts.signal })
-  if (!res.ok) throw new Error(`upload failed: HTTP ${res.status}`)
-  const text = (await res.text()).trim()
+
+  // `fetch` cannot report upload progress — there is no event for bytes sent.
+  // On an 80 MB file the upload is the longest phase by far, so when a caller
+  // wants progress we use XHR, which does. Everything else keeps fetch, which
+  // is also what makes the tests injectable.
+  const text = (opts.onProgress && typeof XMLHttpRequest === 'function')
+    ? await xhrPost(IPFS_PUT, body, opts)
+    : await (async () => {
+        const res = await (opts.fetchImpl ?? fetch)(IPFS_PUT, { method: 'POST', body, signal: opts.signal })
+        if (!res.ok) throw new Error(`upload failed: HTTP ${res.status}`)
+        return (await res.text()).trim()
+      })()
   // /add streams one JSON object per line; the last is the root.
-  const last = text.split('\n').filter(Boolean).pop()
+  const last = text.trim().split('\n').filter(Boolean).pop()
   if (!last) throw new Error('upload returned nothing')
   let j: any
   try { j = JSON.parse(last) } catch { throw new Error(`upload returned non-JSON: ${last.slice(0, 120)}`) }
   const cid = j.Hash ?? j.Cid?.['/']
   if (typeof cid !== 'string' || !isCid(cid)) throw new Error(`upload returned no usable CID: ${last.slice(0, 120)}`)
   return { cid, size: Number(j.Size) || 0 }
+}
+
+/** POST with upload progress. Separate because it is the only reason XHR is here. */
+function xhrPost(url: string, body: FormData, opts: PutOpts): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest()
+    x.open('POST', url)
+    x.upload.onprogress = (e) => { if (e.lengthComputable) opts.onProgress!(e.loaded, e.total) }
+    x.onload = () => x.status >= 200 && x.status < 300
+      ? resolve(x.responseText)
+      : reject(new Error(`upload failed: HTTP ${x.status}`))
+    x.onerror = () => reject(new Error('upload failed: network error'))
+    x.onabort = () => reject(new Error('upload aborted'))
+    opts.signal?.addEventListener('abort', () => x.abort(), { once: true })
+    x.send(body)
+  })
 }
 
 export class ExpiredError extends Error {

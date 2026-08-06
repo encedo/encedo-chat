@@ -116,11 +116,23 @@ export async function decryptChunk(keyRaw: Uint8Array, m: FileManifest, index: n
   return new Uint8Array(pt)
 }
 
-/** Whole-buffer convenience — for tests and small files. Big ones stream. */
-export async function encryptBytes(keyRaw: Uint8Array, plain: Uint8Array, chunk = DEFAULT_CHUNK) {
+/**
+ * Whole-buffer convenience — for tests and small files. Big ones stream.
+ *
+ * `onProgress` exists because a 128 MB file is tens of chunks and several
+ * seconds of work: without it the UI has nothing to report between "started"
+ * and "done", which on a large file is indistinguishable from a freeze.
+ */
+export async function encryptBytes(
+  keyRaw: Uint8Array, plain: Uint8Array, chunk = DEFAULT_CHUNK,
+  onProgress?: (done: number, total: number) => void,
+) {
   const m = planChunks(plain.length, chunk)
   const parts: Uint8Array[] = []
-  for (let i = 0; i < m.chunks; i++) parts.push(await encryptChunk(keyRaw, m, i, plain.subarray(i * m.chunk, (i + 1) * m.chunk)))
+  for (let i = 0; i < m.chunks; i++) {
+    parts.push(await encryptChunk(keyRaw, m, i, plain.subarray(i * m.chunk, (i + 1) * m.chunk)))
+    onProgress?.(i + 1, m.chunks)
+  }
   const total = parts.reduce((n, p) => n + p.length, 0)
   const out = new Uint8Array(total)
   let at = 0

@@ -245,8 +245,9 @@
   .b-file .f-act[disabled]{opacity:.55;cursor:default}
   .b-file.gone .f-name{text-decoration:line-through;opacity:.7}
   /* A caption sits under its file, the way Signal reads: the attachment first,
-     then what was said about it. */
-  .b-caption{margin-top:8px}
+     then what was said about it — with a hairline between, so the two read as
+     related rather than as one run-on block. */
+  .b-caption{margin-top:8px;padding-top:8px;border-top:1px solid rgba(128,128,128,.18)}
   .b-text .lnk{display:inline-flex;align-items:center;justify-content:center;margin:0 2px;padding:0 4px;
     border-radius:6px;background:var(--accent-soft);color:var(--accent);text-decoration:none;
     font-weight:700;line-height:1.4;vertical-align:baseline}
