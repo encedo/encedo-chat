@@ -212,7 +212,18 @@
   .rchip{font-size:12px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1px 6px;line-height:1.35}
   .typing{font-size:12px;color:var(--muted);font-style:italic;min-height:16px;padding:0 20px 4px}
   .composer{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--border)}
-  .composer input{flex:1}
+  /* The clip sits INSIDE the field, at its right edge — the field and the clip
+     read as one control, so attaching feels like part of writing rather than a
+     separate mode. The wrapper carries the border; the input gives its up. */
+  .composer-field{flex:1;display:flex;align-items:center;min-width:0;
+    border:1px solid var(--border);border-radius:8px;background:var(--bg)}
+  .composer-field input{flex:1;min-width:0;border:none;background:none;padding-right:4px}
+  .composer-field input:focus-visible{outline:none}
+  .composer-field:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+  .composer-field .clip{border:none;background:none;color:var(--muted);font-size:17px;
+    line-height:1;padding:8px 10px;border-radius:8px;flex-shrink:0}
+  .composer-field .clip:hover{color:var(--accent)}
+  @media (pointer:coarse){.composer-field .clip{padding:10px 12px}}
   .btn-send{background:var(--accent);color:var(--accent-ink);border:none;padding:0 22px;border-radius:8px;font-weight:600}
   /* Destructive confirm: the affirmative button must not look like the safe
      default, because "Tak" here deletes something. */
@@ -233,6 +244,9 @@
     border-radius:8px;padding:6px 12px;font-weight:600;font-size:12.5px;cursor:pointer}
   .b-file .f-act[disabled]{opacity:.55;cursor:default}
   .b-file.gone .f-name{text-decoration:line-through;opacity:.7}
+  /* A caption sits under its file, the way Signal reads: the attachment first,
+     then what was said about it. */
+  .b-caption{margin-top:8px}
   .b-text .lnk{display:inline-flex;align-items:center;justify-content:center;margin:0 2px;padding:0 4px;
     border-radius:6px;background:var(--accent-soft);color:var(--accent);text-decoration:none;
     font-weight:700;line-height:1.4;vertical-align:baseline}
@@ -437,8 +451,11 @@
         <div class="typing" id="typing-ind"></div>
         <div class="composer">
           <input type="file" id="file-input" hidden>
-          <button class="icon-btn" id="btn-attach" title="Wyślij plik" data-i18n-title="Wyślij plik">📎</button>
-          <input id="msg-input" type="text" placeholder="Wiadomość… (Enter = wyślij)" data-i18n-placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off"><button class="btn-send" id="send" data-i18n="Wyślij ➤">Wyślij ➤</button></div>
+          <div class="composer-field">
+            <input id="msg-input" type="text" placeholder="Wiadomość… (Enter = wyślij)" data-i18n-placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off">
+            <button class="clip" id="btn-attach" title="Dołącz plik" data-i18n-title="Dołącz plik" aria-label="Dołącz plik">📎</button>
+          </div>
+          <button class="btn-send" id="send" data-i18n="Wyślij ➤">Wyślij ➤</button></div>
       </div>
     </main>
   </div>

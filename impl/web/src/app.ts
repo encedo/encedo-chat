@@ -992,13 +992,7 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   bub.append(t, m, rx); row.appendChild(bub)
   if (id) {
     msgEls.set(id, rx)
-    const bar = document.createElement('div'); bar.className = 'b-react'
-    for (const e of QUICK_EMOJI) {
-      const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = e
-      btn.addEventListener('click', () => { row.classList.remove('tapped'); const r = activeRoom(); if (!r?.conv) return; r.conv.sendReaction(id, e); record(r, { t: 'react', id, emoji: e }) })
-      bar.appendChild(btn)
-    }
-    row.appendChild(bar)
+    attachReactionBar(row, id)
     // Touch has no hover: tap the bubble to reveal its reaction bar (one row at a
     // time), tap again to hide. On desktop hover still shows it; this just adds a
     // way in for fingers without a permanently-visible bar on every message.
@@ -1128,6 +1122,35 @@ function paintTransport(room: Room) {
 }
 
 
+/**
+ * The quick-reaction bar, for any bubble that has an id.
+ *
+ * Shared because it has to be: it is attached to messages and to files, in 1:1
+ * rooms and in groups, and the version this replaced knew only about
+ * `activeRoom()` — which is null whenever a group is on screen, so the bar was
+ * inert in every group without anything saying so.
+ */
+function attachReactionBar(row: HTMLElement, id: string) {
+  const bar = document.createElement('div'); bar.className = 'b-react'
+  for (const e of QUICK_EMOJI) {
+    const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = e
+    btn.addEventListener('click', () => {
+      row.classList.remove('tapped')
+      if (activeGid) {
+        const gu = groupsUI.get(activeGid); if (!gu?.room) return
+        void gu.room.sendReaction(id, e)
+        recordGroup(gu, { t: 'react', id, emoji: e })
+      } else {
+        const r = activeRoom(); if (!r?.conv) return
+        r.conv.sendReaction(id, e)
+        record(r, { t: 'react', id, emoji: e })
+      }
+    })
+    bar.appendChild(btn)
+  }
+  row.appendChild(bar)
+}
+
 // ---- files ----------------------------------------------------------------
 /** A file bubble: icon, name, size, and one action. Rendered like any other
  *  event so switching rooms replays it from the log. */
@@ -1150,9 +1173,27 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string)
   act.disabled = fileGone(env)
   act.addEventListener('click', () => void downloadFile(env, act))
   wrap.append(ico, info, act)
+  bub.appendChild(wrap)
+
+  // The caption goes through the SAME renderer as a message body — text nodes
+  // and link arrows, never markup. A second way of showing user text is how the
+  // two drift apart and one of them ends up interpreting something.
+  if (env.body) {
+    const cap = document.createElement('div'); cap.className = 'b-text b-caption'
+    renderBody(cap, env.body)
+    bub.appendChild(cap)
+  }
+
   const meta = document.createElement('div'); meta.className = 'b-meta'; meta.textContent = utcHHMM(ts) + ' UTC'
-  bub.append(wrap, meta)
-  row.appendChild(bub); box.appendChild(row)
+  // Reactions need both halves: somewhere to draw them, and an entry in msgEls
+  // so an incoming reaction can find this bubble. appendFile had neither, which
+  // is why files could not be reacted to at all.
+  const rx = document.createElement('div'); rx.className = 'b-reactions'
+  bub.append(meta, rx)
+  if (env.id) msgEls.set(env.id, rx)
+  row.appendChild(bub)
+  if (env.id) attachReactionBar(row, env.id)
+  box.appendChild(row)
   refreshJump()
 }
 
@@ -1180,6 +1221,13 @@ async function attachFile(f: File) {
   if (!gid && !room?.conv) return
   if (f.size > MAX_FILE) { toast(tr('Plik jest za duży — limit to {mb} MB', { mb: Math.floor(MAX_FILE / 1024 / 1024) })); return }
 
+  // Whatever is in the composer travels WITH the file, as one message. Taken
+  // and cleared now, before the encrypt/upload await, so what is sent is what
+  // the user saw when they picked the file — not whatever they typed since.
+  const inp = $('msg-input') as HTMLInputElement
+  const caption = inp.value.trim()
+  inp.value = ''
+
   const sys = (text: string) => gid ? recordGroup(groupsUI.get(gid)!, { t: 'sys', text }) : record(room!, { t: 'sys', text })
   sys(tr('Szyfruję i wysyłam {name}…', { name: f.name }))
   try {
@@ -1192,6 +1240,7 @@ async function attachFile(f: File) {
       cid, name: f.name, size: f.size, mime: f.type || 'application/octet-stream',
       key: b64(key), chunk: manifest.chunk, chunks: manifest.chunks, alg: manifest.alg,
       exp: nowMs() + FILE_TTL_MS,
+      ...(caption ? { body: caption } : {}),
     }
     const env = { v: 1, t: 'file', id: '', ts: nowMs(), seq: 0, ...meta } as unknown as FileEnv
     if (gid) {

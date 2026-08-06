@@ -718,6 +718,7 @@ async function main() {
       const fileTok = `plik-${Date.now().toString(36)}`
       const body = `TAJNE-${fileTok}-${'x'.repeat(3000)}`
       await A.eval(`
+        document.getElementById('msg-input').value = 'podpis do pliku';
         const dt = new DataTransfer();
         dt.items.add(new File([${JSON.stringify(body)}], ${JSON.stringify(fileTok + '.txt')}, { type: 'text/plain' }));
         const i = document.getElementById('file-input');
@@ -741,6 +742,25 @@ async function main() {
       `)
       if (!got.hasAction) throw new Error('the file bubble offers no download')
       step('and a download action, with the size the sender saw')
+
+      // A caption travels WITH the file, in one envelope, so it lands in the
+      // same bubble — and that bubble must be reactable like any other, which
+      // it was not: appendFile built neither a reactions container nor an entry
+      // for an incoming reaction to find.
+      const bubble = await B.eval<any>(`
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(fileTok)}));
+        return {
+          caption: (row.querySelector('.b-caption') || {}).textContent || '',
+          hasReactions: !!row.querySelector('.b-reactions'),
+          hasReactBar: !!row.querySelector('.b-react button'),
+          oneBubble: row.querySelectorAll('.bubble').length,
+        };
+      `)
+      if (!bubble.caption.includes('podpis')) throw new Error(`caption missing: ${JSON.stringify(bubble.caption)}`)
+      if (bubble.oneBubble !== 1) throw new Error('file and caption were not one message')
+      if (!bubble.hasReactions || !bubble.hasReactBar) throw new Error('the file bubble cannot be reacted to')
+      step('the caption is in the same bubble, and the bubble takes reactions')
 
       // The store must not be able to read it: fetch the raw blob and look.
       const leaked = await B.eval<boolean>(`

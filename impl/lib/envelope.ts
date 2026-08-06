@@ -68,6 +68,16 @@ export interface FileEnv extends BaseEnv {
   /** When the store drops it (epoch ms, UTC). Advisory: the UI says "expired"
    *  rather than pretending a dead link is alive. */
   exp?: number
+  /**
+   * Optional caption, sent WITH the file rather than beside it.
+   *
+   * One envelope, not two, because delivery is tracked per message id: two
+   * envelopes for one user action would put two acks and two markers on one
+   * bubble, and could arrive apart or out of order, leaving a caption with no
+   * file or a file with no caption to reconcile. Same plain-text rule as
+   * `MsgEnv` — rendered as text nodes, never as markup.
+   */
+  body?: string
 }
 /**
  * Delivery confirmation. Instant-only product: this says "it reached the other
@@ -148,7 +158,8 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
       && typeof m.size === 'number' && m.size >= 0 && typeof m.mime === 'string'
       && typeof m.key === 'string' && typeof m.alg === 'string'
       && Number.isInteger(m.chunk) && m.chunk > 0
-      && Number.isInteger(m.chunks) && m.chunks > 0) ? (m as FileEnv) : null
+      && Number.isInteger(m.chunks) && m.chunks > 0
+      && (m.body === undefined || typeof m.body === 'string')) ? (m as FileEnv) : null
     case 'rtc': return (typeof m.to === 'string' && m.sig != null) ? (m as RtcEnv) : null
     case 'ack': return (typeof m.ref === 'string' && typeof m.rts === 'number') ? (m as AckEnv) : null
     case 'group-skd': return (typeof m.gid === 'string' && typeof m.gkPub === 'string' && typeof m.epoch === 'number'
