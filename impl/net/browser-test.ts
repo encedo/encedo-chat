@@ -527,33 +527,71 @@ const makePage = (kind: string, name: string): Page => {
 const SOFT_PASS = 'harness-passphrase'
 
 /**
+ * Where a press of the profile button left us. Three outcomes, and the harness
+ * has to tell them apart because two of them are silent: `ask` is the confirm
+ * dialog for a name with no profile behind it — raised from INSIDE the awaited
+ * handler, so the button stays disabled and the profile window stays open the
+ * whole time it is up. Waiting on either of those alone therefore waits for
+ * ever, which is exactly how this harness broke.
+ */
+type SoftStep = 'ask' | 'done' | 'form'
+
+/** Press the profile button and report which of the three surfaces answered. */
+async function pressSoftGo(b: Page, what: string): Promise<SoftStep> {
+  await b.eval(`document.getElementById('soft-go').click(); return 1`)
+  // PBKDF2 at a million rounds is seconds, not milliseconds — read the surface
+  // that appears rather than assuming the press has finished.
+  return b.waitFor<SoftStep>(what, `
+    if (document.getElementById('ask-modal').classList.contains('open')) return 'ask';
+    if (!document.getElementById('soft-modal').classList.contains('open')) return 'done';
+    return document.getElementById('soft-go').disabled ? '' : 'form';
+  `, 30_000)
+}
+
+/** Whatever the form is complaining about — a real message beats a timeout. */
+async function softError(b: Page): Promise<string> {
+  return b.eval<string>(`return document.getElementById('soft-msg').textContent || '(no message)'`)
+}
+
+/**
  * Open the software-profile modal and get through it.
  *
- * A profile that does not exist takes TWO presses: the first reports that there
- * is none and offers to create it, the second creates it. That is the point of
- * the design — a typo in an existing name must not silently mint a new identity
- * — so the harness has to walk it rather than route around it.
+ * A profile that does not exist is created in TWO steps, on two surfaces: the
+ * confirm dialog the rest of the app uses for decisions, then the form again in
+ * creation mode, which asks for the password a second time. That is the point
+ * of the design — a typo in an existing name must not silently mint a new
+ * identity — so the harness walks it rather than routing around it.
  */
 async function softProfile(b: Page, handle: string) {
-  await b.eval(`document.getElementById('go-soft').click(); return 1`)
-  await b.waitFor('software modal', `return document.getElementById('soft-modal').classList.contains('open')`, 20_000)
+  // `go-soft` is in the static markup, so it exists before the bundle has run
+  // and attached its handler: a single click can land on nothing at all and the
+  // modal never opens. Click from inside the wait instead — `openSoftModal` is
+  // idempotent, and this is the only signal that the page is genuinely wired.
+  await b.waitFor('software modal', `
+    const m = document.getElementById('soft-modal');
+    if (!m.classList.contains('open')) document.getElementById('go-soft').click();
+    return m.classList.contains('open');
+  `, 20_000)
   await b.eval(`
     document.getElementById('soft-name').value = ${JSON.stringify(handle)};
     document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)};
-    document.getElementById('soft-go').click();
     return 1;
   `)
-  // PBKDF2 at a million rounds is seconds, not milliseconds — wait for the
-  // button to settle rather than assuming the first click has finished.
-  await b.waitFor('the create prompt or a finished login', `
-    const m = document.getElementById('soft-modal');
-    return !m.classList.contains('open') || !document.getElementById('soft-go').disabled;
-  `, 30_000)
+
+  const first = await pressSoftGo(b, 'the create prompt or a finished login')
+  if (first === 'done') return
+  if (first === 'form') throw new Error(`${b.name}: the profile form refused the name — ${await softError(b)}`)
+
+  await b.eval(`document.getElementById('ask-yes').click(); return 1`)
+  // Creation mode confirms the password, and the second field only exists once
+  // that mode is on — filling it before the switch writes into a hidden input.
+  await b.waitFor('creation mode', `return !document.getElementById('soft-pass2-wrap').hidden`, 10_000)
   await b.eval(`
-    const m = document.getElementById('soft-modal');
-    if (m.classList.contains('open')) document.getElementById('soft-go').click();
+    document.getElementById('soft-pass2').value = ${JSON.stringify(SOFT_PASS)};
     return 1;
   `)
+  const second = await pressSoftGo(b, 'the profile to be created')
+  if (second !== 'done') throw new Error(`${b.name}: the profile was not created — ${await softError(b)}`)
 }
 
 /** Log in with the software identity already in this profile's localStorage. */
