@@ -1,0 +1,132 @@
+# Android bundles (Tauri 2), built UNSIGNED on purpose.
+#
+# The upload key never comes here. CI produces an unsigned .aab/.apk; signing
+# happens on a machine that holds the keystore, and only then does it go to the
+# Play Console, where Play App Signing swaps the upload signature for the real
+# app signing key. That is Google's recommended flow rather than a workaround,
+# and it means a compromised runner cannot ship a build in our name.
+#
+# This mirrors the recipe already proven on the LAN machine
+# (krzysztof-VOSTRO-15-3510, Ubuntu 24.04 x86_64), which exists because the NDK
+# ships a host toolchain for linux-x86_64 ONLY — the development VM is aarch64,
+# so its linker fails with `Exec format error`. GitHub's runners are x86_64.
+# What this adds over that machine is a build per tag that occupies nobody.
+#
+# Signing afterwards, where the keystore lives:
+#
+#   # Play (.aab)
+#   jarsigner -keystore upload.jks -signedjar app-release.aab \
+#             app-universal-release-unsigned.aab <alias>
+#
+#   # sideload (.apk) — release APKs come out UNSIGNED and Android will refuse
+#   # to install one, so both steps are required, in this order
+#   zipalign -f -p 4 app-universal-release-unsigned.apk aligned.apk
+#   apksigner sign --ks upload.jks --out encedo-chat.apk aligned.apk
+#
+# The signing key IS the app's identity: changing it later leaves every existing
+# installation with no update path. Play App Signing is what makes that
+# recoverable for the store; a sideloaded APK has no such safety net.
+name: Android
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    name: android-aab
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: recursive }
+
+      # Tauri's beforeBuildCommand runs `npm run web:build`, so the frontend
+      # toolchain has to exist before cargo is invoked.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: impl/package-lock.json
+      - run: npm ci
+        working-directory: impl
+
+      # 21, matching the JDK the working local build uses. Not a guess about the
+      # minimum Gradle would accept.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      # NDK 27, platform 34, build-tools 34 — the same set as the machine this
+      # is known to build on.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0 ndk;27.1.12297006'
+
+      # Globbed rather than pinned a second time: the package list above decides
+      # the version, and repeating it here is how the two drift apart.
+      - name: Point Tauri at the NDK
+        run: echo "NDK_HOME=$(ls -d "$ANDROID_HOME"/ndk/* | head -1)" >> "$GITHUB_ENV"
+
+      # aarch64 ONLY, and this is not an optimisation: without --target the build
+      # produces all four architectures, which took a local debug build to 487 MB
+      # against 7.9 MB for this. minSdk is 34, so every device that can install
+      # this is 64-bit ARM anyway; x86_64 would serve emulators and ChromeOS.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: impl/src-tauri
+          key: android
+
+      # src-tauri/gen is gitignored, so the Android project is generated here
+      # rather than carried in the repository — the same `android init` the local
+      # recipe runs. Keeps a large generated tree out of review and makes the
+      # build reproducible from the config alone.
+      - name: Generate the Android project
+        run: npx --yes @tauri-apps/cli@^2 android init
+        working-directory: impl
+
+      # After init, because the generator writes its own minSdk. It VERIFIES,
+      # because a sed that matches nothing leaves the template's value in place
+      # and the build would succeed while shipping a lower floor than intended.
+      # Android 14 = API 34, as decided.
+      - name: Pin minSdk to 34 (Android 14)
+        run: |
+          set -euo pipefail
+          GRADLE=impl/src-tauri/gen/android/app/build.gradle.kts
+          test -f "$GRADLE" || { echo "::error::$GRADLE not generated"; exit 1; }
+          grep -qE 'minSdk *=' "$GRADLE" || { echo "::error::no minSdk line to patch in $GRADLE"; exit 1; }
+          sed -i -E 's/minSdk *= *[0-9]+/minSdk = 34/' "$GRADLE"
+          grep -qE 'minSdk *= *34' "$GRADLE" || { echo "::error::minSdk patch did not take"; exit 1; }
+          grep -nE 'minSdk|targetSdk' "$GRADLE"
+
+      - name: Build the bundle
+        run: npx --yes @tauri-apps/cli@^2 android build --aab --apk --target aarch64
+        working-directory: impl
+
+      # Printed because the output paths move between Tauri releases, and because
+      # the file is called `universal` whatever --target says — reading the name
+      # as an architecture is a mistake that has already been made here.
+      - name: What was produced
+        if: always()
+        run: find impl/src-tauri/gen/android -name '*.aab' -o -name '*.apk' | sort
+
+      # The commit is in the NAME because it is not in the package: Tauri derives
+      # versionCode from the version in tauri.conf.json, so every build of 0.1.1
+      # is 1001 and two of them are indistinguishable to Android — and the bundle
+      # can even be byte-identical across real source changes, since the assets
+      # compress to the same size. Do not use size or versionCode to tell builds
+      # apart; use this.
+      - uses: actions/upload-artifact@v5
+        with:
+          name: android-unsigned-${{ github.ref_name }}-${{ github.sha }}
+          path: |
+            impl/src-tauri/gen/android/app/build/outputs/**/*.aab
+            impl/src-tauri/gen/android/app/build/outputs/**/*.apk
+          if-no-files-found: error
