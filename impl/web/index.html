@@ -224,6 +224,20 @@
     line-height:1;padding:8px 10px;border-radius:8px;flex-shrink:0}
   .composer-field .clip:hover{color:var(--accent)}
   @media (pointer:coarse){.composer-field .clip{padding:10px 12px}}
+  /* The picked file rides INSIDE the field, between the text and the clip that
+     produced it — so it reads as part of the message being written, not as a
+     transfer already under way. The name elides and the size never does: when
+     a send is about to take a minute, how big it is matters more than which. */
+  .composer-field .attach-chip{display:flex;align-items:center;gap:6px;flex:0 1 auto;min-width:0;
+    font-size:12px;color:var(--muted);background:var(--card);border:1px solid var(--border);
+    border-radius:10px;padding:1px 2px 1px 8px}
+  .composer-field .attach-chip[hidden]{display:none}  /* display:flex would defeat the attribute */
+  .composer-field .attach-chip .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:14ch}
+  .composer-field .attach-chip .s{flex:none;opacity:.8}
+  .composer-field .attach-chip .x{border:none;background:none;color:var(--muted);
+    font-size:13px;line-height:1;padding:4px 5px;border-radius:6px;flex-shrink:0}
+  .composer-field .attach-chip .x:hover{color:var(--err,#c0392b)}
+  @media (pointer:coarse){.composer-field .attach-chip .x{padding:8px 9px}}
   .btn-send{background:var(--accent);color:var(--accent-ink);border:none;padding:0 22px;border-radius:8px;font-weight:600}
   /* Destructive confirm: the affirmative button must not look like the safe
      default, because "Tak" here deletes something. */
@@ -454,6 +468,11 @@
           <input type="file" id="file-input" hidden>
           <div class="composer-field">
             <input id="msg-input" type="text" placeholder="Wiadomość… (Enter = wyślij)" data-i18n-placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off">
+            <span class="attach-chip" id="attach-chip" hidden>
+              <span class="n" id="attach-name"></span>
+              <span class="s" id="attach-size"></span>
+              <button class="x" id="attach-drop" title="Usuń plik" data-i18n-title="Usuń plik" aria-label="Usuń plik">✕</button>
+            </span>
             <button class="clip" id="btn-attach" title="Dołącz plik" data-i18n-title="Dołącz plik" aria-label="Dołącz plik">📎</button>
           </div>
           <button class="btn-send" id="send" data-i18n="Wyślij ➤">Wyślij ➤</button></div>

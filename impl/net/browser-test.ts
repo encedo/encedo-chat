@@ -718,13 +718,40 @@ async function main() {
       const fileTok = `plik-${Date.now().toString(36)}`
       const body = `TAJNE-${fileTok}-${'x'.repeat(3000)}`
       await A.eval(`
-        document.getElementById('msg-input').value = 'podpis do pliku';
         const dt = new DataTransfer();
         dt.items.add(new File([${JSON.stringify(body)}], ${JSON.stringify(fileTok + '.txt')}, { type: 'text/plain' }));
         const i = document.getElementById('file-input');
         i.files = dt.files; i.dispatchEvent(new Event('change'));
         return 1;
       `)
+      // Picking must NOT send — the clip only chooses. Easy to regress back to
+      // send-on-pick, and nothing downstream would notice: the file would still
+      // arrive, just without whatever caption was going to be typed.
+      const picked = await A.eval<any>(`
+        return {
+          chip: !document.getElementById('attach-chip').hidden,
+          name: document.getElementById('attach-name').textContent,
+          size: document.getElementById('attach-size').textContent,
+          bubbles: document.querySelectorAll('#messages .b-file').length,
+        };
+      `)
+      if (picked.bubbles !== 0) throw new Error('picking a file sent it — the clip must only pick')
+      if (!picked.chip) throw new Error('picking a file left the composer chip hidden')
+      if (!picked.name.includes(fileTok)) throw new Error(`the chip names the wrong file: ${picked.name}`)
+      if (!/\d/.test(picked.size)) throw new Error(`the chip shows no size: ${JSON.stringify(picked.size)}`)
+      step('picking a file fills the chip and sends nothing')
+
+      // The caption is typed AFTER picking, which is the order the change buys:
+      // under send-on-pick this text could never have ridden with the file.
+      const cleared = await A.eval<any>(`
+        document.getElementById('msg-input').value = 'podpis do pliku';
+        document.getElementById('send').click();
+        return { chip: document.getElementById('attach-chip').hidden,
+                 input: document.getElementById('msg-input').value };
+      `)
+      if (!cleared.chip || cleared.input !== '') throw new Error('Send left the composer holding the file or the caption')
+      step('Send hands off the file and empties the composer')
+
       await B.waitFor('the file bubble arrived', `
         return [...document.querySelectorAll('#messages .b-file .f-name')]
           .some((n) => n.textContent.includes(${JSON.stringify(fileTok)}));

@@ -116,6 +116,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'PeerId węzła': 'Node PeerId',
     'Platforma': 'Platform',
     'Dołącz plik': 'Attach a file',
+    'Usuń plik': 'Remove the file',
     'Szyfruję…': 'Encrypting…',
     'Wysyłam…': 'Sending…',
     'nie wysłano': 'not sent',

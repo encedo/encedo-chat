@@ -650,12 +650,48 @@ $('scrim').addEventListener('click', () => { closeModal(); closeDrawer() })
 $('btn-logout').addEventListener('click', () => location.reload())
 
 // ---- attach a file --------------------------------------------------------
+/**
+ * The clip PICKS; Send sends. Nothing is encrypted or uploaded at pick time, so
+ * a file chosen by mistake costs one click to drop rather than an upload to sit
+ * through — and the caption typed after choosing travels with it, which it
+ * cannot do if the send has already left.
+ */
+let pendingAttach: File | null = null
+
+/** The chip is the whole of the pending state's UI, so this is the only place
+ *  the variable and the DOM can drift apart — set them together, always. */
+function showAttach(f: File | null) {
+  pendingAttach = f
+  $('attach-chip').hidden = !f
+  if (!f) return
+  $('attach-name').textContent = f.name
+  $('attach-name').title = f.name // the chip elides; the tooltip has the whole name
+  $('attach-size').textContent = humanSize(f.size)
+}
+
 $('btn-attach').addEventListener('click', () => ($('file-input') as HTMLInputElement).click())
 ;($('file-input') as HTMLInputElement).addEventListener('change', (e: any) => {
   const f = e.target.files?.[0]
   e.target.value = '' // so picking the same file twice still fires
-  if (f) void attachFile(f)
+  if (!f) return
+  // Refused at PICK time rather than at Send: the limit is a property of the
+  // file alone, and finding out after writing a caption is a worse way to learn.
+  if (f.size > MAX_FILE) { toast(tr('Plik jest za duży — limit to {mb} MB', { mb: Math.floor(MAX_FILE / 1024 / 1024) })); return }
+  showAttach(f)
 })
+$('attach-drop').addEventListener('click', () => showAttach(null))
+
+/**
+ * Empty the composer when the screen changes rooms.
+ *
+ * Switching rooms is the one moment the RECIPIENT changes while the composer
+ * looks untouched — so text meant for one peer, or a file picked for them, would
+ * otherwise sit one Send away from the next. Both go.
+ */
+function clearComposer() {
+  ;($('msg-input') as HTMLInputElement).value = ''
+  showAttach(null)
+}
 
 // ---- language ------------------------------------------------------------
 // The static markup carries its Polish as default content, so the app is
@@ -1410,7 +1446,12 @@ function applyEv(ev: Ev) {
  */
 async function activateRoom(pub: string) {
   const room = rooms.get(pub); if (!room) return
+  // Only when the target actually changes — activateRoom also runs for the room
+  // already on screen (clicking the same peer, a repaint), and wiping a draft
+  // then would be a bug rather than a precaution.
+  const sameTarget = activePub === pub
   activePub = pub; activeGid = null // a 1:1 takes the screen — no group is active
+  if (!sameTarget) clearComposer()
   $('members-cluster').hidden = true; $('members-pop').hidden = true // group-only UI
   room.unseen = 0
   $('chat-empty').hidden = true; $('chat-view').hidden = false
@@ -1529,7 +1570,13 @@ async function closeRoom(pub: string) {
 
 // The composer targets whichever room is on screen — wired once, not per open.
 function sendComposer() {
-  const inp = $('msg-input') as HTMLInputElement; const t = inp.value.trim(); if (!t) return
+  const inp = $('msg-input') as HTMLInputElement
+  // A pending file takes the composer over. attachFile() reads the caption out
+  // of this same input and clears it, so the text goes once, with the file —
+  // and the chip is dropped BEFORE the awaits, so what is sent is what the user
+  // saw when they pressed Send.
+  if (pendingAttach) { const f = pendingAttach; showAttach(null); void attachFile(f); return }
+  const t = inp.value.trim(); if (!t) return
   if (activeGid) { // a group is on screen — broadcast to it
     const gu = groupsUI.get(activeGid); if (!gu?.room) return
     inp.value = ''
@@ -1902,7 +1949,9 @@ async function migrateLegacyGroups(seen: Set<string>) {
 /** Show a group in the chat pane (reuses #messages; sender labels via `who`). */
 async function activateGroup(gid: string) {
   const gu = groupsUI.get(gid); if (!gu) return
+  const sameTarget = activeGid === gid // as in activateRoom: a new audience empties the composer, a repaint does not
   activeGid = gid; activePub = null // a group takes over — no 1:1 is "active"
+  if (!sameTarget) clearComposer()
   gu.unseen = 0
   $('chat-empty').hidden = true; $('chat-view').hidden = false
   showChatPane(true)
