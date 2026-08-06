@@ -11,17 +11,17 @@ three spellings of one:
 - **`ipfs.encedo.com`** — the read gateway, and it is **deliberately public**.
   Knowing a CID is the capability: for a chat file the blob is ciphertext and the
   key travels in the envelope over the ratchet, never here.
+- **`webui.ipfs.encedo.com`** — the management console, on a narrower IP list
+  plus HTTP basic auth. It reaches the **full** admin API, on purpose, because a
+  console that cannot call `files` or `config` is not a console. The IP list and
+  the password are the only controls on that route, which is why the list is
+  shorter than the RPC's.
 
 This node is not only the chat store. It is also the **source of truth for
 published content** — firmware and similar — which readers fetch by CID through
 whatever gateway they happen to use, ours or ipfs.io or Cloudflare. That second
 role is why it stays in the public network at all, and why announcing is tuned
 rather than switched off; see step 4.
-- **`webui.ipfs.encedo.com`** — the management console, on a narrower IP list
-  plus HTTP basic auth. It reaches the **full** admin API, on purpose, because a
-  console that cannot call `files` or `config` is not a console. The IP list and
-  the password are the only controls on that route, which is why the list is
-  shorter than the RPC's.
 
 A browser must never reach the RPC directly. **Kubo's RPC is an admin API** —
 `config`, `shutdown`, `files`, `key` and `repo/gc` live at the same endpoint as
@@ -87,7 +87,7 @@ location @gone {
 }
 ```
 
-### Four things here are not obvious, and each one cost a failed request
+### Five things here are not obvious, and each one cost a failed request
 
 **Strip every marker of browser identity.** Kubo refuses anything that looks
 like it came from a browser — an `Origin` it does not allow, a `Referer`, or a
