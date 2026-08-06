@@ -96,7 +96,7 @@ jobs:
       # recipe runs. Keeps a large generated tree out of review and makes the
       # build reproducible from the config alone.
       - name: Generate the Android project
-        run: npx --yes @tauri-apps/cli@^2 android init
+        run: npm run tauri -- android init
         working-directory: impl
 
       # After init, because the generator writes its own minSdk. It VERIFIES,
@@ -113,8 +113,15 @@ jobs:
           grep -qE 'minSdk *= *34' "$GRADLE" || { echo "::error::minSdk patch did not take"; exit 1; }
           grep -nE 'minSdk|targetSdk' "$GRADLE"
 
+      # Through `npm run`, never npx: the Gradle project this generates builds
+      # the Rust library by calling `npm run tauri` itself, from inside its own
+      # task. With the CLI reachable only through npx there is no such script,
+      # and the build dies deep in Gradle with one honest line — `Missing
+      # script: "tauri"` — buried in a page of Io(Env(…)) wrapping. Going
+      # through the same script the generated project does also means one
+      # version, pinned by package-lock, on both sides.
       - name: Build the bundle
-        run: npx --yes @tauri-apps/cli@^2 android build --aab --apk --target aarch64
+        run: npm run tauri -- android build --aab --apk --target aarch64
         working-directory: impl
 
       # Printed because the output paths move between Tauri releases, and because

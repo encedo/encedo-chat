@@ -32,7 +32,8 @@
     "relay-flood": "node net/relay-flood.ts",
     "relay-hsrate": "node net/relay-hsrate.ts",
     "relay-chatload": "node net/relay-chatload.ts",
-    "phone-shot": "node net/phone-shot.ts"
+    "phone-shot": "node net/phone-shot.ts",
+    "tauri": "tauri"
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.2",
@@ -52,6 +53,7 @@
     "@babel/core": "^8.0.1",
     "@babel/plugin-transform-block-scoping": "^8.0.1",
     "@babel/preset-typescript": "^8.0.1",
+    "@tauri-apps/cli": "^2.11.4",
     "babel-loader": "^10.1.1",
     "html-webpack-plugin": "^5.6.7",
     "webpack": "^5.109.0",
