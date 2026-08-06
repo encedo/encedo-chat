@@ -217,7 +217,11 @@
      separate mode. The wrapper carries the border; the input gives its up. */
   .composer-field{flex:1;display:flex;align-items:center;min-width:0;
     border:1px solid var(--border);border-radius:8px;background:var(--bg)}
-  .composer-field input{flex:1;min-width:0;border:none;background:none;padding-right:4px}
+  /* A FLOOR, not `min-width:0`. With zero the text field is the flex item that
+     gives way first, so on a narrow phone the attachment chip squeezed it out of
+     existence — the composer looked like it had lost its input. The chip shrinks
+     instead: its name elides, and that is what a name is allowed to lose. */
+  .composer-field input{flex:1;min-width:8ch;border:none;background:none;padding-right:4px}
   .composer-field input:focus-visible{outline:none}
   .composer-field:focus-within{outline:2px solid var(--accent);outline-offset:2px}
   .composer-field .clip{border:none;background:none;color:var(--muted);font-size:17px;
@@ -228,16 +232,27 @@
      produced it — so it reads as part of the message being written, not as a
      transfer already under way. The name elides and the size never does: when
      a send is about to take a minute, how big it is matters more than which. */
-  .composer-field .attach-chip{display:flex;align-items:center;gap:6px;flex:0 1 auto;min-width:0;
-    font-size:12px;color:var(--muted);background:var(--card);border:1px solid var(--border);
-    border-radius:10px;padding:1px 2px 1px 8px}
+  .composer-field .attach-chip{display:flex;align-items:center;gap:5px;flex:0 1 auto;min-width:0;
+    font-size:11.5px;line-height:1.25;color:var(--muted);background:var(--card);
+    border:1px solid var(--border);border-radius:8px;padding:1px 1px 1px 7px}
   .composer-field .attach-chip[hidden]{display:none}  /* display:flex would defeat the attribute */
-  .composer-field .attach-chip .n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:14ch}
+  /* min-width lets it shrink past its text; the ellipsis is what it shrinks to.
+     The size never elides — when a send is about to take a minute, how big it is
+     matters more than which file it was. */
+  .composer-field .attach-chip .n{min-width:3ch;max-width:14ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .composer-field .attach-chip .s{flex:none;opacity:.8}
-  .composer-field .attach-chip .x{border:none;background:none;color:var(--muted);
-    font-size:13px;line-height:1;padding:4px 5px;border-radius:6px;flex-shrink:0}
+  /* The cross gets a finger-sized TARGET without a finger-sized BOX. Padding here
+     sets the chip's height, and at 8px it made the chip nearly as tall as the
+     field it sits in — which is what pushed the text input out on a portrait
+     phone. The overlay takes the taps and occupies no layout. */
+  .composer-field .attach-chip .x{position:relative;border:none;background:none;color:var(--muted);
+    font-size:12px;line-height:1;padding:3px 4px;border-radius:6px;flex-shrink:0}
+  .composer-field .attach-chip .x::after{content:'';position:absolute;inset:-9px -7px}
   .composer-field .attach-chip .x:hover{color:var(--err,#c0392b)}
-  @media (pointer:coarse){.composer-field .attach-chip .x{padding:8px 9px}}
+  /* Portrait phones: at ~360 px the chip, the clip and a usable input do not all
+     fit around a 14ch filename. Keyed on WIDTH alone, not the phone block — the
+     same device in landscape has the room and was already right. */
+  @media (max-width:480px){.composer-field .attach-chip .n{max-width:8ch}}
   .btn-send{background:var(--accent);color:var(--accent-ink);border:none;padding:0 22px;border-radius:8px;font-weight:600}
   /* Destructive confirm: the affirmative button must not look like the safe
      default, because "Tak" here deletes something. */

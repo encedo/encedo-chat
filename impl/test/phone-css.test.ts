@@ -89,6 +89,29 @@ test('and they keep their labels on a desktop, where there is room', () => {
     'the collapse rule must not reach a desktop viewport')
 })
 
+test('the composer keeps a text field however wide the attachment chip is', () => {
+  // Reported from a portrait phone: picking a file left no visible input. The
+  // chip and the input are siblings in one flex row, and `min-width:0` made the
+  // INPUT the item that collapsed first. A floor moves that role to the chip,
+  // which can afford it — a filename has an ellipsis, a text field has nothing.
+  const rule = HTML.match(/\.composer-field input\{([^}]*)\}/)
+  assert.ok(rule, '.composer-field input rule not found')
+  const min = rule![1].match(/min-width:\s*([^;}]+)/)?.[1]?.trim()
+  assert.ok(min && !/^0(\D|$)/.test(min), `the text field may not shrink to nothing (min-width: ${min})`)
+})
+
+test('the attachment chip stays shorter than the field it sits in', () => {
+  // The chip's height is set by the padding on its cross. At a finger-sized 8px
+  // it grew the composer enough to push the input out of a portrait phone, so
+  // the tap target has to come from somewhere that costs no layout.
+  const x = HTML.match(/\.composer-field \.attach-chip \.x\{([^}]*)\}/)
+  assert.ok(x, '.attach-chip .x rule not found')
+  const pad = parseInt(x![1].match(/padding:\s*(\d+)/)?.[1] ?? '99', 10)
+  assert.ok(pad <= 4, `padding on the cross sets the chip height; ${pad}px is too tall for a phone composer`)
+  assert.match(HTML, /\.composer-field \.attach-chip \.x::after\{[^}]*position:absolute/,
+    'the cross needs an overlay to stay finger-sized without growing the chip')
+})
+
 test('the one-pane layout switch covers the same set', () => {
   // The rule that makes the app show a single pane. If these two ever disagree
   // about what a phone is, the header collapses on devices that are showing the
