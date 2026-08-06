@@ -14,7 +14,8 @@
  *   node net/file-decrypt.ts '{"cid":"Qm…","key":"…","chunk":4194304,"chunks":2,"size":5242880,"alg":"A256GCM-chunked-v1","name":"raport.pdf"}'
  *   node net/file-decrypt.ts '<same json>' --no-key      # the negative control
  *
- *   --out <path>       where to write the plaintext (default: the name from the manifest)
+ *   --out <path>       where to write the plaintext (default: a fresh temp dir,
+ *                      printed on the last line — never the working directory)
  *   --origin <url>     app origin whose /f proxy to read through (default https://onchato.com)
  *   --gateway <url>    read from an IPFS gateway instead — proves the blob is
  *                      the same bytes whichever door you come through
@@ -24,7 +25,9 @@
  */
 
 import { decryptBytes, type FileManifest } from '../lib/filecrypto.ts'
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, mkdtempSync } from 'node:fs'
+import { basename, isAbsolute, join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 
 const argv = process.argv.slice(2)
 const flag = (name: string) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined }
@@ -80,7 +83,30 @@ try {
   process.exit(1)
 }
 
-const out = flag('--out') ?? (typeof ev.name === 'string' && ev.name ? ev.name : 'decrypted.bin')
+/**
+ * Where the plaintext lands. Two rules, both learned the hard way.
+ *
+ * The name comes from the SENDER, so it is not a path and is not treated as
+ * one: `../../.ssh/authorized_keys` in an envelope would otherwise write there,
+ * with this tool's privileges, on a machine that merely inspected a file it was
+ * sent. Only the last component survives, and a name that is nothing but
+ * separators or dots is replaced outright.
+ *
+ * And the default is a fresh temp directory rather than the working one,
+ * because the working one is usually inside this repository: a decrypted
+ * private file appeared there once and sat one `git add -A` away from being
+ * published. `--out` still writes exactly where it is told — that is a decision
+ * someone made, not a name that arrived over the network.
+ */
+function destination(): string {
+  const chosen = flag('--out')
+  if (chosen) return resolve(chosen)
+  const raw = typeof ev.name === 'string' ? basename(ev.name) : ''
+  const safe = !raw || raw === '.' || raw === '..' || isAbsolute(raw) ? 'decrypted.bin' : raw
+  return join(mkdtempSync(join(tmpdir(), 'ec-file-')), safe)
+}
+
+const out = destination()
 // Caught rather than thrown: by this point the decryption has SUCCEEDED, and a
 // stack trace about an unwritable path would read as if the crypto had failed.
 try { writeFileSync(out, plain) }
