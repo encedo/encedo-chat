@@ -275,20 +275,38 @@ function openSoftModal() {
   clr('soft-msg'); softCreating = ''
   const last = localStorage.getItem(LAST_PROFILE) ?? ''
   ;($('soft-name') as HTMLInputElement).value = last; ($('soft-pass') as HTMLInputElement).value = ''
-  ;($('soft-go') as HTMLButtonElement).textContent = tr('Dalej')
+  softMode(false)
   // Focus lands where there is still something to type — on the password when
   // the name came back by itself, which is the common case after the first run.
   $(last ? 'soft-pass' : 'soft-name').focus()
 }
+
+/**
+ * Sign-in or creation. The two look different on purpose: the same window with
+ * only a changed button label read as "nothing happened, press it again", which
+ * is what it looked like to the first person who used it.
+ *
+ * Creation asks for the password twice. Not ceremony — a typo here does not
+ * cost a retry, it costs the identity: nothing is stored to compare against, so
+ * there is no way to tell a wrong password from a mistyped one, ever.
+ */
+function softMode(creating: boolean) {
+  softCreating = creating ? val('soft-name') : ''
+  $('soft-pass2-wrap').hidden = !creating
+  ;($('soft-pass2') as HTMLInputElement).value = ''
+  $('soft-sub').textContent = creating
+    ? tr('Nowa tożsamość na tym urządzeniu. Hasła nie da się odzyskać ani zmienić bez niego — nie ma czego z nim porównać.')
+    : tr('Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.')
+  ;($('soft-go') as HTMLButtonElement).textContent = creating ? tr('Utwórz profil') : tr('Dalej')
+}
+
 const closeSoftModal = () => { $('scrim').classList.remove('open'); $('soft-modal').classList.remove('open') }
 $('go-soft').addEventListener('click', openSoftModal)
 $('soft-cancel').addEventListener('click', closeSoftModal)
-// Typing a different name invalidates a pending "create this one?" — otherwise
-// the second click would create a profile under a name nobody was asked about.
+// Typing a different name drops creation mode — otherwise the next press would
+// create a profile under a name nobody was asked about.
 ;($('soft-name') as HTMLInputElement).addEventListener('input', () => {
-  if (softCreating && softCreating !== val('soft-name')) {
-    softCreating = ''; clr('soft-msg'); ($('soft-go') as HTMLButtonElement).textContent = tr('Dalej')
-  }
+  if (softCreating && softCreating !== val('soft-name')) { clr('soft-msg'); softMode(false) }
 })
 
 async function softLogin() {
@@ -302,24 +320,37 @@ async function softLogin() {
   // A million PBKDF2 rounds is a second or two on a phone. Without a label that
   // pause is indistinguishable from a dead button, and the user's next move is
   // to press it again.
-  const label = btn.textContent; btn.textContent = tr('Otwieram…')
+  btn.textContent = tr('Otwieram…')
   clr('soft-msg')
-  let keepLabel = false // set when we deliberately leave the button saying something else
   try {
     const raw = localStorage.getItem(softKey(name))
 
     if (!raw && softCreating !== name) {
-      // First click on a name that does not exist: ask, do not create. Creating
-      // silently would turn a typo in an existing profile's name into a brand
-      // new identity, which looks exactly like "my contacts disappeared".
-      softCreating = name
-      setMsg('soft-msg', tr('Nie ma profilu „{name}". Utworzyć nowy?', { name }), '')
-      btn.textContent = tr('Utwórz profil'); keepLabel = true
+      // A name that does not exist: ASK, on a surface of its own, and do not
+      // create. Creating silently would turn a typo in an existing profile's
+      // name into a brand new identity — which presents as "my contacts are
+      // gone" — and a confirmation inside the same window read as no response
+      // at all, because only the button's label moved.
+      const { ok } = await ask(
+        tr('Nie ma profilu „{name}"', { name }),
+        tr('Utworzyć na tym urządzeniu nową tożsamość o tej nazwie? Jeśli chciałeś wejść na istniejącą, sprawdź pisownię — to osobne tożsamości, nie jedna.'),
+        tr('Utwórz'))
+      // ask() drops the scrim when it closes, but the profile window is still
+      // up behind it — without this it floats with no backdrop and the
+      // click-outside-to-close it relies on stops working.
+      $('scrim').classList.add('open')
+      if (ok) { softMode(true); $('soft-pass2').focus() }
       return
     }
 
     let id: Identity
     if (!raw) {
+      // Twice, and compared before anything is written: there is no verifier
+      // stored anywhere, so a typo sealed into the profile is unrecoverable and
+      // indistinguishable from a wrong password for ever after.
+      if (pass !== ($('soft-pass2') as HTMLInputElement).value) {
+        setMsg('soft-msg', tr('Hasła się różnią.'), 'err'); return
+      }
       let generated = ''
       id = await browserSoftwareIdentity(name, () => null, (v) => { generated = v })
       localStorage.setItem(softKey(name), JSON.stringify(await seal(pass, generated)))
@@ -339,10 +370,15 @@ async function softLogin() {
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
     else setMsg('soft-msg', tr('Błąd tożsamości software: ') + (e?.message ?? e), 'err')
-  } finally { btn.disabled = false; if (!keepLabel) btn.textContent = label ?? tr('Dalej') }
+    // Derived from the mode rather than from a captured label: the previous
+    // version restored what the button said on entry, which undid the switch to
+    // creation mode that had just been made three lines earlier.
+  } finally { btn.disabled = false; btn.textContent = softCreating ? tr('Utwórz profil') : tr('Dalej') }
 }
 $('soft-go').addEventListener('click', () => void softLogin())
-;($('soft-pass') as HTMLInputElement).addEventListener('keydown', (e: any) => { if (e.key === 'Enter') void softLogin() })
+for (const f of ['soft-pass', 'soft-pass2']) {
+  ;($(f) as HTMLInputElement).addEventListener('keydown', (e: any) => { if (e.key === 'Enter') void softLogin() })
+}
 
 // ---- the node editor: ONE implementation, used at login and after it -------
 // It exists in two places (the login card and the Network tab) because both

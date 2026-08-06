@@ -550,7 +550,7 @@
        browser who uses it. The list belongs in Settings, behind a login. -->
   <div class="modal" id="soft-modal">
     <h2 data-i18n="Profil software">Profil software</h2>
-    <div class="msub" data-i18n="Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.">Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.</div>
+    <div class="msub" id="soft-sub" data-i18n="Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.">Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.</div>
     <label data-i18n="Nazwa profilu">Nazwa profilu</label>
     <!-- Real autocomplete tokens, unlike the HEM field above: this is the demo
          path, and letting the browser's password manager carry the password is
@@ -560,6 +560,13 @@
     <input id="soft-name" type="text" placeholder="np. Lab1" data-i18n-placeholder="np. Lab1" autocomplete="username">
     <label data-i18n="Hasło">Hasło</label>
     <input id="soft-pass" type="password" autocomplete="current-password">
+    <!-- Creation only. A mistyped password here does not lock someone out of a
+         session, it locks them out of an identity, permanently: there is nothing
+         stored to compare against and nothing to recover from. -->
+    <div id="soft-pass2-wrap" hidden>
+      <label data-i18n="Powtórz hasło">Powtórz hasło</label>
+      <input id="soft-pass2" type="password" autocomplete="new-password">
+    </div>
     <div class="msg" id="soft-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="soft-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="soft-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>

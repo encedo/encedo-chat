@@ -127,6 +127,14 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Utwórz profil': 'Create the profile',
     'Podaj nazwę profilu.': 'Enter a profile name.',
     'Podaj hasło.': 'Enter a password.',
+    'Powtórz hasło': 'Repeat the password',
+    'Hasła się różnią.': 'The passwords do not match.',
+    'Nie ma profilu „{name}"': 'No profile named \u201c{name}\u201d',
+    'Utworzyć na tym urządzeniu nową tożsamość o tej nazwie? Jeśli chciałeś wejść na istniejącą, sprawdź pisownię — to osobne tożsamości, nie jedna.':
+      'Create a new identity under that name on this device? If you meant to open an existing one, check the spelling \u2014 these are separate identities, not one.',
+    'Utwórz': 'Create',
+    'Nowa tożsamość na tym urządzeniu. Hasła nie da się odzyskać ani zmienić bez niego — nie ma czego z nim porównać.':
+      'A new identity on this device. The password cannot be recovered, and cannot be changed without it \u2014 there is nothing stored to compare it against.',
     'Nie ma profilu „{name}". Utworzyć nowy?': 'No profile named “{name}”. Create one?',
     'Profil w starym, niezaszyfrowanym formacie — usuń go przyciskiem Wipeout i załóż nowy.':
       'This profile predates password sealing — clear it with Wipeout and create a new one.',
