@@ -253,6 +253,14 @@
      fit around a 14ch filename. Keyed on WIDTH alone, not the phone block — the
      same device in landscape has the room and was already right. */
   @media (max-width:480px){.composer-field .attach-chip .n{max-width:8ch}}
+  .prof-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
+  .prof-row:last-child{border-bottom:none}
+  .prof-row .p-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+  .prof-row .p-tag{flex:none;font-size:11px;color:var(--accent)}
+  .prof-row .p-del{flex:none;border:none;background:none;color:var(--muted);font-size:14px;
+    line-height:1;padding:5px 6px;border-radius:6px;cursor:pointer}
+  .prof-row .p-del:hover{color:var(--err,#c0392b)}
+  @media (pointer:coarse){.prof-row .p-del{padding:9px 10px}}
   .btn-send{background:var(--accent);color:var(--accent-ink);border:none;padding:0 22px;border-radius:8px;font-weight:600}
   /* Destructive confirm: the affirmative button must not look like the safe
      default, because "Tak" here deletes something. */
@@ -526,11 +534,26 @@
     <h2 data-i18n="Profil software">Profil software</h2>
     <div class="msub" data-i18n="Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.">Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.</div>
     <label data-i18n="Nazwa profilu">Nazwa profilu</label>
-    <input id="soft-name" type="text" placeholder="np. Lab1" data-i18n-placeholder="np. Lab1" autocomplete="off">
+    <!-- Real autocomplete tokens, unlike the HEM field above: this is the demo
+         path, and letting the browser's password manager carry the password is
+         both what was asked for and better than what people otherwise do with a
+         password they must retype. The NAME is remembered by us, the PASSWORD
+         only ever by the browser, and only if its owner agrees. -->
+    <input id="soft-name" type="text" placeholder="np. Lab1" data-i18n-placeholder="np. Lab1" autocomplete="username">
     <label data-i18n="Hasło">Hasło</label>
-    <input id="soft-pass" type="password" autocomplete="off">
+    <input id="soft-pass" type="password" autocomplete="current-password">
     <div class="msg" id="soft-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="soft-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="soft-cancel" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
+  <div class="modal" id="passwd-modal">
+    <h2 data-i18n="Zmiana hasła">Zmiana hasła</h2>
+    <div class="msub" data-i18n="Tożsamość zostaje ta sama — zmienia się wyłącznie hasło, którym jest zaszyfrowana. Kontakty i grupy bez zmian.">Tożsamość zostaje ta sama — zmienia się wyłącznie hasło, którym jest zaszyfrowana. Kontakty i grupy bez zmian.</div>
+    <label data-i18n="Obecne hasło">Obecne hasło</label><input id="pw-old" type="password" autocomplete="off">
+    <label data-i18n="Nowe hasło">Nowe hasło</label><input id="pw-new" type="password" autocomplete="off">
+    <label data-i18n="Powtórz nowe hasło">Powtórz nowe hasło</label><input id="pw-new2" type="password" autocomplete="off">
+    <div class="msg" id="pw-msg"></div>
+    <div class="modal-actions"><button class="btn-send" id="pw-save" style="flex:1;border-radius:8px" data-i18n="Zapisz">Zapisz</button><button class="btn-ghost" id="pw-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
   <div class="modal" id="group-modal">
@@ -594,6 +617,13 @@
       <option value="en" data-i18n="English">English</option>
     </select>
     <button class="btn" id="btn-logout" style="margin-top:18px;background:var(--accent-soft);color:var(--accent)" data-i18n="Wyloguj">Wyloguj</button>
+    <!-- The profile list lives HERE and not on the login screen: naming who uses
+         a device is something only that device's user should see. -->
+    <div class="d-section" style="margin-top:22px" data-i18n="Profile software na tym urządzeniu">Profile software na tym urządzeniu</div>
+    <div class="hint" style="margin-bottom:8px" data-i18n="Każdy profil to osobna tożsamość, zaszyfrowana swoim hasłem. Usunięcie jest nieodwracalne — klucza nie da się odtworzyć.">Każdy profil to osobna tożsamość, zaszyfrowana swoim hasłem. Usunięcie jest nieodwracalne — klucza nie da się odtworzyć.</div>
+    <div id="profiles-list"></div>
+    <button class="btn" id="btn-passwd" hidden style="margin-top:8px;background:var(--accent-soft);color:var(--accent)" data-i18n="Zmień hasło aktywnego profilu">Zmień hasło aktywnego profilu</button>
+
     <div class="d-section" style="margin-top:22px" data-i18n="Reset urządzenia">Reset urządzenia</div>
     <div class="hint" style="margin-bottom:8px" data-i18n="Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.">Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.</div>
     <button class="btn" id="btn-wipeout" style="margin-top:2px;background:none;color:var(--err);border:1px solid var(--err)" data-i18n="🧨 Wipeout — wyczyść wszystko">🧨 Wipeout — wyczyść wszystko</button>

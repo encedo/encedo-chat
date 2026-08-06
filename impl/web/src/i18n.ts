@@ -131,6 +131,31 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Profil w starym, niezaszyfrowanym formacie — usuń go przyciskiem Wipeout i załóż nowy.':
       'This profile predates password sealing — clear it with Wipeout and create a new one.',
     'Złe hasło.': 'Wrong password.',
+    'Profile software na tym urządzeniu': 'Software profiles on this device',
+    'Każdy profil to osobna tożsamość, zaszyfrowana swoim hasłem. Usunięcie jest nieodwracalne — klucza nie da się odtworzyć.':
+      'Each profile is a separate identity, sealed with its own password. Deleting one cannot be undone — the key cannot be recovered.',
+    'Brak profili software na tym urządzeniu.': 'No software profiles on this device.',
+    'aktywny': 'active',
+    'Usuń profil': 'Delete the profile',
+    'Usuń': 'Delete',
+    'Usunąć profil „{name}"?': 'Delete the profile “{name}”?',
+    'To tożsamość, na której jesteś zalogowany. Znikną jej klucze, kontakty i grupy, a aplikacja wróci do ekranu logowania. Nieodwracalne — klucza nie da się odtworzyć.':
+      'This is the identity you are signed in with. Its keys, contacts and groups go, and the app returns to the login screen. Irreversible — the key cannot be recovered.',
+    'Znikną klucze tego profilu, jego kontakty i grupy. Nieodwracalne — klucza nie da się odtworzyć.':
+      'This profile’s keys, contacts and groups will go. Irreversible — the key cannot be recovered.',
+    'Zmień hasło aktywnego profilu': 'Change the active profile’s password',
+    'Zmiana hasła': 'Change password',
+    'Tożsamość zostaje ta sama — zmienia się wyłącznie hasło, którym jest zaszyfrowana. Kontakty i grupy bez zmian.':
+      'The identity stays the same — only the password sealing it changes. Contacts and groups are untouched.',
+    'Obecne hasło': 'Current password',
+    'Nowe hasło': 'New password',
+    'Powtórz nowe hasło': 'Repeat the new password',
+    'Podaj nowe hasło.': 'Enter a new password.',
+    'Nowe hasła się różnią.': 'The new passwords do not match.',
+    'Nie znaleziono profilu do zmiany.': 'No profile found to change.',
+    'Zmieniam…': 'Changing…',
+    'Hasło zmienione.': 'Password changed.',
+    'Złe obecne hasło.': 'Wrong current password.',
     'Szyfruję…': 'Encrypting…',
     'Wysyłam…': 'Sending…',
     'nie wysłano': 'not sent',

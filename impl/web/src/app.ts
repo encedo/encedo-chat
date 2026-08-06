@@ -13,7 +13,7 @@
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
-import { seal, unseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
+import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import type { GkBackend } from '../../lib/group.ts'
 // `t` is taken: this file uses it for text, topics, timers and DOM nodes, and a
 // local shadowing the translator fails at runtime with "t is not a function" —
@@ -251,6 +251,19 @@ $('pass').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') ($('g
  * absent key → offer to create · opens → in · refuses → wrong password.
  */
 const softKey = (name: string) => 'ec-soft-id-' + name
+/**
+ * The last profile signed in here, so it comes back prefilled.
+ *
+ * The NAME only. The password is the browser's password manager to remember or
+ * not — its owner's choice, made in the browser's own UI, and revocable there.
+ * Storing it ourselves would put the key that seals an identity next to the
+ * identity it seals, which is the same as not having sealed it.
+ *
+ * This does reveal one name to anyone who opens the modal on this device. That
+ * is the trade for not retyping it; it is why the full LIST stays behind a
+ * login, where one name is the most that leaks rather than all of them.
+ */
+const LAST_PROFILE = 'ec-last-profile'
 /** Set once the name has been shown not to exist, so the next click creates it
  *  rather than asking again. Cleared whenever the name changes. */
 let softCreating = ''
@@ -258,9 +271,12 @@ let softCreating = ''
 function openSoftModal() {
   $('scrim').classList.add('open'); $('soft-modal').classList.add('open')
   clr('soft-msg'); softCreating = ''
-  ;($('soft-name') as HTMLInputElement).value = ''; ($('soft-pass') as HTMLInputElement).value = ''
+  const last = localStorage.getItem(LAST_PROFILE) ?? ''
+  ;($('soft-name') as HTMLInputElement).value = last; ($('soft-pass') as HTMLInputElement).value = ''
   ;($('soft-go') as HTMLButtonElement).textContent = tr('Dalej')
-  $('soft-name').focus()
+  // Focus lands where there is still something to type — on the password when
+  // the name came back by itself, which is the common case after the first run.
+  $(last ? 'soft-pass' : 'soft-name').focus()
 }
 const closeSoftModal = () => { $('scrim').classList.remove('open'); $('soft-modal').classList.remove('open') }
 $('go-soft').addEventListener('click', openSoftModal)
@@ -315,6 +331,8 @@ async function softLogin() {
       id = await browserSoftwareIdentity(name, () => plain, () => {})
     }
     closeSoftModal()
+    activeSoftProfile = name
+    localStorage.setItem(LAST_PROFILE, name)
     await enterApp(id, localOnlyManager(makeLocalBook(id.handle, localStorage)), 'Software')
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
@@ -719,12 +737,113 @@ $('add-save').addEventListener('click', async () => {
 })
 
 // ---- settings drawer ----
-const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open') }
+const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles() }
 const closeDrawer = () => { $('scrim').classList.remove('open'); $('drawer').classList.remove('open') }
+// ---- software profiles on this device (Settings) ---------------------------
+/**
+ * The software profile signed in right now, '' on the HEM path. Tracked
+ * separately from the handle: a HEM identity's handle can equal some software
+ * profile's name, and offering to change the password of a profile you are not
+ * holding open is a way to lock someone out of one.
+ */
+let activeSoftProfile = ''
+
+/**
+ * Every localStorage namespace keyed by a profile's name.
+ *
+ * Deleting an identity has to take these with it. Contacts and group state
+ * outliving the key that owned them would leave the names and public keys of
+ * everyone that identity spoke to sitting under a prefix nobody owns any more —
+ * and no way to reach them, since the identity that could is gone.
+ */
+const PROFILE_KEYS = ['ec-soft-id-', 'ec-local-contacts-', 'ec-gcache-', 'ec-gcache-emp-', 'ec-groups-']
+
+function listSoftProfiles(): string[] {
+  const out: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i)
+    if (k?.startsWith('ec-soft-id-')) out.push(k.slice('ec-soft-id-'.length))
+  }
+  return out.sort((a, b) => a.localeCompare(b))
+}
+
+function renderProfiles() {
+  const box = $('profiles-list'); box.textContent = ''
+  const names = listSoftProfiles()
+  if (!names.length) {
+    const empty = document.createElement('div'); empty.className = 'hint'
+    empty.textContent = tr('Brak profili software na tym urządzeniu.')
+    box.appendChild(empty)
+  }
+  for (const n of names) {
+    const row = document.createElement('div'); row.className = 'prof-row'
+    const nm = document.createElement('span'); nm.className = 'p-name'; nm.textContent = n; nm.title = n
+    const tag = document.createElement('span'); tag.className = 'p-tag'
+    if (n === activeSoftProfile) tag.textContent = tr('aktywny')
+    const del = document.createElement('button'); del.className = 'p-del'; del.textContent = '🗑'
+    del.title = tr('Usuń profil'); del.setAttribute('aria-label', tr('Usuń profil'))
+    del.addEventListener('click', () => void removeProfile(n))
+    row.append(nm, tag, del)
+    box.appendChild(row)
+  }
+  // Only the profile actually open can have its password changed — re-sealing
+  // needs the old one, and we hold exactly one.
+  $('btn-passwd').hidden = !activeSoftProfile
+}
+
+async function removeProfile(name: string) {
+  const self = name === activeSoftProfile
+  const { ok } = await ask(
+    tr('Usunąć profil „{name}"?', { name }),
+    self
+      ? tr('To tożsamość, na której jesteś zalogowany. Znikną jej klucze, kontakty i grupy, a aplikacja wróci do ekranu logowania. Nieodwracalne — klucza nie da się odtworzyć.')
+      : tr('Znikną klucze tego profilu, jego kontakty i grupy. Nieodwracalne — klucza nie da się odtworzyć.'),
+    tr('Usuń'))
+  if (!ok) return
+  for (const p of PROFILE_KEYS) localStorage.removeItem(p + name)
+  if (localStorage.getItem(LAST_PROFILE) === name) localStorage.removeItem(LAST_PROFILE)
+  // Deleting the identity you are holding leaves a session with nothing behind
+  // it — reload rather than let the app run on a key that no longer exists.
+  if (self) { location.reload(); return }
+  renderProfiles()
+}
+
+const openPasswd = () => {
+  $('scrim').classList.add('open'); $('passwd-modal').classList.add('open'); clr('pw-msg')
+  for (const f of ['pw-old', 'pw-new', 'pw-new2']) ($(f) as HTMLInputElement).value = ''
+  $('pw-old').focus()
+}
+const closePasswd = () => { $('scrim').classList.remove('open'); $('passwd-modal').classList.remove('open') }
+$('btn-passwd').addEventListener('click', openPasswd)
+$('pw-cancel').addEventListener('click', closePasswd)
+$('pw-save').addEventListener('click', async () => {
+  const oldPw = ($('pw-old') as HTMLInputElement).value
+  const a = ($('pw-new') as HTMLInputElement).value, b = ($('pw-new2') as HTMLInputElement).value
+  if (!a) { setMsg('pw-msg', tr('Podaj nowe hasło.'), 'err'); return }
+  // Checked before touching the profile: a typo confirmed into the seal would
+  // lock the identity away behind a password nobody knows.
+  if (a !== b) { setMsg('pw-msg', tr('Nowe hasła się różnią.'), 'err'); return }
+  const raw = localStorage.getItem(softKey(activeSoftProfile))
+  const blob = raw ? JSON.parse(raw) : null
+  if (!isSealedProfile(blob)) { setMsg('pw-msg', tr('Nie znaleziono profilu do zmiany.'), 'err'); return }
+  const btn = $('pw-save') as HTMLButtonElement
+  btn.disabled = true; const label = btn.textContent; btn.textContent = tr('Zmieniam…')
+  try {
+    // Sealed under the NEW password before the old blob is replaced, so a
+    // failure anywhere in here leaves the profile openable with the old one.
+    const next = await reseal(oldPw, a, blob)
+    localStorage.setItem(softKey(activeSoftProfile), JSON.stringify(next))
+    closePasswd(); toast(tr('Hasło zmienione.'))
+  } catch (e: any) {
+    if (e instanceof BadPassword) setMsg('pw-msg', tr('Złe obecne hasło.'), 'err')
+    else setMsg('pw-msg', tr('Błąd: ') + (e?.message ?? e), 'err')
+  } finally { btn.disabled = false; btn.textContent = label ?? tr('Zapisz') }
+})
+
 $('btn-settings').addEventListener('click', openDrawer)
 $('chip-profile').addEventListener('click', openDrawer)
 $('btn-close-drawer').addEventListener('click', closeDrawer)
-$('scrim').addEventListener('click', () => { closeModal(); closeDrawer() })
+$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd() })
 $('btn-logout').addEventListener('click', () => location.reload())
 
 // ---- attach a file --------------------------------------------------------
@@ -1391,6 +1510,14 @@ async function attachFile(f: File) {
       exp: nowMs() + FILE_TTL_MS,
       ...(caption ? { body: caption } : {}),
     }
+    // Evidence line (debug only). Everything needed to fetch the blob from the
+    // store and open it — which is the point: paste it into net/file-decrypt.ts
+    // and watch ciphertext become the original, then drop the key and watch it
+    // stay ciphertext. That demonstration is the whole claim of this design.
+    //
+    // It IS a complete capability to the file, so it is behind ?debug=1, and
+    // bounded anyway: the blob is gone from the store within minutes.
+    ecLog('file evidence · ' + JSON.stringify(meta), 'debug')
     // Fill the SAME object the log already holds, so the pending bubble becomes
     // the finished one and a replay after switching rooms shows the real file.
     Object.assign(pending, meta)
@@ -1429,6 +1556,13 @@ function setFileAction(act: HTMLButtonElement, env: FileEnv) {
 async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
   const was = btn.textContent
   btn.disabled = true; btn.textContent = tr('Pobieram…')
+  // The same evidence line on the RECEIVING side, which is where it is most
+  // useful: this is a file someone else encrypted, and the key arrived over the
+  // ratchet rather than being ours to begin with.
+  ecLog('file evidence · ' + JSON.stringify({
+    cid: env.cid, name: env.name, size: env.size, mime: env.mime,
+    key: env.key, chunk: env.chunk, chunks: env.chunks, alg: env.alg,
+  }), 'debug')
   try {
     const cipher = await getBlob(env.cid)
     const plain = await decryptBytes(unb64(env.key), { alg: env.alg as any, chunk: env.chunk, chunks: env.chunks, size: env.size }, cipher)
