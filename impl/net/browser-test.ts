@@ -520,11 +520,47 @@ const makePage = (kind: string, name: string): Page => {
   throw new Error(`unknown browser "${kind}" — use chromium or firefox`)
 }
 
+/**
+ * The password every harness profile uses. The identity it seals is generated
+ * per run in a throwaway browser profile, so this is a fixture, not a secret.
+ */
+const SOFT_PASS = 'harness-passphrase'
+
+/**
+ * Open the software-profile modal and get through it.
+ *
+ * A profile that does not exist takes TWO presses: the first reports that there
+ * is none and offers to create it, the second creates it. That is the point of
+ * the design — a typo in an existing name must not silently mint a new identity
+ * — so the harness has to walk it rather than route around it.
+ */
+async function softProfile(b: Page, handle: string) {
+  await b.eval(`document.getElementById('go-soft').click(); return 1`)
+  await b.waitFor('software modal', `return document.getElementById('soft-modal').classList.contains('open')`)
+  await b.eval(`
+    document.getElementById('soft-name').value = ${JSON.stringify(handle)};
+    document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)};
+    document.getElementById('soft-go').click();
+    return 1;
+  `)
+  // PBKDF2 at a million rounds is seconds, not milliseconds — wait for the
+  // button to settle rather than assuming the first click has finished.
+  await b.waitFor('the create prompt or a finished login', `
+    const m = document.getElementById('soft-modal');
+    return !m.classList.contains('open') || !document.getElementById('soft-go').disabled;
+  `, 30_000)
+  await b.eval(`
+    const m = document.getElementById('soft-modal');
+    if (m.classList.contains('open')) document.getElementById('soft-go').click();
+    return 1;
+  `)
+}
+
 /** Log in with the software identity already in this profile's localStorage. */
 async function login(b: Page, handle: string) {
   await b.waitFor('login form', `return !!document.getElementById('go-soft')`)
-  await b.eval(`(document.getElementById('handle')).value = ${JSON.stringify(handle)}; document.getElementById('go-soft').click();`)
-  await b.waitFor('contact list', `return !!document.querySelector('#pane-contacts .contact')`)
+  await softProfile(b, handle)
+  await b.waitFor('contact list', `return !!document.querySelector('#pane-contacts .contact')`, 30_000)
 }
 
 /** Click a contact by its visible name. */
@@ -591,11 +627,14 @@ async function main() {
       } else if (relay) {
         await b.eval(`localStorage.setItem('ec-nodes', JSON.stringify([{name:'test', addr:${JSON.stringify(relay)}, enabled:true}])); return 1`)
       }
-      await b.eval(`(document.getElementById('handle')).value = ${JSON.stringify(handle)}; document.getElementById('go-soft').click();`)
-      await b.waitFor('app shell', `return document.getElementById('app') && !document.getElementById('app').hidden`)
+      await softProfile(b, handle)
+      await b.waitFor('app shell', `return document.getElementById('app') && !document.getElementById('app').hidden`, 30_000)
     }
-    const pubA = await A.eval<string>(`return JSON.parse(localStorage.getItem('ec-soft-id-sim-a')).pub`)
-    const pubB = await B.eval<string>(`return JSON.parse(localStorage.getItem('ec-soft-id-sim-b')).pub`)
+    // Read from the app, not from storage: the profile on disk is sealed now,
+    // and a harness that could still parse it out would mean the seal was not
+    // doing its job. `__pub` is a deliberate hook — a public key is public.
+    const pubA = await A.eval<string>(`return window.__pub`)
+    const pubB = await B.eval<string>(`return window.__pub`)
     step(`identities ready — A ${pubA.slice(0, 12)}…  B ${pubB.slice(0, 12)}…`)
 
     // A also gets a second, unreachable contact — the "switch away and back" test

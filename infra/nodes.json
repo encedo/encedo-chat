@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "updated": "2026-08-06",
+  "nodes": [
+    { "name": "bs1.onchato.com", "addr": "/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp" },
+    { "name": "bs2.onchato.com", "addr": "/dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y" }
+  ]
+}

@@ -13,6 +13,7 @@
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
+import { seal, unseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import type { GkBackend } from '../../lib/group.ts'
 // `t` is taken: this file uses it for text, topics, timers and DOM nodes, and a
 // local shadowing the translator fails at runtime with "t is not a function" —
@@ -170,7 +171,9 @@ function paintStatus() {
 }
 let rotTimer: any = null
 
-const setMsg = (id: string, text: string, kind: 'err' | 'ok') => { const m = $(id); m.textContent = text; m.className = 'msg ' + kind }
+// '' is a real third state, not a default: "no such profile — create it?" is a
+// question, and dressing a question as an error teaches people to ignore red.
+const setMsg = (id: string, text: string, kind: 'err' | 'ok' | '') => { const m = $(id); m.textContent = text; m.className = 'msg ' + kind }
 const clr = (id: string) => { const m = $(id); m.textContent = ''; m.className = 'msg' }
 const initials = (s: string) => (s || '?').slice(0, 2).toUpperCase()
 const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
@@ -236,20 +239,90 @@ $('pass').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') ($('g
 
 // dev / no-HEM: a persistent software X25519 identity (localStorage — one per
 // browser). For two peers, open two DIFFERENT browsers (or profiles).
-$('go-soft').addEventListener('click', async () => {
-  const handle = (val('handle') || prompt('Handle (software / dev):', 'dev1') || '').trim()
-  if (!handle) return
-  clr('msg')
-  try {
-    // One persistent software profile PER handle: typing "Lab1" loads (or first
-    // creates) the Lab1 keypair; "Kab88" is its own identity, not whatever was
-    // created first. Lets several software identities coexist (e.g. group testing
-    // across tabs). The keystore lives in localStorage under ec-soft-id-<handle>.
-    const key = 'ec-soft-id-' + handle
-    const id = await browserSoftwareIdentity(handle, () => localStorage.getItem(key), (v) => localStorage.setItem(key, v))
-    await enterApp(id, localOnlyManager(makeLocalBook(id.handle, localStorage)), 'Software · dev')
-  } catch (e: any) { setMsg('msg', tr('Błąd tożsamości software: ') + (e?.message ?? e), 'err') }
+/**
+ * One persistent software profile PER name: typing "Lab1" loads (or first
+ * creates) the Lab1 keypair; "Kab88" is its own identity, not whatever was made
+ * first. Several can coexist — which is how group testing across tabs works.
+ * The keystore lives in localStorage under `ec-soft-id-<name>`, sealed with the
+ * password (see `lib/profile.ts`).
+ *
+ * The three outcomes the screen has to tell apart come out of the storage and
+ * the AEAD, with nothing compared and no password stored anywhere:
+ * absent key → offer to create · opens → in · refuses → wrong password.
+ */
+const softKey = (name: string) => 'ec-soft-id-' + name
+/** Set once the name has been shown not to exist, so the next click creates it
+ *  rather than asking again. Cleared whenever the name changes. */
+let softCreating = ''
+
+function openSoftModal() {
+  $('scrim').classList.add('open'); $('soft-modal').classList.add('open')
+  clr('soft-msg'); softCreating = ''
+  ;($('soft-name') as HTMLInputElement).value = ''; ($('soft-pass') as HTMLInputElement).value = ''
+  ;($('soft-go') as HTMLButtonElement).textContent = tr('Dalej')
+  $('soft-name').focus()
+}
+const closeSoftModal = () => { $('scrim').classList.remove('open'); $('soft-modal').classList.remove('open') }
+$('go-soft').addEventListener('click', openSoftModal)
+$('soft-cancel').addEventListener('click', closeSoftModal)
+// Typing a different name invalidates a pending "create this one?" — otherwise
+// the second click would create a profile under a name nobody was asked about.
+;($('soft-name') as HTMLInputElement).addEventListener('input', () => {
+  if (softCreating && softCreating !== val('soft-name')) {
+    softCreating = ''; clr('soft-msg'); ($('soft-go') as HTMLButtonElement).textContent = tr('Dalej')
+  }
 })
+
+async function softLogin() {
+  const name = val('soft-name')
+  const pass = ($('soft-pass') as HTMLInputElement).value
+  if (!name) { setMsg('soft-msg', tr('Podaj nazwę profilu.'), 'err'); return }
+  if (!pass) { setMsg('soft-msg', tr('Podaj hasło.'), 'err'); return }
+
+  const btn = $('soft-go') as HTMLButtonElement
+  btn.disabled = true
+  // A million PBKDF2 rounds is a second or two on a phone. Without a label that
+  // pause is indistinguishable from a dead button, and the user's next move is
+  // to press it again.
+  const label = btn.textContent; btn.textContent = tr('Otwieram…')
+  clr('soft-msg')
+  let keepLabel = false // set when we deliberately leave the button saying something else
+  try {
+    const raw = localStorage.getItem(softKey(name))
+
+    if (!raw && softCreating !== name) {
+      // First click on a name that does not exist: ask, do not create. Creating
+      // silently would turn a typo in an existing profile's name into a brand
+      // new identity, which looks exactly like "my contacts disappeared".
+      softCreating = name
+      setMsg('soft-msg', tr('Nie ma profilu „{name}". Utworzyć nowy?', { name }), '')
+      btn.textContent = tr('Utwórz profil'); keepLabel = true
+      return
+    }
+
+    let id: Identity
+    if (!raw) {
+      let generated = ''
+      id = await browserSoftwareIdentity(name, () => null, (v) => { generated = v })
+      localStorage.setItem(softKey(name), JSON.stringify(await seal(pass, generated)))
+    } else {
+      const blob = JSON.parse(raw)
+      // A profile from before passwords existed. Not migrated by decision — the
+      // ones in the wild are developer tests — but it must not read as a wrong
+      // password, or someone types the right one repeatedly and never learns why.
+      if (!isSealedProfile(blob)) { setMsg('soft-msg', tr('Profil w starym, niezaszyfrowanym formacie — usuń go przyciskiem Wipeout i załóż nowy.'), 'err'); return }
+      const plain = await unseal(pass, blob)
+      id = await browserSoftwareIdentity(name, () => plain, () => {})
+    }
+    closeSoftModal()
+    await enterApp(id, localOnlyManager(makeLocalBook(id.handle, localStorage)), 'Software')
+  } catch (e: any) {
+    if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
+    else setMsg('soft-msg', tr('Błąd tożsamości software: ') + (e?.message ?? e), 'err')
+  } finally { btn.disabled = false; if (!keepLabel) btn.textContent = label ?? tr('Dalej') }
+}
+$('soft-go').addEventListener('click', () => void softLogin())
+;($('soft-pass') as HTMLInputElement).addEventListener('keydown', (e: any) => { if (e.key === 'Enter') void softLogin() })
 
 // ---- the node editor: ONE implementation, used at login and after it -------
 // It exists in two places (the login card and the Network tab) because both
@@ -329,6 +402,11 @@ const shortKid = (kid?: string) => (kid ? kid.slice(0, 8) + '…' : '')
 
 async function enterApp(id: Identity, book: ContactManager, sourceLabel: string, kid?: string, gkBackend?: GkBackend) {
   session = { id, handle: id.handle, pub: id.pub, kid, book }
+  // Read by the browser harness, which used to parse the identity out of
+  // localStorage — impossible now that the software profile is sealed, and a
+  // good thing: if it could still be read there, the seal would be decorative.
+  // Exposing it costs nothing, a public key being public.
+  ;(window as any).__pub = id.pub
   // Start the transport, but do NOT make the app shell wait for it: dialing a
   // relay is network work, and a login screen that hangs on it looks broken
   // (it also blocked the first automated run of this app outright).

@@ -517,6 +517,22 @@
     <div class="modal-actions"><button class="btn-send" id="add-save" style="flex:1;border-radius:8px" data-i18n="Zapisz">Zapisz</button><button class="btn-ghost" id="add-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
+  <!-- The software profile: the way in for someone who has not bought a HEM, so
+       it is the product's first impression and gets a real form rather than the
+       browser's prompt(). The profile NAME is typed, not picked from a list:
+       listing the profiles on this device would tell anyone who opens the
+       browser who uses it. The list belongs in Settings, behind a login. -->
+  <div class="modal" id="soft-modal">
+    <h2 data-i18n="Profil software">Profil software</h2>
+    <div class="msub" data-i18n="Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.">Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.</div>
+    <label data-i18n="Nazwa profilu">Nazwa profilu</label>
+    <input id="soft-name" type="text" placeholder="np. Lab1" data-i18n-placeholder="np. Lab1" autocomplete="off">
+    <label data-i18n="Hasło">Hasło</label>
+    <input id="soft-pass" type="password" autocomplete="off">
+    <div class="msg" id="soft-msg"></div>
+    <div class="modal-actions"><button class="btn-send" id="soft-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="soft-cancel" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
   <div class="modal" id="group-modal">
     <h2 data-i18n="Nowa grupa">Nowa grupa</h2>
     <div class="msub" data-i18n="Nazwa + członkowie. Tylko kontakty — każdy dostaje zaproszenie (klucze) przez Wasz kanał 1:1.">Nazwa + członkowie. Tylko kontakty — każdy dostaje zaproszenie (klucze) przez Wasz kanał 1:1.</div>
