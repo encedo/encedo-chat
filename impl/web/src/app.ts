@@ -24,6 +24,7 @@ import { probeCapabilities, formatReport } from '../../lib/capabilities.ts'
 import { splitByLinks } from '../../lib/linkify.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob } from '../../net/ipfs.ts'
+import { parseNodeList } from '../../lib/nodelist.ts'
 import type { FileEnv } from '../../lib/envelope.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
@@ -361,12 +362,58 @@ function nodeRowsHTML(list: NodeEntry[]): string {
     + `<span class="n-x" data-rm="${i}" title="${tr('Usuń')}">×</span></label>`).join('')
 }
 /**
+ * The published list of public relays, by CID.
+ *
+ * **Compiled in, never fetched.** A CID is a hash of the content, so this
+ * constant is what makes the list authentic: a substituted file has a different
+ * CID and does not load. Reading the address of the list from anywhere — a
+ * config endpoint, a DNS record — would hand whoever controls that the choice
+ * of which relays every client dials, which is the first hop of every
+ * conversation. Publishing an updated list therefore means publishing a new CID
+ * and shipping a build, and that is the right price.
+ */
+const OFFICIAL_NODES_CID = 'QmPqyS3E8NcSU6kNF9owmvLqemHiRYhDg2tdMQwB47heTJ'
+
+/**
+ * Replace the local list with the published one.
+ *
+ * Read through the app's own `/f` proxy rather than a public gateway: same
+ * origin, so no CORS and no third party learning which CID this client asks
+ * for. The whole file is validated before anything is written — a list applied
+ * in part would leave the user dialling some published relays and some of their
+ * own, with no way to tell which.
+ */
+async function loadOfficialNodes(btnId: string, warn: (t: string) => void, redraw: () => void, onChange: () => void) {
+  const btn = $(btnId) as HTMLButtonElement
+  btn.disabled = true; const label = btn.textContent; btn.textContent = tr('Pobieram…')
+  try {
+    const text = new TextDecoder().decode(await getBlob(OFFICIAL_NODES_CID))
+    const nodes = parseNodeList(text)
+    // Asked before applying: this REPLACES a list the user may have edited by
+    // hand, and the button sits one tap from the one that adds a node.
+    const { ok } = await ask(
+      tr('Wczytać oficjalną listę?'),
+      tr('Zastąpi Twoją listę {n} węzłami z publikacji. Twoje własne wpisy znikną.', { n: nodes.length }),
+      tr('Zastąp'))
+    if (!ok) return
+    saveNodes(nodes.map((n, i) => ({ ...n, enabled: i === 0 })))
+    redraw(); onChange()
+    toast(tr('Wczytano {n} węzłów', { n: nodes.length }))
+  } catch (e: any) {
+    // Includes ExpiredError: the list is pinned, so a 404 means the publication
+    // is gone rather than that it timed out, and saying "try again" would be a lie.
+    warn(tr('Nie udało się wczytać listy: ') + (e?.message ?? e))
+  } finally { btn.disabled = false; btn.textContent = label ?? tr('Wczytaj oficjalną listę węzłów') }
+}
+
+/**
  * Bind one editor. `warn` reports refusals, `onChange` is what the caller does
  * with a changed list (nothing at login — the list is read when the session
  * starts; a live `setRelays` in the Network tab). Returns its redraw.
  */
-function bindNodeEditor(listId: string, addId: string, warn: (t: string) => void, onChange: () => void) {
+function bindNodeEditor(listId: string, addId: string, warn: (t: string) => void, onChange: () => void, officialId?: string) {
   const redraw = () => { $(listId).innerHTML = nodeRowsHTML(loadNodes()) }
+  if (officialId) $(officialId).addEventListener('click', () => void loadOfficialNodes(officialId, warn, redraw, onChange))
   $(listId).addEventListener('change', (e: any) => {
     const i = e.target?.dataset?.i; if (i == null) return
     const list = loadNodes(); list[+i].enabled = e.target.checked
@@ -401,7 +448,7 @@ function bindNodeEditor(listId: string, addId: string, warn: (t: string) => void
 }
 
 // ---- login: editable network-node list (collapsed; the "+" reveals it) ----
-const renderNodes = bindNodeEditor('nodes-list', 'node-add', (t) => setMsg('msg', t, 'err'), () => {})
+const renderNodes = bindNodeEditor('nodes-list', 'node-add', (t) => setMsg('msg', t, 'err'), () => {}, 'nodes-official')
 $('nodes-toggle').addEventListener('click', () => {
   const panel = $('nodes-panel'), open = panel.hidden
   panel.hidden = !open; $('nodes-toggle').classList.toggle('open', open)
@@ -1121,6 +1168,7 @@ function ensureNetworkShell() {
       <div class="nodes-head"><span>${tr('Węzły sieci')}</span> <button class="node-add" id="net-node-add" type="button">${tr('+ dodaj')}</button></div>
       <div id="net-nodes-list"></div>
       <div class="net-note" id="net-nodes-note">${NODES_NOTE}</div>
+      <button class="node-official" id="net-nodes-official" type="button">${tr('Wczytaj oficjalną listę węzłów')}</button>
     </div>`
   const note = () => $('net-nodes-note')
   bindNodeEditor('net-nodes-list', 'net-node-add',
@@ -1131,7 +1179,7 @@ function ensureNetworkShell() {
       // node we are ON re-dials at once; a reorder waits for the next sweep.
       client?.setRelays(chosenRelays())
       renderNetwork()
-    })()
+    }, 'net-nodes-official')()
 }
 function renderNetwork() {
   const pane = $('pane-network'); if (!pane) return

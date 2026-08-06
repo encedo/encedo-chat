@@ -1351,6 +1351,36 @@ async function main() {
     if (afterKeys !== 0) throw new Error(`wipeout left ${afterKeys} ec-* key(s) behind`)
     step(`wipeout cleared ${beforeKeys} ec-* key(s) and returned to login`)
 
+    // ---- the published node list, fetched by its compiled-in CID -------------
+    // LAST, on A, and only with a node to read from: it replaces the relay list
+    // and re-dials, so anything after it would be running against production
+    // relays instead of the test one. Parsing is unit-tested; what this covers
+    // is the part that fails silently — the CID being wrong, or /f not serving
+    // it — which no unit test can see.
+    if (IPFS_RPC) {
+      scenario('the official node list loads by CID')
+      await A.eval(`document.getElementById('tab-network').click(); return 1`)
+      await A.waitFor('the network tab', `return !!document.getElementById('net-nodes-official')`, 10_000)
+      await A.eval(`document.getElementById('net-nodes-official').click(); return 1`)
+      await A.waitFor('the replace confirm', `
+        return document.getElementById('ask-modal').classList.contains('open');
+      `, 20_000)
+      await A.eval(`document.getElementById('ask-yes').click(); return 1`)
+      const loaded = await A.eval<any>(`
+        return new Promise((res) => setTimeout(() => res({
+          rows: document.querySelectorAll('#net-nodes-list .node-row, #net-nodes-list label').length,
+          stored: localStorage.getItem('ec-nodes'),
+        }), 600));
+      `)
+      const nodes = JSON.parse(loaded.stored ?? '[]')
+      if (!Array.isArray(nodes) || nodes.length < 2) throw new Error(`the published list did not land: ${loaded.stored}`)
+      for (const n of nodes) {
+        if (!n.addr?.startsWith('/') || !n.addr.includes('/p2p/')) throw new Error(`a published entry is not a multiaddr: ${n.addr}`)
+      }
+      if (!nodes.some((n: any) => n.enabled)) throw new Error('the loaded list has no enabled node — nothing would be dialled')
+      step(`loaded ${nodes.length} published node(s) by CID, first is ${nodes[0].name}`)
+    }
+
     if (GROUP_ONLY) {
       console.log(`\nPASS — group scenario (GROUP_ONLY: the WebRTC/other scenarios were skipped)`)
       process.exitCode = 0
