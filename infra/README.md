@@ -182,6 +182,20 @@ If both gateway checks succeed, the strategy did not take. If both fail,
 announcing is off altogether and published content is reachable only through
 our own gateway.
 
+**A restart opens a window in which published content is unreachable from
+third-party gateways.** Announcing happens after the daemon comes up, not
+during it, so `Total CIDs provided: 0` right after a restart is normal and
+means exactly what it says: nothing has been published yet, and a public
+gateway asked for a pinned CID in that window gets a timeout. Measured here as
+a 504 followed by a 200 on the retry a few seconds later. Our own gateway
+serves throughout, reading the local repository, so **the outage is invisible
+from inside the deployment** — worth knowing before shipping a firmware URL
+minutes after a restart.
+
+Once a public gateway has served a CID it caches it, so that CID stops being a
+usable probe: it will answer 200 afterwards whatever the DHT knows. Test with
+something that has never been fetched.
+
 ### Three ways this lies to you
 
 **`ipfs config show` prints only what is explicitly set.** An empty grep for
