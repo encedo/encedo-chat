@@ -1739,7 +1739,18 @@ async function attachFile(f: File) {
     // the finished one and a replay after switching rooms shows the real file.
     Object.assign(pending, meta)
     pending.id = gid ? await groupsUI.get(gid)!.room!.sendFile(meta) : room!.conv!.sendFile(meta)
-    if (pending.id) msgEls.set(pending.id, fileEls.get(pending)?.act.closest('.bubble')?.querySelector('.b-reactions') as HTMLElement)
+    // The bubble was drawn before the message had an id — it could not have one,
+    // the send had not happened — so appendFile skipped BOTH halves of
+    // reactions. Registering msgEls let other people's reactions land here;
+    // without the bar, we still could not add our own to a file we sent.
+    // Received files were fine, which is why this looked like it was about
+    // expiry: by the time anyone tries, five minutes have passed.
+    if (pending.id) {
+      const row = fileEls.get(pending)?.act.closest('.mrow') as HTMLElement | null
+      const rx = row?.querySelector('.b-reactions') as HTMLElement | null
+      if (rx) msgEls.set(pending.id, rx)
+      if (row) attachReactionBar(row, pending.id)
+    }
     show(tr('Pobierz'), humanSize(f.size))
     const els = fileEls.get(pending)
     if (els) { els.act.disabled = false; els.act.onclick = () => void downloadFile(pending, els.act) }

@@ -866,6 +866,21 @@ async function main() {
       if (!bubble.hasReactions || !bubble.hasReactBar) throw new Error('the file bubble cannot be reacted to')
       step('the caption is in the same bubble, and the bubble takes reactions')
 
+      // The SENDER's own bubble, which is the half that was broken: it is drawn
+      // before the message has an id, because the send has not happened yet, so
+      // the reaction bar was never attached. Received files were fine, which is
+      // what made this look like a problem with expired files — by the time
+      // anyone tried, five minutes had gone by.
+      const mine = await A.eval<any>(`
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(fileTok)}));
+        return { found: !!row, bar: !!(row && row.querySelector('.b-react button')),
+                 slot: !!(row && row.querySelector('.b-reactions')) };
+      `)
+      if (!mine.found) throw new Error('the sender has no bubble for the file it just sent')
+      if (!mine.slot || !mine.bar) throw new Error('the sender cannot react to a file it sent')
+      step('and the sender can react to its own file too')
+
       // The store must not be able to read it: fetch the raw blob and look.
       const leaked = await B.eval<boolean>(`
         return fetch('/f/' + window.__lastFileCid)
