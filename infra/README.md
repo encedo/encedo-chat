@@ -1,17 +1,34 @@
 # Infra for file sharing (IPFS)
 
-Two hosts, and the split between them is the security boundary:
+Two machines, and the split between them is the security boundary. The node
+answers on three names, and they are three different trust levels rather than
+three spellings of one:
 
 - **`onchato.com`** — nginx serves the app and proxies exactly two operations to
   the node. The browser talks only here.
-- **`ipfs.encedo.com`** — the Kubo node. Its RPC accepts one IP: the web host's.
-  No gateway, no public discovery, and a job that expires uploads.
+- **`rpc.ipfs.encedo.com`** — the Kubo RPC, behind HAProxy: an IP allow-list,
+  `POST` only, and an exact list of two paths (`/api/v0/add`, `/api/v0/cat`).
+- **`ipfs.encedo.com`** — the read gateway, and it is **deliberately public**.
+  Knowing a CID is the capability: the blob is ciphertext, and the key travels
+  in the envelope over the ratchet, never here.
+- **`webui.ipfs.encedo.com`** — the management console, on a narrower IP list
+  plus HTTP basic auth. It reaches the **full** admin API, on purpose, because a
+  console that cannot call `files` or `config` is not a console. The IP list and
+  the password are the only controls on that route, which is why the list is
+  shorter than the RPC's.
 
-A browser must never reach the node directly. **Kubo's RPC is an admin API** —
+A browser must never reach the RPC directly. **Kubo's RPC is an admin API** —
 `config`, `shutdown`, `files`, `key` and `repo/gc` live at the same endpoint as
 `add`. IP allow-listing is what keeps that safe, and it only stays workable
-because the allowed set is one address; it could never admit end-user phones on
-mobile networks.
+because the allowed set is a handful of servers; it could never admit end-user
+phones on mobile networks.
+
+The gateway being open is a decision, not an oversight, and it is worth being
+explicit about what it costs: anyone holding a CID can read that blob without
+authenticating, from outside any rate limit or log. That is acceptable because
+the CID only ever travels inside an authenticated envelope and the bytes are
+useless without a key that never reaches this machine. It is **not** acceptable
+to let the same CIDs reach the DHT — see below.
 
 ---
 
@@ -104,39 +121,90 @@ metadata the rest of the product avoids. The content is useless without a key
 that never touches this host, and abuse is bounded by the size cap, the rate
 limit and a five-minute life.
 
-**4. Do not announce content to the public DHT.** Otherwise anyone who learns a
-CID can fetch the ciphertext from the network — still encrypted, but it leaks
-that a file of that size exists. Check what the node is doing before changing
-anything:
+**4. Do not announce content to the public DHT.** The reason is not privacy —
+it is that **announcing breaks the TTL**. A provider record invites foreign
+nodes to fetch the blob and cache it, and once a copy exists elsewhere, `files
+rm` plus `repo gc` end *our* copy's life, not the file's. The five-minute lease
+is enforceable only while ours is the only copy. Announcing also ties this
+node's PeerID to a list of CIDs with timestamps, which is the transfer metadata
+the rest of the product goes out of its way not to keep.
+
+Nothing is lost by turning it off. Every reader comes through our own HTTP — the
+app via `/f/<cid>`, anyone else via the gateway — and neither path consults the
+DHT. Announcing serves only foreign peer-to-peer retrieval, which is exactly the
+traffic this node does not exist to serve.
 
 ```bash
-ipfs config Routing.Type
-ipfs config Reprovider.Strategy
+docker exec ipfs1 ipfs config Gateway.NoFetch     # true: the gateway serves only what is local
+docker exec ipfs1 ipfs config Routing.Type        # "not found" = unset = the default, which is `auto`
+docker exec ipfs1 ipfs config show | grep -B2 -A10 -iE '"(provide|reprovider)"'
 ```
 
-For a node that only ever serves its own uploads, `Routing.Type=none` is the
-blunt and reliable answer; it also stops the node fetching foreign content, so
-confirm that is what you want before setting it. **Verify against the running
-version** — these keys have moved between Kubo releases.
+**Check the key name against the running version rather than assuming it** — the
+announcing config moved from `Reprovider.*` to `Provide.*` between releases, and
+which one applies depends on the binary in front of you. `Reprovider.Interval 0`
+or `Provide.Enabled false` disables it; restart the container afterwards.
+
+If selective announcing is ever wanted, the strategies are `all`, `pinned`,
+`mfs` and `pinned+mfs`. **Granularity stops at the whole MFS — there is no
+per-path selector**, so `mfs` cannot be narrowed to `/ec`. Today `/ec` is all
+that MFS holds, which makes the two equivalent by accident rather than by
+guarantee: anything else ever written to MFS joins the announcement.
+
+`Routing.Type=none` is the blunt version and goes too far — it also stops the
+node *fetching*, which is how the WebUI got here (`ipfs pin add`, since
+`Gateway.NoFetch=true` stops the gateway but not bitswap). `autoclient` is the
+middle setting: still fetches, no longer answers strangers' DHT queries.
+
+Verify with a public gateway, before and after — a success proves you are
+discoverable, while a single failure proves little, since public gateways time
+out for their own reasons:
+
+```bash
+curl -sI --max-time 25 https://dweb.link/ipfs/<cid> | head -1
+```
 
 **5. Install the expiry job** as a sidecar on the docker network. Kubo's RPC is
 not published to the host, so this is the way in that does not require opening a
 port or handing cron the docker socket (root on the host, for a job that deletes
 directory entries).
 
-```yaml
-  ipfs-ttl:
-    image: alpine:3
-    depends_on: [ipfs1]
-    environment: { IPFS_API: "http://ipfs1:5001", TTL: "300" }
-    command: sh -c "apk add --no-cache curl >/dev/null && while :; do /opt/ttl.sh; sleep 60; done"
-    volumes: [ "./infra/ipfs-ttl.sh:/opt/ttl.sh:ro" ]
-    restart: unless-stopped
+Copy `ipfs-ttl.sh` to the host and run `ipfs-ttl-run.sh`, which holds the exact
+invocation — network, mount, environment — so it does not have to be remembered:
+
+```bash
+scp infra/ipfs-ttl.sh   root@<node>:/opt/my_project/docker/ipfs_ttl/ttl.sh
+scp infra/ipfs-ttl-run.sh root@<node>:/opt/my_project/docker/ipfs_ttl/
+ssh root@<node> sh /opt/my_project/docker/ipfs_ttl/ipfs-ttl-run.sh
 ```
+
+**Prove the wiring before the first real sweep.** A TTL nothing can exceed makes
+the run a no-op, so it tests exactly one thing — whether the container resolves
+`ipfs1` — and destroys nothing if the answer is no:
+
+```bash
+docker run --rm --network www_network \
+  -v /opt/my_project/docker/ipfs_ttl/ttl.sh:/opt/ttl.sh:ro \
+  -e IPFS_API=http://ipfs1:5001 -e TTL=999999999 \
+  alpine:3 sh -c "apk add --no-cache curl >/dev/null && sh /opt/ttl.sh"
+```
+
+`docker run` rather than a compose service: this is one container, and the
+stack's compose file belongs to another project. The cost is that nothing
+recreates it automatically — hence the script. A reboot is covered, though:
+`--restart unless-stopped` brings it back, and the sidecar tolerates `ipfs1`
+starting later, so start order does not matter.
 
 A `while` loop rather than cron: the image has no cron daemon, `sleep 60` does
 the same for less, and the output lands in `docker logs` with the rest of the
 stack's.
+
+Two details that each cost a confusing failure. **`sh /opt/ttl.sh`, not
+`/opt/ttl.sh`** — a bind mount carries the host's permissions, and a missing
+execute bit surfaces as "not found", which reads like a broken mount. And
+**Docker silently creates a directory** when a bind-mount source is absent, so a
+typo in the path mounts an empty directory over the script; `ipfs-ttl-run.sh`
+checks for the file first for that reason.
 
 This works because **the RPC lockdown lives at HAProxy, not in Kubo** —
 `files/*` and `repo/gc` are refused from outside and remain reachable inside the
@@ -151,9 +219,18 @@ are blocked there deliberately, and cleanup taking the internal path is the
 design rather than a workaround.
 
 ```bash
-docker compose up -d ipfs-ttl
-docker compose logs -f ipfs-ttl        # first sweep clears anything already past its TTL
+docker logs -f ipfs-ttl         # the first sweep clears everything already past its TTL
 ```
+
+That first sweep is not gentle — every entry older than the TTL goes at once,
+and `repo gc` follows. On the deployment where this was first installed it
+removed 36 entries and about 245 MB. `TTL=86400 sh ipfs-ttl-run.sh` buys a quiet
+pass to read the logs against; re-run without it to go live.
+
+**`repo gc` collects every unpinned block, not only ours.** The WebUI survives
+because it is pinned. Anything else that lands on this node without a pin will
+not survive the next sweep, which is worth knowing before using it as a scratch
+store for something else.
 
 Why a ledger in MFS rather than `repo gc` on a timer: GC removes everything
 unpinned *whenever it runs*, so a file uploaded ten seconds before a sweep lives
@@ -173,10 +250,17 @@ within a minute" in the UI; do not promise a precision the mechanism lacks.
 echo hello | curl -sF file=@- https://onchato.com/f
 curl -s https://onchato.com/f/<cid>            # → hello
 
-# on the IPFS host — the ledger, and that it drains
-ipfs files ls -l /ec
-sleep 360 && /usr/local/bin/ipfs-ttl-gc.sh     # the entry should go
+# on the IPFS host — the ledger, and that it drains on its own
+docker exec ipfs1 ipfs files ls -l /ec
+docker exec ipfs1 ipfs repo stat
+docker logs --tail 20 ipfs-ttl                 # quiet once /ec is empty
 ```
+
+The one that counts is not any of these: **send a file in the app, wait past the
+TTL, and press Download.** It must say "expired" and not "failed". That is the
+only exercise of the branch separating the two — `getBlob` turns 404 and 410
+into `ExpiredError` and everything else into a failure — and until the sweeper
+ran, nothing expired, so that branch had never once executed in production.
 
 The app's own check is `impl/net/ipfs-test.ts`: it pushes ciphertext through
 `/f`, reads it back, and verifies the round trip decrypts — which is also the
