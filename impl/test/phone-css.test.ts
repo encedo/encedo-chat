@@ -112,6 +112,22 @@ test('the attachment chip stays shorter than the field it sits in', () => {
     'the cross needs an overlay to stay finger-sized without growing the chip')
 })
 
+test('the settings drawer stacks above the scrim, and modals above the drawer', () => {
+  // The drawer opens the scrim with it, so a drawer BELOW the scrim is a drawer
+  // whose every click and scroll is swallowed by the overlay — reported as
+  // "settings is dead, and it will not scroll". The two-browser harness cannot
+  // catch it: it clicks elements through CDP, which never hit-tests.
+  const z = (sel: string) => {
+    const m = HTML.match(new RegExp(`\\${sel}\\{([^}]*)\\}`))
+    assert.ok(m, `${sel} rule not found`)
+    const v = m![1].match(/z-index:\s*(\d+)/)?.[1]
+    assert.ok(v, `${sel} has no z-index`)
+    return parseInt(v!, 10)
+  }
+  assert.ok(z('.scrim') < z('.drawer'), `scrim ${z('.scrim')} must sit under drawer ${z('.drawer')}`)
+  assert.ok(z('.drawer') < z('.modal'), `drawer ${z('.drawer')} must sit under modal ${z('.modal')}`)
+})
+
 test('the one-pane layout switch covers the same set', () => {
   // The rule that makes the app show a single pane. If these two ever disagree
   // about what a phone is, the header collapses on devices that are showing the
