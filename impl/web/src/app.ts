@@ -863,8 +863,11 @@ const openShare = async (returnMode = false) => {
   $('share-sub').textContent = returnMode
     ? tr('Kontakt dodany. Żeby ta osoba mogła do Ciebie napisać, musi mieć też Twój klucz — odeślij jej ten link.')
     : tr('Wyślij ten link dowolnym kanałem. Nie zawiera niczego tajnego — sam klucz publiczny.')
+  // A link produced in return mode says so, and that is what ends the exchange:
+  // the far side imports it without being asked to send anything back, because
+  // it already did.
   ;($('share-link') as HTMLInputElement).value =
-    inviteLink(location.origin, location.pathname, { pub: session.pub, name: session.handle })
+    inviteLink(location.origin, location.pathname, { pub: session.pub, name: session.handle, reply: returnMode })
   $('share-fp').textContent = fpCache.get(session.pub) ?? await fingerprint(session.pub)
 }
 const closeShare = () => { $('scrim').classList.remove('open'); $('share-modal').classList.remove('open') }
@@ -906,7 +909,11 @@ $('import-add').addEventListener('click', async () => {
     await refreshContacts()
     pendingInvite = null
     closeImport()
-    await openShare(true)
+    // Only the FIRST leg asks for a key back. An imported reply means both sides
+    // now hold both keys, and offering to send ours again is how this loops
+    // forever — which is exactly what it did.
+    if (inv.reply) toast(tr('Wymiana zakończona — możecie rozmawiać'))
+    else await openShare(true)
   } catch (e: any) { setMsg('import-msg', tr('Błąd zapisu: ') + (e?.message ?? e), 'err') }
   finally { btn.disabled = false; btn.textContent = label ?? tr('Dodaj kontakt') }
 })

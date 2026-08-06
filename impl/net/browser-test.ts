@@ -1289,6 +1289,13 @@ async function main() {
     // create — so it is asserted rather than assumed.
     if (share.link.split('#')[0].includes('i=')) throw new Error('the invite escaped the fragment')
     if (!/^[0-9A-F:]{23}$/.test(share.fp)) throw new Error(`no fingerprint on the share dialog: ${share.fp}`)
+    // Close both, or the "was A offered a reply?" check at the end of this
+    // scenario reads a share dialog that has been open since this line.
+    await A.eval(`
+      document.getElementById('share-close').click();
+      document.getElementById('btn-close-drawer').click();
+      return 1;
+    `)
     step(`A produced an invite link, fingerprint ${share.fp}`)
 
     // First the LIVE case, because it is the likely one: someone already signed
@@ -1332,9 +1339,26 @@ async function main() {
     `, 20_000)
     // The return dialog is not a courtesy: the pair topic is ECDH(IK_a, IK_b),
     // so until A holds B's key too there is no topic either of them can reach.
-    const back = await B.eval<boolean>(`return document.getElementById('share-modal').classList.contains('open')`)
-    if (!back) throw new Error('after importing, B was not offered its own link back')
+    const back = await B.eval<any>(`
+      const open = document.getElementById('share-modal').classList.contains('open');
+      return { open, link: document.getElementById('share-link').value };
+    `)
+    if (!back.open) throw new Error('after importing, B was not offered its own link back')
     step('the contact was added, and B is offered its key in return')
+
+    // The return leg has to TERMINATE. Importing a reply used to offer another
+    // reply, so the two sides bounced dialogs at each other for ever.
+    await A.eval(`location.hash = ${JSON.stringify(back.link.slice(back.link.indexOf('#') + 1))}; return 1`)
+    await A.waitFor('A is shown the reply', `
+      return document.getElementById('import-modal').classList.contains('open');
+    `, 15_000)
+    await A.eval(`document.getElementById('import-add').click(); return 1`)
+    await A.waitFor('A finished importing the reply', `
+      return !document.getElementById('import-modal').classList.contains('open');
+    `, 20_000)
+    const looped = await A.eval<boolean>(`return document.getElementById('share-modal').classList.contains('open')`)
+    if (looped) throw new Error('importing a reply offered another reply — the exchange loops')
+    step('A imported the reply and was NOT asked to send its key again')
 
     scenario('wipeout clears local state and returns to login')
     // The §10 WIPE: a device reset. It must delete every ec-* key (identity +

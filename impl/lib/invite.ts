@@ -33,7 +33,24 @@
  *  short enough that it cannot be used to wreck the contact list. */
 export const MAX_NAME = 64
 
-export interface Invite { pub: string; name: string }
+export interface Invite {
+  pub: string
+  name: string
+  /**
+   * This link is a REPLY — the sender already holds the recipient's key.
+   *
+   * Without it the exchange never terminates: B imports A and is asked to send
+   * theirs back, A imports that and is asked to send theirs back, and A has
+   * already done so. Nothing in a bare payload distinguishes "here is my key"
+   * from "here is my key, you already gave me yours", so the sender has to say.
+   *
+   * Forging it is a denial, not a compromise: a link falsely marked as a reply
+   * suppresses the return offer, so the recipient never sends their key, so no
+   * conversation happens at all — self-defeating for anyone trying to sit in
+   * the middle of one.
+   */
+  reply?: boolean
+}
 
 const b64urlEncode = (s: string) =>
   btoa(unescape(encodeURIComponent(s))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -43,7 +60,9 @@ const b64urlDecode = (s: string) =>
 
 /** The fragment an invite link carries, without the leading `#`. */
 export function encodeInvite(inv: Invite): string {
-  return 'i=' + b64urlEncode(JSON.stringify({ p: inv.pub, n: inv.name.slice(0, MAX_NAME) }))
+  const o: any = { p: inv.pub, n: inv.name.slice(0, MAX_NAME) }
+  if (inv.reply) o.r = 1
+  return 'i=' + b64urlEncode(JSON.stringify(o))
 }
 
 export function inviteLink(origin: string, path: string, inv: Invite): string {
@@ -78,5 +97,5 @@ export function decodeInvite(hash: string): Invite | null {
   // characters arrives as a contact with no visible name at all.
   const name = obj.n.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '').trim().slice(0, MAX_NAME)
   if (!name) return null
-  return { pub: obj.p, name }
+  return obj.r ? { pub: obj.p, name, reply: true } : { pub: obj.p, name }
 }

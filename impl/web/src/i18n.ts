@@ -180,6 +180,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Dodaję…': 'Adding…',
     'Podaj nazwę.': 'Enter a name.',
     'To Twój własny profil.': 'That is your own profile.',
+    'Wymiana zakończona — możecie rozmawiać': 'Exchange complete — you can talk now',
     'Wczytaj oficjalną listę węzłów': 'Load the official node list',
     'Zacznij od wymiany kluczy': 'Start by exchanging keys',
     'Rozmowa wymaga, żeby obie strony miały swoje klucze publiczne — bez tego nie ma nawet gdzie się spotkać. Wyślij komuś swój link, a on odeśle swój. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie zobaczy.':

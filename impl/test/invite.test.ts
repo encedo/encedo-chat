@@ -67,6 +67,23 @@ test('rubbish in the fragment is null, never a throw', () => {
   }
 })
 
+test('a reply is marked as one, and a first invite is not', () => {
+  // Without this the exchange never ends: B imports A and is asked to send
+  // theirs back, A imports that and is asked to send theirs back — which A
+  // already did. Nothing in a bare payload tells the two apart.
+  const first = decodeInvite('#' + encodeInvite({ pub: PUB, name: 'Alicja' }))
+  assert.ok(!first!.reply)
+  const back = decodeInvite('#' + encodeInvite({ pub: PUB, name: 'Bogdan', reply: true }))
+  assert.equal(back!.reply, true)
+})
+
+test('the reply marker survives a link that never had one', () => {
+  // Older links carry no `r`, and must import as a first leg rather than as a
+  // reply — the failure would be silent and would strand the exchange.
+  const frag = 'i=' + Buffer.from(JSON.stringify({ p: PUB, n: 'Ala' })).toString('base64url')
+  assert.ok(!decodeInvite('#' + frag)!.reply)
+})
+
 test('a fragment that is not ours is left alone', () => {
   assert.equal(decodeInvite('#access_token=abc'), null)
 })
