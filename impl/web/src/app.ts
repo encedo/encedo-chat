@@ -1766,12 +1766,20 @@ const fileGone = (f: FileEnv) => !!f.exp && nowMs() > f.exp
  * disagree, and a saved file was left with a button dead for good.
  */
 function setFileAction(act: HTMLButtonElement, env: FileEnv) {
-  act.textContent = fileGone(env) ? tr('Wygasł') : tr('Pobierz')
-  act.disabled = fileGone(env)
+  const gone = fileGone(env)
+  act.textContent = gone ? tr('Wygasł') : tr('Pobierz')
+  act.disabled = gone
+  if (gone) { act.closest('.b-file')?.classList.add('gone'); return }
+  // Expiry is a moment in time, and nothing here was watching the clock: a
+  // bubble drawn while the file was alive offered Download for ever, and
+  // pressing it minutes later hung rather than saying the file was gone.
+  // One timer per bubble, fired at the moment itself — a poll would have to be
+  // frequent enough to be honest and would then run all day for nothing.
+  const left = env.exp! - nowMs()
+  if (env.exp && left > 0 && left < 2 ** 31) setTimeout(() => setFileAction(act, env), left + 500)
 }
 
 async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
-  const was = btn.textContent
   btn.disabled = true; btn.textContent = tr('Pobieram…')
   // The same evidence line on the RECEIVING side, which is where it is most
   // useful: this is a file someone else encrypted, and the key arrived over the
@@ -1795,12 +1803,20 @@ async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
     // while the bubble sat there.
     setTimeout(() => setFileAction(btn, env), 5000)
   } catch (e: any) {
-    const gone = e?.name === 'ExpiredError'
+    // Past its lifetime, ANY failure is expiry. The store answers a request for
+    // a swept file by going looking for it on the public network — a hunt for
+    // something we deleted on purpose — so what comes back is a proxy timeout,
+    // not the 404 this used to insist on. Reporting "error" then is both wrong
+    // and useless: there is nothing to retry.
+    const gone = e?.name === 'ExpiredError' || fileGone(env)
     btn.textContent = gone ? tr('Wygasł') : tr('Błąd')
     btn.closest('.b-file')?.classList.toggle('gone', gone)
     if (!gone) ecLog('file download failed: ' + (e?.message ?? e))
     if (gone) toast(tr('Plik wygasł — poproś o ponowne wysłanie'))
-    setTimeout(() => { btn.disabled = false; btn.textContent = was ?? '' }, 2500)
+    // Back to what the file's own state says, not to whatever the label was on
+    // entry. Restoring "Pobierz" on an expired file is how a dead download
+    // became a button that invites pressing again — and hangs again.
+    setTimeout(() => setFileAction(btn, env), 2500)
   }
 }
 
