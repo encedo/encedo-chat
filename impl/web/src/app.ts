@@ -1209,8 +1209,8 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string)
   // that state instead of offering a download that cannot work. attachFile
   // updates these two elements as it goes, via `fileEls`.
   const pending = !env.cid
-  act.textContent = pending ? tr('Wysyłam…') : fileGone(env) ? tr('Wygasł') : tr('Pobierz')
-  act.disabled = pending || fileGone(env)
+  if (pending) { act.textContent = tr('Wysyłam…'); act.disabled = true }
+  else setFileAction(act, env)
   if (!pending) act.addEventListener('click', () => void downloadFile(env, act))
   fileEls.set(env, { act, sub })
   wrap.append(ico, info, act)
@@ -1338,6 +1338,16 @@ const fileGone = (f: FileEnv) => !!f.exp && nowMs() > f.exp
  * after minutes by design, so the user is told to ask for it again rather than
  * to retry something that will never work.
  */
+/**
+ * What the action button reads, and whether it can be pressed. ONE rule, used
+ * when the bubble is built and again once a download finishes — the two used to
+ * disagree, and a saved file was left with a button dead for good.
+ */
+function setFileAction(act: HTMLButtonElement, env: FileEnv) {
+  act.textContent = fileGone(env) ? tr('Wygasł') : tr('Pobierz')
+  act.disabled = fileGone(env)
+}
+
 async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
   const was = btn.textContent
   btn.disabled = true; btn.textContent = tr('Pobieram…')
@@ -1349,6 +1359,12 @@ async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
     a.href = url; a.download = env.name; a.click()
     setTimeout(() => URL.revokeObjectURL(url), 30_000)
     btn.textContent = tr('Zapisano')
+    // Saving once must not be the end of it: browsers put downloads in places
+    // people do not find, and a second copy is a reasonable thing to want. The
+    // label parks on "Zapisano" long enough to be read, then returns to whatever
+    // the file's own state says — expiry included, since it may have run out
+    // while the bubble sat there.
+    setTimeout(() => setFileAction(btn, env), 5000)
   } catch (e: any) {
     const gone = e?.name === 'ExpiredError'
     btn.textContent = gone ? tr('Wygasł') : tr('Błąd')
