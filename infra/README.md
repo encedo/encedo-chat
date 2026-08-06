@@ -66,8 +66,24 @@ location ~ ^/f/(?<cid>[A-Za-z0-9]+)$ {
     proxy_set_header Referer    "";
     proxy_set_header User-Agent "encedo-proxy";
     proxy_ssl_server_name on;
-    rewrite ^ /api/v0/cat?arg=$cid break;
+    # Kubo answers "I do not have it, and I am not allowed to look" with a 500.
+    # For this store that is the ordinary end of a file's life rather than a
+    # fault, so it is reported as what it is. ONLY 500 is mapped: 502 and 504
+    # keep their meaning, which is that the node is not answering at all.
+    proxy_intercept_errors on;
+    error_page 500 = @gone;
+
+    rewrite ^ /api/v0/cat?arg=$cid&offline=true break;
     proxy_pass https://rpc.ipfs.encedo.com;
+}
+
+# An expired file, said plainly. nginx cannot read the upstream body, so every
+# 500 becomes this — acceptable because with `offline=true` there is essentially
+# one way for cat to fail.
+location @gone {
+    internal;
+    default_type application/json;
+    return 404 '{"error":"expired"}';
 }
 ```
 
@@ -92,6 +108,13 @@ it refuses to start. After a rewrite the target is constant and resolved once.
 
 **`proxy_method POST`.** Kubo has rejected `GET` on `/api/v0/*` since 0.5. The
 browser fetches `/f/<cid>` with GET, so without this every download is a 405.
+
+**`offline=true`, or an expired file hangs for fifty seconds.** Asked for a CID
+the sweeper removed, the node does what IPFS nodes do: it goes looking for it on
+the public network — a hunt for something we deleted on purpose — and blocks
+until the proxy gives up. `Gateway.NoFetch` does not cover this, because that
+setting governs the GATEWAY and `/f` comes in through the RPC. Measured on the
+live node: 25 s and still going without the flag, 0.32 s with it.
 
 **A named capture, `(?<cid>…)`.** `rewrite ^ … $1` resets the positional
 captures — `$1` there refers to the *rewrite's* groups, and `^` has none, so the
