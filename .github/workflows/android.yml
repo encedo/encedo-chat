@@ -54,11 +54,18 @@ jobs:
 
       # 21, matching the JDK the working local build uses. Not a guess about the
       # minimum Gradle would accept.
-      - uses: actions/setup-java@v4
+      #
+      # Deliberately NO `cache: gradle`, and it must stay that way: that option
+      # looks for a Gradle project AT THIS POINT IN THE RUN, and ours does not
+      # exist until `android init` generates it further down, into a gitignored
+      # tree. There is no build file in the repository for it to find, so the
+      # option does not merely miss the cache — it fails the job outright,
+      # before anything is built. Rust dominates the build time anyway, and that
+      # is cached below.
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle
 
       # NDK 27, platform 34, build-tools 34 — the same set as the machine this
       # is known to build on.
