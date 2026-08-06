@@ -564,6 +564,16 @@
     <div class="modal-actions"><button class="btn-send" id="soft-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="soft-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
+  <!-- Shown once, to an account with no contacts and no groups: the app is
+       otherwise an empty list with no clue what to do, and the thing to do is
+       not guessable — a conversation needs BOTH sides to hold the other's key,
+       so the first move is always an exchange. -->
+  <div class="modal" id="welcome-modal">
+    <h2 data-i18n="Zacznij od wymiany kluczy">Zacznij od wymiany kluczy</h2>
+    <div class="msub" data-i18n="Rozmowa wymaga, żeby obie strony miały swoje klucze publiczne — bez tego nie ma nawet gdzie się spotkać. Wyślij komuś swój link, a on odeśle swój. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie zobaczy.">Rozmowa wymaga, żeby obie strony miały swoje klucze publiczne — bez tego nie ma nawet gdzie się spotkać. Wyślij komuś swój link, a on odeśle swój. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie zobaczy.</div>
+    <div class="modal-actions"><button class="btn-send" id="welcome-share" style="flex:1;border-radius:8px" data-i18n="Udostępnij mój profil">Udostępnij mój profil</button><button class="btn-ghost" id="welcome-close" data-i18n="Zamknij">Zamknij</button></div>
+  </div>
+
   <!-- Invite: a link carrying a public key, and the fingerprint that says the
        key is the right one. The fingerprint is the security control here — the
        link itself is not secret and is not meant to be. -->

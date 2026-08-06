@@ -532,7 +532,12 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   $('sess-kid').title = kid ?? tr('Tożsamość programowa — brak klucza w HSM')
   await refreshContacts()
   // An invite clicked while logged out waited through the login screen for this.
+  // It takes precedence over the welcome card: someone arriving with a link has
+  // already been told what to do, and being told again first would be noise.
   if (pendingInvite) void showInvite(pendingInvite)
+  else if (!contactsCache.length && !hasStoredGroups()) {
+    $('scrim').classList.add('open'); $('welcome-modal').classList.add('open')
+  }
 }
 
 // ---- contacts (HEM-backed book; in-memory cache keeps re-renders cheap) ----
@@ -831,6 +836,24 @@ window.addEventListener('hashchange', () => {
   if (session) void showInvite(inv) // otherwise the login screen hands it over
 })
 
+/**
+ * Whether this device holds any group state for the signed-in handle.
+ *
+ * Read straight from storage rather than from `groupsUI`, because the cache
+ * restore is asynchronous: asked at login time, the map is still empty on a
+ * device that has several groups and is a second away from showing them — and
+ * the onboarding card would greet a returning user as a new one.
+ */
+function hasStoredGroups(): boolean {
+  const p = gcachePrefix()
+  for (let i = 0; i < localStorage.length; i++) if (localStorage.key(i)?.startsWith(p)) return true
+  return false
+}
+
+const closeWelcome = () => { $('scrim').classList.remove('open'); $('welcome-modal').classList.remove('open') }
+$('welcome-close').addEventListener('click', closeWelcome)
+$('welcome-share').addEventListener('click', () => { closeWelcome(); void openShare() })
+
 const openShare = async (returnMode = false) => {
   if (!session) return
   $('scrim').classList.add('open'); $('share-modal').classList.add('open')
@@ -993,7 +1016,7 @@ $('pw-save').addEventListener('click', async () => {
 $('btn-settings').addEventListener('click', openDrawer)
 $('chip-profile').addEventListener('click', openDrawer)
 $('btn-close-drawer').addEventListener('click', closeDrawer)
-$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); pendingInvite = null; closeImport() })
+$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); closeWelcome(); pendingInvite = null; closeImport() })
 $('btn-logout').addEventListener('click', () => location.reload())
 
 // ---- attach a file --------------------------------------------------------

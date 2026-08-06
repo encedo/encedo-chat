@@ -181,6 +181,10 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Podaj nazwę.': 'Enter a name.',
     'To Twój własny profil.': 'That is your own profile.',
     'Wczytaj oficjalną listę węzłów': 'Load the official node list',
+    'Zacznij od wymiany kluczy': 'Start by exchanging keys',
+    'Rozmowa wymaga, żeby obie strony miały swoje klucze publiczne — bez tego nie ma nawet gdzie się spotkać. Wyślij komuś swój link, a on odeśle swój. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie zobaczy.':
+      'A conversation needs both sides to hold the other\u2019s public key \u2014 without that there is not even a place to meet. Send someone your link and they will send theirs back. From then on the content is end-to-end encrypted and no server along the way sees it.',
+    'Udostępnij mój profil': 'Share my profile',
     'Pobieram…': 'Fetching…',
     'Wczytać oficjalną listę?': 'Load the official list?',
     'Zastąpi Twoją listę {n} węzłami z publikacji. Twoje własne wpisy znikną.':
