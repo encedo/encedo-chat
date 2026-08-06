@@ -225,6 +225,48 @@ messages both ways). The **WebSocket listener and the ACL are not** — AppArmor
 confines mosquitto to `/etc/mosquitto`, so they need the install above and a root
 shell. Run the block, and the last line proves the browser's transport path.
 
+## Checking the file encryption yourself
+
+Shared files are encrypted in the browser and uploaded to an IPFS node that
+holds nothing but ciphertext; the key rides in the message envelope, over the
+ratchet or a group sender key, and never reaches the store. `file-decrypt.ts`
+exists so that is a thing you can verify rather than a thing you are told.
+
+Open the app with `?debug=1` and send or download a file. The console prints one
+line per file:
+
+```
+[ec 12.44s] file evidence · {"cid":"Qm…","name":"raport.pdf","size":5242880,"key":"…","chunk":4194304,"chunks":2,"alg":"A256GCM-chunked-v1"}
+```
+
+Paste it — quotes included — into the tool:
+
+```bash
+cd impl
+
+# the positive case: fetch the blob the node is holding, open it, write the file
+node net/file-decrypt.ts '{"cid":"Qm…", … }'
+
+# the negative control: same blob, no key, nothing to see
+node net/file-decrypt.ts '{"cid":"Qm…","size":…,"chunk":…,"chunks":…,"alg":"…"}' --no-key
+
+# through a public gateway instead of the app's proxy — same CID, same bytes
+node net/file-decrypt.ts '{…}' --gateway https://ipfs.encedo.com
+```
+
+The run prints the ciphertext length and its first bytes, then either recovers
+the original and reports whether any plaintext appears in the stored blob, or —
+given a wrong key — refuses. A wrong key, a tampered blob, a reordered chunk and
+a truncated file all land in that same refusal, by design: none of them may
+yield partial plaintext.
+
+`--out <path>` chooses where the plaintext goes; without it the name from the
+manifest is used. **A 404 means the file expired** — uploads live minutes, and
+nothing here can bring one back, which is the other half of the claim.
+
+The evidence line is a complete capability to that one file. It is behind
+`?debug=1` for that reason, and bounded anyway by the same expiry.
+
 ## Self-hosting
 
 Running an independent network is a first-class, encouraged path (own nodes

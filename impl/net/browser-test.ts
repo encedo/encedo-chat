@@ -536,7 +536,7 @@ const SOFT_PASS = 'harness-passphrase'
  */
 async function softProfile(b: Page, handle: string) {
   await b.eval(`document.getElementById('go-soft').click(); return 1`)
-  await b.waitFor('software modal', `return document.getElementById('soft-modal').classList.contains('open')`)
+  await b.waitFor('software modal', `return document.getElementById('soft-modal').classList.contains('open')`, 20_000)
   await b.eval(`
     document.getElementById('soft-name').value = ${JSON.stringify(handle)};
     document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)};
@@ -1272,6 +1272,69 @@ async function main() {
     }
     if (!delivered2) throw new Error('after reload, A could not broadcast to the group (chain state lost?)')
     step('after reload the send chain continued — A still broadcasts to the member')
+
+    // ---- invite: a link carries a key, a fingerprint says it is the right one -
+    scenario('an invite link travels from A to B and adds the contact')
+    const share = await A.eval<any>(`
+      document.getElementById('btn-settings').click();
+      document.getElementById('btn-share').click();
+      return new Promise((res) => setTimeout(() => res({
+        link: document.getElementById('share-link').value,
+        fp: document.getElementById('share-fp').textContent,
+      }), 400));
+    `)
+    if (!share.link.includes('#i=')) throw new Error(`the share link carries no invite: ${share.link}`)
+    // The payload MUST be in the fragment. In the path or the query the web host
+    // would log who invited whom, which is the one record this design refuses to
+    // create — so it is asserted rather than assumed.
+    if (share.link.split('#')[0].includes('i=')) throw new Error('the invite escaped the fragment')
+    if (!/^[0-9A-F:]{23}$/.test(share.fp)) throw new Error(`no fingerprint on the share dialog: ${share.fp}`)
+    step(`A produced an invite link, fingerprint ${share.fp}`)
+
+    // First the LIVE case, because it is the likely one: someone already signed
+    // in clicks the link. Changing only the fragment is a same-document
+    // navigation — no script runs — so this passes only because the app listens
+    // for hashchange. It did not, and this is how that was found.
+    await B.eval(`location.hash = ${JSON.stringify(share.link.slice(share.link.indexOf('#') + 1))}; return 1`)
+    await B.waitFor('the invite is noticed by an already-open app', `
+      return document.getElementById('import-modal').classList.contains('open');
+    `, 10_000)
+    await B.eval(`document.getElementById('import-cancel').click(); return 1`)
+    step('a signed-in B notices an invite that only changed the fragment')
+
+    // Now the cold case: a genuinely fresh document, which is what happens when
+    // the link is opened from mail. about:blank first — navigating straight to a
+    // URL differing only by fragment would not reload at all.
+    // The FRAGMENT is what the link contributes; the harness keeps its own query
+    // flags, which a real invite has no business carrying and does not.
+    await B.reload('about:blank')
+    await B.reload(APP_URL + share.link.slice(share.link.indexOf('#')))
+    await B.waitFor('B back at the login form', `return !!document.getElementById('go-soft')`, 20_000)
+    await softProfile(B, 'sim-b')
+    await B.waitFor('the invite survived the login screen', `
+      return document.getElementById('import-modal').classList.contains('open');
+    `, 30_000)
+    const imp = await B.eval<any>(`return {
+      fp: document.getElementById('import-fp').textContent,
+      name: document.getElementById('import-name').value,
+      url: location.href,
+    }`)
+    if (imp.fp !== share.fp) throw new Error(`fingerprint changed in transit: ${share.fp} → ${imp.fp}`)
+    // Read once, then dropped: a public key left in the address bar outlives the
+    // dialog, survives into history, and re-asks on every reload.
+    if (imp.url.includes('#i=')) throw new Error('the invite stayed in the address bar')
+    step(`B was shown the invite after logging in — same fingerprint, URL cleaned`)
+
+    await B.eval(`document.getElementById('import-add').click(); return 1`)
+    await B.waitFor('the contact appeared', `
+      return [...document.querySelectorAll('#pane-contacts .contact')]
+        .some((c) => c.textContent.includes(${JSON.stringify(imp.name)}));
+    `, 20_000)
+    // The return dialog is not a courtesy: the pair topic is ECDH(IK_a, IK_b),
+    // so until A holds B's key too there is no topic either of them can reach.
+    const back = await B.eval<boolean>(`return document.getElementById('share-modal').classList.contains('open')`)
+    if (!back) throw new Error('after importing, B was not offered its own link back')
+    step('the contact was added, and B is offered its key in return')
 
     scenario('wipeout clears local state and returns to login')
     // The §10 WIPE: a device reset. It must delete every ec-* key (identity +

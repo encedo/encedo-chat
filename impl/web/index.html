@@ -253,6 +253,14 @@
      fit around a 14ch filename. Keyed on WIDTH alone, not the phone block — the
      same device in landscape has the room and was already right. */
   @media (max-width:480px){.composer-field .attach-chip .n{max-width:8ch}}
+  /* The fingerprint is the one thing on these dialogs a person must actually
+     read and compare, so it gets monospace, spacing and size that the rest of
+     the copy does not compete with. */
+  .fp-box{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin:12px 0 6px;
+    padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px}
+  .fp-box .fp-lbl{font-size:12px;color:var(--muted);flex:none}
+  .fp-box .fp-val{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;
+    letter-spacing:.06em;word-break:break-all;color:var(--text)}
   .prof-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
   .prof-row:last-child{border-bottom:none}
   .prof-row .p-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
@@ -546,12 +554,42 @@
     <div class="modal-actions"><button class="btn-send" id="soft-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="soft-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
+  <!-- Invite: a link carrying a public key, and the fingerprint that says the
+       key is the right one. The fingerprint is the security control here — the
+       link itself is not secret and is not meant to be. -->
+  <div class="modal" id="share-modal">
+    <h2 id="share-title" data-i18n="Udostępnij swój profil">Udostępnij swój profil</h2>
+    <div class="msub" id="share-sub" data-i18n="Wyślij ten link dowolnym kanałem. Nie zawiera niczego tajnego — sam klucz publiczny.">Wyślij ten link dowolnym kanałem. Nie zawiera niczego tajnego — sam klucz publiczny.</div>
+    <label data-i18n="Link">Link</label>
+    <input id="share-link" type="text" readonly onclick="this.select()">
+    <div class="fp-box"><span class="fp-lbl" data-i18n="Twój odcisk">Twój odcisk</span><span class="fp-val" id="share-fp">—</span></div>
+    <div class="hint" data-i18n="Podaj ten odcisk osobno — głosem albo osobiście. Odbiorca porówna go z tym, co zobaczy po kliknięciu linku; to jedyne, co wykrywa podmianę klucza po drodze.">Podaj ten odcisk osobno — głosem albo osobiście. Odbiorca porówna go z tym, co zobaczy po kliknięciu linku; to jedyne, co wykrywa podmianę klucza po drodze.</div>
+    <div class="modal-actions"><button class="btn-send" id="share-copy" style="flex:1;border-radius:8px" data-i18n="Kopiuj link">Kopiuj link</button><button class="btn-ghost" id="share-close" data-i18n="Zamknij">Zamknij</button></div>
+  </div>
+
+  <div class="modal" id="import-modal">
+    <h2 data-i18n="Zaproszenie">Zaproszenie</h2>
+    <div class="msub" data-i18n="Ktoś przysłał Ci swój profil. Sprawdź odcisk, zanim dodasz.">Ktoś przysłał Ci swój profil. Sprawdź odcisk, zanim dodasz.</div>
+    <label data-i18n="Nazwa">Nazwa</label><input id="import-name" type="text" autocomplete="off">
+    <div class="fp-box"><span class="fp-lbl" data-i18n="Odcisk">Odcisk</span><span class="fp-val" id="import-fp">—</span></div>
+    <div class="hint" data-i18n="Musi zgadzać się co do znaku z tym, co podała Ci ta osoba innym kanałem niż link. Jeśli się nie zgadza — nie dodawaj.">Musi zgadzać się co do znaku z tym, co podała Ci ta osoba innym kanałem niż link. Jeśli się nie zgadza — nie dodawaj.</div>
+    <div class="msg" id="import-msg"></div>
+    <div class="modal-actions"><button class="btn-send" id="import-add" style="flex:1;border-radius:8px" data-i18n="Dodaj kontakt">Dodaj kontakt</button><button class="btn-ghost" id="import-cancel" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
   <div class="modal" id="passwd-modal">
     <h2 data-i18n="Zmiana hasła">Zmiana hasła</h2>
     <div class="msub" data-i18n="Tożsamość zostaje ta sama — zmienia się wyłącznie hasło, którym jest zaszyfrowana. Kontakty i grupy bez zmian.">Tożsamość zostaje ta sama — zmienia się wyłącznie hasło, którym jest zaszyfrowana. Kontakty i grupy bez zmian.</div>
-    <label data-i18n="Obecne hasło">Obecne hasło</label><input id="pw-old" type="password" autocomplete="off">
-    <label data-i18n="Nowe hasło">Nowe hasło</label><input id="pw-new" type="password" autocomplete="off">
-    <label data-i18n="Powtórz nowe hasło">Powtórz nowe hasło</label><input id="pw-new2" type="password" autocomplete="off">
+    <!-- Proper change-password markup, and not for tidiness: with the manager
+         holding the OLD password and no way to tell it we changed one, the next
+         login autofills a password that no longer opens the profile and reads
+         as "wrong password". The readonly name says WHICH entry to update, which
+         matters once there is more than one profile — and shows the user which
+         profile they are about to re-seal. -->
+    <label data-i18n="Profil">Profil</label><input id="pw-who" type="text" readonly autocomplete="username" style="opacity:.7">
+    <label data-i18n="Obecne hasło">Obecne hasło</label><input id="pw-old" type="password" autocomplete="current-password">
+    <label data-i18n="Nowe hasło">Nowe hasło</label><input id="pw-new" type="password" autocomplete="new-password">
+    <label data-i18n="Powtórz nowe hasło">Powtórz nowe hasło</label><input id="pw-new2" type="password" autocomplete="new-password">
     <div class="msg" id="pw-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="pw-save" style="flex:1;border-radius:8px" data-i18n="Zapisz">Zapisz</button><button class="btn-ghost" id="pw-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
@@ -619,6 +657,8 @@
     <button class="btn" id="btn-logout" style="margin-top:18px;background:var(--accent-soft);color:var(--accent)" data-i18n="Wyloguj">Wyloguj</button>
     <!-- The profile list lives HERE and not on the login screen: naming who uses
          a device is something only that device's user should see. -->
+    <button class="btn" id="btn-share" style="margin-top:10px;background:var(--accent-soft);color:var(--accent)" data-i18n="Udostępnij swój profil">Udostępnij swój profil</button>
+
     <div class="d-section" style="margin-top:22px" data-i18n="Profile software na tym urządzeniu">Profile software na tym urządzeniu</div>
     <div class="hint" style="margin-bottom:8px" data-i18n="Każdy profil to osobna tożsamość, zaszyfrowana swoim hasłem. Usunięcie jest nieodwracalne — klucza nie da się odtworzyć.">Każdy profil to osobna tożsamość, zaszyfrowana swoim hasłem. Usunięcie jest nieodwracalne — klucza nie da się odtworzyć.</div>
     <div id="profiles-list"></div>

@@ -14,6 +14,7 @@
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
+import { decodeInvite, inviteLink, type Invite } from '../../lib/invite.ts'
 import type { GkBackend } from '../../lib/group.ts'
 // `t` is taken: this file uses it for text, topics, timers and DOM nodes, and a
 // local shadowing the translator fails at runtime with "t is not a function" —
@@ -482,7 +483,9 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   $('sess-id').textContent = sourceLabel + ' · ' + fp
   $('sess-kid').textContent = kid ?? tr('— (klucz w przeglądarce)')
   $('sess-kid').title = kid ?? tr('Tożsamość programowa — brak klucza w HSM')
-  refreshContacts()
+  await refreshContacts()
+  // An invite clicked while logged out waited through the login screen for this.
+  if (pendingInvite) void showInvite(pendingInvite)
 }
 
 // ---- contacts (HEM-backed book; in-memory cache keeps re-renders cheap) ----
@@ -739,6 +742,105 @@ $('add-save').addEventListener('click', async () => {
 // ---- settings drawer ----
 const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles() }
 const closeDrawer = () => { $('scrim').classList.remove('open'); $('drawer').classList.remove('open') }
+// ---- invite: my profile as a link, and someone else's arriving as one -------
+/**
+ * An invite read out of the URL and not yet dealt with.
+ *
+ * It has to survive the login screen. Someone who receives a link does not
+ * choose when they click it, and the common case — click, get asked to log in,
+ * log in — would otherwise end with nothing on screen and a link that looks
+ * broken. RAM only: a pending invite is not worth persisting past a reload,
+ * and the link can simply be opened again.
+ */
+let pendingInvite: Invite | null = takeInviteFromUrl()
+
+/**
+ * Take the invite out of the address bar the moment it is read.
+ *
+ * Leaving it there would keep a public key in the URL bar, in the history, and
+ * in whatever the next screenshot catches — and a reload would re-ask about a
+ * contact already added. `replaceState` drops the fragment without touching the
+ * page.
+ */
+function takeInviteFromUrl(): Invite | null {
+  const inv = decodeInvite(location.hash)
+  if (inv) history.replaceState(null, '', location.pathname + location.search)
+  return inv
+}
+
+/**
+ * An invite arriving at a page that is ALREADY open.
+ *
+ * Clicking a link to the origin you are on is a same-document navigation: the
+ * browser changes the fragment and runs no script, so nothing above this line
+ * would ever see it. That is the common case rather than an edge one — the
+ * person most likely to click an invite is someone already signed in on this
+ * device — and without this it presents as a link that does nothing at all.
+ */
+window.addEventListener('hashchange', () => {
+  const inv = takeInviteFromUrl()
+  if (!inv) return
+  pendingInvite = inv
+  if (session) void showInvite(inv) // otherwise the login screen hands it over
+})
+
+const openShare = async (returnMode = false) => {
+  if (!session) return
+  $('scrim').classList.add('open'); $('share-modal').classList.add('open')
+  $('share-title').textContent = returnMode ? tr('Odeślij swój profil') : tr('Udostępnij swój profil')
+  // The return trip is not optional politeness — until the other side holds our
+  // key too, neither of us can compute the pair topic, so nothing can be sent.
+  $('share-sub').textContent = returnMode
+    ? tr('Kontakt dodany. Żeby ta osoba mogła do Ciebie napisać, musi mieć też Twój klucz — odeślij jej ten link.')
+    : tr('Wyślij ten link dowolnym kanałem. Nie zawiera niczego tajnego — sam klucz publiczny.')
+  ;($('share-link') as HTMLInputElement).value =
+    inviteLink(location.origin, location.pathname, { pub: session.pub, name: session.handle })
+  $('share-fp').textContent = fpCache.get(session.pub) ?? await fingerprint(session.pub)
+}
+const closeShare = () => { $('scrim').classList.remove('open'); $('share-modal').classList.remove('open') }
+$('btn-share').addEventListener('click', () => void openShare())
+$('share-close').addEventListener('click', closeShare)
+$('share-copy').addEventListener('click', async () => {
+  const el = $('share-link') as HTMLInputElement
+  try { await navigator.clipboard.writeText(el.value); toast(tr('Link skopiowany')) }
+  catch { el.select(); toast(tr('Zaznaczono — skopiuj ręcznie')) } // no clipboard permission, or plain http
+})
+
+const closeImport = () => { $('scrim').classList.remove('open'); $('import-modal').classList.remove('open') }
+$('import-cancel').addEventListener('click', () => { pendingInvite = null; closeImport() })
+
+/** Show a received invite. Called after login, so the contact book exists. */
+async function showInvite(inv: Invite) {
+  pendingInvite = inv
+  $('scrim').classList.add('open'); $('import-modal').classList.add('open')
+  clr('import-msg')
+  ;($('import-name') as HTMLInputElement).value = inv.name
+  $('import-fp').textContent = await fingerprint(inv.pub)
+  if (inv.pub === session?.pub) setMsg('import-msg', tr('To Twój własny profil.'), 'err')
+}
+
+$('import-add').addEventListener('click', async () => {
+  const inv = pendingInvite
+  if (!inv || !session) return
+  const name = val('import-name')
+  if (!name) { setMsg('import-msg', tr('Podaj nazwę.'), 'err'); return }
+  // Adding yourself would create a contact whose pair topic is the self-topic —
+  // a room that looks real and can never carry a conversation.
+  if (inv.pub === session.pub) { setMsg('import-msg', tr('To Twój własny profil.'), 'err'); return }
+  const btn = $('import-add') as HTMLButtonElement
+  btn.disabled = true; const label = btn.textContent; btn.textContent = tr('Dodaję…')
+  try {
+    const dup = contactsCache.find((c) => c.pub === inv.pub)
+    if (dup) await session.book.remove(dup) // same key under a new name: replace, do not duplicate
+    await session.book.add(name, inv.pub, true)
+    await refreshContacts()
+    pendingInvite = null
+    closeImport()
+    await openShare(true)
+  } catch (e: any) { setMsg('import-msg', tr('Błąd zapisu: ') + (e?.message ?? e), 'err') }
+  finally { btn.disabled = false; btn.textContent = label ?? tr('Dodaj kontakt') }
+})
+
 // ---- software profiles on this device (Settings) ---------------------------
 /**
  * The software profile signed in right now, '' on the HEM path. Tracked
@@ -811,6 +913,7 @@ async function removeProfile(name: string) {
 const openPasswd = () => {
   $('scrim').classList.add('open'); $('passwd-modal').classList.add('open'); clr('pw-msg')
   for (const f of ['pw-old', 'pw-new', 'pw-new2']) ($(f) as HTMLInputElement).value = ''
+  ;($('pw-who') as HTMLInputElement).value = activeSoftProfile
   $('pw-old').focus()
 }
 const closePasswd = () => { $('scrim').classList.remove('open'); $('passwd-modal').classList.remove('open') }
@@ -843,7 +946,7 @@ $('pw-save').addEventListener('click', async () => {
 $('btn-settings').addEventListener('click', openDrawer)
 $('chip-profile').addEventListener('click', openDrawer)
 $('btn-close-drawer').addEventListener('click', closeDrawer)
-$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd() })
+$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); pendingInvite = null; closeImport() })
 $('btn-logout').addEventListener('click', () => location.reload())
 
 // ---- attach a file --------------------------------------------------------
