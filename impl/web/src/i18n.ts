@@ -352,7 +352,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Węzły sieci': 'Network nodes',
     'Węzły sieci — wybierz/edytuj': 'Network nodes — choose / edit',
     'Zaloguj': 'Sign in',
-    'Zaloguj się swoim HEM. Klucz tożsamości nie opuszcza urządzenia.': 'Sign in with your HEM. The identity key never leaves the device.',
+    'Zaloguj się swoim HEM.': 'Sign in with your HEM.',
     'Zapis': 'Storage',
     'Zapisuję…': 'Saving…',
     'Zapisz': 'Save',
