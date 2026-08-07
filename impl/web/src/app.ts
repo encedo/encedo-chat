@@ -1636,7 +1636,7 @@ function paintSecurity(room: Room) {
   const b = $('e2e-badge')
   if (best === 'established') setBadge(b, 'badge direct', tr('🔐 Secure'), tr('Handshake EH-2 uzgodniony — forward secrecy per wiadomość, hybryda PQ (ML-KEM-768)'))
   else if (best === 'handshaking') setBadge(b, 'badge e2e', tr('🤝 Securing…'), tr('Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)'))
-  else setBadge(b, 'badge e2e', tr('⚠️ Not secure'), tr('Handshake nie doszedł do skutku — ponowi się przy następnym Announce'))
+  else setBadge(b, 'badge fail', tr('⚠️ Not secure'), tr('Handshake nie doszedł do skutku — ponowi się przy następnym Announce'))
 }
 
 /**
