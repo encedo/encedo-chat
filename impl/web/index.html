@@ -5,30 +5,42 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Encedo Chat</title>
 <style>
+  /* The palette is shared with the public page (`landing.html`): a cool ground
+     biased green rather than a neutral grey, ink that is green-black, and ONE
+     signal colour — the spruce green this product already used to mean "live".
+     Every colour below is a token because that is what made adopting it cheap:
+     19 names, ~210 uses, nothing hard-coded in a rule.
+     `--accent-ink` is redefined per theme deliberately. The dark accent is a
+     bright green, and white text on it is unreadable — the previous palette got
+     away with one value only because its accent stayed a mid blue in both. */
   :root{
-    --bg:#f8f8fb;--card:#fff;--border:#eff2f7;--text:#343a40;--body:#495057;--muted:#74788d;
-    --accent:#556ee6;--accent-ink:#fff;--accent-soft:#eef1fd;--bubble-in:#eef1fd;--bubble-out:#eff2f7;
-    --good:#34c38f;--good-soft:#e2f6ef;--warn:#f1b44c;--warn-soft:#fdf3e0;--err:#f46a6a;--off:#c8ccd8;
-    --shadow:0 10px 20px rgba(18,38,63,.03);--radius:10px;
+    --bg:#edf0ef;--card:#f6f8f7;--border:#d3dad7;--text:#0c1512;--body:#24322d;--muted:#5c6e68;
+    --accent:#0f6b57;--accent-ink:#f6f8f7;--accent-soft:#e0eae6;--bubble-in:#e0eae6;--bubble-out:#e5e9e7;
+    --good:#1a8a6b;--good-soft:#dcefe7;--warn:#b4761f;--warn-soft:#f5ebdc;--err:#b23c26;--off:#b6c1bc;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --shadow:0 1px 2px rgba(12,21,18,.05);--radius:6px;
   }
   @media (prefers-color-scheme:dark){:root{
-    --bg:#222736;--card:#2a3042;--border:#32394e;--text:#d7dcf1;--body:#a6b0cf;--muted:#79829c;
-    --accent:#6579e0;--accent-soft:#2e3552;--bubble-in:#2e3552;--bubble-out:#32394e;
-    --good-soft:#263f42;--warn-soft:#3e3a33;--off:#4a5170;--shadow:0 10px 20px rgba(0,0,0,.15);
+    --bg:#0a100e;--card:#101815;--border:#1e2a26;--text:#e4ebe7;--body:#c3d0cb;--muted:#8ba099;
+    --accent:#35c99e;--accent-ink:#06120e;--accent-soft:#14332a;--bubble-in:#14332a;--bubble-out:#18211e;
+    --good:#35c99e;--good-soft:#12332a;--warn:#d99a4e;--warn-soft:#33291a;--err:#e0603f;--off:#3a4a44;
+    --shadow:0 10px 20px rgba(0,0,0,.25);
   }}
   :root[data-theme="dark"]{
-    --bg:#222736;--card:#2a3042;--border:#32394e;--text:#d7dcf1;--body:#a6b0cf;--muted:#79829c;
-    --accent:#6579e0;--accent-soft:#2e3552;--bubble-in:#2e3552;--bubble-out:#32394e;
-    --good-soft:#263f42;--warn-soft:#3e3a33;--off:#4a5170;--shadow:0 10px 20px rgba(0,0,0,.15);
+    --bg:#0a100e;--card:#101815;--border:#1e2a26;--text:#e4ebe7;--body:#c3d0cb;--muted:#8ba099;
+    --accent:#35c99e;--accent-ink:#06120e;--accent-soft:#14332a;--bubble-in:#14332a;--bubble-out:#18211e;
+    --good:#35c99e;--good-soft:#12332a;--warn:#d99a4e;--warn-soft:#33291a;--err:#e0603f;--off:#3a4a44;
+    --shadow:0 10px 20px rgba(0,0,0,.25);
   }
   :root[data-theme="light"]{
-    --bg:#f8f8fb;--card:#fff;--border:#eff2f7;--text:#343a40;--body:#495057;--muted:#74788d;
-    --accent:#556ee6;--accent-soft:#eef1fd;--bubble-in:#eef1fd;--bubble-out:#eff2f7;
-    --good-soft:#e2f6ef;--warn-soft:#fdf3e0;--off:#c8ccd8;--shadow:0 10px 20px rgba(18,38,63,.03);
+    --bg:#edf0ef;--card:#f6f8f7;--border:#d3dad7;--text:#0c1512;--body:#24322d;--muted:#5c6e68;
+    --accent:#0f6b57;--accent-ink:#f6f8f7;--accent-soft:#e0eae6;--bubble-in:#e0eae6;--bubble-out:#e5e9e7;
+    --good:#1a8a6b;--good-soft:#dcefe7;--warn:#b4761f;--warn-soft:#f5ebdc;--err:#b23c26;--off:#b6c1bc;
+    --shadow:0 1px 2px rgba(12,21,18,.05);
   }
   *{box-sizing:border-box}
   html,body{height:100%}
-  body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;background:var(--bg);color:var(--body);font-size:14px;line-height:1.5}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;background:var(--bg);color:var(--body);font-size:14px;line-height:1.5}
   button{font:inherit;cursor:pointer}
   input,textarea{font:inherit}
   button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -121,11 +133,11 @@
   .avatar{width:38px;height:38px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-weight:600;font-size:13px;color:var(--accent);background:var(--accent-soft)}
   .search-wrap{padding:12px 16px 4px}
   .tabs{display:flex;gap:6px;padding:12px 16px}
-  .tab{flex:1;padding:8px 0;text-align:center;background:none;border:none;border-radius:8px;color:var(--muted);font-weight:500}
+  .tab{flex:1;padding:8px 0;text-align:center;background:none;border:none;border-radius:5px;color:var(--muted);font-weight:500}
   .tab:hover{background:var(--bg)}.tab.active{background:var(--accent);color:var(--accent-ink)}
   .tab.ph{opacity:.45}
   .pane{flex:1;overflow-y:auto;padding:4px 8px 8px}
-  .pane-label{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:10px 12px 4px}
+  .pane-label{font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);padding:10px 12px 4px}
   .contact{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:none;background:none;text-align:left;border-radius:8px;color:var(--body)}
   .contact:hover{background:var(--bg)}.contact.active{background:var(--accent-soft)}
   .contact .c-name{font-weight:600;color:var(--text)}
@@ -163,7 +175,7 @@
   .add-btn:hover{border-color:var(--accent);color:var(--accent)}
   .profile-strip{border-top:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px}
   .profile-strip .lbl{font-size:12px;color:var(--muted)}
-  .chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:3px 10px;border-radius:20px;background:var(--accent-soft);color:var(--accent);border:none}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:500;padding:3px 10px;border-radius:4px;background:var(--accent-soft);color:var(--accent);border:none}
 
   .chat{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
   .chat-head{display:flex;align-items:center;gap:12px;flex-wrap:nowrap;padding:14px 20px;border-bottom:1px solid var(--border)}
@@ -191,11 +203,11 @@
   .to-bottom .unread{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;
     background:var(--accent);color:var(--accent-ink);font-size:10.5px;font-weight:700;display:grid;place-items:center}
   .badges{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  .badge{font-size:11.5px;font-weight:600;padding:4px 12px;border-radius:20px;display:inline-flex;align-items:center;gap:6px}
-  .badge.relay{background:var(--bubble-out);color:var(--muted)}
-  .badge.direct{background:var(--good-soft);color:var(--good)}
-  .badge.e2e{background:var(--warn-soft);color:var(--warn)}
-  .badge.rotate{background:var(--bg);color:var(--muted);font-variant-numeric:tabular-nums;border:1px solid var(--border)}
+  .badge{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.02em;padding:3px 9px;border-radius:4px;display:inline-flex;align-items:center;gap:6px;background:transparent;border:1px solid var(--border);color:var(--text)}
+  .badge.relay{color:var(--muted)}
+  .badge.direct{border-color:var(--good)}
+  .badge.e2e{border-color:var(--warn)}
+  .badge.rotate{color:var(--muted);font-variant-numeric:tabular-nums}
   .messages{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
   .mrow{display:flex;align-items:center;gap:6px}.mrow.out{justify-content:flex-end}
   .bubble{max-width:62%;padding:10px 14px;border-radius:10px;box-shadow:var(--shadow)}
@@ -203,7 +215,7 @@
   .mrow.out .bubble{background:var(--bubble-out);border-bottom-right-radius:2px}
   .bubble .b-who{font-size:11px;font-weight:600;color:var(--accent);margin-bottom:2px}
   .bubble .b-text{color:var(--text);overflow-wrap:break-word;white-space:pre-wrap}
-  .bubble .b-meta{font-size:11px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums}
+  .bubble .b-meta{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums}
   .mrow.out .b-meta{text-align:right}
   .sysline{text-align:center;font-size:12px;color:var(--muted)}
   .b-react{display:none;gap:3px}
@@ -534,14 +546,18 @@
 
   <div class="modal" id="add-modal">
     <h2 data-i18n="Dodaj peera">Dodaj peera</h2>
-    <div class="msub" data-i18n="Nazwa lokalna + jego klucz publiczny (base64, X25519) albo link zaproszenia.">Nazwa lokalna + jego klucz publiczny (base64, X25519) albo link zaproszenia.</div>
-    <label data-i18n="Nazwa">Nazwa</label><input id="add-name" type="text" placeholder="np. bob" data-i18n-placeholder="np. bob" autocomplete="off">
-    <!-- One field for both, because from the outside they are one thing: "what
+    <div class="msub" data-i18n="Klucz publiczny (base64, X25519) albo link zaproszenia — i nazwa, pod którą go zapiszesz.">Klucz publiczny (base64, X25519) albo link zaproszenia — i nazwa, pod którą go zapiszesz.</div>
+    <!-- The key comes FIRST because that is the order of the task: you paste
+         what somebody gave you, and only then decide what to call them. Asking
+         for the name first also asks it too early — when the paste turns out to
+         be an invite link, the link carries a name of its own.
+         One field for both, because from the outside they are one thing: "what
          that person gave me". A pasted invite link is recognised and handed to
          the import window, fingerprint and all — there is no shortcut around
          that check, since it is the only thing standing between a link and a
          man in the middle. -->
     <label data-i18n="Klucz publiczny albo link zaproszenia">Klucz publiczny albo link zaproszenia</label><textarea id="add-pub" placeholder="wklej pubkey albo link zaproszenia…" data-i18n-placeholder="wklej pubkey albo link zaproszenia…"></textarea>
+    <label data-i18n="Nazwa">Nazwa</label><input id="add-name" type="text" placeholder="np. bob" data-i18n-placeholder="np. bob" autocomplete="off">
     <label data-i18n="Zapis">Zapis</label>
     <div class="store-opts" id="add-store">
       <label class="store-opt"><input type="radio" name="store" value="hem" checked> <span data-i18n="🔒 W HEM — trwałe, przenośne między urządzeniami">🔒 W HEM — trwałe, przenośne między urządzeniami</span></label>

@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>onchato — messages that leave nothing behind</title>
+<meta name="description" content="Peer-to-peer encrypted chat. Post-quantum from the first handshake, no accounts, no message store, and a network you can run yourself on one small VPS.">
+<meta name="color-scheme" content="light dark">
+<style>
+  /* ---- tokens ------------------------------------------------------------
+     Neutrals are biased green, not grey: the one signal colour on this page is
+     the app's own "live / direct" green, and a neutral that ignores it reads as
+     stock. `--ember` appears EXACTLY once, on the self-host block, so the "run
+     it yourself" moment is the only warm thing here. */
+  :root {
+    --paper:   #edf0ef;
+    --raised:  #f6f8f7;
+    --ink:     #0c1512;
+    --muted:   #5c6e68;
+    --hair:    #d3dad7;
+    --live:    #0f6b57;
+    --live-dim:#0f6b5714;
+    --ember:   #a64b21;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", "Roboto Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #0a100e; --raised: #101815; --ink: #e4ebe7; --muted: #8ba099;
+      --hair: #1e2a26; --live: #35c99e; --live-dim: #35c99e1a; --ember: #e07a45;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0a100e; --raised: #101815; --ink: #e4ebe7; --muted: #8ba099;
+    --hair: #1e2a26; --live: #35c99e; --live-dim: #35c99e1a; --ember: #e07a45;
+  }
+  :root[data-theme="light"] {
+    --paper: #edf0ef; --raised: #f6f8f7; --ink: #0c1512; --muted: #5c6e68;
+    --hair: #d3dad7; --live: #0f6b57; --live-dim: #0f6b5714; --ember: #a64b21;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 17px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--live); outline-offset: 3px; border-radius: 2px; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+
+  /* The rail carries real artefacts of the system — a fingerprint, a derived
+     topic — the way an engineering drawing carries margin notes. It is the
+     first thing to go when there is no room for it. */
+  .layout { display: grid; grid-template-columns: 1fr; gap: 0; }
+  @media (min-width: 1100px) {
+    .layout { grid-template-columns: 190px 1fr; gap: 56px; }
+  }
+  .rail { display: none; }
+  @media (min-width: 1100px) {
+    .rail { display: block; position: sticky; top: 0; align-self: start; padding-top: 132px; }
+  }
+  .rail dl { margin: 0; display: flex; flex-direction: column; gap: 26px; }
+  .rail dt {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .rail dd {
+    margin: 5px 0 0; font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+    color: var(--ink); word-break: break-all; opacity: .78;
+  }
+
+  /* ---- masthead ---- */
+  header { padding: 30px 0 0; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .brand { display: flex; align-items: baseline; gap: 10px; font-family: var(--mono); font-weight: 600; letter-spacing: -.02em; font-size: 19px; }
+  .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--live); display: inline-block; }
+  .nav { display: flex; gap: 22px; font-family: var(--mono); font-size: 12.5px; letter-spacing: .04em; }
+  .nav a { color: var(--muted); text-decoration: none; }
+  .nav a:hover { color: var(--ink); }
+  @media (max-width: 560px) { .nav a.hide-sm { display: none; } }
+
+  /* ---- hero ---- */
+  .hero { padding: 84px 0 24px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--live); margin: 0 0 22px;
+  }
+  h1 {
+    font-family: var(--mono); font-weight: 600; letter-spacing: -.035em;
+    font-size: clamp(2.5rem, 6.2vw, 4.3rem); line-height: 1.02; margin: 0;
+    text-wrap: balance;
+  }
+  h1 .soft { color: var(--muted); }
+  .lede { max-width: 60ch; margin: 26px 0 0; font-size: 19px; color: var(--muted); }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin: 34px 0 0; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px; text-decoration: none;
+    font-family: var(--mono); font-size: 14px; letter-spacing: .01em;
+    padding: 13px 22px; border-radius: 4px; border: 1px solid var(--live);
+    background: var(--live); color: var(--paper); transition: transform .12s ease, opacity .12s ease;
+  }
+  .btn:hover { transform: translateY(-1px); opacity: .92; }
+  .btn.ghost { background: transparent; color: var(--ink); border-color: var(--hair); }
+  .btn.ghost:hover { border-color: var(--live); }
+
+  /* ---- the demonstration ----
+     The page's thesis is that nothing survives a conversation, so the hero
+     performs it instead of claiming it: three rows fill in order and the last
+     one settles on the word "nothing". It runs ONCE — a loop would turn the
+     argument into wallpaper — and reduced-motion gets the finished state. */
+  .wire {
+    margin: 60px 0 0; border: 1px solid var(--hair); border-radius: 6px;
+    background: var(--raised); overflow: hidden;
+  }
+  .wire-row { display: grid; grid-template-columns: 1fr; gap: 4px; padding: 20px 22px; border-top: 1px solid var(--hair); }
+  .wire-row:first-child { border-top: 0; }
+  @media (min-width: 720px) { .wire-row { grid-template-columns: 210px 1fr; gap: 20px; align-items: baseline; } }
+  .wire-label {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+  }
+  .wire-val {
+    font-family: var(--mono); font-size: 14.5px; word-break: break-all; min-height: 1.5em;
+    color: var(--ink);
+  }
+  .wire-val.cipher { color: var(--live); }
+  .wire-val.void { color: var(--muted); font-style: normal; }
+  .caret { display: inline-block; width: 8px; background: var(--live); animation: blink 1s step-end infinite; color: transparent; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .replay {
+    display: block; width: 100%; text-align: left; background: none; border: 0; border-top: 1px solid var(--hair);
+    padding: 12px 22px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); cursor: pointer;
+  }
+  .replay:hover { color: var(--live); }
+  @media (prefers-reduced-motion: reduce) { .caret { animation: none; } .btn { transition: none; } }
+
+  /* ---- claims ---- */
+  section { padding: 96px 0 0; }
+  .sec-label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 34px; padding-bottom: 12px; border-bottom: 1px solid var(--hair);
+  }
+  .claims { display: grid; grid-template-columns: 1fr; gap: 2px; background: var(--hair); border: 1px solid var(--hair); border-radius: 6px; overflow: hidden; }
+  @media (min-width: 780px) { .claims { grid-template-columns: 1fr 1fr; } }
+  .claim { background: var(--paper); padding: 30px 28px 32px; }
+  .claim h2 { font-family: var(--mono); font-size: 17px; font-weight: 600; letter-spacing: -.015em; margin: 0 0 12px; }
+  .claim p { margin: 0; color: var(--muted); font-size: 15.5px; max-width: 46ch; }
+  .metric {
+    margin: 20px 0 0; font-family: var(--mono); font-size: 12px; letter-spacing: .02em;
+    color: var(--live); background: var(--live-dim); display: inline-block; padding: 5px 10px; border-radius: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- self-host: the one warm block on the page ---- */
+  .host { border: 1px solid var(--hair); border-radius: 6px; overflow: hidden; }
+  .host-top { padding: 32px 28px; border-bottom: 1px solid var(--hair); }
+  .host-top h2 { font-family: var(--mono); font-size: clamp(1.4rem, 3vw, 1.9rem); font-weight: 600; letter-spacing: -.03em; margin: 0 0 12px; }
+  .host-top p { margin: 0; color: var(--muted); max-width: 58ch; }
+  .host-top .accent { color: var(--ember); }
+  pre {
+    margin: 0; padding: 26px 28px; overflow-x: auto; background: var(--raised);
+    font-family: var(--mono); font-size: 13.5px; line-height: 1.9; color: var(--ink);
+  }
+  pre .c { color: var(--muted); }
+  pre .p { color: var(--ember); user-select: none; }
+  .host-foot {
+    display: flex; flex-wrap: wrap; gap: 8px 28px; padding: 18px 28px; border-top: 1px solid var(--hair);
+    font-family: var(--mono); font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums;
+  }
+  .host-foot b { color: var(--ink); font-weight: 600; }
+
+  /* ---- honesty note: this project documents its limits, so the page does ---- */
+  .limits { margin: 22px 0 0; font-size: 14.5px; color: var(--muted); max-width: 62ch; }
+  .limits a { color: var(--live); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+
+  footer { margin: 110px 0 0; padding: 30px 0 60px; border-top: 1px solid var(--hair); display: flex; flex-wrap: wrap; gap: 12px 28px; align-items: center; }
+  footer a { font-family: var(--mono); font-size: 12.5px; color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--ink); }
+  footer .spacer { flex: 1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><span class="dot" aria-hidden="true"></span> onchato</div>
+    <nav class="nav">
+      <a href="#how" class="hide-sm">how it works</a>
+      <a href="#run">run your own</a>
+      <a href="https://github.com/encedo/encedo-chat">source</a>
+    </nav>
+  </header>
+
+  <div class="layout">
+    <aside class="rail" aria-hidden="true">
+      <dl>
+        <dt>Fingerprint</dt>
+        <dd>A0:D7:64:E1<br>67:B0:D4:8C</dd>
+        <dt>Today's topic</dt>
+        <dd>tq5ia7ydkm2g<br>lxqv5x5gvbkp<br>i7ahtxcrig3s</dd>
+        <dt>Handshake</dt>
+        <dd>X25519 + ML-KEM-768</dd>
+        <dt>Stored</dt>
+        <dd>—</dd>
+      </dl>
+    </aside>
+
+    <main>
+      <div class="hero">
+        <p class="eyebrow">Peer-to-peer · post-quantum · nothing kept</p>
+        <h1>Messages that leave<br>nothing behind.<br><span class="soft">Not even with us.</span></h1>
+        <p class="lede">
+          onchato has <strong>no message store</strong> — not encrypted, not anywhere. Your key lives in
+          your hardware module or sealed in your browser, the conversation goes
+          <strong>straight between the two of you</strong>, and every handshake has been
+          post-quantum since the first line of code.
+        </p>
+        <div class="cta">
+          <a class="btn" href="/chat">Open onchato</a>
+          <a class="btn ghost" href="#run">Run your own network</a>
+        </div>
+
+        <div class="wire" id="wire">
+          <div class="wire-row">
+            <div class="wire-label">What you write</div>
+            <div class="wire-val" id="w-plain"></div>
+          </div>
+          <div class="wire-row">
+            <div class="wire-label">What the network carries</div>
+            <div class="wire-val cipher" id="w-cipher"></div>
+          </div>
+          <div class="wire-row">
+            <div class="wire-label">What is left afterwards</div>
+            <div class="wire-val void" id="w-void"></div>
+          </div>
+          <button class="replay" id="replay" type="button">↺ Run it again</button>
+        </div>
+      </div>
+
+      <section id="how">
+        <p class="sec-label">Four claims, and what backs each one</p>
+        <div class="claims">
+          <article class="claim">
+            <h2>Post-quantum already, not "on the roadmap"</h2>
+            <p>
+              Every session key is derived from X25519 <em>and</em> ML-KEM-768 together, so
+              recording today's traffic to break later does not work — there is no
+              classical-only path to attack. It costs almost nothing.
+            </p>
+            <p class="metric">3.3 ms per full handshake, both sides</p>
+          </article>
+          <article class="claim">
+            <h2>Instant, because there is nowhere to keep it</h2>
+            <p>
+              A message is sealed on your device and opened on theirs. Nothing is spooled,
+              queued or archived on the way, which is why there is no store to subpoena,
+              breach or quietly mine.
+            </p>
+            <p class="metric">0.42 ms to seal and open a message</p>
+          </article>
+          <article class="claim">
+            <h2>No account, no phone number, no directory</h2>
+            <p>
+              You are a key, not a row in a table. Nobody operates a lookup of who may talk
+              to whom — you exchange keys directly and compare a fingerprint out loud, the
+              one check an attacker in the middle cannot pass.
+            </p>
+            <p class="metric">Identity in hardware (HEM) or sealed locally</p>
+          </article>
+          <article class="claim">
+            <h2>The introduction node never sees your words</h2>
+            <p>
+              Nodes exist to introduce two people and then get out of the way: the
+              conversation upgrades to a direct channel, and what does pass a node is
+              ciphertext on a room name derived from your two keys.
+            </p>
+            <p class="metric">Direct WebRTC, relay only as fallback</p>
+          </article>
+        </div>
+        <p class="limits">
+          And what a node <em>can</em> still observe — timing, addresses, that two parties met —
+          is written down rather than glossed over.
+          <a href="https://github.com/encedo/encedo-chat/blob/main/docs/THREAT-MODELS.md">Read the threat models →</a>
+        </p>
+      </section>
+
+      <section id="run">
+        <p class="sec-label">Your own infrastructure</p>
+        <div class="host">
+          <div class="host-top">
+            <h2>Three commands. One <span class="accent">$5 VPS</span>. Five minutes.</h2>
+            <p>
+              Do not take our word for any of the above — run the network yourself. A node is a
+              single Node.js process with no database, no queue and nothing to administer.
+            </p>
+          </div>
+<pre><span class="c"># any small Linux box, Node 22+</span>
+<span class="p">$</span> git clone https://github.com/encedo/encedo-chat
+<span class="p">$</span> cd encedo-chat/relay &amp;&amp; npm ci
+<span class="p">$</span> node relay.mjs --pass "my-node" --port 9001</pre>
+          <div class="host-foot">
+            <span><b>63 MB</b> idle</span>
+            <span><b>192 MB</b> at 520 live sessions</span>
+            <span><b>~4000</b> sessions per GB</span>
+            <span><b>1 vCPU</b> measured</span>
+          </div>
+        </div>
+      </section>
+
+      <footer>
+        <a href="/chat">Open the app</a>
+        <a href="https://github.com/encedo/encedo-chat">Source (MIT)</a>
+        <a href="https://github.com/encedo/encedo-chat/blob/main/docs/PROTOCOL.md">Protocol</a>
+        <span class="spacer"></span>
+        <a href="https://encedo.com">Encedo</a>
+      </footer>
+    </main>
+  </div>
+</div>
+
+<script>
+// An invite link written before the app moved to /chat points here, and its
+// payload lives in the fragment — which the server never sees, so only this
+// page can forward it. Without these four lines those invitations die silently
+// on a marketing page.
+if (location.hash.startsWith('#i=')) location.replace('/chat' + location.hash);
+
+(function () {
+  var PLAIN = 'the key is under the third flowerpot'
+  var HEX = '0123456789abcdef'
+  var plain = document.getElementById('w-plain')
+  var cipher = document.getElementById('w-cipher')
+  var gone = document.getElementById('w-void')
+  var replay = document.getElementById('replay')
+  var still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  var timers = []
+
+  function rand(n) {
+    var s = ''
+    for (var i = 0; i < n; i++) s += HEX[(Math.random() * 16) | 0] + HEX[(Math.random() * 16) | 0] + ' '
+    return s.trim()
+  }
+  function at(fn, ms) { timers.push(setTimeout(fn, ms)) }
+
+  function finish() {
+    plain.textContent = PLAIN
+    cipher.textContent = rand(18)
+    gone.textContent = '— nothing —'
+  }
+
+  function run() {
+    timers.forEach(clearTimeout); timers = []
+    if (still) { finish(); return }
+    plain.innerHTML = '<span class="caret">&nbsp;</span>'
+    cipher.textContent = ''
+    gone.textContent = ''
+
+    // Typed, then sealed, then dropped: the three states a message actually has
+    // here. The ciphertext is re-randomised a few times before it settles so it
+    // reads as *output*, not as a second string someone wrote.
+    var i = 0
+    function type() {
+      if (i > PLAIN.length) { at(seal, 420); return }
+      plain.innerHTML = PLAIN.slice(0, i) + '<span class="caret">&nbsp;</span>'
+      i++
+      at(type, 34)
+    }
+    function seal() {
+      plain.textContent = PLAIN
+      var n = 0
+      function churn() {
+        cipher.textContent = rand(18)
+        if (++n < 7) at(churn, 55); else at(vanish, 700)
+      }
+      churn()
+    }
+    function vanish() {
+      gone.textContent = '— nothing —'
+    }
+    type()
+  }
+
+  replay.addEventListener('click', run)
+  run()
+})()
+</script>
+</body>
+</html>

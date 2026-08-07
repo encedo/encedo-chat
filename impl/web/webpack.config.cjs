@@ -39,6 +39,14 @@ module.exports = (_env, argv) => {
       new webpack.NormalModuleReplacementPlugin(/^node:/, (r) => { r.request = r.request.replace(/^node:/, '') }),
       new HtmlWebpackPlugin({ template: './index.html', filename: 'index.html', chunks: ['app'] }),
       new HtmlWebpackPlugin({ template: './webrtc-test.html', filename: 'webrtc-test.html', chunks: ['webrtc-test'] }),
+      // The public landing page, carried through verbatim: no chunks, no
+      // injection, no minifier. It has no bundle — the whole point is that a
+      // first-time visitor downloads a few KB of HTML rather than 1.2 MiB of
+      // libp2p — and `index.html` deliberately stays the APP, so the desktop
+      // and Android builds, which load dist/index.html, are untouched by this.
+      // Which page is served at `/` is a decision for the WEB deploy alone; see
+      // infra/README.md for the nginx mapping.
+      new HtmlWebpackPlugin({ template: './landing.html', filename: 'landing.html', chunks: [], inject: false, minify: false }),
     ],
     // Every build was cold, and the work is not small: the .js/.mjs rule below
     // has no `exclude`, so ~920 node_modules files (libp2p, 3.3 MiB) go through

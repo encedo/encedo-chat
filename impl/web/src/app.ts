@@ -863,7 +863,7 @@ async function claimContact(name: string, pub: string): Promise<boolean> {
   return true
 }
 
-const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; paintStoreOptions('add-store'); $('add-name').focus() }
+const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; paintStoreOptions('add-store'); $('add-pub').focus() }
 const closeModal = () => { $('scrim').classList.remove('open'); $('add-modal').classList.remove('open') }
 $('add-cancel').addEventListener('click', closeModal)
 $('add-save').addEventListener('click', async () => {

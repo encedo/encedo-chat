@@ -107,7 +107,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Nazwa': 'Name',
     'Nazwa + członkowie. Tylko kontakty — każdy dostaje zaproszenie (klucze) przez Wasz kanał 1:1.': 'Name + members. Contacts only — each one gets an invitation (keys) over your 1:1 channel.',
     'Nazwa grupy': 'Group name',
-    'Nazwa lokalna + jego klucz publiczny (base64, X25519) albo link zaproszenia.': 'A local name + their public key (base64, X25519) — or an invite link.',
+    'Klucz publiczny (base64, X25519) albo link zaproszenia — i nazwa, pod którą go zapiszesz.': 'Their public key (base64, X25519) or an invite link — and the name you will keep it under.',
     'Nazwa nie może być pusta.': 'The name cannot be empty.',
     'Nazwa zmieni się u wszystkich członków — klucze zostają bez zmian.': 'The name changes for every member — the keys are untouched.',
     'Nie': 'No',
