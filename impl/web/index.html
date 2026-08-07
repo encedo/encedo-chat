@@ -38,6 +38,34 @@
     --good:#1a8a6b;--good-soft:#dcefe7;--warn:#b4761f;--warn-soft:#f5ebdc;--err:#b23c26;--off:#b6c1bc;
     --shadow:0 1px 2px rgba(12,21,18,.05);
   }
+  /* ---- boot screen -------------------------------------------------------
+     1.2 MiB of transport and crypto has to arrive before anything works, and
+     until it does the markup shows its Polish source text — so an English
+     reader watched a Polish page and then saw it change under them. Covering
+     that window is both fixes at once: nothing is asserted and then retracted,
+     and the wait stops looking like a stalled page.
+     It is plain markup with no script behind it, so it is on screen with the
+     FIRST paint — a spinner that needs the bundle to appear would be showing up
+     exactly when it is no longer needed. The app removes it when it is ready. */
+  #boot{position:fixed;inset:0;z-index:99;display:grid;place-items:center;gap:18px;
+    background:var(--bg);align-content:center}
+  #boot .mark{font-family:var(--mono);font-size:15px;letter-spacing:.02em;color:var(--text);
+    display:flex;align-items:center;gap:9px}
+  #boot .mark i{width:7px;height:7px;border-radius:50%;background:var(--accent);display:block}
+  #boot .ring{width:26px;height:26px;border-radius:50%;border:2px solid var(--border);
+    border-top-color:var(--accent);animation:boot-spin .8s linear infinite}
+  /* Only after a wait long enough to mean something is wrong, and in both
+     languages because the catalogue that would pick one is the thing missing. */
+  #boot .slow{font-size:12.5px;color:var(--muted);opacity:0;animation:boot-slow 0s linear 12s forwards;
+    text-align:center;max-width:34ch;line-height:1.5}
+  @keyframes boot-spin{to{transform:rotate(360deg)}}
+  @keyframes boot-slow{to{opacity:1}}
+  @media (prefers-reduced-motion:reduce){
+    /* A ring that cannot spin says nothing, so it becomes a quiet pulse. */
+    #boot .ring{animation:boot-pulse 1.6s ease-in-out infinite;border-top-color:var(--border);
+      background:var(--accent-soft)}
+    @keyframes boot-pulse{50%{opacity:.35}}
+  }
   *{box-sizing:border-box}
   html,body{height:100%}
   body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;background:var(--bg);color:var(--body);font-size:14px;line-height:1.5}
@@ -452,6 +480,12 @@
 </style>
 </head>
 <body>
+  <!-- Removed by the app once it is ready; see #boot in the stylesheet. -->
+  <div id="boot">
+    <div class="mark"><i></i> onchato</div>
+    <div class="ring"></div>
+    <div class="slow">Ładowanie trwa dłużej niż zwykle — sprawdź połączenie.<br>Taking longer than usual — check your connection.</div>
+  </div>
   <div class="login-wrap" id="login">
     <div class="login-card">
       <h1>⚡ Encedo Chat</h1>

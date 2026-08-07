@@ -55,6 +55,14 @@
      topic — the way an engineering drawing carries margin notes. It is the
      first thing to go when there is no room for it. */
   .layout { display: grid; grid-template-columns: 1fr; gap: 0; }
+  /* A grid item defaults to `min-width: auto`, so it refuses to shrink below the
+     widest thing inside it and pushes the `1fr` track out with it. On a phone
+     that made the whole column ~432px wide inside a 345px viewport: the page
+     scrolled sideways and the right margin disappeared while the left one
+     stayed, which reads as "uneven margins" rather than as overflow.
+     Wide content here already scrolls inside its own box (`pre`), so nothing
+     needs the column to be wider than the screen. */
+  .layout > * { min-width: 0; }
   @media (min-width: 1100px) {
     .layout { grid-template-columns: 190px 1fr; gap: 56px; }
   }
@@ -89,9 +97,13 @@
   }
   h1 {
     font-family: var(--mono); font-weight: 600; letter-spacing: -.035em;
-    font-size: clamp(2.5rem, 6.2vw, 4.3rem); line-height: 1.02; margin: 0;
+    font-size: clamp(2rem, 7vw, 4.3rem); line-height: 1.04; margin: 0;
     text-wrap: balance;
   }
+  /* The line breaks are a composition for wide screens. Below that the text has
+     to be allowed to find its own, or a fixed break plus a fixed character
+     width guarantees the overflow this is here to prevent. */
+  @media (max-width: 620px) { h1 br { display: none; } }
   h1 .soft { color: var(--muted); }
   .lede { max-width: 60ch; margin: 26px 0 0; font-size: 19px; color: var(--muted); }
   .lede strong { color: var(--ink); font-weight: 600; }
@@ -123,10 +135,13 @@
     font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
   }
   .wire-val {
-    font-family: var(--mono); font-size: 14.5px; word-break: break-all; min-height: 1.5em;
+    font-family: var(--mono); font-size: 14.5px; overflow-wrap: anywhere; min-height: 1.5em;
     color: var(--ink);
   }
-  .wire-val.cipher { color: var(--live); }
+  /* Only the ciphertext gets broken mid-token: it is one long run of hex with no
+     word boundaries to honour. The plaintext row is a sentence, and cutting it
+     mid-word to save a few pixels reads as a rendering fault. */
+  .wire-val.cipher { color: var(--live); word-break: break-all; }
   .wire-val.void { color: var(--muted); font-style: normal; }
   .caret { display: inline-block; width: 8px; background: var(--live); animation: blink 1s step-end infinite; color: transparent; }
   @keyframes blink { 50% { opacity: 0; } }
@@ -211,7 +226,8 @@
     <main>
       <div class="hero">
         <p class="eyebrow">Peer-to-peer · post-quantum · nothing kept</p>
-        <h1>Messages that leave<br>nothing behind.<br><span class="soft">Not even with us.</span></h1>
+        <h1>Messages that leave<br>
+          nothing behind. <span class="soft">Not even with us.</span></h1>
         <p class="lede">
           onchato has <strong>no message store</strong> — not encrypted, not anywhere. Your key lives in
           your hardware module or sealed in your browser, the conversation goes

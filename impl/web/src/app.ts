@@ -33,15 +33,26 @@ import { unb64, b64, randomBytes } from '../../lib/wc.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
-
-const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
+// The published relay list, compiled in — see DEFAULT_NODES below for why.
+import published from '../../../infra/nodes.json'
 
 // ---- network nodes (relays): an editable list, chosen at login -------------
 // The user keeps a list of relay multiaddrs and ticks which to use this session;
-// the first enabled one is the relay we dial (bs1 by default). Full multiaddrs so
-// a node with its own PeerId (not derived from a pass) can be pasted in.
+// the first enabled one is the relay we dial. Full multiaddrs so a node with its
+// own PeerId (not derived from a pass) can be pasted in.
+//
+// The defaults are COMPILED FROM the published list rather than written out
+// again here. They had drifted: the file behind the CID carried bs1 and bs2
+// while a fresh client shipped with bs1 alone, so everybody started on one node
+// and only got the second by pressing "load the official list". Two copies of a
+// list that must agree is a bug with a delay on it; importing the file removes
+// the second copy. `enabled` is the client's own idea and is not in the file.
+
 interface NodeEntry { name: string; addr: string; enabled: boolean }
-const DEFAULT_NODES: NodeEntry[] = [{ name: 'bs1.onchato.com', addr: RELAY, enabled: true }]
+const DEFAULT_NODES: NodeEntry[] = (published.nodes as Array<{ name: string; addr: string }>)
+  .map((n) => ({ name: n.name, addr: n.addr, enabled: true }))
+/** The floor under every dial: the first published node. */
+const RELAY = DEFAULT_NODES[0].addr
 function loadNodes(): NodeEntry[] {
   try { const v = JSON.parse(localStorage.getItem('ec-nodes') || 'null'); if (Array.isArray(v) && v.length) return v } catch {}
   return DEFAULT_NODES.map((n) => ({ ...n }))
@@ -1256,6 +1267,11 @@ function clearComposer() {
   }
   document.documentElement.lang = getLocale()
   applyDom()
+  // The boot screen goes now and not a moment earlier: this is the first point
+  // at which the page says what it means in the reader's language. Removed
+  // rather than hidden — it has served its whole purpose and must never come
+  // back over a running conversation.
+  $('boot')?.remove()
   // Paint the two header badges through the same helper the running app uses.
   // Their markup carries the icon/text split from the start (so the phone rule
   // has something to collapse before anything is painted), and this makes the
