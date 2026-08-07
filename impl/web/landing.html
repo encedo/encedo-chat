@@ -214,8 +214,14 @@
       <dl>
         <dt>Fingerprint</dt>
         <dd>A0:D7:64:E1<br>67:B0:D4:8C</dd>
+        <!-- Filled in by the script below with a topic this page DERIVES, from a
+             throwaway pair, by the derivation the product uses. The markup keeps
+             a plausible-looking value so a browser without X25519 shows the idea
+             rather than an empty label. -->
         <dt>Today's topic</dt>
-        <dd>tq5ia7ydkm2g<br>lxqv5x5gvbkp<br>i7ahtxcrig3s</dd>
+        <dd id="rail-topic">tq5ia7ydkm2g<br>lxqv5x5gvbkp<br>i7ahtxcrig3s</dd>
+        <dt id="rail-rot-label">Rotates in</dt>
+        <dd id="rail-rot">—</dd>
         <dt>Handshake</dt>
         <dd>X25519 + ML-KEM-768</dd>
         <dt>Stored</dt>
@@ -227,7 +233,8 @@
       <div class="hero">
         <p class="eyebrow">Peer-to-peer · post-quantum · nothing kept</p>
         <h1>Messages that leave<br>
-          nothing behind. <span class="soft">Not even with us.</span></h1>
+          nothing behind.<br>
+          <span class="soft">Not even with us.</span></h1>
         <p class="lede">
           onchato has <strong>no message store</strong> — not encrypted, not anywhere. Your key lives in
           your hardware module or sealed in your browser, the conversation goes
@@ -331,7 +338,7 @@
         <a href="https://github.com/encedo/encedo-chat">Source (MIT)</a>
         <a href="https://github.com/encedo/encedo-chat/blob/main/docs/PROTOCOL.md">Protocol</a>
         <span class="spacer"></span>
-        <a href="https://encedo.com">Encedo</a>
+        <a href="https://encedo.com">RKV</a>
       </footer>
     </main>
   </div>
@@ -343,6 +350,101 @@
 // page can forward it. Without these four lines those invitations die silently
 // on a marketing page.
 if (location.hash.startsWith('#i=')) location.replace('/chat' + location.hash);
+
+/*
+ * The rail's topic is DERIVED here, not written into the markup.
+ *
+ * A rendezvous topic is the one part of this design that is hard to describe and
+ * easy to show: two people who hold each other's key compute the same
+ * unguessable room name, nobody else can, and it changes every day at an instant
+ * only that pair can work out. So the page computes one — with the derivation
+ * the product uses, labels and all — from a THROWAWAY pair generated for this
+ * file. Both halves of it are here in plain sight; they protect nothing.
+ *
+ * This is a second implementation of `lib/rendezvous.ts`, which is a real cost:
+ * if the protocol's derivation ever changes, this page will keep showing a value
+ * the app would not compute. It is pinned by comparing both against the library
+ * for a fixed date — see the note in EMBED-PLAN/CLAUDE if that check moves.
+ */
+(function () {
+  var PRIV_PKCS8 = 'MC4CAQAwBQYDK2VuBCIEIPDUBtOz4k4AtZCgVDPY/cVIvBAjvGYWL/Mose2Z0zNy'
+  var PEER_PUB   = 'kMrrhv2/mLBZ4BGEJrkDW+vQ2Tb87Dy1ppK8hO1EcXY='
+  var NETWORK    = 'main'
+  var B32        = 'abcdefghijklmnopqrstuvwxyz234567'   // RFC 4648, lowercase, no padding
+  var enc = new TextEncoder()
+
+  var b64 = function (s) { return Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0) }) }
+  function base32(bytes) {
+    var bits = 0, value = 0, out = ''
+    for (var i = 0; i < bytes.length; i++) {
+      value = (value << 8) | bytes[i]; bits += 8
+      while (bits >= 5) { out += B32[(value >>> (bits - 5)) & 31]; bits -= 5 }
+    }
+    if (bits > 0) out += B32[(value << (5 - bits)) & 31]
+    return out
+  }
+  /** info = network_id || 0x00 || date_UTC — the §5.1 domain separator. */
+  function paramsInfo(date) {
+    var n = enc.encode(NETWORK), d = date ? enc.encode(date) : new Uint8Array(0)
+    var out = new Uint8Array(n.length + 1 + d.length)
+    out.set(n, 0); out[n.length] = 0; if (date) out.set(d, n.length + 1)
+    return out
+  }
+  async function hkdf(ikm, salt, info, len) {
+    var key = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits'])
+    var bits = await crypto.subtle.deriveBits(
+      { name: 'HKDF', hash: 'SHA-256', salt: enc.encode(salt), info: info }, key, len * 8)
+    return new Uint8Array(bits)
+  }
+  var utcDate = function (ms) { return new Date(ms).toISOString().slice(0, 10) }
+
+  async function paint() {
+    var priv = await crypto.subtle.importKey('pkcs8', b64(PRIV_PKCS8), { name: 'X25519' }, false, ['deriveBits'])
+    var pub  = await crypto.subtle.importKey('raw', b64(PEER_PUB), { name: 'X25519' }, false, [])
+    var ss   = new Uint8Array(await crypto.subtle.deriveBits({ name: 'X25519', public: pub }, priv, 256))
+
+    // The rotation instant is the pair's own: midnight shifted by an offset that
+    // both members derive from their shared secret and nobody else can predict.
+    // Date-independent, so it is computed once.
+    var off = await hkdf(ss, 'encedo-chat-rotation-v1', paramsInfo(null), 4)
+    var offsetSec = new DataView(off.buffer, off.byteOffset, 4).getUint32(0) % 86400
+
+    var now = Date.now()
+    var day = utcDate(now - offsetSec * 1000)     // the day on the pair's shifted clock
+    var mat = await hkdf(ss, 'encedo-chat-rendezvous-v1', paramsInfo(day), 32)
+    var topic = base32(mat).slice(0, 52)
+
+    var el = document.getElementById('rail-topic')
+    el.textContent = ''
+    for (var i = 0; i < topic.length; i += 12) {
+      if (i) el.appendChild(document.createElement('br'))
+      el.appendChild(document.createTextNode(topic.slice(i, i + 12)))
+    }
+    document.getElementById('rail-topic').dataset.topic = topic   // read by the check that pins this
+    document.getElementById('rail-rot').dataset.offset = String(offsetSec)
+
+    function tick() {
+      var t = Date.now()
+      // Shift the clock back by the offset, take that day's midnight, add a day,
+      // shift forward again: the pair's next rotation instant (§5.4).
+      var d = new Date(t - offsetSec * 1000)
+      var midnight = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())
+      var next = midnight + 86400000 + offsetSec * 1000
+      var left = Math.max(0, Math.floor((next - t) / 1000))
+      document.getElementById('rail-rot').textContent =
+        String(Math.floor(left / 3600)).padStart(2, '0') + 'h ' + String(Math.floor(left % 3600 / 60)).padStart(2, '0') + 'm'
+    }
+    tick(); setInterval(tick, 30000)
+  }
+
+  // No X25519 (older Safari) is not an error here — the rail keeps the static
+  // example. The app itself refuses to start without it, and says so; a landing
+  // page that did the same would be theatre.
+  paint().catch(function () {
+    document.getElementById('rail-rot-label').textContent = 'Rotation'
+    document.getElementById('rail-rot').textContent = 'daily'
+  })
+})();
 
 (function () {
   var PLAIN = 'the key is under the third flowerpot'
