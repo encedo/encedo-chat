@@ -1475,10 +1475,10 @@ function renderNetwork() {
     ${capReport && capReport.degraded.length ? `<div class="net-row wrap"><span class="k">${tr('Platforma')}</span><span class="v chips" title="${escapeHtml(capReport.ua)}">`
       + capReport.degraded.map((c) => `<span class="net-node">○ ${escapeHtml(c.id)}</span>`).join('')
       + `</span></div>` : ''}
-    <div class="net-row"><span class="k">${tr('Ekran')}</span><span class="v" title="${escapeHtml(navigator.userAgent)}">`
+    ${DEBUG ? `<div class="net-row"><span class="k">${tr('Ekran')}</span><span class="v" title="${escapeHtml(navigator.userAgent)}">`
       + `${window.innerWidth}×${window.innerHeight} · ${window.devicePixelRatio || 1}× · `
       + `${matchMedia('(max-width:900px),(max-height:560px)').matches ? tr('układ telefonu') : tr('układ pulpitu')}</span></div>
-    <div class="net-row"><span class="k">${tr('Topiki')}</span><span class="v">${s.topics.length} <span class="net-sub">(grupy: ${gCount} · pary/self: ${s.topics.length - gCount})</span></span></div>
+    <div class="net-row"><span class="k">${tr('Topiki')}</span><span class="v">${s.topics.length} <span class="net-sub">(grupy: ${gCount} · pary/self: ${s.topics.length - gCount})</span></span></div>` : ''}
   </div>
   <div class="net-note">${candidates.length > 1
     ? tr('Failover po liście węzłów: gdy pierwszy węzeł nie odpowiada, sesja przechodzi na następny. Węzły są zmeshowane, więc przełączenie nie dzieli rozmówców.')
@@ -1656,6 +1656,11 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
 const setTyping = (on: boolean, name = '') => { $('typing-ind').textContent = on ? `${name} pisze…` : '' }
 /** `?debug=1` adds per-frame lines (every handshake frame, every sealed payload). */
 const DEBUG = new URLSearchParams(location.search).has('debug')
+// Transport diagnostics answer a support question ("send me what the Network
+// tab says"), not a daily one — and on a phone there is no console to ask
+// instead, which is why they are hidden rather than deleted. The harness runs
+// with ?debug=1, so its assertions on `sess-peerid` still find the row.
+{ const row = document.getElementById('kv-peerid'); if (row) row.hidden = !DEBUG }
 
 /**
  * The engine narrates itself here (lib/room.ts, lib/core.ts) — everything that
