@@ -955,6 +955,36 @@ const closeWelcome = () => { $('scrim').classList.remove('open'); $('welcome-mod
 $('welcome-close').addEventListener('click', closeWelcome)
 $('welcome-share').addEventListener('click', () => { closeWelcome(); void openShare() })
 
+/**
+ * ─────────────────────────────────────────────────────────────────────────────
+ * WHERE INVITE LINKS POINT — change these two lines to point a build at another
+ * deployment (your own domain, your own path), then rebuild.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * They matter only OUTSIDE a browser. On the web the address bar is the source
+ * of truth: the link names the origin the user is actually looking at, so
+ * someone self-hosting hands out their own address and a test deployment hands
+ * out itself. Nothing here overrides that.
+ *
+ * Inside the desktop and Android builds there is no address bar, and
+ * `location.origin` is the app's own internal scheme — a valid origin that
+ * means nothing anywhere else. Sharing your key from a phone produced a link
+ * that looked right and that nobody could open.
+ */
+const CANONICAL_ORIGIN = 'https://onchato.com'
+const CANONICAL_PATH = '/chat'
+
+/**
+ * True when this document is NOT a page on the web — i.e. it is the app shell.
+ *
+ * Tauri serves the bundle from `tauri://localhost` on some platforms and
+ * `http://tauri.localhost` on others, so neither the protocol nor the host
+ * alone is enough. If a future Tauri changes this again the symptom returns
+ * quietly, so the origin is printed in the startup line: open the app with
+ * `?debug=1` and read it there rather than guessing.
+ */
+const inAppShell = !/^https?:$/.test(location.protocol) || location.hostname === 'tauri.localhost'
+
 const openShare = async (returnMode = false) => {
   if (!session) return
   $('scrim').classList.add('open'); $('share-modal').classList.add('open')
@@ -967,8 +997,14 @@ const openShare = async (returnMode = false) => {
   // A link produced in return mode says so, and that is what ends the exchange:
   // the far side imports it without being asked to send anything back, because
   // it already did.
-  ;($('share-link') as HTMLInputElement).value =
-    inviteLink(location.origin, location.pathname, { pub: session.pub, name: session.handle, reply: returnMode })
+  // The app shell has no address to hand out, so it hands out the canonical one.
+  // A link is the better carrier either way: it can be CLICKED by someone with a
+  // browser and PASTED by someone with the app, whereas a bare payload can only
+  // be pasted — and `inviteFromPaste` accepts either, so nothing is lost.
+  ;($('share-link') as HTMLInputElement).value = inviteLink(
+    inAppShell ? CANONICAL_ORIGIN : location.origin,
+    inAppShell ? CANONICAL_PATH : location.pathname,
+    { pub: session.pub, name: session.handle, reply: returnMode })
   $('share-fp').textContent = fpCache.get(session.pub) ?? await fingerprint(session.pub)
 }
 const closeShare = () => { $('scrim').classList.remove('open'); $('share-modal').classList.remove('open') }
@@ -1581,6 +1617,12 @@ function ecLog(msg: string, level: 'info' | 'debug' = 'info') {
 ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : 'libp2p'}`
   + ` rotation=${FORCED_ROTATION_SEC == null ? 'per-pair offset' : `forced ${String(Math.floor(FORCED_ROTATION_SEC / 3600)).padStart(2, '0')}:${String(Math.floor((FORCED_ROTATION_SEC % 3600) / 60)).padStart(2, '0')} UTC`};`
   + ' add ?debug=1 for the full trace, ?mqtt=1 for the broker transport, ?rot=<hour> to force the rollover time')
+// Printed because the app-shell test is a guess about somebody else's software:
+// Tauri picks the origin, and if a future version changes it, invite links
+// quietly go back to naming an address only this device understands. This line
+// is where you check, on the device, instead of reasoning about it.
+ecLog(`origin: ${location.origin}${location.pathname}`
+  + ` — invites will say ${inAppShell ? `${CANONICAL_ORIGIN}${CANONICAL_PATH} (app shell: no address bar to quote)` : 'this origin'}`)
 
 /**
  * What this platform can actually do, checked before anything needs it.
