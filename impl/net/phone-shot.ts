@@ -140,6 +140,68 @@ class Chrome {
   }
 }
 
+/**
+ * The password every screenshot profile uses. The identity it seals is made
+ * fresh in a throwaway browser profile on every run, so this is a fixture.
+ */
+const SOFT_PASS = 'phone-shot-passphrase'
+
+/** Press the profile button and report which surface answered. */
+async function pressSoftGo(c: Chrome): Promise<'ask' | 'done' | 'form'> {
+  await c.eval(`document.getElementById('soft-go').click(); return 1`)
+  const t0 = Date.now()
+  for (;;) {
+    // PBKDF2 at a million rounds is seconds: read the surface that appears
+    // rather than assuming the press has finished.
+    const state = await c.eval<string>(`
+      if (document.getElementById('ask-modal').classList.contains('open')) return 'ask';
+      if (!document.getElementById('soft-modal').classList.contains('open')) return 'done';
+      return document.getElementById('soft-go').disabled ? '' : 'form';
+    `)
+    if (state) return state as 'ask' | 'done' | 'form'
+    if (Date.now() - t0 > 30_000) throw new Error('the profile window never answered')
+    await sleep(200)
+  }
+}
+
+/**
+ * Sign in with a software profile, walking the flow the app actually asks for:
+ * a name with no profile behind it raises a confirm dialog first, and creating
+ * one asks for the password twice.
+ *
+ * This mirrors `softProfile` in browser-test.ts on purpose, and the duplication
+ * is the point to notice: when the login changes, BOTH have to change. This
+ * file is the one that gets forgotten, because nothing runs it in CI — which is
+ * exactly how it came to be broken.
+ */
+async function softProfile(c: Chrome, name: string) {
+  // `go-soft` is in the static markup, so it exists before the bundle has
+  // attached its handler and a single click can be silently lost. Click from
+  // inside the wait — `openSoftModal` is idempotent.
+  await c.waitFor('software modal', `
+    const m = document.getElementById('soft-modal');
+    if (!m.classList.contains('open')) document.getElementById('go-soft').click();
+    return m.classList.contains('open');
+  `, 20_000)
+  await c.eval(`
+    document.getElementById('soft-name').value = ${JSON.stringify(name)};
+    document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)};
+    return 1;
+  `)
+  const first = await pressSoftGo(c)
+  if (first === 'done') return                    // the profile already existed
+  if (first === 'form') throw new Error(`the profile form refused the name: ${await c.eval<string>(`return document.getElementById('soft-msg').textContent`)}`)
+
+  await c.eval(`document.getElementById('ask-yes').click(); return 1`)
+  // The confirm field only exists once creation mode is on — filling it any
+  // earlier writes into a hidden input.
+  await c.waitFor('creation mode', `return !document.getElementById('soft-pass2-wrap').hidden`, 10_000)
+  await c.eval(`document.getElementById('soft-pass2').value = ${JSON.stringify(SOFT_PASS)}; return 1`)
+  if (await pressSoftGo(c) !== 'done') {
+    throw new Error(`the profile was not created: ${await c.eval<string>(`return document.getElementById('soft-msg').textContent`)}`)
+  }
+}
+
 if (!existsSync(join(DIST, 'index.html'))) { console.error('no build — run: npm run web:build'); process.exit(2) }
 mkdirSync(OUT, { recursive: true })
 const server = serve()
@@ -158,7 +220,7 @@ try {
     await c.waitFor('login form', `return !!document.getElementById('go-soft')`)
     await c.shot(join(OUT, `${d.name}-1-login.png`))
 
-    await c.eval(`document.getElementById('handle').value = 'ala'; document.getElementById('go-soft').click(); return 1`)
+    await softProfile(c, 'ala')
     await c.waitFor('app shell', `return document.getElementById('app') && !document.getElementById('app').hidden`)
     // A contact to look at (never answers — this is about layout, not networking).
     await c.eval(`
@@ -168,7 +230,7 @@ try {
     `)
     await c.send('Page.navigate', { url }, true)
     await sleep(1200)
-    await c.eval(`document.getElementById('handle').value = 'ala'; document.getElementById('go-soft').click(); return 1`)
+    await softProfile(c, 'ala')
     await c.waitFor('contact list', `return !!document.querySelector('#pane-contacts .contact')`)
     await c.shot(join(OUT, `${d.name}-2-contacts.png`))
 
