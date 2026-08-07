@@ -101,6 +101,27 @@ const FORCED_ROTATION_SEC = parseRotSec(new URLSearchParams(location.search).get
 // survive a reload; the same applies to diagnosing a user ("turn Direct off and
 // see if it still works"). Absent or any other value = the default, Direct on.
 const WEBRTC_OFF = new URLSearchParams(location.search).get('webrtc') === '0'
+
+/**
+ * Where content travels: straight to the peer, or through the node.
+ *
+ * This is the one row of the threat-model matrix the client actually decides at
+ * runtime, which is why it replaced the three profile names that promised a
+ * policy nothing enforced. `relay` is the meaningful half: the direct plane is
+ * never negotiated, so the peer never learns this device's address. It also
+ * works one-sidedly — a channel needs both ends, so one refusal is enough.
+ *
+ * Not offered: a direct-ONLY mode. Refusing the relay is not a flag but a
+ * behaviour — a pair behind hard NAT would have nowhere to send, and the honest
+ * version of that needs a visible "not sent" state rather than a queue that
+ * quietly fills. Worth building; not worth pretending it is a third radio.
+ */
+const TRANSPORT_KEY = 'ec-transport'
+type TransportMode = 'auto' | 'relay'
+const transportMode = (): TransportMode =>
+  (localStorage.getItem(TRANSPORT_KEY) === 'relay' ? 'relay' : 'auto')
+/** The direct plane is enabled unless the user or `?webrtc=0` says otherwise. */
+const wantsDirect = () => !WEBRTC_OFF && transportMode() === 'auto'
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
@@ -904,7 +925,26 @@ $('add-save').addEventListener('click', async () => {
 })
 
 // ---- settings drawer ----
-const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles() }
+function paintTransportSetting() {
+  const mode = transportMode()
+  const chip = $('chip-profile')
+  chip.textContent = mode === 'relay' ? tr('⚪ Tylko węzeł') : tr('🟢 Automatycznie')
+  const pick = document.querySelector(`#tmode input[value="${mode}"]`) as HTMLInputElement | null
+  if (pick) pick.checked = true
+}
+$('chip-profile').addEventListener('click', () => openDrawer())
+for (const el of document.querySelectorAll('#tmode input')) {
+  el.addEventListener('change', () => {
+    const v = (document.querySelector('#tmode input:checked') as HTMLInputElement | null)?.value
+    try { localStorage.setItem(TRANSPORT_KEY, v === 'relay' ? 'relay' : 'auto') } catch {}
+    paintTransportSetting()
+    toast(v === 'relay'
+      ? tr('Nowe rozmowy pójdą tylko przez węzeł')
+      : tr('Nowe rozmowy spróbują połączenia bezpośredniego'))
+  })
+}
+
+const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles(); paintTransportSetting() }
 const closeDrawer = () => { $('scrim').classList.remove('open'); $('drawer').classList.remove('open') }
 // ---- invite: my profile as a link, and someone else's arriving as one -------
 /**
@@ -1267,6 +1307,7 @@ function clearComposer() {
   }
   document.documentElement.lang = getLocale()
   applyDom()
+  paintTransportSetting()
   // The boot screen goes now and not a moment earlier: this is the first point
   // at which the page says what it means in the reader's language. Removed
   // rather than hidden — it has served its whole purpose and must never come
@@ -2133,7 +2174,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
     let peerTyping = false
     let warnedForeign = false
     const conv = await (await clientReady!).open({ pub: contact.pub, kid: contact.kid }, {
-      webrtc: !WEBRTC_OFF,
+      webrtc: wantsDirect(),
       onWebrtcState: (s) => noteTransport(room, s),
       onSecurity: (peer, state) => noteSecurity(room, peer, state),
       onLog: ecLog,

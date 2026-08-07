@@ -201,6 +201,7 @@
   .net-node.act{color:var(--text);border-color:var(--accent,#3b82f6);font-weight:600}
   .net-note{margin:8px 10px;font-size:11.5px;line-height:1.45;color:var(--muted)}
   .add-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .d-note{padding:0 16px 14px;font-size:12px;color:var(--muted);line-height:1.5}
   .profile-strip{border-top:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px}
   .profile-strip .lbl{font-size:12px;color:var(--muted)}
   .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:500;padding:3px 10px;border-radius:4px;background:var(--accent-soft);color:var(--accent);border:none}
@@ -528,7 +529,7 @@
       <div class="pane" id="pane-contacts"></div>
       <div class="pane" id="pane-groups" hidden></div>
       <div class="pane" id="pane-network" hidden><div class="pane-label" data-i18n="Sieć — wkrótce (lista węzłów, latencje)">Sieć — wkrótce (lista węzłów, latencje)</div></div>
-      <div class="profile-strip"><span class="lbl" data-i18n="Profil bezpieczeństwa">Profil bezpieczeństwa</span><button class="chip" id="chip-profile" title="Profil — wkrótce" data-i18n-title="Profil — wkrótce" data-i18n="P1 · prywatny">P1 · prywatny</button></div>
+      <div class="profile-strip"><span class="lbl" data-i18n="Transport">Transport</span><button class="chip" id="chip-profile" title="Zmień w Ustawieniach" data-i18n-title="Zmień w Ustawieniach">—</button></div>
     </aside>
 
     <div class="splitter" id="splitter" title="Przeciągnij, aby zmienić szerokość (dwuklik = reset)" data-i18n-title="Przeciągnij, aby zmienić szerokość (dwuklik = reset)"></div>
@@ -733,11 +734,20 @@
   </div>
 
   <aside class="drawer" id="drawer" aria-label="Ustawienia">
-    <div class="d-head"><div><h2 data-i18n="Ustawienia">Ustawienia</h2><div class="d-sub" data-i18n="Sesja + profil bezpieczeństwa">Sesja + profil bezpieczeństwa</div></div><button class="icon-btn" id="btn-close-drawer" title="Zamknij" data-i18n-title="Zamknij">✕</button></div>
-    <div class="d-section" data-i18n="Profil bezpieczeństwa — wkrótce">Profil bezpieczeństwa — wkrótce</div>
-    <div class="opt ph"><div><div class="o-name" data-i18n="P1 · Prywatny">P1 · Prywatny</div><div class="o-desc" data-i18n="WebRTC direct dozwolone. Rozmówca widzi Twoje IP.">WebRTC direct dozwolone. Rozmówca widzi Twoje IP.</div></div></div>
-    <div class="opt ph"><div><div class="o-name" data-i18n="P2 · Wrogie otoczenie">P2 · Wrogie otoczenie</div><div class="o-desc" data-i18n="Wyłącznie relay — IP niewidoczne. (czeka na data plane §13)">Wyłącznie relay — IP niewidoczne. (czeka na data plane §13)</div></div></div>
-    <div class="opt ph"><div><div class="o-name" data-i18n="P3 · Sieć własna">P3 · Sieć własna</div><div class="o-desc" data-i18n="Relay-only na własnych węzłach z własnym kluczem podpisu.">Relay-only na własnych węzłach z własnym kluczem podpisu.</div></div></div>
+    <div class="d-head"><div><h2 data-i18n="Ustawienia">Ustawienia</h2><div class="d-sub" data-i18n="Sesja i transport">Sesja i transport</div></div><button class="icon-btn" id="btn-close-drawer" title="Zamknij" data-i18n-title="Zamknij">✕</button></div>
+    <!-- This replaced three profile names that named a policy the app could not
+         enforce: of the seven rows in the threat-model matrix, only the
+         transport is something the client decides at runtime. The rest are
+         facts about a deployment (who hosts the nodes, Tor, installed app or
+         browser) that it can report at best. A control that looks like a
+         security setting and changes nothing is the same mistake as the PIN
+         that was rejected from the invite links. -->
+    <div class="d-section" data-i18n="Transport treści">Transport treści</div>
+    <div class="store-opts" id="tmode" style="padding:0 16px 12px">
+      <label class="store-opt"><input type="radio" name="tmode" value="auto" checked> <span data-i18n="🟢 Automatycznie — bezpośrednio, gdy się da">🟢 Automatycznie — bezpośrednio, gdy się da</span></label>
+      <label class="store-opt"><input type="radio" name="tmode" value="relay"> <span data-i18n="⚪ Tylko przez węzeł — rozmówca nie pozna Twojego IP">⚪ Tylko przez węzeł — rozmówca nie pozna Twojego IP</span></label>
+    </div>
+    <div class="d-note" data-i18n="Bezpośredni kanał jest szybszy i nie przechodzi przez węzeł, ale rozmówca widzi wtedy Twój adres IP. Wybór dotyczy rozmów otwieranych od teraz — trwającej nie przełączamy, bo to zerwałoby kanał w środku zdania. Odznaka w nagłówku pokazuje stan faktyczny każdej rozmowy.">Bezpośredni kanał jest szybszy i nie przechodzi przez węzeł, ale rozmówca widzi wtedy Twój adres IP. Wybór dotyczy rozmów otwieranych od teraz — trwającej nie przełączamy, bo to zerwałoby kanał w środku zdania. Odznaka w nagłówku pokazuje stan faktyczny każdej rozmowy.</div>
     <div class="d-section" data-i18n="Sesja">Sesja</div>
     <div class="kv"><span class="k" data-i18n="Tożsamość">Tożsamość</span><span class="v" id="sess-id" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer">—</span></div>
     <div class="kv"><span class="k" data-i18n="KID (klucz w HSM)">KID (klucz w HSM)</span><span class="v" id="sess-kid">—</span></div>
