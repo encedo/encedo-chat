@@ -43,7 +43,7 @@ test('a marker round-trips through the DESCR', async () => {
   assert.ok(descr.startsWith(MARKER_PREFIX), 'key_search finds it by this prefix')
 
   const m = parseMarker(descr)!
-  assert.equal(m.adminKid, await hemKid(members[0]))
+  assert.equal(m.adminKid, (await hemKid(members[0])).slice(0, 8), 'the admin travels as a 4-byte hint')
   assert.equal(m.hints.length, 3)
   assert.equal(m.name, 'Zespół')
 })
@@ -84,7 +84,7 @@ test('over the roster maximum the blob is omitted, not truncated', async () => {
   assert.equal(rosterIncluded, false, 'a partial roster would be worse than none')
   const m = parseMarker(descr)!
   assert.equal(m.hints.length, 0)
-  assert.equal(m.adminKid, await hemKid(members[0]), 'whom to re-sync from still survives')
+  assert.equal(m.adminKid, (await hemKid(members[0])).slice(0, 8), 'whom to re-sync from still survives')
 })
 
 test('hints resolve against the local key set, in roster order', async () => {
@@ -134,7 +134,8 @@ test('a DESCR that is not ours parses as null', () => {
   assert.equal(parseMarker('ETSEIC:self,chris,ik,1780000000'), null)
   assert.equal(parseMarker(''), null)
   assert.equal(parseMarker(MARKER_PREFIX + 'nonsense'), null)
-  assert.equal(parseMarker(MARKER_PREFIX + 'notakid,n,'), null, 'a malformed admin KID is rejected')
+  assert.equal(parseMarker(MARKER_PREFIX + 'nope:n:'), null, 'a malformed admin hint is rejected')
+  assert.ok(parseMarker('ETSEIC:chan,' + 'a'.repeat(32) + ',n,'), 'a legacy marker still parses')
 })
 
 // ---- the four shape decisions (user review, 2026-08-04) --------------------
@@ -142,8 +143,8 @@ test('a DESCR that is not ours parses as null', () => {
 test('no iat: the HSM timestamps its own key records, so the field is not repeated', async () => {
   const members = await pubs(2)
   const { descr } = await buildMarker({ admin: { pub: members[0] }, members: members.map((pub) => ({ pub })), name: 'g' })
-  const fields = descr.slice(MARKER_PREFIX.length).split(',')
-  assert.equal(fields.length, 3, 'admin KID, name, roster — and nothing else')
+  const fields = descr.slice(MARKER_PREFIX.length).split(':')
+  assert.equal(fields.length, 3, 'admin hint, name, roster — and nothing else')
   assert.ok(!/\b1[7-9]\d{8}\b/.test(descr), 'no unix timestamp anywhere in the marker')
 })
 

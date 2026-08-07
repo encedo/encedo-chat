@@ -68,8 +68,19 @@ export async function kidOf(r: KeyRef): Promise<string | undefined> {
   return r.pub ? hemKid(r.pub) : undefined
 }
 
-/** `key_search` prefix — everything below is one DESCR field. */
-export const MARKER_PREFIX = 'ETSEIC:chan,'
+/**
+ * `key_search` prefix that finds EVERY generation — the version digit follows it,
+ * so one search returns markers written by any build (§8 implementation note).
+ */
+export const MARKER_SEARCH = 'ETSEIC:chan'
+/** What this build WRITES: generation 1 of the compact format. */
+export const MARKER_PREFIX = 'ETSEIC:chan1:'
+/**
+ * The unversioned format written before 2026-08-07 — full admin KID in hex,
+ * comma-separated. Still READ (a device already carries markers in it), never
+ * written. This is what the version digit is for.
+ */
+const LEGACY_PREFIX = 'ETSEIC:chan,'
 
 /**
  * The HEM description field is a raw **128-byte** record, and overrunning it is
@@ -126,7 +137,13 @@ export function crc32(bytes: Uint8Array): number {
 }
 
 export interface MarkerFields {
-  /** The admin's KID as the HSM issued it — whom to ask for a re-sync. */
+  /**
+   * Whom to ask for a re-sync — as a **hint**, not as proof.
+   *
+   * 8 hex chars (4 bytes) in the current format, the full KID in a legacy
+   * marker. Four bytes are grindable (~2^32), so this selects a candidate among
+   * keys the device already holds; the admin's `rk_i` MAC is what decides.
+   */
   adminKid: string
   /** Display label, ≤16 characters. */
   name: string
@@ -175,28 +192,60 @@ export async function buildMarker(m: {
     blob = b64url(packed)
   }
 
-  // A comma would break the positional format, so it cannot survive in one.
-  let name = [...(m.name ?? '').replace(/,/g, ' ')].slice(0, NAME_MAX).join('')
-  const head = `${MARKER_PREFIX}${adminKid},`
-  name = sliceBytes(name, Math.max(0, DESCR_MAX - byteLen(head) - 1 - byteLen(blob)))
-  let descr = `${head}${name},${blob}`
+  // The admin travels as the same 4-byte hint the roster members do, in the same
+  // base64url: 6 characters instead of 32, which is most of what makes the
+  // compact form fit a 63-byte field. See the §8 implementation note.
+  // The hint is 4 bytes of the KID, so it needs a hex KID to cut. A device that
+  // labels its keys some other way still has the public key, and `hemKid`
+  // derives the same value the HSM would — so derive rather than refuse.
+  const adminHex = isHexKid(adminKid)
+    ? adminKid
+    : m.admin.pub ? await hemKid(m.admin.pub) : null
+  if (!adminHex) throw new Error('marker: the admin needs a hex KID or a public key')
+  const adminHint = b64url(unhex(adminHex.slice(0, HINT_HEX)))
+
+  // A separator would break the positional format, so it cannot survive in one.
+  const wanted = [...(m.name ?? '').replace(/[:,]/g, ' ')].slice(0, NAME_MAX).join('')
+  const head = `${MARKER_PREFIX}${adminHint}:`
+  let name = sliceBytes(wanted, Math.max(0, DESCR_MAX - byteLen(head) - 1 - byteLen(blob)))
+  let descr = `${head}${name}:${blob}`
   let rosterIncluded = blob.length > 0
   if (byteLen(descr) > DESCR_MAX) { // the blob no longer fits: drop it whole
     rosterIncluded = false
-    descr = `${head}${name},`
+    name = sliceBytes(wanted, Math.max(0, DESCR_MAX - byteLen(head) - 1))
+    descr = `${head}${name}:`
   }
   return { descr, rosterIncluded, nameIncluded: name.length > 0 }
 }
 
-/** Parse a DESCR written by `buildMarker`. Null when it is not a group marker. */
+/**
+ * Parse a DESCR written by `buildMarker`, in either generation. Null when it is
+ * not a group marker.
+ *
+ * Both are read because markers outlive builds: one is already sitting in a HEM
+ * the moment the format changes, and a device that cannot read its own past
+ * shows the user an empty group list.
+ */
 export function parseMarker(descr: string): MarkerFields | null {
-  if (!descr.startsWith(MARKER_PREFIX)) return null
-  const parts = descr.slice(MARKER_PREFIX.length).split(',')
+  const v1 = descr.startsWith(MARKER_PREFIX)
+  const legacy = !v1 && descr.startsWith(LEGACY_PREFIX)
+  if (!v1 && !legacy) return null
+  const sep = v1 ? ':' : ','
+  const parts = descr.slice((v1 ? MARKER_PREFIX : LEGACY_PREFIX).length).split(sep)
   if (parts.length < 3) return null
-  const adminKid = parts[0]
   const name = parts[1]
-  const blobS = parts.slice(2).join(',') // the blob is last and base64url: no commas in it
-  if (!adminKid || !isHexKid(adminKid)) return null
+  const blobS = parts.slice(2).join(sep) // the blob is last and base64url: no separator in it
+
+  let adminKid: string
+  if (v1) {
+    let raw: Uint8Array
+    try { raw = unb64url(parts[0]) } catch { return null }
+    if (raw.length !== 4) return null
+    adminKid = hex(raw)
+  } else {
+    adminKid = parts[0]
+    if (!adminKid || !isHexKid(adminKid)) return null
+  }
   const hints: string[] = []
   let crc = 0
   if (blobS) {

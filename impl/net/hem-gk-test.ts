@@ -24,12 +24,31 @@
  *
  * The password comes from the environment, never an argument — arguments are
  * visible to every process on the box via /proc.
+ *
+ * ── TODO, firmware ≥ 2026-08-10: cover `ecdhDerive` (HKDF in the device) ──
+ *
+ * The new firmware adds
+ *   `ecdhDerive(token, kid, peerPub, salt, info, len)
+ *      = HKDF-SHA256(ikm = X25519(priv[kid], peerPub), salt, info, len)`
+ * under the SAME `keymgmt:use:<kid>` scope (salt ≤64 B, info ≤128 B, len ≤64 B).
+ * It is what closes the gap this whole spike works around: today the pair secret
+ * `ss` transits client RAM because the HKDF happens here, not in the device.
+ *
+ * The check that matters is one equality — in-device against client-side over
+ * the raw ECDH, same salt and info, byte for byte. If those differ, every
+ * rendezvous topic derived either way lands in a different room, and the failure
+ * presents as "the other person never shows up".
+ *
+ * Then the `wm` scheme (see the window-key note): the device derives
+ * `wm = HKDF(ss, "encedo-chat-window-v1", paramsInfo(date, offset), 32)` and the
+ * host derives topic and MAC key from `wm` — so a host compromise yields one
+ * window, not every window this pair will ever use.
  */
 
 import { HEM } from '../../hem-sdk-js/hem-sdk.js'
 import { generateX25519 } from '../lib/x25519.ts'
 import { b64, unb64, sha256 } from '../lib/wc.ts'
-import { buildMarker, parseMarker, MARKER_PREFIX, DESCR_MAX, byteLen } from '../lib/gmarker.ts'
+import { buildMarker, parseMarker, MARKER_PREFIX, MARKER_SEARCH, DESCR_MAX, byteLen } from '../lib/gmarker.ts'
 import { groupIdFromGK } from '../lib/group.ts'
 
 const args = process.argv.slice(2)
@@ -75,6 +94,8 @@ try {
   const { pubkey, type } = await hem.getPubKey(use, gkKid)
   const gkPub = unb64(pubkey)
   ok(gkPub.length === 32, 'GK_pub is 32 raw bytes', `type=${type}`)
+  console.log(`    GK_pub (base64) ${pubkey}`)
+  console.log(`    GK_pub (hex)    ${hex(gkPub)}`)
   const gid = await groupIdFromGK(gkPub)
   ok(gid.length === 16, 'gid = SHA-256(GK_pub)[0:16]', hex(gid))
 
@@ -105,19 +126,19 @@ try {
 
   step('marker: key_search by prefix, and the DESCR round trip')
   const listTok = await hem.authorizePassword(pass, 'keymgmt:list')
-  const found: any[] = await hem.searchKeys(listTok, MARKER_PREFIX)
+  const found: any[] = await hem.searchKeys(listTok, MARKER_SEARCH)
   const mine = found.find((k) => k.kid === gkKid)
-  ok(!!mine, `searchKeys("${MARKER_PREFIX}") returns the group`, `${found.length} marker key(s) on this HEM`)
+  ok(!!mine, `searchKeys("${MARKER_SEARCH}") returns the group`, `${found.length} marker key(s) on this HEM`)
   if (mine) {
     // description comes back as the raw field: NUL padding is expected.
-    const raw = mine.description instanceof Uint8Array ? dec(mine.description) : String(mine.description ?? '')
+    const raw = mine.description instanceof Uint8Array ? dec.decode(mine.description) : String(mine.description ?? '')
     const clean = raw.replace(/\0+$/, '')
     ok(clean === real.descr, 'the DESCR survives the round trip byte for byte',
       clean === real.descr ? `${byteLen(clean)} B` : `got ${JSON.stringify(clean.slice(0, 60))}`)
     const parsed = parseMarker(clean)
     ok(!!parsed, 'and parses back as a marker')
     if (parsed) {
-      ok(parsed.adminKid === gkKid.toLowerCase(), 'admin KID round-tripped')
+      ok(parsed.adminKid === gkKid.toLowerCase().slice(0, 8), 'admin hint round-tripped', parsed.adminKid)
       ok(parsed.hints.length === 1, 'the roster blob round-tripped', `crc=${parsed.crc.toString(16)}`)
       ok(parsed.name === 'gk-selftest', 'the name round-tripped', parsed.name)
     }

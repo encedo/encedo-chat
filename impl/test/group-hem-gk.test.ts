@@ -217,7 +217,7 @@ test('the marker is written at creation and rewritten on every membership change
   const kid = [...hem.keys.keys()][0]
   const born = parseMarker(dec(hem.keys.get(kid)!.descr))!
   assert.ok(born, 'the DESCR is a group marker')
-  assert.equal(born.adminKid, await hemKid(unb64(A.id.pub)), 'admin KID = whom to re-sync from')
+  assert.equal(born.adminKid, (await hemKid(unb64(A.id.pub))).slice(0, 8), 'admin hint = whom to re-sync from')
   assert.equal(born.hints.length, 2, 'the roster blob is there from birth')
   assert.equal(born.name, 'Zespół')
   assert.equal(hem.calls.updateKey, 0, 'creation needs no update')

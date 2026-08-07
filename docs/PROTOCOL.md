@@ -493,6 +493,38 @@ Scale assumption: **3–5 members, max 8–10** (1:1 goes through §6–7, not t
 >
 > **New HKDF labels:** `encedo-chat-group-rendezvous-v1` (§5.3), `encedo-group-msg-mac`,
 > `encedo-chat-group-roster-mac`. (`encedo-group-msg` / `encedo-group-chain` unchanged.)
+>
+> ---
+>
+> **Implementation note — 2026-08-07, non-normative.** `impl/` writes the marker DESCR in a
+> compact, versioned form. The security argument above is unchanged: every identifier in
+> this field is a **lookup hint**, and authenticity comes from the admin's `rk_i` MAC (and
+> the CRC for reconstruction integrity), never from the field itself.
+>
+> ```
+> ETSEIC:chan1:<admin_KID[0:4] base64url>:<name>:<compact roster base64url>
+> ```
+>
+> - **`ETSEIC:` rather than `CHAT:`** — the HEM's `allow_keysearch` matches the **first six
+>   bytes** of the DESCR, and `CHAT` is four. The generation rides in the prefix
+>   (`chan1`, `chan2`, …), so a later format change leaves markers already written on a
+>   device readable, and `key_search("ETSEIC:chan")` still returns every generation.
+> - **No `group_id`.** The marker *is* the DESCR of the `GK_pub` entry, and
+>   `group_id = SHA-256(GK_pub)[0:16]`, so it is derivable from the record that carries it.
+>   (Until firmware returns public keys from `key_search` this costs one extra `getPubKey`
+>   per group; that firmware is expected 2026-08-10.)
+> - **`admin_KID` truncated to 4 bytes**, exactly as the roster hints are and for the same
+>   reason — it is resolved against keys the device already holds. Note the consequence
+>   explicitly: a 4-byte identifier is **grindable** (~2³² work), so nothing may treat this
+>   field as evidence of *who* the admin is; it selects a candidate, the MAC decides.
+> - **A group name is carried** (≤16 characters, separator character excluded), which this
+>   section does not describe. It is a label shown on a recovered device and sits outside
+>   the roster's integrity story.
+>
+> **Budget.** The DESCR field is **128 bytes**, which carries a full name and the ten
+> members the roster allows. Firmware before 2026-08-10 accepted **63**; the compact form
+> was sized against that and still carries a name plus three members there — which is the
+> reason the format is versioned rather than simply changed.
 
 ---
 

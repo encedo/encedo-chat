@@ -791,6 +791,47 @@ Signal/WhatsApp) but authenticated by **per-recipient ECDH-HMAC instead of Ed255
   compact-roster marker, and the live 4–5-user test. `mySenderKey()` returns a copy —
   the client keeps sender keys in the encrypted cache (§10), re-synced on device change.
 
+### The HEM marker DESCR — `lib/gmarker.ts`
+
+One DESCR field per group, written on the `GK_pub` key, found by
+`key_search`. **This must stay 1:1 with the implementation note at the end of
+`docs/PROTOCOL.md` §8** — the spec describes the design, this describes the code,
+and a reader comparing them should find no difference.
+
+```
+ETSEIC:chan1:<admin_KID[0:4] base64url>:<name>:<compact roster base64url>
+```
+
+- **Version in the prefix.** `MARKER_SEARCH = 'ETSEIC:chan'` finds every
+  generation; `MARKER_PREFIX = 'ETSEIC:chan1:'` is what this build writes. The
+  unversioned `ETSEIC:chan,` (full hex admin KID, comma-separated) is still
+  **read** and never written — a marker is already sitting in somebody's HEM the
+  moment a format changes, and a device that cannot read its own past presents
+  as a device with no groups.
+- **`ETSEIC:` not `CHAT:`** as the spec's own text has it: the HEM matches
+  `allow_keysearch` on the **first six bytes**, and `CHAT` is four.
+- **No `group_id`.** The marker is the DESCR *of* the `GK_pub` entry and
+  `group_id = SHA-256(GK_pub)[0:16]`, so it is derivable from the record
+  carrying it. Costs one `getPubKey` per group until firmware returns public
+  keys from `key_search` (expected 2026-08-10); nothing after that.
+- **The admin is a 4-byte hint**, like every roster member, in the same
+  base64url. `MarkerFields.adminKid` is therefore 8 hex characters in this
+  format and the full KID in a legacy one. It **selects a candidate** among keys
+  the device already holds — four bytes are grindable (~2^32), so the admin's
+  `rk_i` MAC is what decides, never this field.
+- **Field order is priority order.** The admin hint always survives; the name is
+  capped at `NAME_MAX` and truncated on a character boundary; the roster blob is
+  last and is dropped WHOLE, because half a roster reconstructs a wrong one.
+- **`KID = SHA-1(pub)[0:16]`** — verified against a real HEM on 2026-08-07
+  (`hem-gk-test`), and stated in §8 all along. It makes the KID an index on the
+  key's CONTENT: the device refuses to import a key it already holds, whatever
+  DESCR it sits under.
+
+**`DESCR_MAX` is 128**, which the compact form uses for a full name and the ten
+members the roster allows. Firmware before 2026-08-10 accepted only 63; the
+format was designed against that number and still carries a name plus three
+members there, which is why the version prefix exists at all.
+
 ## Deploy (onchato.com) — two parts, one host
 
 The host builds; nothing is uploaded. Clone lives at **`/opt/github/encedo-chat`**.
