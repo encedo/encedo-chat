@@ -804,22 +804,87 @@ async function renameContact(c: Contact, name: string) {
 }
 
 // ---- add-peer modal ----
-const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; ;(document.querySelector('input[name="store"][value="hem"]') as HTMLInputElement).checked = true; $('add-name').focus() }
+/**
+ * Make the storage choice describe the identity that is actually signed in.
+ *
+ * A software profile has no HEM, and `localOnlyManager` ignores the persistent
+ * flag altogether — so "in the HEM, portable between devices" names a place
+ * that does not exist and promises a difference the code does not make. The row
+ * is removed rather than greyed out: a disabled option reads as a feature
+ * waiting to be unlocked, and this one is simply not part of the software path.
+ */
+function paintStoreOptions(groupId: string) {
+  const hasHem = !activeSoftProfile
+  const group = $(groupId)
+  const hemRow = group.querySelector('input[value="hem"]')?.closest('.store-opt') as HTMLElement | null
+  if (hemRow) hemRow.hidden = !hasHem
+  const local = group.querySelector('.store-local') as HTMLElement | null
+  if (local) local.textContent = hasHem
+    ? tr('💻 Tylko lokalnie — ta przeglądarka, nic nie trafia do HEM')
+    : tr('💻 Zapisz w tym profilu — zostaje na tym urządzeniu')
+  // Something has to be selected, and the default moves with the identity.
+  const pick = group.querySelector(`input[value="${hasHem ? 'hem' : 'local'}"]`) as HTMLInputElement | null
+  if (pick) pick.checked = true
+}
+
+/** Which destination the user picked in one of the two add windows. */
+const storeChoice = (group: string) =>
+  ($(group).querySelector('input:checked') as HTMLInputElement | null)?.value ?? 'hem'
+
+/**
+ * One notion of "the same contact", shared by both ways of adding one.
+ *
+ * The two paths disagreed: adding by hand replaced whatever had the same NAME,
+ * importing a link replaced whatever had the same KEY. So one person added both
+ * ways became two contacts, while two different people under one name silently
+ * overwrote each other — the second of those loses a key you still needed.
+ *
+ * The key IS the person; the name is a label this device chose. A key that is
+ * already here is therefore the same contact under a new label and is replaced
+ * without asking, and a name collision is a question rather than a rule.
+ *
+ * Returns false when the user declines — the caller must not write.
+ */
+async function claimContact(name: string, pub: string): Promise<boolean> {
+  if (!session) return false
+  const samePub = contactsCache.find((c) => c.pub === pub)
+  if (samePub) { await session.book.remove(samePub); return true }
+  const sameName = contactsCache.find((c) => c.name === name)
+  if (!sameName) return true
+  const { ok } = await ask(
+    tr('Masz już kontakt „{name}"', { name }),
+    tr('Ta nazwa jest już zajęta przez kogoś o innym kluczu. Zastąpienie usunie tamten kontakt — jeśli to dwie różne osoby, wróć i nadaj inną nazwę.'),
+    tr('Zastąp'))
+  // ask() takes the scrim down with it and the window that asked is still open
+  // behind it — the same repair as in the profile window.
+  $('scrim').classList.add('open')
+  if (!ok) return false
+  await session.book.remove(sameName)
+  return true
+}
+
+const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; paintStoreOptions('add-store'); $('add-name').focus() }
 const closeModal = () => { $('scrim').classList.remove('open'); $('add-modal').classList.remove('open') }
 $('add-cancel').addEventListener('click', closeModal)
 $('add-save').addEventListener('click', async () => {
   if (!session) return
   const name = val('add-name'), pub = val('add-pub')
+  // A pasted invite is not a key and must not be checked as one. It goes to the
+  // import window instead — the same one a clicked link opens, fingerprint and
+  // all. There is deliberately no shortcut past that comparison, because it is
+  // the only thing between a link and a man in the middle. A name typed here
+  // wins over the one in the link: someone who typed it meant it.
+  const inv = pub ? inviteFromPaste(pub) : null
+  if (inv) { closeModal(); await showInvite(inv, name); return }
   if (!name || !pub) { setMsg('add-msg', tr('Podaj nazwę i klucz.'), 'err'); return }
   try { if (Uint8Array.from(atob(pub), (c) => c.charCodeAt(0)).length !== 32) { setMsg('add-msg', tr('Klucz nie wygląda na 32-bajtowy X25519 (base64).'), 'err'); return } }
   catch { setMsg('add-msg', tr('Klucz nie jest poprawnym base64.'), 'err'); return }
-  const store = (document.querySelector('input[name="store"]:checked') as HTMLInputElement | null)?.value ?? 'hem'
+  const store = storeChoice('add-store')
   if (store === 'none') { closeModal(); void openRoomFor({ name, pub, source: 'local' }, true); return } // ephemeral — nothing saved (HEM nor localStorage)
   const persistent = store !== 'local'
   const btn = $('add-save') as HTMLButtonElement; btn.disabled = true; btn.textContent = tr('Zapisuję…')
   try {
-    const dup = contactsCache.find((c) => c.name === name)
-    if (dup) await session.book.remove(dup)   // upsert: replace an existing peer of the same name (any source)
+    if (!(await claimContact(name, pub))) return
     await session.book.add(name, pub, persistent)
     await refreshContacts()
     closeModal()
@@ -918,12 +983,40 @@ $('share-copy').addEventListener('click', async () => {
 const closeImport = () => { $('scrim').classList.remove('open'); $('import-modal').classList.remove('open') }
 $('import-cancel').addEventListener('click', () => { pendingInvite = null; closeImport() })
 
-/** Show a received invite. Called after login, so the contact book exists. */
-async function showInvite(inv: Invite) {
+/**
+ * Pull an invite out of whatever was pasted into the key field.
+ *
+ * Nobody pastes a fragment. They paste a link, usually with the sentence around
+ * it that came along from the messenger they copied it out of — so the fragment
+ * is looked for inside the text rather than required to be the whole of it.
+ *
+ * The ORIGIN is ignored on purpose. A link is written by onchato.com and may be
+ * pasted into the desktop app, whose origin is something else entirely; without
+ * this, invites do not work there at all, and there is no address bar to fall
+ * back on. Ignoring it costs nothing, because what makes an invite trustworthy
+ * is the fingerprint the next window shows, never where the text came from.
+ */
+function inviteFromPaste(text: string): Invite | null {
+  const t = text.trim()
+  const whole = t.startsWith('#') || t.startsWith('i=') ? decodeInvite(t) : null
+  if (whole) return whole
+  const m = t.match(/#(i=[A-Za-z0-9\-_]+)/)
+  return m ? decodeInvite(m[1]) : null
+}
+
+/**
+ * Show a received invite. Called after login, so the contact book exists.
+ *
+ * `nameOverride` carries a name typed in the add window before the link was
+ * pasted there — the person doing the adding gets to say what they call the
+ * contact, over whatever the sender called themselves.
+ */
+async function showInvite(inv: Invite, nameOverride?: string) {
   pendingInvite = inv
   $('scrim').classList.add('open'); $('import-modal').classList.add('open')
   clr('import-msg')
-  ;($('import-name') as HTMLInputElement).value = inv.name
+  ;($('import-name') as HTMLInputElement).value = nameOverride || inv.name
+  paintStoreOptions('import-store')
   $('import-fp').textContent = await fingerprint(inv.pub)
   if (inv.pub === session?.pub) setMsg('import-msg', tr('To Twój własny profil.'), 'err')
 }
@@ -939,12 +1032,20 @@ $('import-add').addEventListener('click', async () => {
   const btn = $('import-add') as HTMLButtonElement
   btn.disabled = true; const label = btn.textContent; btn.textContent = tr('Dodaję…')
   try {
-    const dup = contactsCache.find((c) => c.pub === inv.pub)
-    if (dup) await session.book.remove(dup) // same key under a new name: replace, do not duplicate
-    await session.book.add(name, inv.pub, true)
-    await refreshContacts()
+    // Arriving by link is not a decision to keep someone's key for ever, so the
+    // destination is asked here exactly as it is when adding by hand. Before
+    // this the link took the most durable option there was, without saying so.
+    const store = storeChoice('import-store')
+    if (store !== 'none') {
+      if (!(await claimContact(name, inv.pub))) return
+      await session.book.add(name, inv.pub, store !== 'local')
+      await refreshContacts()
+    }
     pendingInvite = null
     closeImport()
+    // Nothing was written, so the conversation is all there is: open it, or the
+    // import ends with no trace of having happened.
+    if (store === 'none') void openRoomFor({ name, pub: inv.pub, source: 'local' }, true)
     // Only the FIRST leg asks for a key back. An imported reply means both sides
     // now hold both keys, and offering to send ours again is how this loops
     // forever — which is exactly what it did.

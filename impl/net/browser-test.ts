@@ -1362,6 +1362,43 @@ async function main() {
     await B.eval(`document.getElementById('import-cancel').click(); return 1`)
     step('a signed-in B notices an invite that only changed the fragment')
 
+    // The desktop app has NO ADDRESS BAR, so a link sent by any other channel
+    // can only get in by being pasted — until this existed, invites were a
+    // web-only feature there. Pasted with the sentence around it, because that
+    // is how a link arrives out of a messenger, and from an origin that is not
+    // this window's, because the sender's app wrote it.
+    await B.eval(`
+      document.querySelector('#pane-contacts .add-btn').click();
+      document.getElementById('add-name').value = 'wklejony';
+      document.getElementById('add-pub').value =
+        'ktoś Ci przysyła: https://onchato.com/i' + ${JSON.stringify(share.link.slice(share.link.indexOf('#')))} + ' — dodaj mnie';
+      document.getElementById('add-save').click();
+      return 1;
+    `)
+    await B.waitFor('a pasted link opens the import window', `
+      return document.getElementById('import-modal').classList.contains('open');
+    `, 10_000)
+    const pasted = await B.eval<any>(`return {
+      fp: document.getElementById('import-fp').textContent,
+      name: document.getElementById('import-name').value,
+      stores: [...document.querySelectorAll('#import-store input')].map((i) => i.value),
+      hemShown: !document.querySelector('#import-store input[value="hem"]').closest('.store-opt').hidden,
+      addOpen: document.getElementById('add-modal').classList.contains('open'),
+    }`)
+    // The whole point of routing through this window rather than adding the
+    // contact directly: a pasted link gets the same fingerprint check a clicked
+    // one does. If these ever differ, the paste path has become the soft way in.
+    if (pasted.fp !== share.fp) throw new Error(`a pasted link produced a different fingerprint: ${share.fp} → ${pasted.fp}`)
+    if (pasted.name !== 'wklejony') throw new Error(`the typed name lost to the sender's: ${pasted.name}`)
+    if (pasted.addOpen) throw new Error('the add window stayed open behind the import window')
+    if (!pasted.stores.includes('none')) throw new Error('an imported invite still cannot be kept ephemerally')
+    // These identities are software profiles, which have no HEM at all — so the
+    // HEM row must not be on offer. `display:flex` beats [hidden], so this is
+    // asserted rather than assumed; without the CSS rule it silently reappears.
+    if (pasted.hemShown) throw new Error('a software profile was offered to store the key in a HEM')
+    await B.eval(`document.getElementById('import-cancel').click(); return 1`)
+    step('a pasted link lands in the same import window, with a choice of where to keep it')
+
     // Now the cold case: a genuinely fresh document, which is what happens when
     // the link is opened from mail. about:blank first — navigating straight to a
     // URL differing only by fragment would not reload at all.

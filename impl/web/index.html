@@ -335,6 +335,10 @@
   .gmember:hover{background:var(--bg)}
   .gavatar{width:34px;height:34px;border-radius:8px;flex-shrink:0;display:grid;place-items:center;font-weight:600;font-size:12px;color:var(--accent);background:var(--accent-soft)}
   .store-opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+  /* MUST stay: `display:flex` above beats the browser's own [hidden] rule, so a
+     row hidden from script would otherwise still be on screen — which is how a
+     software profile would keep offering to store a key in a HEM it has not got. */
+  .store-opt[hidden]{display:none}
   .store-opt input{width:auto;margin:0;accent-color:var(--accent)}
   .src{font-size:11px;opacity:.75}
   .modal-actions{display:flex;gap:8px;margin-top:16px}
@@ -530,14 +534,19 @@
 
   <div class="modal" id="add-modal">
     <h2 data-i18n="Dodaj peera">Dodaj peera</h2>
-    <div class="msub" data-i18n="Nazwa lokalna + jego klucz publiczny (base64, X25519).">Nazwa lokalna + jego klucz publiczny (base64, X25519).</div>
+    <div class="msub" data-i18n="Nazwa lokalna + jego klucz publiczny (base64, X25519) albo link zaproszenia.">Nazwa lokalna + jego klucz publiczny (base64, X25519) albo link zaproszenia.</div>
     <label data-i18n="Nazwa">Nazwa</label><input id="add-name" type="text" placeholder="np. bob" data-i18n-placeholder="np. bob" autocomplete="off">
-    <label data-i18n="Klucz publiczny">Klucz publiczny</label><textarea id="add-pub" placeholder="wklej pubkey kontaktu…" data-i18n-placeholder="wklej pubkey kontaktu…"></textarea>
+    <!-- One field for both, because from the outside they are one thing: "what
+         that person gave me". A pasted invite link is recognised and handed to
+         the import window, fingerprint and all — there is no shortcut around
+         that check, since it is the only thing standing between a link and a
+         man in the middle. -->
+    <label data-i18n="Klucz publiczny albo link zaproszenia">Klucz publiczny albo link zaproszenia</label><textarea id="add-pub" placeholder="wklej pubkey albo link zaproszenia…" data-i18n-placeholder="wklej pubkey albo link zaproszenia…"></textarea>
     <label data-i18n="Zapis">Zapis</label>
-    <div class="store-opts">
-      <label class="store-opt"><input type="radio" name="store" value="hem" checked> 🔒 W HEM — trwałe, przenośne między urządzeniami</label>
-      <label class="store-opt"><input type="radio" name="store" value="local"> 💻 Tylko lokalnie — ta przeglądarka, nic nie trafia do HEM</label>
-      <label class="store-opt"><input type="radio" name="store" value="none"> ⚡ Jednorazowo — nie zapisuj nigdzie (tylko ten czat)</label>
+    <div class="store-opts" id="add-store">
+      <label class="store-opt"><input type="radio" name="store" value="hem" checked> <span data-i18n="🔒 W HEM — trwałe, przenośne między urządzeniami">🔒 W HEM — trwałe, przenośne między urządzeniami</span></label>
+      <label class="store-opt"><input type="radio" name="store" value="local"> <span class="store-local" data-i18n="💻 Tylko lokalnie — ta przeglądarka, nic nie trafia do HEM">💻 Tylko lokalnie — ta przeglądarka, nic nie trafia do HEM</span></label>
+      <label class="store-opt"><input type="radio" name="store" value="none"> <span data-i18n="⚡ Jednorazowo — nie zapisuj nigdzie (tylko ten czat)">⚡ Jednorazowo — nie zapisuj nigdzie (tylko ten czat)</span></label>
     </div>
     <div class="msg" id="add-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="add-save" style="flex:1;border-radius:8px" data-i18n="Zapisz">Zapisz</button><button class="btn-ghost" id="add-cancel" data-i18n="Anuluj">Anuluj</button></div>
@@ -600,6 +609,15 @@
     <label data-i18n="Nazwa">Nazwa</label><input id="import-name" type="text" autocomplete="off">
     <div class="fp-box"><span class="fp-lbl" data-i18n="Odcisk">Odcisk</span><span class="fp-val" id="import-fp">—</span></div>
     <div class="hint" data-i18n="Musi zgadzać się co do znaku z tym, co podała Ci ta osoba innym kanałem niż link. Jeśli się nie zgadza — nie dodawaj.">Musi zgadzać się co do znaku z tym, co podała Ci ta osoba innym kanałem niż link. Jeśli się nie zgadza — nie dodawaj.</div>
+    <!-- The same choice the manual path offers. Arriving by link is not a
+         decision to keep someone's key for ever, and until this was here the
+         link silently took the most durable option there was. -->
+    <label data-i18n="Zapis">Zapis</label>
+    <div class="store-opts" id="import-store">
+      <label class="store-opt"><input type="radio" name="istore" value="hem" checked> <span data-i18n="🔒 W HEM — trwałe, przenośne między urządzeniami">🔒 W HEM — trwałe, przenośne między urządzeniami</span></label>
+      <label class="store-opt"><input type="radio" name="istore" value="local"> <span class="store-local" data-i18n="💻 Tylko lokalnie — ta przeglądarka, nic nie trafia do HEM">💻 Tylko lokalnie — ta przeglądarka, nic nie trafia do HEM</span></label>
+      <label class="store-opt"><input type="radio" name="istore" value="none"> <span data-i18n="⚡ Jednorazowo — po przeładowaniu kontakt zniknie">⚡ Jednorazowo — po przeładowaniu kontakt zniknie</span></label>
+    </div>
     <div class="msg" id="import-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="import-add" style="flex:1;border-radius:8px" data-i18n="Dodaj kontakt">Dodaj kontakt</button><button class="btn-ghost" id="import-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
