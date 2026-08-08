@@ -5,8 +5,9 @@ A native desktop shell over the **same web bundle** the browser app uses
 and the WebRTC/relay transport all run in the webview. On Linux that webview is
 **WebKitGTK**, which is the one thing to watch (see *Caveats*).
 
-This scaffold targets Debian/Ubuntu. On this machine it builds an **arm64**
-(`aarch64`) `.deb` + AppImage; on an x86_64 host it builds amd64.
+This scaffold is developed on Debian/Ubuntu, but `targets: "all"` means one
+Linux build produces **`.deb`, `.rpm` and AppImage** (see *Other distributions*).
+On this machine they come out **arm64** (`aarch64`); on an x86_64 host, amd64.
 
 ## Prerequisites (Debian/Ubuntu) — one-time
 
@@ -58,6 +59,7 @@ cargo tauri build                     # runs `npm run web:build` first (beforeBu
 Artifacts land in:
 
 - `impl/src-tauri/target/release/bundle/deb/*.deb`
+- `impl/src-tauri/target/release/bundle/rpm/*.rpm`
 - `impl/src-tauri/target/release/bundle/appimage/*.AppImage`
 
 Install + run the `.deb`:
@@ -66,6 +68,31 @@ Install + run the `.deb`:
 sudo dpkg -i "src-tauri/target/release/bundle/deb/Encedo Chat_0.1.0_arm64.deb"
 encedo-chat        # or launch "Encedo Chat" from the app menu
 ```
+
+## Other distributions
+
+**Fedora / RHEL — the `.rpm`.** Tauri 2 builds it natively (no `rpmbuild` on the
+machine), so it falls out of the same Linux build as the `.deb`. Its `Requires`
+are **not** automatic the way the deb's `Depends` are: the rpm bundler writes
+only what `bundle.linux.rpm.depends` lists, and an empty list gives a package
+that installs cleanly and then dies at startup on a missing
+`libwebkit2gtk-4.1.so.0`. That is why `tauri.conf.json` names `webkit2gtk4.1`
+and `gtk3` explicitly. Those are **Fedora's** package names — openSUSE calls the
+same library `libwebkit2gtk-4_1-0`, so one rpm cannot satisfy both; openSUSE
+takes the AppImage.
+
+Built on ubuntu-22.04 (glibc 2.35) the rpm runs on Fedora, because glibc is
+backward compatible; the reverse would not hold, which is why CI builds on the
+**oldest** distribution that still ships WebKitGTK 4.1.
+
+**Everything else — the AppImage.** Arch, NixOS, Void, openSUSE: one file, no
+package manager. It needs FUSE2 (`fuse-libs` on Fedora, `libfuse2` on Debian);
+without it, `./Encedo*.AppImage --appimage-extract-and-run` works anyway.
+
+**No Flatpak, deliberately.** On Linux the webview is WebKitGTK, so the desktop
+build is relay-only (see *Caveats*) — the browser at onchato.com gives a Linux
+user *more* than this app does. Another package format would ship a worse
+product in nicer wrapping.
 
 Dev mode (hot frontend via webpack-dev-server on :3000):
 

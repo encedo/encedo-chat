@@ -94,6 +94,7 @@ jobs:
           # `**` matches zero segments, so one set of globs covers both.
           path: |
             impl/src-tauri/target/**/bundle/**/*.deb
+            impl/src-tauri/target/**/bundle/**/*.rpm
             impl/src-tauri/target/**/bundle/**/*.AppImage
             impl/src-tauri/target/**/bundle/**/*.dmg
             impl/src-tauri/target/**/bundle/**/*.msi
