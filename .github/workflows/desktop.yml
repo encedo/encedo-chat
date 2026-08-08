@@ -3,7 +3,8 @@
 # Runs on a version tag, and on demand. The matrix covers what people actually
 # install: both Linux architectures — arm64 matters because that is the machine
 # this is developed on, and GitHub gives public repositories arm64 Linux runners
-# at no cost — plus macOS and Windows, which are built but NOT signed. An
+# at no cost — plus macOS and Windows on both architectures (x64, and ARM64
+# cross-compiled from the same runner), which are built but NOT signed. An
 # unsigned .dmg/.msi still installs past a warning; signing them costs an Apple
 # Developer subscription and a Windows certificate, so it is a decision to make
 # when there is someone to ship to, not a blocker for producing artifacts.
@@ -26,6 +27,14 @@ jobs:
           - { os: ubuntu-22.04-arm, label: linux-arm64 }
           - { os: macos-latest,     label: macos }
           - { os: windows-latest,   label: windows }
+          # Windows on ARM is cross-compiled from the x64 runner — its image
+          # already ships the ARM64 MSVC tools, so this costs one extra job and
+          # no new runner image. NSIS only: WiX v3, which Tauri uses for the
+          # .msi, has no ARM64 target and the job would fail on it. The
+          # installer itself runs emulated; the app inside is native ARM64.
+          - { os: windows-latest,   label: windows-arm64,
+              target: aarch64-pc-windows-msvc,
+              args: '--target aarch64-pc-windows-msvc --bundles nsis' }
 
     steps:
       - uses: actions/checkout@v5
@@ -53,6 +62,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Cross-compilation target
+        if: matrix.target != ''
+        run: rustup target add ${{ matrix.target }}
+
       # Without this every run compiles the whole dependency tree from scratch,
       # which is the difference between a two-minute job and a twenty-minute one.
       - uses: Swatinem/rust-cache@v2
@@ -65,6 +78,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: impl
+          args: ${{ matrix.args }}
           # A tag build publishes a draft release; a manual run just leaves
           # artifacts, so the button is safe to press for a test bundle.
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
@@ -75,10 +89,13 @@ jobs:
       - uses: actions/upload-artifact@v5
         with:
           name: bundles-${{ matrix.label }}
+          # `target/**/bundle` rather than `target/release/bundle`: a build with
+          # an explicit --target writes to target/<triple>/release/bundle, and
+          # `**` matches zero segments, so one set of globs covers both.
           path: |
-            impl/src-tauri/target/release/bundle/**/*.deb
-            impl/src-tauri/target/release/bundle/**/*.AppImage
-            impl/src-tauri/target/release/bundle/**/*.dmg
-            impl/src-tauri/target/release/bundle/**/*.msi
-            impl/src-tauri/target/release/bundle/**/*.exe
+            impl/src-tauri/target/**/bundle/**/*.deb
+            impl/src-tauri/target/**/bundle/**/*.AppImage
+            impl/src-tauri/target/**/bundle/**/*.dmg
+            impl/src-tauri/target/**/bundle/**/*.msi
+            impl/src-tauri/target/**/bundle/**/*.exe
           if-no-files-found: warn
