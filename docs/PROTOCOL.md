@@ -613,6 +613,65 @@ Scale assumption: **3–5 members, max 8–10** (1:1 goes through §6–7, not t
 > was sized against that and still carries a name plus three members there — which is the
 > reason the format is versioned rather than simply changed.
 
+> **Proposal — a member holds the group key too: `chan2` and portable membership** *(v6, 2026-08-09; not yet normative — `chan1` above stands until this is accepted).*
+>
+> **Correction of record first.** This section says members import `GK_pub`; the
+> implementation does not — `key_import` is used only for contacts, and a member keeps
+> `GK_pub` as bytes in the §10 encrypted local cache. So today the marker exists **only on
+> the admin's device**, and the "portable membership" this section promises holds for
+> exactly one member of each group. A member who moves to a new device with the same HEM
+> recovers nothing: not the group's existence, not its name, not who administers it.
+>
+> **The change.** A member imports `GK_pub` as an ordinary public-key entry, with a marker
+> of its own:
+> ```
+> label   Onchato-Group-<name>                             (truncated to fit)
+> DESCR   ETSEIC:chan2:<owner_hint>:<admin_hint>:<name>:   ← roster blob omitted
+> ```
+> `owner_hint` is 4 bytes of the OWNING IDENTITY's KID in base64url — the same convention,
+> and the same "hint, not proof" semantics, as `admin_hint`. It is needed **because
+> members now write markers**: on an admin's marker the admin *is* the owner, so `chan1`
+> needs no such field and a client holding several identities (§4 Proposal) can scope by
+> `admin_hint` alone. On a member's marker the admin is someone else, and without the
+> owner the group list of one identity leaks into another's.
+>
+> A member **omits the roster blob**. The roster is the admin's authority and arrives
+> attested in the distribution; carrying a copy would add nothing and would turn every
+> member's device into a copy of the membership graph. Budget: the header grows from 20 to
+> 27 bytes, so an admin's marker with ten members and a 16-character name occupies 119 of
+> 128; a member's is ~60.
+>
+> **A member's marker is near-immutable.** `GK` lives for the group's life — an epoch
+> rotation changes `group_secret` and the topic but never `GK` — so the entry is written
+> once at joining, rewritten only if the group is renamed, and deleted on leaving.
+>
+> **Recovery needs no new protocol.** From the entry a returning member has `GK_pub`,
+> hence `group_id = SHA-256(GK_pub)[0:16]`, the admin and the name. It has **not** got
+> `group_secret` or any sender key — those stay client-side and forward-secret, which is
+> the point — so it cannot derive the topic and cannot join. It asks: the sender-key
+> request proposed above carries `{group_id, epoch}` over the 1:1 ratchet, the responder
+> re-checks the roster (a returning member is in it, a removed one is not), and the answer
+> is an ordinary distribution carrying `group_secret`. An unknown epoch is sent as 0 and
+> the responder answers at its own, which is the existing newer-epoch path. **Recovery is
+> a second trigger for one mechanism, not a second mechanism.**
+>
+> **Consequences, all three deliberate.**
+> - **A member's device now admits membership.** Before this a seized HEM revealed nothing
+>   about a member's groups. It now reveals that this person is in a group, and a hint of
+>   who administers it — membership, not the graph, since the roster is omitted. The bound
+>   on this is the device's own policy: `key_search` may be configured to require
+>   authorisation, and a deployment that cares should set it, which leaves a seized HEM
+>   yielding nothing without the password. Nothing in the client is affected, because
+>   every search it makes already follows an authorisation.
+> - **A group belongs to one identity per device**, for the same reason a contact does —
+>   the HEM refuses to hold one public key twice, and `GK_pub` is the same bytes for both
+>   of a user's identities. The same client-side precheck applies unchanged. There is no
+>   clash with contacts: `GK` is a fresh per-group keypair and never an identity key.
+> - **A removed member keeps its entry.** Nothing can delete it remotely, so a recovering
+>   ex-member sees a group it cannot rejoin: its request is refused at the roster check.
+>   That refusal is correct and must be surfaced as such — "you are no longer a member,
+>   remove this?" — or it presents as a broken group that never loads.
+
 > **Proposal — sender-key re-request, and the counter a distribution must carry** *(v6, 2026-08-09; not yet normative — an availability repair, no change to what is authenticated or encrypted).*
 >
 > §8 distributes a sender key **once**, over a 1:1 session that may not exist at that

@@ -1004,11 +1004,37 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
     orphans both. Pre-MVP the old entries are simply cleared.
   - Handles may repeat; the sign-in picker sorts **alphabetically by handle** and must
     show a short KID beside it, or the wrong identity is chosen silently.
-  - **The group marker has the same flat-namespace problem** (`ETSEIC:chan`, and ordinary
-    members hold a `GK_pub` entry too). Not designed yet — but if the DESCR generation is
-    being spent, it should be spent once.
-
   No backward compatibility: pre-MVP, the old format is dropped rather than read.
+- **Groups: a member will hold `GK_pub` in the HEM too — designed, NOT built**
+  (2026-08-09; Proposal in `docs/PROTOCOL.md` §8, after the marker note).
+
+  **Correct the record when reading §8:** it says members import `GK_pub`, and the code
+  does not. `importPublicKey` is used only for contacts; `admit()` keeps `gkPub` as bytes
+  in the record and it reaches only the §10 encrypted local cache. So the marker exists
+  **only on the admin's device**, and "portable membership" holds for one member per
+  group — everyone else recovers nothing on a new device with the same HEM.
+
+  ```
+  label   Onchato-Group-<name>
+  DESCR   ETSEIC:chan2:<ownerHint>:<adminHint>:<name>:      ← member: no roster blob
+  ```
+
+  - **`ownerHint` (4 bytes of the owning identity's KID) is needed only because members
+    write markers.** On an admin's marker the admin IS the owner, so as long as only
+    admins wrote them, a multi-identity client could scope by `adminHint` and `chan2`
+    would be unnecessary. Worth knowing before anyone "simplifies" the field away.
+  - Header grows 20 → 27 bytes: an admin marker with 10 members and a 16-char name is
+    119 of 128; a member's is ~60.
+  - **`GK` survives a rekey** (epoch/secret/topic change, `GK` does not), so a member's
+    entry is written once at join, rewritten only on rename, deleted on leave.
+  - **Recovery reuses `group-skd-req`** — the entry yields `GK_pub` → `gid`, but never
+    `group_secret` or sender keys, so the returning member cannot derive the topic and
+    must ask over the 1:1. Unknown epoch → send 0; the responder answers at its own and
+    the existing newer-epoch path in `onGroupInvite` takes it from there. A **removed**
+    member is refused at the roster check — surface that as "no longer a member", not as
+    a group that never loads.
+  - A group is 1:1 with an identity for the same reason a contact is (duplicate key
+    content), and the same precheck covers it.
 
 ## Status
 
