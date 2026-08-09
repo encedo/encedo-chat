@@ -1005,14 +1005,9 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
   - Handles may repeat; the sign-in picker sorts **alphabetically by handle** and must
     show a short KID beside it, or the wrong identity is chosen silently.
   No backward compatibility: pre-MVP, the old format is dropped rather than read.
-- **Groups: a member will hold `GK_pub` in the HEM too — designed, NOT built**
-  (2026-08-09; Proposal in `docs/PROTOCOL.md` §8, after the marker note).
-
-  **Correct the record when reading §8:** it says members import `GK_pub`, and the code
-  does not. `importPublicKey` is used only for contacts; `admit()` keeps `gkPub` as bytes
-  in the record and it reaches only the §10 encrypted local cache. So the marker exists
-  **only on the admin's device**, and "portable membership" holds for one member per
-  group — everyone else recovers nothing on a new device with the same HEM.
+- **Groups: a member holds `GK_pub` in the HEM too — BUILT 2026-08-09**
+  (Proposal in `docs/PROTOCOL.md` §8, after the marker note; §8's own text said members
+  import `GK_pub` all along, and until now the code did not).
 
   ```
   label   Onchato-Group-<name>
@@ -1038,7 +1033,19 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
     member is refused at the roster check — surface that as "no longer a member", not as
     a group that never loads.
   - A group is 1:1 with an identity for the same reason a contact is (duplicate key
-    content), and the same precheck covers it.
+    content). `writeMemberMarker` returns **false rather than throwing** when the import
+    is refused — a second identity on this device that is in the same group cannot hold
+    `GK_pub` twice — and the group then runs from the local cache with no portable record.
+  - **Recovery is `restoreGroups` → `recoverGroupsFromDevice`**: the cache is what this
+    browser remembers, `deviceGroups(ownerKid)` is what the HEM knows, and the difference
+    is asked for over the 1:1. The timeout (45 s) must **not** assert removal: silence is
+    what an offline admin and a removed member both produce, and `answerSkdReq` is silent
+    on purpose.
+  - The whole of Track A (identity records, scoped contacts, KID-keyed local state,
+    sign-in picker) is built and covered by `test/descr.test.ts`, `test/core.test.ts`,
+    `test/gmarker.test.ts` and `test/group-hem-gk.test.ts` — but **no HEM path is
+    covered by an automated test**, and `browser-test` cannot reach one. The two-identity
+    walkthrough has to be done by hand.
 
 ## Status
 
