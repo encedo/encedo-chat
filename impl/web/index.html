@@ -536,6 +536,12 @@
         <div class="avatar" id="me-avatar">··</div>
         <div class="info"><div class="name" id="me-handle">—</div><div class="fp" id="me-fp" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer"></div></div>
         <button class="icon-btn" id="btn-settings" title="Ustawienia" data-i18n-title="Ustawienia">⚙</button>
+        <!-- Leaving was reachable only from inside Settings, which is not where
+             anyone looks for the way out. Next to the gear, one click, and it
+             confirms — because a session's transcript is ephemeral and a reload
+             takes it, so a stray hit next to a button people press often would
+             cost the conversation. -->
+        <button class="icon-btn" id="btn-signout" title="Wyloguj" data-i18n-title="Wyloguj">⏻</button>
       </div>
       <div class="search-wrap"><input id="contact-search" type="text" placeholder="Szukaj kontaktu…" data-i18n-placeholder="Szukaj kontaktu…" autocomplete="off"></div>
       <div class="tabs">

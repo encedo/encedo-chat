@@ -1253,6 +1253,14 @@ $('chip-profile').addEventListener('click', openDrawer)
 $('btn-close-drawer').addEventListener('click', closeDrawer)
 $('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); closeWelcome(); pendingInvite = null; closeImport() })
 $('btn-logout').addEventListener('click', () => location.reload())
+// The same act, from the header rather than from inside Settings — but asked
+// first, because this one sits beside a button people press often. Logging out
+// is a reload: the identity survives (it is in the HEM, or in this browser), the
+// TRANSCRIPT does not, and neither do the ratchets carrying it.
+$('btn-signout').addEventListener('click', async () => {
+  if (!(await ask(tr('Wylogować?'), tr('Historia tej sesji zniknie — jest efemeryczna i nigdzie się nie zapisuje. Tożsamość i kontakty zostają.'), tr('Wyloguj'))).ok) return
+  location.reload()
+})
 
 // ---- attach a file --------------------------------------------------------
 /**
