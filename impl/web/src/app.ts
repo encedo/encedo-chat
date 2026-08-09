@@ -1298,6 +1298,36 @@ function clearComposer() {
   showAttach(null)
 }
 
+// ---- theme ---------------------------------------------------------------
+// The choice is APPLIED by the inline script in <head> (see index.html, and the
+// reason it cannot live here); this only reflects it and records it. Setting the
+// attribute is the entire switch, because the palette is three token blocks and
+// nothing hard-codes a colour.
+//
+// "Jak w systemie" removes the attribute rather than writing the current system
+// value — the difference shows up when the machine flips at dusk: an app that
+// stored "dark" at noon would then be wrong, while an absent attribute keeps
+// following prefers-color-scheme, which is what the app did before there was
+// any control at all.
+{
+  const sel = $('theme-select') as HTMLSelectElement
+  if (sel) {
+    sel.value = document.documentElement.getAttribute('data-theme') ?? 'system'
+    sel.addEventListener('change', () => {
+      const v = sel.value
+      try {
+        if (v === 'light' || v === 'dark') {
+          document.documentElement.setAttribute('data-theme', v)
+          localStorage.setItem('ec-theme', v)
+        } else {
+          document.documentElement.removeAttribute('data-theme')
+          localStorage.removeItem('ec-theme')
+        }
+      } catch {}
+    })
+  }
+}
+
 // ---- language ------------------------------------------------------------
 // The static markup carries its Polish as default content, so the app is
 // readable before this runs and stays readable if it throws. `applyDom`

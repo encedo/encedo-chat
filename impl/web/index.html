@@ -479,6 +479,23 @@
     input,select,textarea{font-size:16px}
   }
 </style>
+<script>
+  /* The theme is applied HERE, not from the bundle, and that is the whole point
+     of these six lines. #boot paints on var(--bg) with the FIRST frame, while
+     1.2 MiB of transport and crypto is still downloading — so a reader who
+     picked light on a dark machine would watch a dark screen for seconds and
+     then see it swap under them. app.ts is far too late to decide this.
+
+     No stored choice leaves the attribute OFF, which is what hands the decision
+     back to prefers-color-scheme — the app has always followed the system and
+     still does unless someone says otherwise. `?theme=` pins for one page load
+     without saving, the same bargain `?lang=` makes: support asks for a
+     screenshot, it does not rewrite the user's preference. */
+  try {
+    var t = new URLSearchParams(location.search).get('theme') || localStorage.getItem('ec-theme')
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t)
+  } catch (e) {}
+</script>
 </head>
 <body>
   <!-- Removed by the app once it is ready; see #boot in the stylesheet. -->
@@ -754,7 +771,13 @@
     <div class="kv"><span class="k" data-i18n="Rozmówca (odcisk klucza)">Rozmówca (odcisk klucza)</span><span class="v" id="sess-peer">—</span></div>
     <div class="kv" id="kv-peerid" hidden><span class="k" data-i18n="PeerId (efemeryczny)">PeerId (efemeryczny)</span><span class="v" id="sess-peerid">—</span></div>
     <div class="kv"><span class="k" data-i18n="Historia">Historia</span><span class="v" data-i18n="brak — sesja efemeryczna">brak — sesja efemeryczna</span></div>
-    <label data-i18n="Język">Język</label>
+    <label data-i18n="Motyw">Motyw</label>
+    <select id="theme-select" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px">
+      <option value="system" data-i18n="Jak w systemie">Jak w systemie</option>
+      <option value="light" data-i18n="Jasny">Jasny</option>
+      <option value="dark" data-i18n="Ciemny">Ciemny</option>
+    </select>
+    <label style="margin-top:12px" data-i18n="Język">Język</label>
     <select id="lang-select" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px">
       <option value="pl" data-i18n="Polski">Polski</option>
       <option value="en" data-i18n="English">English</option>
