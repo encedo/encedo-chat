@@ -11,6 +11,7 @@
 
 import { generateKeyPairSync, createPublicKey, createPrivateKey, diffieHellman, type KeyObject } from 'node:crypto'
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { buildSelfDescr } from '../lib/descr.ts'
 
 // X25519 ASN.1 DER prefixes for raw<->KeyObject conversion.
 const SPKI_PREFIX  = Buffer.from('302a300506032b656e032100', 'hex')          // public  (12B) + 32B key
@@ -59,7 +60,7 @@ export class Keystore {
   save(): void { writeFileSync(this.path, JSON.stringify(this.data, null, 2) + '\n') }
 
   ownPubB64(): string { return this.data.pub }
-  descrSelf(): string { return `ETSEIC:self,${this.data.handle},ik,${this.data.iat}` }
+  descrSelf(): string { return buildSelfDescr(this.data.handle) }
 
   addPeer(handle: string, pubB64: string): void {
     // validate it parses as an X25519 point before storing

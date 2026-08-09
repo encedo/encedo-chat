@@ -11,7 +11,7 @@
  *   join <peer> [--network m] [--date d]            open a live chat
  *
  * Flow: `init` → give the printed pubkey to the peer (imports it into their HEM
- * as ETSEIC:peer,<name>,ik) → `add-peer <them> <their_pub>` → `join <them>`.
+ * as a contact) → `add-peer <them> <their_pub>` → `join <them>`.
  */
 
 import { Keystore } from '../bob/keystore.ts'
@@ -36,7 +36,9 @@ export async function softwarePeerCli(ksPath: string, name: string) {
       console.log(`${Name} created — handle "${ks.data.handle}"`)
       console.log(`DESCR:  ${ks.descrSelf()}`)
       console.log(`pubkey: ${ks.ownPubB64()}`)
-      console.log(`\n→ import this pubkey into the peer's HEM as  ETSEIC:peer,${ks.data.handle},ik`)
+      // Not a DESCR to copy: a contact record now names the OWNING identity's
+      // KID, which this keystore does not know. The app builds it on import.
+      console.log(`\n→ add this pubkey as a contact on the peer's side, under the name "${ks.data.handle}"`)
       break
     }
     case 'pubkey':
@@ -48,7 +50,7 @@ export async function softwarePeerCli(ksPath: string, name: string) {
       if (!handle || !pubB64) { console.error('usage: add-peer <handle> <pubB64>'); process.exit(1) }
       const ks = requireKeystore()
       ks.addPeer(handle, pubB64)
-      console.log(`peer saved: ETSEIC:peer,${handle},ik`)
+      console.log(`peer saved: ${handle}`)
       break
     }
     case 'peers': {

@@ -22,6 +22,7 @@ import { topicFromSecret, todayUTC } from '../lib/rendezvous.ts'
 import { hemIdentity } from '../cli/identity.ts'
 import { runChatSession } from '../cli/chat-session.ts'
 import { onchatoRelay } from '../net/onchato.ts'
+import { buildSelfDescr, selfLabel } from '../lib/descr.ts'
 
 const LOCAL = new URL('./alice.local.json', import.meta.url).pathname
 const [cmd, ...rest] = process.argv.slice(2)
@@ -59,10 +60,9 @@ switch (cmd) {
     const handle = opt('--handle', 'alice')
     const hem = await connect(hsmUrl)
     const pw = await getPassword()
-    const iat = Math.floor(Date.now() / 1000)
-    const descr = `ETSEIC:self,${handle},ik,${iat}`
+    const descr = buildSelfDescr(handle)
     const genToken = await hem.authorizePassword(pw, 'keymgmt:gen')
-    const { kid } = await hem.createKeyPair(genToken, `chat-ik-${handle}`, 'CURVE25519', encodeDescr(descr))
+    const { kid } = await hem.createKeyPair(genToken, selfLabel(handle), 'CURVE25519', encodeDescr(descr))
     const useToken = await hem.authorizePassword(null, `keymgmt:use:${kid}`)   // null → reuse cached pw-derived key
     const { pubkey } = await hem.getPubKey(useToken, kid)
     writeFileSync(LOCAL, JSON.stringify({ handle, hsmUrl, kid, pub: pubkey }, null, 2) + '\n')

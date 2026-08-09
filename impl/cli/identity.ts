@@ -9,28 +9,40 @@ import { HEM } from '../../hem-sdk-js/hem-sdk.js'
 import { diffieHellman } from 'node:crypto'
 import { Keystore, rawToPriv, rawToPub } from '../bob/keystore.ts'
 import { hemIdentityFrom, type Identity } from '../lib/core.ts'
+import { SELF_PREFIX, buildSelfDescr, parseSelfDescr, selfLabel } from '../lib/descr.ts'
 
 export type { Identity }
 
-const dec = new TextDecoder()
-const parseHandle = (d: Uint8Array | null) => (d ? dec.decode(d).split('\0')[0].split(',')[1] : undefined) ?? '(?)'
-
-/** HEM-backed identity. Logs in if an ETSEIC:self key exists, else registers one. */
+/**
+ * HEM-backed identity: signs in as an existing `ETSEIC:self1` key, else registers one.
+ *
+ * A device may now hold several (§4 Proposal), and a CLI has no picker — so
+ * `handleHint` selects, matched case-insensitively, and only an unambiguous
+ * device signs in without one. Guessing here would mean running as the wrong
+ * identity, which looks like an empty contact book rather than like an error.
+ */
 export async function hemIdentity(url: string, password: string, handleHint = 'me'): Promise<Identity> {
   const hem = new HEM(url)
   await hem.hemCheckin()
   const listTok = await hem.authorizePassword(password, 'keymgmt:list')
-  const keys: any[] = await hem.searchKeys(listTok, 'ETSEIC:self,')
+  const keys: any[] = await hem.searchKeys(listTok, SELF_PREFIX)
+  const ids = keys.map((k) => ({ kid: String(k.kid), handle: parseSelfDescr(k.description)?.handle || '(?)' }))
 
   let kid: string, handle: string
-  if (keys.length) {
-    kid = keys[0].kid; handle = parseHandle(keys[0].description)
+  const named = ids.filter((i) => i.handle.toLowerCase() === handleHint.toLowerCase())
+  if (named.length > 1) {
+    throw new Error(`several identities are called "${handleHint}": ${named.map((i) => i.kid.slice(0, 8)).join(', ')}`)
+  } else if (named.length === 1) {
+    kid = named[0].kid; handle = named[0].handle
+  } else if (ids.length === 1) {
+    kid = ids[0].kid; handle = ids[0].handle
+  } else if (ids.length > 1) {
+    throw new Error(`this HEM holds ${ids.length} identities (${ids.map((i) => i.handle).join(', ')}) — name one with --handle`)
   } else {
     handle = handleHint
     const gen = await hem.authorizePassword(password, 'keymgmt:gen')
-    const iat = Math.floor(Date.now() / 1000)
-    const descrB64 = Buffer.from(`ETSEIC:self,${handle},ik,${iat}`, 'utf8').toString('base64')
-    kid = (await hem.createKeyPair(gen, `chat-ik-${handle}`, 'CURVE25519', descrB64)).kid
+    const descrB64 = Buffer.from(buildSelfDescr(handle), 'utf8').toString('base64')
+    kid = (await hem.createKeyPair(gen, selfLabel(handle), 'CURVE25519', descrB64)).kid
   }
   const useTok = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
   const { pubkey } = await hem.getPubKey(useTok, kid)
