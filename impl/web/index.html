@@ -379,6 +379,11 @@
   .store-opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
   /* Identity picker (login). The KID is monospace and muted so the eye reads the
      name first and the four bytes only when two names are the same. */
+  /* Bytes left for a name, counted in UTF-8 because that is what the 128-byte
+     DESCR field holds. Muted until it runs out, then it is the only thing on the
+     label that has changed colour. */
+  .bytes-left{float:right;font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400}
+  .bytes-left.full{color:var(--err)}
   #id-picker{display:flex;flex-direction:column;gap:6px;margin-top:10px}
   #id-picker[hidden]{display:none}
   .id-opt{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
@@ -523,7 +528,7 @@
       <div class="hint" id="status-hint"></div>
       <label data-i18n="Hasło">Hasło</label>
       <input id="pass" type="password" autocomplete="off">
-      <div id="reg-handle-wrap" hidden><label data-i18n="Handle (widoczny dla kontaktów)">Handle (widoczny dla kontaktów)</label><input id="handle" type="text" placeholder="np. alice" data-i18n-placeholder="np. alice" autocomplete="off"></div>
+      <div id="reg-handle-wrap" hidden><label data-i18n="Handle (widoczny dla kontaktów)">Handle (widoczny dla kontaktów)<span class="bytes-left" id="handle-bytes"></span></label><input id="handle" type="text" placeholder="np. alice" data-i18n-placeholder="np. alice" autocomplete="off"></div>
       <button class="btn" id="go" data-i18n="Zaloguj">Zaloguj</button>
       <!-- Shown only when a HEM holds more than one identity; one signs straight in. -->
       <div id="id-picker" hidden></div>
@@ -628,7 +633,7 @@
          that check, since it is the only thing standing between a link and a
          man in the middle. -->
     <label data-i18n="Klucz publiczny albo link zaproszenia">Klucz publiczny albo link zaproszenia</label><textarea id="add-pub" placeholder="wklej pubkey albo link zaproszenia…" data-i18n-placeholder="wklej pubkey albo link zaproszenia…"></textarea>
-    <label data-i18n="Nazwa">Nazwa</label><input id="add-name" type="text" placeholder="np. bob" data-i18n-placeholder="np. bob" autocomplete="off">
+    <label data-i18n="Nazwa">Nazwa<span class="bytes-left" id="add-name-bytes"></span></label><input id="add-name" type="text" placeholder="np. bob" data-i18n-placeholder="np. bob" autocomplete="off">
     <label data-i18n="Zapis">Zapis</label>
     <div class="store-opts" id="add-store">
       <label class="store-opt"><input type="radio" name="store" value="hem" checked> <span data-i18n="🔒 W HEM — trwałe, przenośne między urządzeniami">🔒 W HEM — trwałe, przenośne między urządzeniami</span></label>

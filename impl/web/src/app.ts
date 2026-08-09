@@ -30,7 +30,9 @@ import { nowMs, utcHHMM } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
 import { unb64, b64, randomBytes } from '../../lib/wc.ts'
-import { kidOf, SELF_PREFIX, buildSelfDescr, parseSelfDescr, selfLabel } from '../../lib/descr.ts'
+import {
+  kidOf, SELF_PREFIX, buildSelfDescr, parseSelfDescr, selfLabel, byteLen, sliceBytes, SELF_NAME_MAX, PEER_NAME_MAX,
+} from '../../lib/descr.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
@@ -321,6 +323,10 @@ $('go').addEventListener('click', async () => {
   finally { const b = $('go') as HTMLButtonElement; b.disabled = false; b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj' }
 })
 $('pass').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') ($('go') as HTMLButtonElement).click() })
+// The two places a name becomes the tail of a DESCR: the handle at registration
+// and a contact's name. Both count against a real budget, so both show it.
+attachByteBudget($('handle') as HTMLInputElement, SELF_NAME_MAX, $('handle-bytes'))
+attachByteBudget($('add-name') as HTMLInputElement, PEER_NAME_MAX, $('add-name-bytes'))
 
 // dev / no-HEM: a persistent software X25519 identity (localStorage — one per
 // browser). For two peers, open two DIFFERENT browsers (or profiles).
@@ -997,6 +1003,41 @@ async function claimContact(name: string, pub: string): Promise<boolean> {
   if (!ok) return false
   await session.book.remove(sameName)
   return true
+}
+
+
+/**
+ * A live UTF-8 byte counter on a name field, and a hard stop at zero.
+ *
+ * A DESCR is a fixed 128-byte record and the name is what is left of it, so the
+ * limit is in BYTES and not characters: "Zażółć" is six characters and ten
+ * bytes, and an emoji is four. Counting characters would let a Polish name pass
+ * the form and be cut on save — the field would lose its ending silently, which
+ * is the failure this replaces.
+ *
+ * The cut happens on input rather than on submit, because a name that arrives
+ * shortened is one the user never agreed to. When the budget is spent the field
+ * simply stops taking characters, and the caret is put back where it was so a
+ * paste that overflows does not also jump the cursor to the end.
+ */
+function attachByteBudget(input: HTMLInputElement, max: number, out: HTMLElement) {
+  const paint = () => {
+    const used = byteLen(input.value)
+    const left = max - used
+    out.textContent = String(left)
+    out.classList.toggle('full', left <= 0)
+    out.title = tr('Pozostało bajtów UTF-8 na nazwę (limit {max})', { max })
+  }
+  input.addEventListener('input', () => {
+    if (byteLen(input.value) > max) {
+      const at = input.selectionStart ?? input.value.length
+      input.value = sliceBytes(input.value, max)
+      const p = Math.min(at, input.value.length)
+      try { input.setSelectionRange(p, p) } catch {}
+    }
+    paint()
+  })
+  paint()
 }
 
 const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; paintStoreOptions('add-store'); $('add-pub').focus() }

@@ -214,6 +214,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Powtórz hasło': 'Repeat the password',
     'Powtórz nowe hasło': 'Repeat the new password',
     'poza pokojem': 'not in the room',
+    'Pozostało bajtów UTF-8 na nazwę (limit {max})': 'UTF-8 bytes left for the name (limit {max})',
     'połączony': 'connected',
     'Profil': 'Profile',
     'Profil software': 'Software profile',

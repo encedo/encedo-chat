@@ -166,9 +166,20 @@ export const groupLabel = (name: string) => label('Onchato-Group-', name)
 // records
 // ---------------------------------------------------------------------------
 
+/**
+ * How many UTF-8 bytes are left for the free-text tail of each record.
+ *
+ * Exported because the UI counts down against exactly this: a name is cut here
+ * if it does not fit, and a field that silently loses its last characters on
+ * save is worse than one that stops accepting them. The peer figure is fixed —
+ * an owner id is always 22 characters — so both are constants, not estimates.
+ */
+export const SELF_NAME_MAX = DESCR_MAX - byteLen(SELF_PREFIX)                    // 115
+export const PEER_NAME_MAX = DESCR_MAX - byteLen(PEER_PREFIX) - 22 - 1           // 92
+
 /** `ETSEIC:self1,<handle>` — the handle is the tail, so it may contain anything. */
 export const buildSelfDescr = (handle: string): string =>
-  SELF_PREFIX + sliceBytes(handle, DESCR_MAX - byteLen(SELF_PREFIX))
+  SELF_PREFIX + sliceBytes(handle, SELF_NAME_MAX)
 
 export function parseSelfDescr(raw: Uint8Array | string | null | undefined): { handle: string } | null {
   const s = descrText(raw)
@@ -187,6 +198,8 @@ export function buildPeerDescr(ownerKidHex: string, name: string): string | null
   if (!owner) return null
   const head = `${PEER_PREFIX}${owner},`
   return head + sliceBytes(name, DESCR_MAX - byteLen(head))
+  // (DESCR_MAX - byteLen(head) === PEER_NAME_MAX; computed rather than assumed
+  // so a malformed owner cannot quietly widen the budget.)
 }
 
 export function parsePeerDescr(raw: Uint8Array | string | null | undefined): { ownerKid: string; name: string } | null {
