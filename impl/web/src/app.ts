@@ -259,13 +259,29 @@ async function probeVersion(url: string): Promise<any | null> {
   try { return await withTimeout(new HEM(url).getVersion(), HEM_VERSION_MS, '/version') } catch { return null }
 }
 
+/**
+ * Sign-in stays disabled until the device has answered `/status`.
+ *
+ * The green dot and the button now say the same thing, which is the point: a
+ * form that lets you type a password and press a button, and only then reports
+ * that the address was never reachable, spends the user's attention on the wrong
+ * step. A software identity is unaffected — it needs no device.
+ */
+function setHemReady(ready: boolean) {
+  const go = $('go') as HTMLButtonElement
+  go.disabled = !ready
+  go.title = ready ? '' : tr('Najpierw musi odpowiedzieć HEM pod podanym adresem')
+}
+
 async function refreshStatus() {
   const url = val('hsm'), dot = $('status-dot'), hint = $('status-hint')
   dot.className = 'dot'; hint.textContent = ''
+  setHemReady(false)
   if (!url) return
   try {
     const status: any = await probeStatus(url)
     dot.className = 'dot ok'
+    setHemReady(true)
     const host = typeof status?.host === 'string' ? status.host : ''
     hint.textContent = `HEM ok${host ? ` · ${host}` : ''}`
     // The firmware line arrives when it arrives; the dot is already green.
@@ -278,6 +294,13 @@ async function refreshStatus() {
   }
 }
 $('hsm').addEventListener('blur', refreshStatus)
+// Typing a new address re-probes shortly after the typing stops. Without this the
+// button could only be unlocked by leaving the field, and the field arrives
+// pre-filled — so the first probe also runs now, or a default address would sit
+// there with the button dead and nothing to click.
+let hsmProbeT: any
+$('hsm').addEventListener('input', () => { clearTimeout(hsmProbeT); hsmProbeT = setTimeout(refreshStatus, 600) })
+void refreshStatus()
 
 // ---- login / register ----
 $('toggle').addEventListener('click', () => {
@@ -387,7 +410,13 @@ $('go').addEventListener('click', async () => {
       showIdentityPicker(ids, (chosen) => { void signInAs(hem, chosen) })
     }
   } catch (e: any) { setMsg('msg', tr('Błąd: ') + (e?.message ?? e), 'err') }
-  finally { const b = $('go') as HTMLButtonElement; b.disabled = false; b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj' }
+  finally {
+    const b = $('go') as HTMLButtonElement
+    b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj'
+    // Re-probe rather than simply re-enabling: an attempt that failed because the
+    // device went away must not leave a live-looking button behind it.
+    void refreshStatus()
+  }
 })
 $('pass').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') ($('go') as HTMLButtonElement).click() })
 // The two places a name becomes the tail of a DESCR: the handle at registration

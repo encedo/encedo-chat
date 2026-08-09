@@ -156,6 +156,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Musi zostać co najmniej jeden węzeł.': 'At least one node must remain.',
     'Na pewno?': 'Are you sure?',
     'Najpierw dodaj kontakty — członkowie grupy muszą być kontaktami.': 'Add contacts first — group members must be contacts.',
+    'Najpierw musi odpowiedzieć HEM pod podanym adresem': 'The HEM at that address has to answer first',
     'Nazwa': 'Name',
     'Nazwa + członkowie. Tylko kontakty — każdy dostaje zaproszenie (klucze) przez Wasz kanał 1:1.': 'Name + members. Contacts only — each one gets an invitation (keys) over your 1:1 channel.',
     'Nazwa grupy': 'Group name',
