@@ -97,9 +97,9 @@
   .nodes-panel{width:100%;margin-top:12px;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--bg)}
   .nodes-head{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:4px}
   .node-add{border:none;background:none;color:var(--accent);font-size:12px;cursor:pointer;width:auto;margin:0;padding:0}
-  .node-row{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:6px 2px;font-size:13px}
+  .node-row{display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px}
   .node-row input[type=checkbox]{width:auto;margin:0;flex-shrink:0}
-  .node-row .n-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+  .node-row .n-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
   .node-row .n-x{color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px;flex-shrink:0}
   /* Order is the failover order (row 1 = primary), so the arrows are a real
      control, not decoration. Touch needs a finger-sized target — hence padding
@@ -196,7 +196,10 @@
   .net-row .v.chips{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px 6px;white-space:normal;overflow:visible;text-overflow:clip}
   @media (max-width:900px),(max-height:560px){
     .net-row.wrap{flex-direction:column;align-items:stretch;gap:6px}
-    .net-row .v.chips{justify-content:flex-start}
+    /* Stacked under its label, the chip list is still a VALUE, and every other
+       value in this card sits against the right margin. Wrapping is what the
+       phone layout is for; changing which edge they hang off was not. */
+    .net-row .v.chips{justify-content:flex-end}
   }
   .net-sub{color:var(--muted);font-size:11px}
   .net-tag{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:#fff;background:var(--warn,#c47f17);border-radius:6px;padding:1px 6px;margin-left:2px}
