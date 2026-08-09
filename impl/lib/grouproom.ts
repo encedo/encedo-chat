@@ -18,16 +18,29 @@
 
 import type { GroupSession } from './group.ts'
 import { envMsg, envReaction, envFile, encodeEnvelope, decodeEnvelope, type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta } from './envelope.ts'
+import { nowMs } from './time.ts'
 
 const T_GKEEPALIVE = 0x21 // a 1-byte mesh keepalive frame — NOT a group message (T_GMSG is 0x20)
 const KEEPALIVE = new Uint8Array([T_GKEEPALIVE])
 const KEEPALIVE_MS = 20_000
 const KEEPALIVE_JITTER_MS = 8_000
+/**
+ * How rarely we may ask one member for its sender key again. The answer travels
+ * over a 1:1 that has to be dialled and handshaked, and the member we are asking
+ * is by definition mid-conversation — so a burst of undecryptable frames (which
+ * is exactly what this condition produces: every frame that member sends) must
+ * cost ONE request, not one per frame.
+ */
+const ASK_COOLDOWN_MS = 30_000
 
 export interface GroupRoomOpts {
   onMessage?: (from: string, env: MsgEnv) => void
   onReaction?: (from: string, env: ReactionEnv) => void
   onFile?: (from: string, env: FileEnv) => void
+  /** An authenticated member is sending frames we cannot open for lack of their
+   *  sender key — ask them for one (see `GroupSession.onNeedSenderKey`). Already
+   *  rate-limited per member when this fires. */
+  onNeedSenderKey?: (memberPub: string) => void
   onLog?: (msg: string) => void
 }
 
@@ -66,6 +79,20 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
     else if (env.t === 'reaction') opts.onReaction?.(opened.from, env as ReactionEnv)
     else if (env.t === 'file') opts.onFile?.(opened.from, env as FileEnv)
     // unknown envelope types are ignored (forward-compat)
+  }
+
+  // Repair path: a member whose sender key never reached us is deaf-to-us in ONE
+  // direction and looks perfectly healthy in the other, so nothing else in the
+  // system would ever notice. The session raises this only for frames that
+  // already proved our MAC, so the peer is a member and the ask is warranted.
+  const lastAsk = new Map<string, number>()
+  session.onNeedSenderKey = (memberPub: string) => {
+    if (stopped) return
+    const t = nowMs()
+    if (t - (lastAsk.get(memberPub) ?? 0) < ASK_COOLDOWN_MS) return
+    lastAsk.set(memberPub, t)
+    log(`no sender key for ${memberPub.slice(0, 12)}… — asking them to re-send it`)
+    opts.onNeedSenderKey?.(memberPub)
   }
 
   node.services.pubsub.addEventListener('message', handler)
@@ -124,6 +151,9 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
     },
     stop() {
       stopped = true
+      // The session outlives the room (the manager owns it), so hand it back
+      // without our handler rather than leaving a stopped room reachable.
+      if (session.onNeedSenderKey) session.onNeedSenderKey = undefined
       for (const b of beacons) clearTimeout(b)
       if (kaTimer) clearTimeout(kaTimer)
       try { node.services.pubsub.removeEventListener('message', handler) } catch {}

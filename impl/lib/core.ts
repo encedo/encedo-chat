@@ -355,6 +355,9 @@ export interface Conversation {
   sendReaction(toId: string, emoji: string): void
   /** Hand a group's Sender-Key Distribution to this contact over the ratchet (§8). */
   sendGroupSkd(skd: SkdFields): void
+  /** Ask this contact to hand ITS sender key for a group over again (§8 repair) —
+   *  we hold none and cannot derive one. `gid` is base64, as in the SKD itself. */
+  sendGroupSkdReq(gid: string, epoch: number): void
   /** Send a file's metadata — CID, key, manifest. The bytes were encrypted and
    *  uploaded before this; the store never sees any of these fields. */
   sendFile(f: FileMeta): string
@@ -474,6 +477,11 @@ export interface SessionOpts {
   /** A group Sender-Key Distribution arrived over some 1:1 room (§8). It is already
    *  applied to `session.groups`; this lets the app react (e.g. surface the group). */
   onGroupSkd?: ChatOpts['onGroupSkd']
+  /** A contact cannot open our group frames and asks for our sender key again.
+   *  Unlike an SKD there is nothing for core to apply — answering means deciding
+   *  whether they are in that group, which is the app's roster to read. `from` is
+   *  the sender's IK pub, as for `onGroupSkd` and for the same reason. */
+  onGroupSkdReq?: ChatOpts['onGroupSkdReq']
   /** Our own transport state — see `LinkState`. */
   onLink?: (state: LinkState) => void
   /**
@@ -766,6 +774,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
         // Handing two different notions of "who" to two callers is how a group
         // rename silently did nothing.
         onGroupSkd: async (_from, skd) => { await groups.applySkd(peer.pub, skd); roomOpts.onGroupSkd?.(peer.pub, skd); opts.onGroupSkd?.(peer.pub, skd) },
+        onGroupSkdReq: (_from, req) => { roomOpts.onGroupSkdReq?.(peer.pub, req); opts.onGroupSkdReq?.(peer.pub, req) },
       }, {
         log,
         onIsolated: () => { setLink('reconnecting'); void reconnect(true) },
@@ -870,6 +879,7 @@ async function openRoom(
     // the invite); without forwarding it the invite reaches the room, decodes,
     // and dies in the default no-op — the receiver never surfaces the group.
     onGroupSkd: opts.onGroupSkd,
+    onGroupSkdReq: opts.onGroupSkdReq,
     // The peer reloaded: rebind the data plane onto the PeerId that is alive.
     onPeerReplaced: (old, now) => { log(`peer ${old.slice(0, 12)}… is now ${now.slice(0, 12)}… — rebinding the data plane`); plane?.onPeer(now) },
     heartbeatMs: opts.heartbeatMs,
@@ -914,6 +924,7 @@ async function openRoom(
     resend: (mid) => room.resend(mid),
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),
     sendGroupSkd: (skd) => room.sendGroupSkd(skd),
+    sendGroupSkdReq: (gid, epoch) => room.sendGroupSkdReq(gid, epoch),
     sendFile: (f) => room.sendFile(f),
     noteActivity,
     noteAway,

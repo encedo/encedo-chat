@@ -785,11 +785,54 @@ Signal/WhatsApp) but authenticated by **per-recipient ECDH-HMAC instead of Ed255
   WebRTC** (a mesh would be N² channels); content stays ciphertext + metadata to the relay.
 - **Tests:** `test/senderkey` (KAT + forge), `group` (insider-forge), `group-dist`
   (bootstrap loop), `grouproom` (topic broadcast + **scale 8**), `group-rotate`
-  (remove locks out, add joins). All over WebCrypto, deterministic.
-- **Not done (stages 6–7):** wiring into `core.ts`/`app.ts` (a group is another Room
-  in the web multi-room model), a real HEM `GK` keypair + roster MAC on the wire, the
-  compact-roster marker, and the live 4–5-user test. `mySenderKey()` returns a copy —
+  (remove locks out, add joins), `group-repair` (the one-way silence, below). All over
+  WebCrypto, deterministic.
+- **Not done (stages 6–7):** the live 4–5-user test. `mySenderKey()` returns a copy —
   the client keeps sender keys in the encrypted cache (§10), re-synced on device change.
+
+### The one-way group silence — a distribution that is sent once (§8 repair)
+
+A sender key is handed out **once**, over a 1:1 that may not exist at that moment, and
+the receiving side of Sender Keys **cannot derive what it was never given**. So a lost
+SKD makes one member deaf to exactly one sender, for the life of the epoch, while every
+other pair in the group works — no error, no badge, nothing in a log, because neither the
+MAC nor the AEAD failed. Reported live 2026-08-09 ("jeden wysyła i dochodziło, w drugą
+nie"), and it was reproducible on demand: create a group while a member's 1:1 is still
+opening.
+
+Three things fix it, and the third is the one that is easy to get wrong:
+
+- **The distribution no longer gets dropped.** `distributeGroup` (`app.ts`) used to
+  `return` on a member it could not build an SKD for — abandoning everyone behind them in
+  the roster — and to log-and-forget when the 1:1 was not up. `openRoomFor` returns
+  **immediately** for a room that already exists, and a room that is still opening has
+  `conv === null`, so that branch was reached in ordinary use. Failures now queue in
+  `pendingSkd` and go out when that contact's room comes up (`room.conv = conv`) or the
+  relay comes back.
+- **The receiver notices and asks.** `GroupSession.onNeedSenderKey` fires at the one point
+  in `receive` where our MAC has verified and no chain exists — *after* verification,
+  never before, because the group topic is public and a request emitted on
+  attacker-chosen bytes would let anyone aim a member's 1:1 traffic. `grouproom` rate-limits
+  it to one ask per member per 30 s (the condition recurs on every frame that sender sends),
+  the app sends `group-skd-req` over the 1:1, and the responder **re-checks the roster** —
+  the ratchet proves who is asking, not that they are still a member, and a removed member
+  still holds our contact and the old `group_id`.
+- **`SkdFields.ctr` — the counter the chain key is at.** This is the subtle one. A sending
+  chain ratchets per message, so a key handed over mid-conversation is `chain@k`, and
+  `setSenderKey` seeded every receiver at 0. A re-sent key therefore repaired **nothing**,
+  and silently: the original distribution (`ctr = 0`) keeps working, so only the repair path
+  is affected — the path nobody exercises by hand. Found by the test, not by reading.
+  Absent ⇒ 0, so SKDs from older builds stay valid.
+
+**The UI action is "re-send my sender key", not "reset the group", and it is not
+admin-only.** What breaks is one member's *outgoing* direction and only that member holds
+the key that repairs it. A rekey — the obvious reading of "reset" — bumps the epoch and
+changes the topic (§5.3), so a member who is offline at that instant is locked out
+entirely: a repair that can drop a healthy member is worse than the fault. Epoch rotation
+stays where it belongs, on membership change.
+
+Written up as a Proposal at the end of `docs/PROTOCOL.md` §8 (both conditions above are
+normative there).
 
 ### The HEM marker DESCR — `lib/gmarker.ts`
 

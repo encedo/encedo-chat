@@ -100,14 +100,38 @@ export interface GroupSkdEnv extends BaseEnv {
   epoch: number
   secret: string   // group_secret (32 B) — seeds the topic
   chain: string    // the sender's sending-chain key (32 B)
+  /**
+   * Which counter `chain` is AT. Omitted means 0, which is what an SKD sent
+   * before the sender has said anything means — and what builds before this
+   * field always meant. It matters on a RE-send: a sending chain ratchets per
+   * message, so a key handed over mid-conversation is `chain@k`, and a receiver
+   * that seeds it at 0 fails to open every subsequent frame, indistinguishably
+   * from having received no key at all.
+   */
+  ctr?: number
   roster: string[] // member IK_pub, incl. admin & self
   rmac?: string    // roster MAC (rk_i), present when the sender is the admin
   name?: string    // human group name (app metadata; the crypto ignores it)
 }
+/**
+ * Ask one member to hand its Sender-Key Distribution over again (§8), on the same
+ * 1:1 ratchet an SKD itself travels on.
+ *
+ * This exists because a sender key is distributed exactly once, over a channel
+ * that can be down at that moment — and the receiving side of Sender Keys has no
+ * way to derive what it was never given. A member whose SKD did not arrive is
+ * therefore deaf to that one sender **permanently**, while every other direction
+ * looks perfect. The request is what turns that into a few seconds of silence.
+ *
+ * It carries only the group and the epoch the asker is stuck at. The answer is an
+ * ordinary `group-skd`, so nothing else has to travel, and a responder that is
+ * further ahead answers with its own epoch — which is the existing rekey path.
+ */
+export interface GroupSkdReqEnv extends BaseEnv { t: 'group-skd-req'; gid: string; epoch: number }
 /** A valid envelope whose `t` this build doesn't know — carried for forward-compat. */
 export interface UnknownEnv extends BaseEnv { [k: string]: unknown }
 
-export type KnownEnv = MsgEnv | TypingEnv | PresenceEnv | ReactionEnv | FileEnv | RtcEnv | AckEnv | GroupSkdEnv
+export type KnownEnv = MsgEnv | TypingEnv | PresenceEnv | ReactionEnv | FileEnv | RtcEnv | AckEnv | GroupSkdEnv | GroupSkdReqEnv
 export type Envelope = KnownEnv | UnknownEnv
 export type FileMeta = Omit<FileEnv, keyof BaseEnv>
 
@@ -117,7 +141,11 @@ const te = new TextEncoder()
 /** Short per-message id (base64 of 6 random bytes). */
 export const mkId = (): string => b64(randomBytes(6))
 
-const base = (t: string, seq: number): BaseEnv => ({ v: ENVELOPE_V, t, id: mkId(), ts: nowMs(), seq })
+// Generic in `t` so the literal survives the spread: annotated `: BaseEnv` it
+// widened to `string`, and every builder below then failed to be the envelope it
+// says it returns. Nothing checks types at runtime here (Node strips them, the
+// bundler transpiles), so this was invisible outside an editor.
+const base = <T extends string>(t: T, seq: number) => ({ v: ENVELOPE_V, t, id: mkId(), ts: nowMs(), seq })
 
 // builders (fill v/id/ts); the room supplies the monotonic seq
 export const envMsg = (seq: number, body: string, format: MsgFormat = 'plain'): MsgEnv => ({ ...base('msg', seq), body, format })
@@ -129,6 +157,7 @@ export const envRtc = (seq: number, to: string, sig: any): RtcEnv => ({ ...base(
 export const envAck = (seq: number, ref: string, rts: number = nowMs()): AckEnv => ({ ...base('ack', seq), ref, rts })
 export type SkdFields = Omit<GroupSkdEnv, keyof BaseEnv | 't'>
 export const envGroupSkd = (seq: number, f: SkdFields): GroupSkdEnv => ({ ...base('group-skd', seq), ...f })
+export const envGroupSkdReq = (seq: number, gid: string, epoch: number): GroupSkdReqEnv => ({ ...base('group-skd-req', seq), gid, epoch })
 
 export const encodeEnvelope = (e: Envelope): Uint8Array => te.encode(JSON.stringify(e))
 
@@ -163,7 +192,9 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
     case 'rtc': return (typeof m.to === 'string' && m.sig != null) ? (m as RtcEnv) : null
     case 'ack': return (typeof m.ref === 'string' && typeof m.rts === 'number') ? (m as AckEnv) : null
     case 'group-skd': return (typeof m.gid === 'string' && typeof m.gkPub === 'string' && typeof m.epoch === 'number'
-      && typeof m.secret === 'string' && typeof m.chain === 'string' && Array.isArray(m.roster)) ? (m as GroupSkdEnv) : null
+      && typeof m.secret === 'string' && typeof m.chain === 'string' && Array.isArray(m.roster)
+      && (m.ctr === undefined || (Number.isInteger(m.ctr) && m.ctr >= 0))) ? (m as GroupSkdEnv) : null
+    case 'group-skd-req': return (typeof m.gid === 'string' && typeof m.epoch === 'number') ? (m as GroupSkdReqEnv) : null
     default: return m as UnknownEnv // forward-compat: dispatcher ignores unknown types
   }
 }

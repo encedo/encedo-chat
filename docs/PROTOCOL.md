@@ -526,6 +526,51 @@ Scale assumption: **3–5 members, max 8–10** (1:1 goes through §6–7, not t
 > was sized against that and still carries a name plus three members there — which is the
 > reason the format is versioned rather than simply changed.
 
+> **Proposal — sender-key re-request, and the counter a distribution must carry** *(v6, 2026-08-09; not yet normative — an availability repair, no change to what is authenticated or encrypted).*
+>
+> §8 distributes a sender key **once**, over a 1:1 session that may not exist at that
+> instant, and the receiving side of Sender Keys cannot derive what it was never given.
+> The failure that follows is silent and one-directional: the member whose distribution
+> was lost cannot open **that one sender's** messages for the life of the epoch, while
+> every other pair in the group works, and nothing in §8 lets either side notice. Neither
+> the MAC nor the AEAD has failed — there is simply no chain to walk. Observed in a live
+> 3-member group, 2026-08-09.
+>
+> **The re-request.** On receiving a group message whose per-recipient MAC **verifies**
+> (so the sender is an authenticated member and the frame is addressed to us) for which we
+> hold no `chain_key`, a member may ask that sender to distribute again:
+> ```
+> SenderKeyRequest { group_id, epoch }      // over the 1:1 EH-2/ratchet, as the SKD itself travels
+> ```
+> The answer is an ordinary `SenderKeyDistribution`; a responder at a newer epoch answers
+> at that epoch, which is the existing membership-change path. Two conditions are
+> **normative for this proposal**, and each closes a way to abuse it:
+>
+> - The request is emitted only **after** MAC verification, never on unauthenticated bytes.
+>   The group topic is public and a frame on it is attacker-chosen; a request emitted
+>   before verification would let anyone on the topic direct a member's 1:1 traffic.
+> - The responder **re-checks the roster** before answering. The 1:1 ratchet proves *who*
+>   is asking, not that they are still in the group — and a removed member holds both our
+>   contact and the old `group_id`. Answering without that check would return post-removal
+>   read access, undoing §8's removal semantics.
+>
+> Requests are rate-limited per member (the condition recurs on every frame that sender
+> sends). This is deliberately **not** an epoch rotation: rotating re-keys the group and
+> changes the topic (§5.3), so using it as a repair would lock out any member who is
+> offline at that moment — a repair that can drop a healthy member is worse than the fault.
+>
+> **`ctr` in the distribution.** A `SenderKeyDistribution` must carry the counter its
+> `chain_key` stands at:
+> ```
+> SenderKeyDistribution { group_id, epoch, chain_key, ctr, … }      // ctr absent ⇒ 0
+> ```
+> The sending chain ratchets per message, so a key handed over mid-conversation is
+> `chain@k`. A receiver seeding it at 0 walks k steps that already happened and fails to
+> open every subsequent frame — indistinguishably from having received nothing. Without
+> this field a re-distribution repairs nothing **precisely when a repair is needed**, and
+> the original distribution (at `ctr = 0`) keeps working, so the omission is invisible in
+> testing. Absent ⇒ 0 keeps distributions from builds predating the field valid.
+
 ---
 
 ## 9. Session management

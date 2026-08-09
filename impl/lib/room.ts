@@ -19,9 +19,9 @@ import type { RatchetOpts } from '../eh2/ratchet.ts'
 import { startHandshake, isHandshakeFrame, type Eh2Handshake } from '../eh2/establish.ts'
 import { T_MSG1 } from '../eh2/wire.ts'
 import {
-  encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile, envRtc, envAck, envGroupSkd,
+  encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile, envRtc, envAck, envGroupSkd, envGroupSkdReq,
   type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta, type TypingState, type PresenceState, type RtcEnv, type AckEnv,
-  type GroupSkdEnv, type SkdFields,
+  type GroupSkdEnv, type GroupSkdReqEnv, type SkdFields,
 } from './envelope.ts'
 import { nowMs } from './time.ts'
 
@@ -77,6 +77,10 @@ export interface ChatOpts {
   /** A group Sender-Key Distribution arrived over this 1:1 ratchet (§8) — the
    *  session routes it to the group manager. */
   onGroupSkd?: (from: string, skd: GroupSkdEnv) => void
+  /** This contact cannot open our group frames and is asking for our sender key
+   *  again (§8 repair). The app answers with an ordinary `group-skd` — after
+   *  checking that they are in fact in that group's roster. */
+  onGroupSkdReq?: (from: string, req: GroupSkdReqEnv) => void
   /**
    * The one peer in this pair room now answers to a different PeerId (it
    * reloaded, or its transport restarted) — `old` is dead, `now` is live.
@@ -141,6 +145,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const onFile = opts.onFile ?? (() => {})
   const onSignal = opts.onSignal ?? (() => {})
   const onGroupSkd = opts.onGroupSkd ?? (() => {})
+  const onGroupSkdReq = opts.onGroupSkdReq ?? (() => {})
   const onDelivered = opts.onDelivered ?? (() => {})
   const onUndelivered = opts.onUndelivered ?? (() => {})
   const onLateDelivered = opts.onLateDelivered ?? (() => {})
@@ -354,6 +359,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       }
       case 'rtc': onSignal(from, env as RtcEnv); break
       case 'group-skd': onGroupSkd(from, env as GroupSkdEnv); break
+      case 'group-skd-req': onGroupSkdReq(from, env as GroupSkdReqEnv); break
       case 'ack': {
         touch(from)
         acking.add(from)
@@ -1005,6 +1011,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     sendReaction: (to: string, emoji: string) => emitContent(encodeEnvelope(envReaction(seq++, to, emoji))),
     /** Hand a group's Sender-Key Distribution to this contact over the ratchet (§8). */
     sendGroupSkd: (skd: SkdFields) => emitContent(encodeEnvelope(envGroupSkd(seq++, skd))),
+    /** Ask this contact to hand its sender key for `gid` over again (§8 repair). */
+    sendGroupSkdReq: (gid: string, epoch: number) => emitContent(encodeEnvelope(envGroupSkdReq(seq++, gid, epoch))),
     sendFile: (f: FileMeta) => {
       const e = envFile(seq++, f)
       const bytes = encodeEnvelope(e)

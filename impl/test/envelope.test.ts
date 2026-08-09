@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile, ENVELOPE_V,
+  encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile, envGroupSkdReq, ENVELOPE_V,
 } from '../lib/envelope.ts'
 
 const te = new TextEncoder()
@@ -47,4 +47,23 @@ test('full pipe: envelope → encode → decode (crypto-agnostic — the Session
   assert.notEqual(pt, null)
   const d = decodeEnvelope(pt!) as any
   assert.equal(d.body, 'end to end'); assert.equal(d.seq, 9)
+})
+
+test('group-skd-req roundtrip; a malformed one drops', () => {
+  const d = rt(envGroupSkdReq(11, 'Z2lkYnl0ZXM=', 3))
+  assert.equal(d.t, 'group-skd-req'); assert.equal(d.gid, 'Z2lkYnl0ZXM='); assert.equal(d.epoch, 3); assert.equal(d.seq, 11)
+  // Both fields are required: a request naming no group, or no epoch, is not a
+  // partially useful request — it is one the responder would have to guess at.
+  assert.equal(decodeEnvelope(te.encode(JSON.stringify({ v: 1, t: 'group-skd-req', id: 'x', ts: 1, seq: 1 }))), null)
+  assert.equal(decodeEnvelope(te.encode(JSON.stringify({ v: 1, t: 'group-skd-req', id: 'x', ts: 1, seq: 1, gid: 'a' }))), null)
+})
+
+test('an SKD without ctr still decodes (it means 0); a nonsense ctr does not', () => {
+  // Builds before the counter existed sent no ctr, and their SKDs must keep
+  // decoding — the field only ever meant "0" for them.
+  const base = { v: 1, t: 'group-skd', id: 'x', ts: 1, seq: 1, gid: 'g', gkPub: 'k', epoch: 0, secret: 's', chain: 'c', roster: ['a'] }
+  assert.ok(decodeEnvelope(te.encode(JSON.stringify(base))))
+  assert.ok(decodeEnvelope(te.encode(JSON.stringify({ ...base, ctr: 7 }))))
+  assert.equal(decodeEnvelope(te.encode(JSON.stringify({ ...base, ctr: -1 }))), null)
+  assert.equal(decodeEnvelope(te.encode(JSON.stringify({ ...base, ctr: 'x' }))), null)
 })

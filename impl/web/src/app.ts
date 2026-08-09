@@ -552,13 +552,17 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     broker: BROKER,
     forcedRotationSec: FORCED_ROTATION_SEC,
     onGroupSkd: (from, skd) => { void onGroupInvite(from, skd) }, // a group invite arrived over a 1:1
+    onGroupSkdReq: (from, req) => { void answerSkdReq(from, req) }, // …and a member asking for one back
 
     onLog: ecLog,
     onLink: (state) => {
       linkState = state; paintStatus()
       // The relay came back: 1:1 rooms are refreshed by core, but groups are passive
       // and not registered there — re-warm their meshes so they don't stay silently dead.
-      if (state === 'online') for (const gu of groupsUI.values()) gu.room?.refresh()
+      if (state === 'online') {
+        for (const gu of groupsUI.values()) gu.room?.refresh()
+        void flushPendingSkd() // a key that could not leave while we were offline
+      }
     },
     onRelay: (addr) => {
       // Failed over to another node (or returned to the primary). Tell the user
@@ -2228,6 +2232,10 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
     })
     if (!rooms.has(contact.pub)) { await conv.leave(); return } // room was closed mid-connect
     room.conv = conv
+    // This room is what a queued SKD was waiting for. Doing it here rather than
+    // on a timer is what makes the repair take seconds: the moment the channel
+    // exists, the key that could not travel travels.
+    void flushPendingSkd(contact.pub)
     if (room === activeRoom()) $('sess-peerid').textContent = conv.peerId.slice(0, 16) + '…'
   } catch (e: any) {
     record(room, { t: 'sys', text: tr('Błąd: ') + (e?.message ?? e) })
@@ -2484,6 +2492,16 @@ function renderGroups() {
       // Admin-only affordances, on the list itself: no need to open a group to
       // manage it. The members button opens the SAME popover the chat header
       // uses — one implementation, so the two cannot drift.
+      // NOT admin-only, and that is the point: what breaks is one member's
+      // outgoing direction, and only that member holds the sender key that fixes
+      // it. An admin button would be the wrong hand on the wrong lever.
+      + `<button class="g-edit" data-skd="1" title="${tr('Wyślij ponownie mój klucz do wszystkich')}">🔑</button>`
+      // The key button is NOT admin-only, and that is the point: what breaks is
+      // one member's outgoing direction, and only that member holds the sender
+      // key that repairs it. An admin button would be the wrong hand on the
+      // wrong lever — and a rekey, which is what "reset the group" would mean,
+      // changes the topic and locks out whoever is asleep at that moment.
+      + `<button class="g-edit" data-skd="1" title="${tr('Wyślij ponownie mój klucz do wszystkich')}">🔑</button>`
       + (admin ? `<button class="g-edit" data-ren="1" title="${tr('Zmień nazwę grupy')}">✎</button>` : '')
       + (admin ? `<button class="g-edit" data-mem="1" title="${tr('Uczestnicy')}">👥</button>` : '')
       + `<span class="c-x" title="${admin ? tr('Usuń grupę') : tr('Opuść grupę')}">×</span>`
@@ -2493,6 +2511,14 @@ function renderGroups() {
         e.stopPropagation()
         const name = await promptName(tr('Zmień nazwę grupy'), tr('Nazwa zmieni się u wszystkich członków — klucze zostają bez zmian.'), gu.name, 'Nazwa grupy')
         if (name) await renameGroup(gu.gid, name)
+        return
+      }
+      if (d.skd) {
+        e.stopPropagation()
+        // Same epoch, same topic, same roster — this is the ordinary sender-key
+        // handoff, not a rekey. Nobody is locked out by pressing it twice.
+        await distributeGroup(gu.gid, gu.name)
+        toast(tr('Wysłano Twój klucz do członków grupy „{name}”', { name: groupDisplay(gu) }))
         return
       }
       if (d.mem) {
@@ -2659,22 +2685,99 @@ const groupHandlers = (gid: string) => ({
   // key it carries, so each fetches the blob itself within its short life.
   onFile: (from: string, f: FileEnv) =>
     recordGroup(groupsUI.get(gid)!, { t: 'file', kind: from === session?.pub ? 'me' : 'peer', ts: nowMs(), file: f, who: memberName(from) }),
+  // A member we cannot decrypt: ask them to hand their sender key over again.
+  onNeedSenderKey: (memberPub: string) => { void askForSenderKey(gid, memberPub) },
   onLog: (m: string) => ecLog('group: ' + m, 'debug'),
 })
 
-/** Hand my SKD for `gid` (with the display name) to every other member over 1:1. */
-async function distributeGroup(gid: string, name: string) {
+/**
+ * Members whose SKD could not be handed over yet — `${gid}|${memberPub}`.
+ *
+ * A sender key is given out ONCE, over a 1:1 that may not be up at that instant,
+ * and the receiving side of Sender Keys cannot derive what it was never given. So
+ * a delivery that quietly failed here used to mean that member could not read
+ * ANY of our group messages, for the life of the epoch, while every other
+ * direction looked perfect — the one-way group silence this queue exists to end.
+ */
+const pendingSkd = new Set<string>()
+
+/** Hand my SKD for `gid` (with the display name) to every other member over 1:1.
+ *  `only` narrows it to one member (a retry, or an answer to their request). */
+async function distributeGroup(gid: string, name: string, only?: string) {
   if (!client) return
   for (const m of groupsUI.get(gid)?.members ?? []) {
     if (m.pub === session?.pub) continue
+    if (only && m.pub !== only) continue
     // Per recipient: when I am the admin, skdFor attaches THIS member's roster MAC
     // (rk from ECDH(GK_priv, IK_m)); a member's own redistribution carries none.
-    const skd = await client.groups.skdFor(gid, m.pub); if (!skd) return
+    // `continue`, not `return`: one member we cannot build an SKD for must not
+    // cost the sender key to everyone standing behind them in the roster.
+    const skd = await client.groups.skdFor(gid, m.pub); if (!skd) continue
     const contact = contactsCache.find((c) => c.pub === m.pub) ?? { name: m.name, pub: m.pub, source: 'local' as const }
     await openRoomFor(contact, false) // ensure a background 1:1 room; sendGroupSkd queues until it is up
+    // openRoomFor returns immediately when a room already EXISTS, and a room that
+    // is still opening has no conv yet — so this is reached with conv === null
+    // often enough to matter, and dropping it there is precisely the bug.
     const conv = rooms.get(m.pub)?.conv
-    if (conv) conv.sendGroupSkd({ ...skd, name }); else ecLog(`group: 1:1 to ${m.name} not ready — SKD not sent yet`)
+    if (conv) { conv.sendGroupSkd({ ...skd, name }); pendingSkd.delete(`${gid}|${m.pub}`) }
+    else {
+      pendingSkd.add(`${gid}|${m.pub}`)
+      ecLog(`group: 1:1 to ${m.name} not ready — SKD queued for when it is`)
+    }
   }
+}
+
+/** Re-try every queued SKD; `forPub` limits it to one contact (their room just came up). */
+async function flushPendingSkd(forPub?: string) {
+  for (const key of [...pendingSkd]) {
+    const [gid, pub] = key.split('|')
+    if (forPub && pub !== forPub) continue
+    const gu = groupsUI.get(gid)
+    if (!gu) { pendingSkd.delete(key); continue } // group is gone — nothing to hand over
+    await distributeGroup(gid, gu.name, pub)
+  }
+}
+
+/**
+ * A member is sending group frames we cannot open, because their sender key never
+ * reached us. Ask them for it over the 1:1 — the same channel an SKD travels on,
+ * which is what makes the answer authenticated.
+ *
+ * Rate-limited upstream in `grouproom.ts` (once per member per 30 s), because the
+ * condition fires on EVERY frame that member sends.
+ */
+async function askForSenderKey(gid: string, memberPub: string) {
+  const gu = groupsUI.get(gid); if (!gu || !client) return
+  const contact = contactsCache.find((c) => c.pub === memberPub)
+    ?? { name: memberName(memberPub), pub: memberPub, source: 'local' as const }
+  // The gid travels base64, as in the SKD itself; take the bytes off the live
+  // session rather than parsing our own hex key back into them.
+  const gs = client.groups.session(gid); if (!gs) return
+  await openRoomFor(contact, false)
+  const conv = rooms.get(memberPub)?.conv
+  if (conv) conv.sendGroupSkdReq(b64(gs.gid), gu.epoch)
+  else ecLog(`group: cannot ask ${contact.name} for a sender key — no 1:1 yet`)
+}
+
+/**
+ * The other half: a contact says it cannot open our group frames. Hand our sender
+ * key over again, at the epoch we are on.
+ *
+ * The roster check is the security of this, not a tidiness check. `from` is the
+ * IK the 1:1 ratchet authenticated, so it is really them — but "really them" is
+ * not "in this group", and a sender key handed to a non-member would let them
+ * read a group they were removed from. A removed member asking is the expected
+ * case, not a hypothetical one: they still hold our contact and the old group id.
+ */
+async function answerSkdReq(from: string, req: { gid: string; epoch: number }) {
+  if (!client) return
+  const gid = client.groups.gidHexOf(unb64(req.gid))
+  const gu = groupsUI.get(gid); if (!gu) return
+  if (!gu.members.some((m) => m.pub === from)) {
+    ecLog(`group: ${from.slice(0, 12)}… asked for a sender key but is not in the roster — ignored`)
+    return
+  }
+  await distributeGroup(gid, gu.name, from)
 }
 
 /** An SKD arrived over some 1:1 (already applied to the engine): join a new group

@@ -122,6 +122,18 @@ export interface GroupInit {
 export class GroupSession {
   readonly gid: Uint8Array
   readonly epoch: number
+  /**
+   * A frame from this member proved OUR per-recipient MAC, and we hold no sender
+   * key to open it — distribution never reached us, and Sender Keys give the
+   * receiving side no way to derive one. Set by the room, which asks that member
+   * for a re-send (`group-skd-req`).
+   *
+   * It fires **after** the MAC verifies, never before, and that ordering is the
+   * whole safety of it: unauthenticated bytes on a public topic must not be able
+   * to make us transmit anything, or the signal becomes a way to have a stranger
+   * point our 1:1 traffic wherever they like.
+   */
+  onNeedSenderKey?: (memberPub: string) => void
   private id: GroupId
   private groupSecret: Uint8Array
   private params: RvParams
@@ -166,11 +178,25 @@ export class GroupSession {
 
   /** My current sending key — this is what distribution hands to the other members. */
   mySenderKey(): Uint8Array { return this.send_.key.slice() }
+  /** The counter that chain key is AT. A key without it is only usable by someone
+   *  who has heard nothing from us yet — see `setSenderKey`. */
+  mySenderCtr(): number { return this.send_.n }
 
-  /** Seed a receiving chain for a member (from a SenderKeyDistribution). */
-  setSenderKey(memberPub: string, chainKey: Uint8Array): void {
+  /**
+   * Seed a receiving chain for a member (from a SenderKeyDistribution).
+   *
+   * `ctr` is where that chain key sits, and it is not optional in spirit: a
+   * sending chain ratchets on every message, so a key handed over MID-conversation
+   * is `chain@k`, and seeding it at 0 makes the receiver walk k steps that already
+   * happened — every frame then fails to open, exactly as if no key had arrived.
+   * That made a re-sent key useless precisely when a re-send is what is needed,
+   * and it is silent: same "cannot decrypt", same absence of any error.
+   * It defaults to 0 for the ordinary case (distribution before anyone has sent)
+   * and for SKDs from builds that did not carry it.
+   */
+  setSenderKey(memberPub: string, chainKey: Uint8Array, ctr = 0): void {
     if (memberPub === this.id.pub) return
-    this.receivers.set(memberPub, new SenderReceiver(chainKey, this.receiverOpts))
+    this.receivers.set(memberPub, SenderReceiver.from(chainKey, ctr, this.receiverOpts))
   }
   hasSenderKey(memberPub: string): boolean { return this.receivers.has(memberPub) }
 
@@ -239,7 +265,7 @@ export class GroupSession {
     if (!mine) return null // not addressed to us
     if (!(await verify(await this.macKeyFor(sender.pub), headerBytes, ct, mine))) return null // forged / tampered
     const recv = this.receivers.get(sender.pub)
-    if (!recv) return null // no sender key yet — distribution has not reached us
+    if (!recv) { this.onNeedSenderKey?.(sender.pub); return null } // distribution has not reached us — ask
     const pt = await recv.open(h.ctr, headerBytes, ct)
     return pt ? { from: sender.pub, pt } : null
   }
@@ -484,12 +510,12 @@ export class GroupManager {
       const session = await this.admit({
         gid, gkPub: unb64(skd.gkPub), epoch: skd.epoch, secret: unb64(skd.secret), roster: skd.roster.map((pub) => ({ pub })),
       })
-      session.setSenderKey(from, unb64(skd.chain))
+      session.setSenderKey(from, unb64(skd.chain), skd.ctr ?? 0)
     } else {
       // Same-or-older epoch: a member redistributing its own sending key. It does
       // NOT change the roster (admin authority), and we accept the key only from a
       // sender already in the admin-attested roster.
-      if (cur.roster.some((m) => m.pub === from)) cur.session.setSenderKey(from, unb64(skd.chain))
+      if (cur.roster.some((m) => m.pub === from)) cur.session.setSenderKey(from, unb64(skd.chain), skd.ctr ?? 0)
     }
   }
 
@@ -516,7 +542,7 @@ export class GroupManager {
     if (!rec) return null
     const skd: SkdFields = {
       gid: b64(rec.session.gid), gkPub: b64(rec.gkPub), epoch: rec.epoch,
-      secret: b64(rec.secret), chain: b64(rec.session.mySenderKey()),
+      secret: b64(rec.secret), chain: b64(rec.session.mySenderKey()), ctr: rec.session.mySenderCtr(),
       roster: rec.roster.map((m) => m.pub),
     }
     if (rec.gk && forPub) {
