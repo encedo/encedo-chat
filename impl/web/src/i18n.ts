@@ -234,6 +234,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Sieć': 'Network',
     'Sieć — wkrótce (lista węzłów, latencje)': 'Network — coming soon (node list, latencies)',
     'Skopiowano klucz publiczny ✓': 'Public key copied ✓',
+    'Stan sprzed zmiany formatu tożsamości został wyczyszczony ({n}) — kontakty w HEM są nietknięte.': 'State from before the identity format change was cleared ({n} entries) — contacts in the HEM are untouched.',
     'Status': 'Status',
     'status HEM': 'HEM status',
     'Status węzła sieci': 'Network node status',

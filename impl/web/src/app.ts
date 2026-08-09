@@ -30,6 +30,7 @@ import { nowMs, utcHHMM } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
 import { unb64, b64, randomBytes } from '../../lib/wc.ts'
+import { kidOf } from '../../lib/descr.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
@@ -127,7 +128,7 @@ const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
 
 let mode: 'login' | 'register' = 'login'
-let session: { id: Identity; handle: string; pub: string; kid?: string; book: ContactManager } | null = null
+let session: { id: Identity; handle: string; pub: string; kid?: string; idKey: string; book: ContactManager } | null = null
 /**
  * ONE transport for the whole app, opened at login: every room runs on it.
  * Building a node per conversation was invisible while only one chat was ever
@@ -256,7 +257,7 @@ $('go').addEventListener('click', async () => {
       const { kid } = await hem.createKeyPair(gen, `chat-ik-${handle}`, 'CURVE25519', btoa(`ETSEIC:self,${handle},ik,${iat}`))
       const use = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
       const { pubkey } = await hem.getPubKey(use, kid)
-      await enterApp(hemIdentityFrom(hem, kid, handle, pubkey), mergedContactBook(hemContactBook(hem, kid), makeLocalBook(handle, localStorage)), 'HEM', kid, hemGkBackend(hem, kid))
+      await enterApp(hemIdentityFrom(hem, kid, handle, pubkey), mergedContactBook(hemContactBook(hem, kid), makeLocalBook(await identityKey(pubkey, kid), localStorage)), 'HEM', kid, hemGkBackend(hem, kid))
     } else {
       const listTok = await hem.authorizePassword(pass, 'keymgmt:list')
       const keys: any[] = await hem.searchKeys(listTok, 'ETSEIC:self,')
@@ -264,7 +265,7 @@ $('go').addEventListener('click', async () => {
       const key = keys[0]; const handle = parseHandle(key.description)
       const use = await hem.authorizePassword(null, `keymgmt:use:${key.kid}`)
       const { pubkey } = await hem.getPubKey(use, key.kid)
-      await enterApp(hemIdentityFrom(hem, key.kid, handle, pubkey), mergedContactBook(hemContactBook(hem, key.kid), makeLocalBook(handle, localStorage)), 'HEM', key.kid, hemGkBackend(hem, key.kid))
+      await enterApp(hemIdentityFrom(hem, key.kid, handle, pubkey), mergedContactBook(hemContactBook(hem, key.kid), makeLocalBook(await identityKey(pubkey, key.kid), localStorage)), 'HEM', key.kid, hemGkBackend(hem, key.kid))
     }
   } catch (e: any) { setMsg('msg', tr('Błąd: ') + (e?.message ?? e), 'err') }
   finally { const b = $('go') as HTMLButtonElement; b.disabled = false; b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj' }
@@ -398,7 +399,7 @@ async function softLogin() {
     closeSoftModal()
     activeSoftProfile = name
     localStorage.setItem(LAST_PROFILE, name)
-    await enterApp(id, localOnlyManager(makeLocalBook(id.handle, localStorage)), 'Software')
+    await enterApp(id, localOnlyManager(makeLocalBook(await identityKey(id.pub), localStorage)), 'Software')
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
     else setMsg('soft-msg', tr('Błąd tożsamości software: ') + (e?.message ?? e), 'err')
@@ -523,8 +524,8 @@ $('nodes-toggle').addEventListener('click', () => {
   if (open) renderNodes()
 })
 
-function makeLocalBook(handle: string, storage: Storage) {
-  const lsKey = 'ec-local-contacts-' + handle
+function makeLocalBook(idKey: string, storage: Storage) {
+  const lsKey = 'ec-local-contacts-' + idKey
   return localContactBook(
     () => { try { return JSON.parse(storage.getItem(lsKey) || '[]') } catch { return [] } },
     (l) => storage.setItem(lsKey, JSON.stringify(l)),
@@ -534,8 +535,51 @@ function makeLocalBook(handle: string, storage: Storage) {
 /** Short form of an HSM key id — the full one is long and adds no meaning here. */
 const shortKid = (kid?: string) => (kid ? kid.slice(0, 8) + '…' : '')
 
+/**
+ * The id every per-identity local key hangs off: the identity's KID.
+ *
+ * Content-derived (`SHA-1(pub)[0:16]`), so a HEM identity and a software one are
+ * named the same way and the value is the one the device itself would issue —
+ * `kidOf` prefers the issued KID and derives only when there is none. Stable
+ * across a rename, and distinct for two identities that share a handle, which is
+ * exactly what a storage namespace has to be.
+ */
+const identityKey = async (pub: string, kid?: string) => (await kidOf({ kid, pub: unb64(pub) }))!
+
+/** How many pre-KID entries the sweep below dropped, reported after the next sign-in. */
+let sweptPreKid = 0
+
+/**
+ * One-time sweep of state written before local keys were namespaced by KID.
+ *
+ * Everything per-identity used to hang off the HANDLE, so the entries left over
+ * name nothing this build can resolve. Pre-MVP they are dropped rather than
+ * migrated — but SILENTLY dropping a contact list looks exactly like a fault, so
+ * the caller says how many went.
+ *
+ * `ec-soft-id-` is deliberately not in the list: that is the sealed software
+ * identity itself, and it is keyed by profile name on purpose.
+ */
+const ID_KEYED = /^[0-9a-f]{32}(-|$)/
+function clearPreKidState(): number {
+  if (localStorage.getItem('ec-idkey-swept')) return 0
+  let n = 0
+  for (const k of Object.keys(localStorage)) {
+    // Longest prefix first — `ec-gcache-emp-` also starts with `ec-gcache-`.
+    for (const p of ['ec-gcache-emp-', 'ec-gcache-', 'ec-local-contacts-', 'ec-groups-']) {
+      if (!k.startsWith(p)) continue
+      if (!ID_KEYED.test(k.slice(p.length))) { localStorage.removeItem(k); n++ }
+      break
+    }
+  }
+  try { localStorage.setItem('ec-idkey-swept', '1') } catch {}
+  return n
+}
+sweptPreKid = clearPreKidState()
+if (sweptPreKid) ecLog(`cleared ${sweptPreKid} local entries written before identities were keyed by KID`)
+
 async function enterApp(id: Identity, book: ContactManager, sourceLabel: string, kid?: string, gkBackend?: GkBackend) {
-  session = { id, handle: id.handle, pub: id.pub, kid, book }
+  session = { id, handle: id.handle, pub: id.pub, kid, idKey: await identityKey(id.pub, kid), book }
   // Read by the browser harness, which used to parse the identity out of
   // localStorage — impossible now that the software profile is sealed, and a
   // good thing: if it could still be read there, the seal would be decorative.
@@ -594,6 +638,12 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     toast(tr('Brak połączenia z przekaźnikiem — odśwież stronę'))
   })
   $('login').hidden = true; $('app').hidden = false
+  // Said HERE and not at boot: an empty contact list is what the user is about
+  // to look at, and this is the sentence that explains it. Once per device.
+  if (sweptPreKid > 0) {
+    toast(tr('Stan sprzed zmiany formatu tożsamości został wyczyszczony ({n}) — kontakty w HEM są nietknięte.', { n: sweptPreKid }))
+    sweptPreKid = 0
+  }
   $('me-avatar').textContent = initials(id.handle)
   $('me-handle').textContent = id.handle
   const fp = await fingerprint(id.pub)
@@ -2602,9 +2652,13 @@ function recordGroup(gu: GroupUI, ev: Ev) {
 // emp_pub) (one id.ecdh per session; IK stays in the HEM), per-group AES key =
 // HKDF(base, gid) — see lib/gcache.ts. One blob per gid: ec-gcache-<handle>-<gid>.
 const genc = new TextEncoder()
-const empKey = () => 'ec-gcache-emp-' + (session?.handle ?? '')
-const gcachePrefix = () => 'ec-gcache-' + (session?.handle ?? '') + '-'
-const legacyGroupsKey = () => 'ec-groups-' + (session?.handle ?? '') // B1 plaintext (migrated away)
+// Keyed by the identity's KID, never by its handle. A handle is a caption: two
+// identities may share one (the KID tells them apart), and editing it would
+// orphan everything stored under the old spelling — which is what used to
+// happen to a renamed profile's contacts and group cache.
+const empKey = () => 'ec-gcache-emp-' + (session?.idKey ?? '')
+const gcachePrefix = () => 'ec-gcache-' + (session?.idKey ?? '') + '-'
+const legacyGroupsKey = () => 'ec-groups-' + (session?.idKey ?? '') // B1 plaintext (migrated away)
 let cacheBase: Uint8Array | null = null
 let persistTimer: any
 
