@@ -236,11 +236,33 @@ const HEM_VERSION_MS = 2_000  // decoration; it may fail without meaning anythin
 class HemTimeout extends Error {
   constructor(what: string, ms: number) { super(`${what} did not answer in ${ms} ms`); this.name = 'HemTimeout' }
 }
-function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new HemTimeout(what, ms)), ms)
-    p.then((v) => { clearTimeout(t); resolve(v) }, (e) => { clearTimeout(t); reject(e) })
-  })
+
+/**
+ * A probe that is genuinely CANCELLED when its time is up, not merely stopped
+ * being waited for.
+ *
+ * This is why it does not go through the SDK. Racing an SDK call against a timer
+ * abandons the promise and leaves the HTTP request open, so a login screen
+ * watching an unplugged device accumulated one hanging request per tick — and
+ * the moment the device appeared, a minute of them completed at once, ahead of
+ * everything the page actually wanted to do. `#req` builds its own fetch options
+ * and takes no signal, and `hem-sdk-js` is a submodule we do not fork, so the
+ * two unauthenticated GETs the login screen needs are issued directly. Drop this
+ * the day the SDK accepts a signal.
+ *
+ * `AbortSignal.timeout` rejects with a DOMException, so it is normalised to the
+ * one error type the callers already tell apart from a refusal.
+ */
+async function hemGet(url: string, path: string, ms: number): Promise<any> {
+  const base = url.replace(/\/+$/, '')
+  try {
+    const res = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(ms), headers: { Accept: 'application/json' } })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return await res.json()
+  } catch (e: any) {
+    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') throw new HemTimeout(path, ms)
+    throw e
+  }
 }
 
 /**
@@ -248,7 +270,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
  * state to be talked to. This is the gate, and it is the ONLY thing signing in
  * waits for.
  */
-const probeStatus = (url: string, ms = HEM_STATUS_MS) => withTimeout(new HEM(url).getStatus(), ms, '/status')
+const probeStatus = (url: string, ms = HEM_STATUS_MS) => hemGet(url, '/api/system/status', ms)
 
 /**
  * `/api/system/version` reports firmware and is informational. It never decides
@@ -258,7 +280,7 @@ const probeStatus = (url: string, ms = HEM_STATUS_MS) => withTimeout(new HEM(url
  * its own budget.
  */
 async function probeVersion(url: string): Promise<any | null> {
-  try { return await withTimeout(new HEM(url).getVersion(), HEM_VERSION_MS, '/version') } catch { return null }
+  try { return await hemGet(url, '/api/system/version', HEM_VERSION_MS) } catch { return null }
 }
 
 /**
