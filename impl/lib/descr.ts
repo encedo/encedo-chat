@@ -159,6 +159,8 @@ const label = (prefix: string, name: string) => sliceBytes(prefix + name, LABEL_
 export const selfLabel = (handle: string) => label('Onchato-IK-', handle)
 /** `Onchato-Peer-<name>` — a contact, likewise. */
 export const peerLabel = (name: string) => label('Onchato-Peer-', name)
+/** `Onchato-Group-<name>` — the group key entry, admin's pair or member's imported pub. */
+export const groupLabel = (name: string) => label('Onchato-Group-', name)
 
 // ---------------------------------------------------------------------------
 // records

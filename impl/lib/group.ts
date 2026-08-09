@@ -29,6 +29,7 @@ import { seal, sendChainFrom, newSendChain, SenderReceiver, tag, verify, type Se
 import { x25519FromPriv } from './x25519.ts'
 import type { SkdFields } from './envelope.ts'
 import { buildMarker, type KeyRef } from './gmarker.ts'
+import { groupLabel } from './descr.ts'
 
 const enc = new TextEncoder()
 const MSG_MAC_INFO = enc.encode('encedo-group-msg-mac')
@@ -312,6 +313,14 @@ export interface GkBackend {
   adminKid?: string
   /** Destroy a group key. Absent on backends with no HSM object to destroy. */
   destroy?(kid: string): Promise<void>
+  /**
+   * Import a group's PUBLIC key as this member's own record of the group, and
+   * return the KID the device gave it. This is what makes a non-admin's
+   * membership portable: without it the group exists only in the local cache and
+   * a new device recovers nothing (§8 Proposal). Absent on software backends,
+   * which have no HSM to hold it.
+   */
+  importPub?(pub: Uint8Array, label: string, descr: string): Promise<string>
 }
 
 interface GroupRec {
@@ -322,6 +331,13 @@ interface GroupRec {
   epoch: number
   /** Present iff I am the admin — holding this is what admin authority IS. */
   gk?: AdminGk
+  /**
+   * The HSM entry holding GK_pub for a MEMBER — the portable record of "I am in
+   * this group". A reference, never key material: the group's secret and sender
+   * keys stay client-side and forward-secret, so this recovers the group's
+   * existence and who administers it, and nothing that reads a message.
+   */
+  memberGkKid?: string
   /**
    * ECDH(GK, member) memoised per member pubkey.
    *
@@ -345,6 +361,7 @@ export interface GroupSnapshot {
   secret: string     // group_secret (seeds the topic)
   roster: Member[]
   gkKid?: string     // admin, HEM-backed: the HSM key id for GK — a reference, no key material
+  memberGkKid?: string // member: the HSM entry holding GK_pub, so the marker can be updated or dropped
   gkPriv?: string    // admin, software-backed: GK private half (secret). Also the bucket-B legacy field
   send: { key: string; n: number }                       // my sending chain
   receivers: { pub: string; key: string; n: number }[]   // every known member's receiving chain
@@ -483,6 +500,45 @@ export class GroupManager {
     return true
   }
 
+  /**
+   * Put GK_pub in the device as a MEMBER, so this membership survives the browser
+   * (§8 Proposal). Idempotent: it updates the record it already wrote rather than
+   * importing a second copy.
+   *
+   * Returns false — never throws — when there is nothing to do or nothing can be
+   * done: an admin already holds the key pair, a software backend has no device,
+   * and an import can legitimately fail because a HEM refuses to hold one public
+   * key twice, which happens when a SECOND identity on this device is in the same
+   * group. That case degrades to what we had before: the group works, from the
+   * local cache, without a portable record.
+   */
+  async writeMemberMarker(gidHex: string, name?: string): Promise<boolean> {
+    const rec = this.recs.get(gidHex)
+    if (!rec || rec.gk) return false // admins hold the pair; their marker is writeMarker's
+    const descr = await this.memberMarker(gidHex, name)
+    if (!descr) return false
+    const label = groupLabel(name ?? gidHex.slice(0, 8))
+    try {
+      if (rec.memberGkKid) {
+        if (!this.gkBackend?.setMarker) return false
+        await this.gkBackend.setMarker(rec.memberGkKid, label, descr)
+      } else {
+        if (!this.gkBackend?.importPub) return false
+        rec.memberGkKid = await this.gkBackend.importPub(rec.gkPub, label, descr)
+      }
+      return true
+    } catch { return false }
+  }
+
+  /** Drop a member's portable record on leaving. The admin's key goes through
+   *  `deleteGroup`, which destroys the pair rather than an imported public half. */
+  async dropMemberMarker(gidHex: string): Promise<void> {
+    const rec = this.recs.get(gidHex)
+    if (!rec?.memberGkKid || !this.gkBackend?.destroy) return
+    try { await this.gkBackend.destroy(rec.memberGkKid) } catch {}
+    rec.memberGkKid = undefined
+  }
+
   /** Establish or update a group from its shared material. New group or a newer
    *  epoch → a fresh session (new sending key). Same epoch → keep the session
    *  (never reset my own chain), only refresh the roster. */
@@ -506,7 +562,10 @@ export class GroupManager {
     // without touching the HSM.
     this.recs.set(gh, {
       session, gkPub: m.gkPub, secret: m.secret.slice(), roster: m.roster, epoch: m.epoch,
-      gk: m.gk ?? cur?.gk, ssCache: cur?.ssCache ?? new Map(),
+      // GK survives a rekey (only the secret and the topic move), so the entry
+      // holding it survives too — re-importing on every membership change would
+      // leave a trail of orphaned keys in the device.
+      gk: m.gk ?? cur?.gk, memberGkKid: cur?.memberGkKid, ssCache: cur?.ssCache ?? new Map(),
     })
     return session
   }
@@ -623,6 +682,7 @@ export class GroupManager {
         // point of bucket A — a stolen cache yields a reference that is useless
         // without the HSM, where before it yielded the roster-MAC key itself.
         gkKid: rec.gk?.kid,
+        memberGkKid: rec.memberGkKid,
         gkPriv: rec.gk?.priv ? b64(rec.gk.priv) : undefined,
         send: { key: b64(c.send.key), n: c.send.n },
         receivers: c.receivers.map((r) => ({ pub: r.pub, key: b64(r.key), n: r.n })),
@@ -644,6 +704,9 @@ export class GroupManager {
         ? this.gkBackend?.fromKid(s.gkKid)
         : s.gkPriv ? await softwareGkFromPriv(unb64(s.gkPriv)) : undefined
       const session = await this.admit({ gid, gkPub: unb64(s.gkPub), epoch: s.epoch, secret: unb64(s.secret), roster: s.roster, gk })
+      // The member's HSM entry is a reference the manager must keep, or a rename
+      // would import a second copy and leaving would orphan the first.
+      if (s.memberGkKid) { const r = this.recs.get(hex(gid)); if (r) r.memberGkKid = s.memberGkKid }
       session.importChains({
         send: { key: unb64(s.send.key), n: s.send.n },
         receivers: s.receivers.map((r) => ({ pub: r.pub, key: unb64(r.key), n: r.n })),

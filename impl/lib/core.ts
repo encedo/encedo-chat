@@ -96,6 +96,18 @@ export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
     async destroy(kid: string) {
       await hem.deleteKey(await hem.authorizePassword(null, 'keymgmt:del'), kid)
     },
+    // A MEMBER's half of the same story: importing GK_pub is what makes being in
+    // a group survive this browser. The device stores a public key and a marker
+    // and nothing else — `group_secret` and the sender keys stay client-side and
+    // forward-secret, so what this recovers is the group's existence, not a word
+    // anyone said in it.
+    async importPub(pub: Uint8Array, label: string, descr: string) {
+      const imp = await hem.authorizePassword(null, 'keymgmt:imp')
+      const r = await hem.importPublicKey(imp, label, 'CURVE25519', pub, asB64(descr))
+      // Older firmware answers an import with nothing useful; the KID is derived
+      // from the key's content, so it is the same value either way.
+      return String(r?.kid ?? await hemKid(pub))
+    },
   }
 }
 

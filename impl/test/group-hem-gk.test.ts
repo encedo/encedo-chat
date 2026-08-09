@@ -40,7 +40,7 @@ async function softId(): Promise<GroupId> {
  */
 function fakeHem() {
   const keys = new Map<string, { priv: Uint8Array; pub: Uint8Array; label: string; descr: string }>()
-  const calls = { ecdh: 0, createKeyPair: 0, getPubKey: 0, authorize: 0, updateKey: 0, deleteKey: 0 }
+  const calls = { ecdh: 0, createKeyPair: 0, getPubKey: 0, authorize: 0, updateKey: 0, deleteKey: 0, importPublicKey: 0 }
   let n = 0
   return {
     calls,
@@ -75,6 +75,17 @@ function fakeHem() {
       calls.ecdh++
       const k = keys.get(kid); if (!k) throw new Error('no such kid')
       return (await x25519FromPriv(k.priv)).dh(unb64(peerPubB64))
+    },
+    // A device holds one public key ONCE, whatever DESCR it sits under: the KID
+    // indexes the key's content. Modelled here, because it is the rule the
+    // member-marker path has to survive rather than assume away.
+    async importPublicKey(_t: string, label: string, type: string, pub: Uint8Array, descr: string) {
+      calls.importPublicKey++
+      assert.equal(type, 'CURVE25519')
+      const kid = await hemKid(pub)
+      if (keys.has(kid)) throw new Error('key already present')
+      keys.set(kid, { priv: new Uint8Array(0), pub, label, descr })
+      return { kid }
     },
   }
 }
@@ -290,4 +301,73 @@ test('a member has no group to delete — leaving is a local act', async () => {
   await B.mgr.deleteGroup(gid) // B holds no GK: this drops B's state and nothing else
   assert.ok(hem.keys.has(kid), 'a member cannot destroy the admin\'s group key')
   assert.ok(A.mgr.session(gid), 'and the admin still has the group')
+})
+
+// ---- a member's own record of the group (§8 Proposal, 2026-08-09) ----------
+
+test("a member imports GK_pub, and its marker names itself as owner and the admin as admin", async () => {
+  const hemA = fakeHem(), hemB = fakeHem()
+  const A = await peer(hemGkBackend(hemA)), B = await peer(hemGkBackend(hemB))
+  const roster: Member[] = [{ pub: A.id.pub }, { pub: B.id.pub }]
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-test', roster)
+  await B.mgr.applySkd(A.id.pub, (await A.mgr.skdFor(gid, B.id.pub))!)
+
+  assert.equal(await B.mgr.writeMemberMarker(gid, 'Zespół'), true)
+  assert.equal(hemB.calls.importPublicKey, 1, 'exactly one entry per group')
+  // The fake stores what the device is given, and a DESCR reaches it base64'd.
+  const [entry] = [...hemB.keys.values()].filter((k) => dec(k.descr).startsWith('ETSEIC:chan'))
+  assert.ok(entry, 'GK_pub is in the device')
+  assert.equal(entry.label, 'Onchato-Group-Zespół')
+
+  const m = parseMarker(dec(entry.descr))!
+  assert.equal(m.ownerKid, (await hemKid(unb64(B.id.pub))).slice(0, 8), 'the group is B\'s')
+  assert.equal(m.adminKid, (await hemKid(unb64(A.id.pub))).slice(0, 8), 'and A administers it')
+  assert.notEqual(m.ownerKid, m.adminKid)
+  assert.equal(m.hints.length, 0, 'no membership graph copied onto a member\'s device')
+  assert.equal(m.name, 'Zespół')
+
+  // What it must NOT hold: the topic seed or anything that opens a message.
+  const [rec] = B.mgr.snapshot()
+  assert.ok(!dec(entry.descr).includes(rec.secret), 'group_secret is not in the device')
+  assert.ok(!dec(entry.descr).includes(rec.send.key), 'nor a sender key')
+})
+
+test("an admin writes no member record — it already holds the key pair", async () => {
+  const hem = fakeHem()
+  const A = await peer(hemGkBackend(hem))
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-test', [{ pub: A.id.pub }])
+  assert.equal(await A.mgr.writeMemberMarker(gid, 'g'), false)
+  assert.equal(hem.calls.importPublicKey, 0)
+})
+
+test('a rename updates the one record, and leaving takes it away', async () => {
+  const hemA = fakeHem(), hemB = fakeHem()
+  const A = await peer(hemGkBackend(hemA)), B = await peer(hemGkBackend(hemB))
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-test', [{ pub: A.id.pub }, { pub: B.id.pub }])
+  await B.mgr.applySkd(A.id.pub, (await A.mgr.skdFor(gid, B.id.pub))!)
+
+  await B.mgr.writeMemberMarker(gid, 'stara')
+  await B.mgr.writeMemberMarker(gid, 'nowa')
+  assert.equal(hemB.calls.importPublicKey, 1, 'the second write updates, it does not import again')
+  assert.equal(hemB.calls.updateKey, 1)
+  const markers = () => [...hemB.keys.values()].filter((k) => dec(k.descr).startsWith('ETSEIC:chan'))
+  assert.equal(parseMarker(dec(markers()[0].descr))!.name, 'nowa')
+
+  await B.mgr.dropMemberMarker(gid)
+  assert.equal(markers().length, 0, 'a group left behind would come back on the next device')
+})
+
+test('a second identity already holding this GK degrades to no record, not to a crash', async () => {
+  // One device, two identities, both in the same group: the device refuses the
+  // second import because the key content is already there. The group must keep
+  // working from the local cache.
+  const hem = fakeHem()
+  const A = await peer(hemGkBackend(hem)), B = await peer(hemGkBackend(hem)), C = await peer(hemGkBackend(hem))
+  const gid = await A.mgr.createGroupWithNewKey('chat-gk-test', [{ pub: A.id.pub }, { pub: B.id.pub }, { pub: C.id.pub }])
+  await B.mgr.applySkd(A.id.pub, (await A.mgr.skdFor(gid, B.id.pub))!)
+  await C.mgr.applySkd(A.id.pub, (await A.mgr.skdFor(gid, C.id.pub))!)
+
+  assert.equal(await B.mgr.writeMemberMarker(gid, 'g'), true)
+  assert.equal(await C.mgr.writeMemberMarker(gid, 'g'), false, 'refused, and said so instead of throwing')
+  assert.equal(hem.calls.importPublicKey, 2, 'it was attempted')
 })

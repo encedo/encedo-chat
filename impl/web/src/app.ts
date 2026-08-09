@@ -2571,7 +2571,10 @@ async function renameGroup(gid: string, name: string) {
   gu.name = name
   try {
     await distributeGroup(gid, name)   // same epoch: a key handoff that carries the label
+    // Whichever of the two records this device holds — the admin's key pair or a
+    // member's imported public half — carries the name, so both follow a rename.
     client.groups.writeMarker(gid, name).catch((e) => ecLog('marker update failed: ' + (e?.message ?? e)))
+    client.groups.writeMemberMarker(gid, name).catch((e) => ecLog('member marker update failed: ' + (e?.message ?? e)))
     await persistGroups()
     recordGroup(gu, { t: 'sys', text: `Nazwa grupy zmieniona na „${name}"` })
     if (activeGid === gid) activateGroup(gid); else renderGroups()
@@ -2595,6 +2598,9 @@ async function renameGroup(gid: string, name: string) {
 async function leaveGroup(gid: string) {
   const gu = groupsUI.get(gid); if (!gu) return
   gu.room?.stop()
+  // Before the record goes: a group left behind in the device would come back on
+  // the next machine as a group we cannot rejoin.
+  await client?.groups.dropMemberMarker(gid).catch(() => {})
   groupsUI.delete(gid)
   // Same reset the 1:1 path uses when the room on screen goes away.
   if (activeGid === gid) { activeGid = null; $('chat-view').hidden = true; $('chat-empty').hidden = false; showChatPane(false) }
@@ -2956,6 +2962,14 @@ async function onGroupInvite(from: string, skd: GroupSkdEnv) {
     gu.room = await client.openGroup(gid, groupHandlers(gid))
     toast(tr('Dołączono do grupy „{name}”', { name: groupDisplay(gu) }))
     void distributeGroup(gid, gu.name) // hand my sender key to everyone, once
+    // The portable half: GK_pub goes into the device, so this membership survives
+    // the browser. Best effort — it fails when a SECOND identity here is already
+    // in this group (one device holds a key once), and then the group still works
+    // from the local cache, just without a record that outlives it.
+    void client.groups.writeMemberMarker(gid, gu.name).then(
+      (ok) => { if (!ok) ecLog(`group: no portable record for ${gid.slice(0, 8)}… (not admin-owned, or the key is already here)`, 'debug') },
+      (e: any) => ecLog('group: member marker failed — ' + (e?.message ?? e), 'debug'),
+    )
   } else {
     gu.members = members
     // The name is app metadata the roster MAC does NOT cover, and any member may
