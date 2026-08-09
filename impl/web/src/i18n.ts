@@ -54,6 +54,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     ' po {ms} ms': ' after {ms} ms',
     ' Pozostali członkowie zachowują grupę — nie da się jej usunąć u nich.': ' The other members keep the group — it cannot be deleted on their devices.',
     ' Zamknij nadmiarową kartę i odśwież tę, w której chcesz rozmawiać.': ' Close the extra tab and reload the one you want to talk in.',
+    ' Zapisz go „tylko lokalnie” — będzie w tej przeglądarce, ale nie w HEM.': ' Save it as “this browser only” — it will live here, but not in the HEM.',
     ' · wysyłam ponownie…': ' · resending…',
     ' · wysyłam…': ' · sending…',
     ' · wysłano': ' · sent',
@@ -246,6 +247,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Ta przeglądarka nie wystarczy': 'This browser is not enough',
     'Tak': 'Yes',
     'Ten adres używa znaków spoza ASCII i może udawać inny. Przeglądarka otworzy: {host}.': 'This address uses non-ASCII characters and may be impersonating another. The browser will open: {host}.',
+    'Ten klucz jest już kontaktem tożsamości „{who}”, a urządzenie trzyma każdy klucz tylko raz.': 'This key is already a contact of the identity “{who}”, and a device holds each key only once.',
     'To nie wygląda na multiaddr (…/p2p/<PeerId>).': 'That does not look like a multiaddr (…/p2p/<PeerId>).',
     'To tożsamość, na której jesteś zalogowany. Znikną jej klucze, kontakty i grupy, a aplikacja wróci do ekranu logowania. Nieodwracalne — klucza nie da się odtworzyć.':
       'This is the identity you are signed in with. Its keys, contacts and groups go, and the app returns to the login screen. Irreversible — the key cannot be recovered.',

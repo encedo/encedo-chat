@@ -1002,6 +1002,27 @@ async function claimContact(name: string, pub: string): Promise<boolean> {
 const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; paintStoreOptions('add-store'); $('add-pub').focus() }
 const closeModal = () => { $('scrim').classList.remove('open'); $('add-modal').classList.remove('open') }
 $('add-cancel').addEventListener('click', closeModal)
+
+/**
+ * Turn the one device-level rule that reaches a user into a sentence.
+ *
+ * A HEM refuses to hold one public key twice whatever DESCR it sits under, so a
+ * contact belongs to a single identity per device (§4 Proposal). The book sees
+ * that coming and raises before writing anything; without this the user would
+ * read "this key is already a contact of Work" as a raw error string, with no
+ * hint that there is a way round it.
+ *
+ * There IS a way round it, and saying so is most of the point: the local book is
+ * per-identity and takes anyone, at the cost of the portability that putting a
+ * contact in the device buys.
+ */
+function contactAddError(e: any): string {
+  if (e?.name !== 'ContactHeldByOtherIdentity') return tr('Błąd zapisu: ') + (e?.message ?? e)
+  const who = e.ownerHandle || e.ownerKid.slice(0, 8)
+  return tr('Ten klucz jest już kontaktem tożsamości „{who}”, a urządzenie trzyma każdy klucz tylko raz.', { who })
+    + tr(' Zapisz go „tylko lokalnie” — będzie w tej przeglądarce, ale nie w HEM.')
+}
+
 $('add-save').addEventListener('click', async () => {
   if (!session) return
   const name = val('add-name'), pub = val('add-pub')
@@ -1024,7 +1045,7 @@ $('add-save').addEventListener('click', async () => {
     await session.book.add(name, pub, persistent)
     await refreshContacts()
     closeModal()
-  } catch (e: any) { setMsg('add-msg', tr('Błąd zapisu: ') + (e?.message ?? e), 'err') }
+  } catch (e: any) { setMsg('add-msg', contactAddError(e), 'err') }
   finally { btn.disabled = false; btn.textContent = tr('Zapisz') }
 })
 
@@ -1242,7 +1263,7 @@ $('import-add').addEventListener('click', async () => {
     // forever — which is exactly what it did.
     if (inv.reply) toast(tr('Wymiana zakończona — możecie rozmawiać'))
     else await openShare(true)
-  } catch (e: any) { setMsg('import-msg', tr('Błąd zapisu: ') + (e?.message ?? e), 'err') }
+  } catch (e: any) { setMsg('import-msg', contactAddError(e), 'err') }
   finally { btn.disabled = false; btn.textContent = label ?? tr('Dodaj kontakt') }
 })
 
