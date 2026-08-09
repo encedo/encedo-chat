@@ -1016,13 +1016,17 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
 
   ```
   label   Onchato-Group-<name>
-  DESCR   ETSEIC:chan2:<ownerHint>:<adminHint>:<name>:      ← member: no roster blob
+  DESCR   ETSEIC:chan1:<ownerHint>:<adminHint>:<name>:      ← member: no roster blob
   ```
 
   - **`ownerHint` (4 bytes of the owning identity's KID) is needed only because members
     write markers.** On an admin's marker the admin IS the owner, so as long as only
-    admins wrote them, a multi-identity client could scope by `adminHint` and `chan2`
-    would be unnecessary. Worth knowing before anyone "simplifies" the field away.
+    admins wrote them, a multi-identity client could scope by `adminHint` and no new field
+    would be needed at all. Worth knowing before anyone "simplifies" it away.
+  - **Generation 1 is redefined in place, not bumped** — sound only because the test HEMs
+    are being erased. The field goes in BEFORE `adminHint`, so a surviving old marker would
+    not fail to parse, it would parse as a different group under the wrong identity with the
+    wrong admin. The digit stays in the format, unspent, for the first change after MVP.
   - Header grows 20 → 27 bytes: an admin marker with 10 members and a 16-char name is
     119 of 128; a member's is ~60.
   - **`GK` survives a rekey** (epoch/secret/topic change, `GK` does not), so a member's

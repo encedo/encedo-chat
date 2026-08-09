@@ -623,7 +623,7 @@ Scale assumption: **3–5 members, max 8–10** (1:1 goes through §6–7, not t
 > was sized against that and still carries a name plus three members there — which is the
 > reason the format is versioned rather than simply changed.
 
-> **Proposal — a member holds the group key too: `chan2` and portable membership** *(v6, 2026-08-09; not yet normative — `chan1` above stands until this is accepted).*
+> **Proposal — a member holds the group key too, and generation 1 is redefined** *(v6, 2026-08-09; not yet normative — the layout above stands until this is accepted).*
 >
 > **Correction of record first.** This section says members import `GK_pub`; the
 > implementation does not — `key_import` is used only for contacts, and a member keeps
@@ -636,14 +636,23 @@ Scale assumption: **3–5 members, max 8–10** (1:1 goes through §6–7, not t
 > of its own:
 > ```
 > label   Onchato-Group-<name>                             (truncated to fit)
-> DESCR   ETSEIC:chan2:<owner_hint>:<admin_hint>:<name>:   ← roster blob omitted
+> DESCR   ETSEIC:chan1:<owner_hint>:<admin_hint>:<name>:   ← roster blob omitted
 > ```
 > `owner_hint` is 4 bytes of the OWNING IDENTITY's KID in base64url — the same convention,
 > and the same "hint, not proof" semantics, as `admin_hint`. It is needed **because
-> members now write markers**: on an admin's marker the admin *is* the owner, so `chan1`
-> needs no such field and a client holding several identities (§4 Proposal) can scope by
-> `admin_hint` alone. On a member's marker the admin is someone else, and without the
-> owner the group list of one identity leaks into another's.
+> members now write markers**: on an admin's marker the admin *is* the owner, so the field
+> is unnecessary while admins alone write them, and a client holding several identities
+> (§4 Proposal) can scope by `admin_hint`. On a member's marker the admin is someone else,
+> and without the owner the group list of one identity leaks into another's.
+>
+> **This redefines generation 1 rather than spending generation 2**, which is only sound
+> because every existing marker is being erased with the devices that hold them (pre-MVP;
+> the same decision as §4's). The distinction matters and should be recorded: a new field
+> is inserted *before* `admin_hint`, so a surviving old record would not fail to parse — it
+> would parse as a different group, attributing it to the wrong identity and naming the
+> wrong admin, silently. Making old records inert rather than misread is what the
+> generation digit is for, and it is kept unspent for the first change that lands after
+> MVP.
 >
 > A member **omits the roster blob**. The roster is the admin's authority and arrives
 > attested in the distribution; carrying a copy would add nothing and would turn every
