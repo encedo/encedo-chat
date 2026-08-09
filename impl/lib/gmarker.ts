@@ -44,29 +44,14 @@
  * caller's choice.
  */
 
-import { subtle, b64, unb64 } from './wc.ts'
+import {
+  DESCR_MAX, byteLen, sliceBytes, isHexKid, unhex, hex, b64url, unb64url, hemKid, kidOf, type KeyRef,
+} from './descr.ts'
 
-/** Anyone this module can identify: an HSM-issued KID, a public key, or both. */
-export interface KeyRef { kid?: string; pub?: Uint8Array }
-
-/**
- * The HEM KID: `SHA1(pub)[0:16]`, hex — deterministic and global, so the same
- * public key yields the same KID on every HEM, which is what lets a hint
- * written by the admin resolve on a member's device.
- *
- * SHA-**1**, deliberately: this is a key index. The app fingerprint is
- * `SHA-256(pub)` (§4.4) and answers a different question (out-of-band MITM).
- */
-export async function hemKid(pub: Uint8Array): Promise<string> {
-  const d = new Uint8Array(await subtle.digest('SHA-1', pub))
-  return hex(d.slice(0, 16))
-}
-
-/** Prefer what the HSM issued; derive only when we hold no KID. Equal by construction. */
-export async function kidOf(r: KeyRef): Promise<string | undefined> {
-  if (r.kid) return r.kid.toLowerCase()
-  return r.pub ? hemKid(r.pub) : undefined
-}
+// The budget rules and the key-id helpers are shared with the identity/contact
+// records (`descr.ts`) — one DESCR field, one set of rules. Re-exported because
+// this module was their home first and callers still import them from here.
+export { DESCR_MAX, byteLen, hemKid, kidOf, type KeyRef }
 
 /**
  * `key_search` prefix that finds EVERY generation — the version digit follows it,
@@ -83,42 +68,17 @@ export const MARKER_PREFIX = 'ETSEIC:chan1:'
 const LEGACY_PREFIX = 'ETSEIC:chan,'
 
 /**
- * The HEM description field is a raw **128-byte** record, and overrunning it is
- * silent truncation — of the roster blob, which then decodes to a *different*
- * roster. So the budget is checked, and checked in BYTES: the generated fields
- * are ASCII, but a group name is not ("Zespół" is 6 characters and 8 bytes), and
- * measuring a name in `String.length` overruns the field by exactly as many
- * bytes as it has non-ASCII characters.
+ * What overrunning `DESCR_MAX` costs HERE, which is worse than a clipped string:
+ * the roster blob is last, so silent truncation leaves a blob that still decodes
+ * — into a *different* roster. Hence every cut goes through `sliceBytes`, and the
+ * blob is dropped whole rather than shortened.
  */
-export const DESCR_MAX = 128
 /** A label, not a protocol field — the roster needs the room more than it does. */
 export const NAME_MAX = 16
 /** The spec bounds the compact roster at 10 members (~44 B). Beyond that it is omitted. */
 export const ROSTER_MAX = 10
 
 const HINT_HEX = 8 // 4 bytes of KID, as hex characters
-
-const enc = new TextEncoder()
-/** UTF-8 length — the only length this field is measured in. */
-export function byteLen(s: string): number { return enc.encode(s).length }
-/** Longest prefix of `s` that fits `max` UTF-8 bytes, never splitting a character. */
-function sliceBytes(s: string, max: number): string {
-  if (byteLen(s) <= max) return s
-  let out = ''
-  for (const ch of s) { // by code point, so surrogate pairs stay intact
-    if (byteLen(out + ch) > max) break
-    out += ch
-  }
-  return out
-}
-
-const isHexKid = (k: string) => /^[0-9a-f]+$/i.test(k) && k.length >= HINT_HEX && k.length % 2 === 0
-function unhex(s: string): Uint8Array {
-  const out = new Uint8Array(s.length >> 1)
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(s.slice(i * 2, i * 2 + 2), 16)
-  return out
-}
-function hex(b: Uint8Array): string { return [...b].map((x) => x.toString(16).padStart(2, '0')).join('') }
 
 /** CRC-32 (IEEE), table built once. Integrity check only — never a MAC. */
 const CRC_TABLE = (() => {
@@ -292,10 +252,3 @@ export async function resolveRoster<T extends KeyRef>(
 
 // base64url without padding — the DESCR budget is tight enough that four
 // characters of '=' matter, and the field is text.
-function b64url(b: Uint8Array): string {
-  return b64(b).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-function unb64url(s: string): Uint8Array {
-  const p = s.replace(/-/g, '+').replace(/_/g, '/')
-  return unb64(p + '='.repeat((4 - (p.length % 4)) % 4))
-}
