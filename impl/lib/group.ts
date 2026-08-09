@@ -28,7 +28,7 @@ import { groupTopicFromSecret } from './rendezvous.ts'
 import { seal, sendChainFrom, newSendChain, SenderReceiver, tag, verify, type SendChain, type ReceiverOpts } from './senderkey.ts'
 import { x25519FromPriv } from './x25519.ts'
 import type { SkdFields } from './envelope.ts'
-import { buildMarker, type KeyRef } from './gmarker.ts'
+import { buildMarker, parseMarker, type KeyRef } from './gmarker.ts'
 import { groupLabel } from './descr.ts'
 
 const enc = new TextEncoder()
@@ -321,6 +321,12 @@ export interface GkBackend {
    * which have no HSM to hold it.
    */
   importPub?(pub: Uint8Array, label: string, descr: string): Promise<string>
+  /**
+   * Every group entry in the device, with its marker text and public key. This
+   * is the portable group list — the one thing that survives a browser, and the
+   * reason a marker exists at all.
+   */
+  listMarkers?(): Promise<Array<{ kid: string; pub: Uint8Array; descr: string }>>
 }
 
 interface GroupRec {
@@ -537,6 +543,39 @@ export class GroupManager {
     if (!rec?.memberGkKid || !this.gkBackend?.destroy) return
     try { await this.gkBackend.destroy(rec.memberGkKid) } catch {}
     rec.memberGkKid = undefined
+  }
+
+  /**
+   * What the DEVICE says this identity is in — group id, name and admin hint,
+   * read from the markers rather than from the local cache.
+   *
+   * This is the half of §8 that makes membership portable: the cache is what a
+   * browser remembers, this is what a HEM knows. Entries already established
+   * are included; the caller decides which of them it is missing.
+   *
+   * Only markers owned by `ownerKid` are returned. A device may hold several
+   * identities and every one of them searches the same prefix, so without that
+   * filter one identity would list another's groups.
+   */
+  async deviceGroups(ownerKid: string): Promise<Array<{ gidHex: string; gkPub: Uint8Array; name: string; adminHint: string; kid: string }>> {
+    if (!this.gkBackend?.listMarkers) return []
+    const mine = ownerKid.toLowerCase().slice(0, 8)
+    const out: Array<{ gidHex: string; gkPub: Uint8Array; name: string; adminHint: string; kid: string }> = []
+    for (const e of await this.gkBackend.listMarkers()) {
+      const f = parseMarker(e.descr)
+      if (!f || f.ownerKid !== mine) continue
+      out.push({ gidHex: hex(await groupIdFromGK(e.pub)), gkPub: e.pub, name: f.name, adminHint: f.adminKid, kid: e.kid })
+    }
+    return out
+  }
+
+  /** Whether this manager already holds the group — i.e. it can read its topic. */
+  has(gidHex: string): boolean { return this.recs.has(gidHex) }
+
+  /** Drop a device entry for a group we could not get back into. Takes the KID
+   *  rather than a gid: by definition we hold no record for it. */
+  async forgetDeviceGroup(kid: string): Promise<void> {
+    if (this.gkBackend?.destroy) await this.gkBackend.destroy(kid)
   }
 
   /** Establish or update a group from its shared material. New group or a newer

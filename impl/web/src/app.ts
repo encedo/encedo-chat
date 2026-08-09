@@ -31,7 +31,8 @@ import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
 import { unb64, b64, randomBytes } from '../../lib/wc.ts'
 import {
-  kidOf, SELF_PREFIX, buildSelfDescr, parseSelfDescr, selfLabel, byteLen, sliceBytes, SELF_NAME_MAX, PEER_NAME_MAX,
+  kidOf, SELF_PREFIX, buildSelfDescr, parseSelfDescr, selfLabel, byteLen, sliceBytes, unhex,
+  SELF_NAME_MAX, PEER_NAME_MAX,
 } from '../../lib/descr.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
@@ -2823,6 +2824,84 @@ async function addRestoredGroup(snap: any, name: string): Promise<string | null>
 }
 
 /** Restore groups from the encrypted §10 cache on startup (+ migrate a B1 blob). */
+
+/**
+ * Groups this DEVICE knows about but this browser does not — the other half of
+ * §8's portable membership.
+ *
+ * The marker yields `GK_pub`, hence the group id, its name and a hint at who
+ * administers it. It deliberately does NOT yield `group_secret` or any sender
+ * key: those are forward-secret and client-side, so a recovered device knows a
+ * group exists and cannot read a word of it until somebody hands the material
+ * over. That handover already exists — it is the sender-key request — so this
+ * adds a trigger, not a protocol.
+ *
+ * Silence is ambiguous and is reported as such. A request goes unanswered when
+ * the admin is offline exactly as when we are no longer in the roster, and the
+ * client cannot tell those apart: `answerSkdReq` is silent on purpose, because a
+ * denial would confirm to a stranger that a group exists and that they are out
+ * of it. So the timeout says both possibilities and offers to drop the entry
+ * rather than asserting the unkind one.
+ */
+const RECOVER_TIMEOUT_MS = 45_000
+async function recoverGroupsFromDevice() {
+  if (!client || !session?.kid) return
+  let found: Awaited<ReturnType<typeof client.groups.deviceGroups>> = []
+  try { found = await client.groups.deviceGroups(session.kid) } catch (e: any) {
+    ecLog('group recovery: cannot read the device group list — ' + (e?.message ?? e), 'debug'); return
+  }
+  const missing = found.filter((g) => !groupsUI.has(g.gidHex) && !client!.groups.has(g.gidHex))
+  if (!missing.length) return
+  ecLog(`group recovery: ${missing.length} group(s) in the device this browser does not hold`)
+
+  for (const g of missing) {
+    // The admin travels as four bytes, so it is resolved against the contacts
+    // this device already holds — the same lookup the roster hints use.
+    const admin = await resolveByKidHint(g.adminHint)
+    if (!admin) {
+      toast(tr('Grupa „{name}” jest w HEM, ale nie mam kontaktu do jej administratora.', { name: g.name || g.gidHex.slice(0, 8) }))
+      continue
+    }
+    await openRoomFor(admin, false)
+    const conv = rooms.get(admin.pub)?.conv
+    if (!conv) { ecLog(`group recovery: no 1:1 to ${admin.name} yet`, 'debug'); continue }
+    // Epoch 0: we do not know which one we are owed, and a responder that is
+    // further ahead answers at its own — the ordinary newer-epoch path.
+    conv.sendGroupSkdReq(b64(unhex(g.gidHex)), 0)
+    ecLog(`group recovery: asked ${admin.name} for "${g.name}"`)
+    setTimeout(() => {
+      if (groupsUI.has(g.gidHex)) return // the distribution arrived and opened it
+      void offerToForgetGroup(g)
+    }, RECOVER_TIMEOUT_MS)
+  }
+}
+
+/** Resolve a 4-byte KID hint against the contacts this device holds. */
+async function resolveByKidHint(hint: string): Promise<Contact | null> {
+  const want = hint.toLowerCase()
+  for (const c of contactsCache) {
+    const kid = await kidOf({ kid: c.kid, pub: unb64(c.pub) })
+    if (kid && kid.slice(0, 8) === want) return c
+  }
+  return null
+}
+
+/** No answer within the window: say what that can mean, and offer to drop the entry. */
+async function offerToForgetGroup(g: { gidHex: string; name: string; kid: string }) {
+  const name = g.name || g.gidHex.slice(0, 8)
+  const { ok } = await ask(
+    tr('Nie udało się odzyskać grupy „{name}”', { name }),
+    tr('Administrator nie odpowiedział. Może być offline — albo nie jesteś już członkiem tej grupy; tego nie da się rozróżnić.')
+      + tr(' Usunąć wpis grupy z HEM? Jeśli nie, spróbuję ponownie przy następnym logowaniu.'),
+    tr('Usuń wpis'),
+  )
+  if (!ok || !client) return
+  try {
+    await client.groups.forgetDeviceGroup(g.kid)
+    toast(tr('Wpis grupy „{name}” usunięty z HEM', { name }))
+  } catch (e: any) { ecLog('group recovery: could not delete the marker — ' + (e?.message ?? e), 'debug') }
+}
+
 async function restoreGroups() {
   if (!client || !session) return
   const base = await ensureCacheBase(); if (!base) return
@@ -2840,6 +2919,10 @@ async function restoreGroups() {
   await migrateLegacyGroups(seen)
   renderGroups()
   if (seen.size) ecLog(`restored ${seen.size} group(s) from the encrypted cache`)
+  // The cache is what this browser remembers; the device is what the HEM knows.
+  // Anything in the second and not the first is a group we have to be let back
+  // into — which needs contacts loaded, so it runs after them.
+  void refreshContacts().then(() => recoverGroupsFromDevice())
 }
 
 /** One-time upgrade: a B1 plaintext blob (ec-groups-<handle>) → encrypt each group

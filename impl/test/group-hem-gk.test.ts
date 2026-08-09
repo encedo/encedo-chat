@@ -40,7 +40,7 @@ async function softId(): Promise<GroupId> {
  */
 function fakeHem() {
   const keys = new Map<string, { priv: Uint8Array; pub: Uint8Array; label: string; descr: string }>()
-  const calls = { ecdh: 0, createKeyPair: 0, getPubKey: 0, authorize: 0, updateKey: 0, deleteKey: 0, importPublicKey: 0 }
+  const calls = { ecdh: 0, createKeyPair: 0, getPubKey: 0, authorize: 0, updateKey: 0, deleteKey: 0, importPublicKey: 0, searchKeys: 0 }
   let n = 0
   return {
     calls,
@@ -75,6 +75,15 @@ function fakeHem() {
       calls.ecdh++
       const k = keys.get(kid); if (!k) throw new Error('no such kid')
       return (await x25519FromPriv(k.priv)).dh(unb64(peerPubB64))
+    },
+    // Anchored PREFIX matching, as the device does it — the owner filter is the
+    // whole scoping mechanism, so a stub that ignored the prefix would let a
+    // broken one pass.
+    async searchKeys(_t: string, pat: string) {
+      calls.searchKeys++
+      return [...keys.entries()]
+        .filter(([, k]) => dec(k.descr).startsWith(pat))
+        .map(([kid, k]) => ({ kid, label: k.label, type: 'CURVE25519', description: unb64(k.descr) }))
     },
     // A device holds one public key ONCE, whatever DESCR it sits under: the KID
     // indexes the key's content. Modelled here, because it is the rule the
@@ -370,4 +379,43 @@ test('a second identity already holding this GK degrades to no record, not to a 
   assert.equal(await B.mgr.writeMemberMarker(gid, 'g'), true)
   assert.equal(await C.mgr.writeMemberMarker(gid, 'g'), false, 'refused, and said so instead of throwing')
   assert.equal(hem.calls.importPublicKey, 2, 'it was attempted')
+})
+
+test('the device lists the groups of ONE identity, and the id comes off GK_pub', async () => {
+  // Two identities on one device (one fake HEM), each in a group of its own:
+  // both markers sit under the same ETSEIC:chan prefix, so without the owner
+  // filter each identity would list the other's group.
+  const hem = fakeHem()
+  const admin = await peer(hemGkBackend(hem))
+  const B = await peer(hemGkBackend(hem)), C = await peer(hemGkBackend(hem))
+  const g1 = await admin.mgr.createGroupWithNewKey('gk1', [{ pub: admin.id.pub }, { pub: B.id.pub }], 'jeden')
+  const g2 = await admin.mgr.createGroupWithNewKey('gk2', [{ pub: admin.id.pub }, { pub: C.id.pub }], 'dwa')
+  await B.mgr.applySkd(admin.id.pub, (await admin.mgr.skdFor(g1, B.id.pub))!)
+  await C.mgr.applySkd(admin.id.pub, (await admin.mgr.skdFor(g2, C.id.pub))!)
+  await B.mgr.writeMemberMarker(g1, 'jeden')
+  await C.mgr.writeMemberMarker(g2, 'dwa')
+
+  const bKid = await hemKid(unb64(B.id.pub))
+  const mine = await B.mgr.deviceGroups(bKid)
+  assert.equal(mine.length, 1, "one identity does not see the other's groups")
+  assert.equal(mine[0].gidHex, g1, 'the group id is derived from GK_pub, not stored')
+  assert.equal(mine[0].name, 'jeden')
+  assert.equal(mine[0].adminHint, (await hemKid(unb64(admin.id.pub))).slice(0, 8))
+
+  // And the recovery precondition: knowing the group exists is not being in it.
+  assert.equal(B.mgr.has(g1), true)
+  assert.equal(B.mgr.has(g2), false)
+})
+
+test('a device entry can be dropped for a group we cannot get back into', async () => {
+  const hem = fakeHem()
+  const A = await peer(hemGkBackend(hem)), B = await peer(hemGkBackend(hem))
+  const gid = await A.mgr.createGroupWithNewKey('gk', [{ pub: A.id.pub }, { pub: B.id.pub }], 'g')
+  await B.mgr.applySkd(A.id.pub, (await A.mgr.skdFor(gid, B.id.pub))!)
+  await B.mgr.writeMemberMarker(gid, 'g')
+
+  const bKid = await hemKid(unb64(B.id.pub))
+  const [entry] = await B.mgr.deviceGroups(bKid)
+  await B.mgr.forgetDeviceGroup(entry.kid)
+  assert.equal((await B.mgr.deviceGroups(bKid)).length, 0)
 })

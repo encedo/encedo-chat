@@ -23,8 +23,9 @@ import { watchSelfSession, type SelfWatch } from './selfsession.ts'
 import { watchPresenceRotating, rendezvousDay, type PresenceWatch } from './presence.ts'
 import { GroupManager, type AdminGk, type GkBackend } from './group.ts'
 import {
-  SELF_PREFIX, buildPeerDescr, parsePeerDescr, parseSelfDescr, peerSearchPrefix, peerLabel, hemKid,
+  SELF_PREFIX, buildPeerDescr, parsePeerDescr, parseSelfDescr, peerSearchPrefix, peerLabel, hemKid, descrText,
 } from './descr.ts'
+import { MARKER_SEARCH } from './gmarker.ts'
 import { joinGroup, type GroupRoom, type GroupRoomOpts } from './grouproom.ts'
 import { b64, unb64 } from './wc.ts'
 
@@ -107,6 +108,25 @@ export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
       // Older firmware answers an import with nothing useful; the KID is derived
       // from the key's content, so it is the same value either way.
       return String(r?.kid ?? await hemKid(pub))
+    },
+    // The portable group list. `MARKER_SEARCH` matches every generation, so a
+    // marker written by an older build still turns up here — it simply fails to
+    // parse and is skipped, which is what a generation digit is for.
+    // One getPubKey per group, as the contact book pays for a contact: GK_pub is
+    // what yields the group id, and search does not return public keys yet.
+    async listMarkers() {
+      const listTok = await hem.authorizePassword(null, 'keymgmt:list')
+      const keys: any[] = await hem.searchKeys(listTok, MARKER_SEARCH)
+      const out: Array<{ kid: string; pub: Uint8Array; descr: string }> = []
+      for (const k of keys) {
+        const text = descrText(k.description)
+        if (!text) continue
+        try {
+          const { pubkey } = await hem.getPubKey(await use(k.kid), k.kid)
+          out.push({ kid: String(k.kid), pub: unb64(pubkey), descr: text })
+        } catch { /* a key we cannot read is not a group we can rejoin */ }
+      }
+      return out
     },
   }
 }
