@@ -30,7 +30,7 @@ import { nowMs, utcHHMM } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
 import { unb64, b64, randomBytes } from '../../lib/wc.ts'
-import { kidOf } from '../../lib/descr.ts'
+import { kidOf, SELF_PREFIX, buildSelfDescr, parseSelfDescr, selfLabel } from '../../lib/descr.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
@@ -218,10 +218,6 @@ async function fingerprint(pubB64: string): Promise<string> {
   const h = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)).slice(0, 8)
   return [...h].map((b) => b.toString(16).padStart(2, '0')).join(':').toUpperCase()
 }
-function parseHandle(descr: Uint8Array | null): string {
-  if (!descr) return '(?)'
-  return dec.decode(descr).split('\0')[0].split(',')[1] ?? '(?)'
-}
 
 // ---- HEM reachability ----
 async function refreshStatus() {
@@ -243,6 +239,58 @@ $('toggle').addEventListener('click', () => {
   $('toggle').textContent = reg ? 'Zaloguj' : tr('Zarejestruj tożsamość')
   clr('msg')
 })
+
+/**
+ * Sign in as one identity on an authorised HEM. Everything per-identity hangs
+ * off its KID from here on: the contact book is scoped to it, and so is every
+ * local key (`identityKey`).
+ */
+async function signInAs(hem: any, id: { kid: string; handle: string }) {
+  const use = await hem.authorizePassword(null, `keymgmt:use:${id.kid}`)
+  const { pubkey } = await hem.getPubKey(use, id.kid)
+  await enterApp(
+    hemIdentityFrom(hem, id.kid, id.handle, pubkey),
+    mergedContactBook(hemContactBook(hem, id.kid), makeLocalBook(await identityKey(pubkey, id.kid), localStorage)),
+    'HEM', id.kid, hemGkBackend(hem, id.kid),
+  )
+}
+
+/**
+ * Choose between the identities on this HEM.
+ *
+ * Shown only when there are several — one identity signs straight in, because a
+ * confirmation step with a single option is a click that asks nothing.
+ *
+ * Every row carries the first four bytes of the KID beside the name, and that is
+ * not decoration: handles may repeat (nothing forbids two identities called
+ * "Alice", and the KID is what tells them apart), so without it the two rows are
+ * indistinguishable and picking the wrong one is silent — same contacts missing,
+ * same messages not arriving, no error anywhere.
+ */
+function showIdentityPicker(ids: Array<{ kid: string; handle: string }>, onPick: (id: { kid: string; handle: string }) => void) {
+  const box = $('id-picker')
+  box.innerHTML = ''
+  const head = document.createElement('div')
+  head.className = 'hint'
+  head.textContent = tr('Wybierz tożsamość:')
+  box.appendChild(head)
+  for (const id of ids) {
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'id-opt'
+    const name = document.createElement('span')
+    name.className = 'id-name'
+    name.textContent = id.handle // never innerHTML: this string comes off the device
+    const kid = document.createElement('span')
+    kid.className = 'id-kid'
+    kid.textContent = id.kid.slice(0, 8)
+    row.append(name, kid)
+    row.addEventListener('click', () => { box.hidden = true; onPick(id) })
+    box.appendChild(row)
+  }
+  box.hidden = false
+}
+
 $('go').addEventListener('click', async () => {
   const url = val('hsm'), pass = val('pass')
   if (!url || !pass) { setMsg('msg', tr('Podaj adres HEM i hasło.'), 'err'); return }
@@ -253,19 +301,21 @@ $('go').addEventListener('click', async () => {
     if (mode === 'register') {
       const handle = val('handle'); if (!handle) { setMsg('msg', tr('Podaj handle.'), 'err'); return }
       const gen = await hem.authorizePassword(pass, 'keymgmt:gen')
-      const iat = Math.floor(Date.now() / 1000)
-      const { kid } = await hem.createKeyPair(gen, `chat-ik-${handle}`, 'CURVE25519', btoa(`ETSEIC:self,${handle},ik,${iat}`))
-      const use = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
-      const { pubkey } = await hem.getPubKey(use, kid)
-      await enterApp(hemIdentityFrom(hem, kid, handle, pubkey), mergedContactBook(hemContactBook(hem, kid), makeLocalBook(await identityKey(pubkey, kid), localStorage)), 'HEM', kid, hemGkBackend(hem, kid))
+      // b64 of the UTF-8 bytes, not btoa: btoa throws on any character above
+      // U+00FF, so registering as "Zażółć" used to fail with a DOM exception.
+      const { kid } = await hem.createKeyPair(gen, selfLabel(handle), 'CURVE25519', b64(new TextEncoder().encode(buildSelfDescr(handle))))
+      await signInAs(hem, { kid, handle })
     } else {
       const listTok = await hem.authorizePassword(pass, 'keymgmt:list')
-      const keys: any[] = await hem.searchKeys(listTok, 'ETSEIC:self,')
+      const keys: any[] = await hem.searchKeys(listTok, SELF_PREFIX)
       if (!keys.length) { setMsg('msg', tr('Brak tożsamości czatu na tym HEM — zarejestruj.'), 'err'); return }
-      const key = keys[0]; const handle = parseHandle(key.description)
-      const use = await hem.authorizePassword(null, `keymgmt:use:${key.kid}`)
-      const { pubkey } = await hem.getPubKey(use, key.kid)
-      await enterApp(hemIdentityFrom(hem, key.kid, handle, pubkey), mergedContactBook(hemContactBook(hem, key.kid), makeLocalBook(await identityKey(pubkey, key.kid), localStorage)), 'HEM', key.kid, hemGkBackend(hem, key.kid))
+      // Alphabetical, so the list does not reorder itself as identities are
+      // added — the device returns them in whatever order it stores them.
+      const ids = keys
+        .map((k) => ({ kid: String(k.kid).toLowerCase(), handle: parseSelfDescr(k.description)?.handle || '(?)' }))
+        .sort((a, b) => a.handle.localeCompare(b.handle, undefined, { sensitivity: 'base' }))
+      if (ids.length === 1) { await signInAs(hem, ids[0]); return }
+      showIdentityPicker(ids, (chosen) => { void signInAs(hem, chosen) })
     }
   } catch (e: any) { setMsg('msg', tr('Błąd: ') + (e?.message ?? e), 'err') }
   finally { const b = $('go') as HTMLButtonElement; b.disabled = false; b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj' }

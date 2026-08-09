@@ -308,6 +308,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Wszystkie topiki na jednym połączeniu. Więcej węzłów (i failover) dodasz z edytowalnej listy w oknie logowania.': 'Every topic on one connection. Add more nodes (and failover) from the editable list on the sign-in screen.',
     'Wybierz co najmniej jednego członka.': 'Select at least one member.',
     'Wybierz kontakt': 'Choose a contact',
+    'Wybierz tożsamość:': 'Choose an identity:',
     'Wygasł': 'Expired',
     'wygasł': 'expired',
     'Wyjdziesz poza aplikację. Strona {host} pozna Twój adres IP i czas wejścia — tego rozmowa nie ujawnia.': 'You are leaving the app. {host} will learn your IP address and the time you arrived — the conversation itself reveals neither.',

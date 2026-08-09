@@ -377,6 +377,16 @@
   .gmember:hover{background:var(--bg)}
   .gavatar{width:34px;height:34px;border-radius:8px;flex-shrink:0;display:grid;place-items:center;font-weight:600;font-size:12px;color:var(--accent);background:var(--accent-soft)}
   .store-opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+  /* Identity picker (login). The KID is monospace and muted so the eye reads the
+     name first and the four bytes only when two names are the same. */
+  #id-picker{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+  #id-picker[hidden]{display:none}
+  .id-opt{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
+    padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg);
+    color:var(--text);font-size:14px;font-family:inherit;cursor:pointer;text-align:left}
+  .id-opt:hover{border-color:var(--accent);background:var(--accent-soft)}
+  .id-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .id-kid{font-family:var(--mono);font-size:11.5px;color:var(--muted);flex-shrink:0}
   /* MUST stay: `display:flex` above beats the browser's own [hidden] rule, so a
      row hidden from script would otherwise still be on screen — which is how a
      software profile would keep offering to store a key in a HEM it has not got. */
@@ -515,6 +525,8 @@
       <input id="pass" type="password" autocomplete="off">
       <div id="reg-handle-wrap" hidden><label data-i18n="Handle (widoczny dla kontaktów)">Handle (widoczny dla kontaktów)</label><input id="handle" type="text" placeholder="np. alice" data-i18n-placeholder="np. alice" autocomplete="off"></div>
       <button class="btn" id="go" data-i18n="Zaloguj">Zaloguj</button>
+      <!-- Shown only when a HEM holds more than one identity; one signs straight in. -->
+      <div id="id-picker" hidden></div>
       <div class="toggle"><span id="toggle-pre" data-i18n="Nie masz konta?">Nie masz konta?</span> <a id="toggle" data-i18n="Zarejestruj tożsamość">Zarejestruj tożsamość</a></div>
       <div class="toggle" style="margin-top:6px;font-size:12px;opacity:.85">bez HEM: <a id="go-soft" data-i18n="tożsamość software (dev)">tożsamość software (dev)</a></div>
       <div class="nodes-sec">
