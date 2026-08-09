@@ -223,12 +223,59 @@ async function fingerprint(pubB64: string): Promise<string> {
 }
 
 // ---- HEM reachability ----
+/**
+ * A device that neither answers nor refuses is the case a bare `await` handles
+ * worst: the button stays disabled and the user has nothing to press. Every probe
+ * here is bounded, and running out of time is reported as itself rather than as
+ * a failure of whatever came next.
+ */
+const HEM_STATUS_MS = 5_000   // the gate — nothing is authorised until this returns
+const HEM_VERSION_MS = 2_000  // decoration; it may fail without meaning anything
+class HemTimeout extends Error {
+  constructor(what: string, ms: number) { super(`${what} did not answer in ${ms} ms`); this.name = 'HemTimeout' }
+}
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new HemTimeout(what, ms)), ms)
+    p.then((v) => { clearTimeout(t); resolve(v) }, (e) => { clearTimeout(t); reject(e) })
+  })
+}
+
+/**
+ * Read `/api/system/status` — the endpoint that says whether the device is in a
+ * state to be talked to. This is the gate, and it is the ONLY thing signing in
+ * waits for.
+ */
+const probeStatus = (url: string) => withTimeout(new HEM(url).getStatus(), HEM_STATUS_MS, '/status')
+
+/**
+ * `/api/system/version` reports firmware and is informational. It never decides
+ * whether we proceed, and nothing that matters waits on it: a device that
+ * answers `/status` and then goes quiet on `/version` is a working device with a
+ * missing caption, so this resolves to null rather than delaying a sign-in by
+ * its own budget.
+ */
+async function probeVersion(url: string): Promise<any | null> {
+  try { return await withTimeout(new HEM(url).getVersion(), HEM_VERSION_MS, '/version') } catch { return null }
+}
+
 async function refreshStatus() {
   const url = val('hsm'), dot = $('status-dot'), hint = $('status-hint')
   dot.className = 'dot'; hint.textContent = ''
   if (!url) return
-  try { const v: any = await new HEM(url).getVersion(); dot.className = 'dot ok'; hint.textContent = `HEM ok — fw ${v?.fwv ?? '?'}` }
-  catch { dot.className = 'dot bad'; hint.textContent = tr('HEM nieosiągalny (adres / CORS)') }
+  try {
+    const status: any = await probeStatus(url)
+    dot.className = 'dot ok'
+    const host = typeof status?.host === 'string' ? status.host : ''
+    hint.textContent = `HEM ok${host ? ` · ${host}` : ''}`
+    // The firmware line arrives when it arrives; the dot is already green.
+    void probeVersion(url).then((v) => {
+      if (v?.fwv && val('hsm') === url) hint.textContent = `HEM ok — fw ${v.fwv}${host ? ` · ${host}` : ''}`
+    })
+  } catch (e: any) {
+    dot.className = 'dot bad'
+    hint.textContent = e?.name === 'HemTimeout' ? tr('HEM nie odpowiada (timeout)') : tr('HEM nieosiągalny (adres / CORS)')
+  }
 }
 $('hsm').addEventListener('blur', refreshStatus)
 
@@ -300,6 +347,25 @@ $('go').addEventListener('click', async () => {
   const btn = $('go') as HTMLButtonElement
   btn.disabled = true; btn.textContent = tr('…'); clr('msg')
   try {
+    // The gate: nothing is authorised until the device says it is in a state to
+    // be talked to. Doing this first also means a wrong address or a sleeping
+    // device fails HERE, with a message about reaching the HEM — rather than
+    // three calls later as an authorisation error, which is what it looked like.
+    try {
+      await probeStatus(url)
+      $('status-dot').className = 'dot ok'
+    } catch (e: any) {
+      $('status-dot').className = 'dot bad'
+      const timedOut = e?.name === 'HemTimeout'
+      await ask(
+        timedOut ? tr('HEM nie odpowiedział') : tr('Nie mogę połączyć się z HEM'),
+        timedOut
+          ? tr('Urządzenie nie odpowiedziało w ciągu 5 sekund. Sprawdź, czy jest podłączone i odblokowane, i spróbuj ponownie.')
+          : tr('Sprawdź adres HEM i czy urządzenie jest osiągalne z tej przeglądarki.') + ' ' + (e?.message ?? ''),
+        tr('Zamknij'), undefined, undefined, null,
+      )
+      return // the button is re-enabled in `finally`, so the operation can simply be repeated
+    }
     const hem = new HEM(url); await hem.hemCheckin()
     if (mode === 'register') {
       const handle = val('handle'); if (!handle) { setMsg('msg', tr('Podaj handle.'), 'err'); return }
@@ -838,7 +904,7 @@ $('contact-search').addEventListener('input', renderContacts)
 // draws those as browser chrome outside the app's skin, and they block the
 // event loop — which here means the transport stops pumping while a dialog is
 // open. -------------------------------------------------------------------
-function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string, href?: string): Promise<{ ok: boolean; remember: boolean }> {
+function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string, href?: string, noLabel: string | null = 'Nie'): Promise<{ ok: boolean; remember: boolean }> {
   return new Promise((resolve) => {
     $('ask-title').textContent = title
     $('ask-body').textContent = body
@@ -867,6 +933,11 @@ function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string, h
       if (href) { open.href = href; open.textContent = yes }
     }
     $('ask-yes').hidden = !!(href && open)
+    // A NOTICE has one way out. Passing no `noLabel` hides the second button, so
+    // "close this and try again" does not have to be phrased as yes-or-no.
+    const no = $('ask-no')
+    no.hidden = noLabel === null
+    if (noLabel) no.textContent = noLabel
     $('members-pop').hidden = true // nothing may stay clickable behind a modal
     $('scrim').classList.add('open'); $('ask-modal').classList.add('open')
     const done = (v: boolean) => {
