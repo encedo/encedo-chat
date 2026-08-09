@@ -967,6 +967,48 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
   DataChannel, GossipSub is the fallback — that covers the direct profile (peers
   see IPs). What stays parked is specifically the **relay-blind / anonymous**
   plane (no IP exposure).
+- **Several identities in one HEM — designed, NOT built** (2026-08-09). Written up as
+  a Proposal at the end of `docs/PROTOCOL.md` §4; this note is the implementation
+  side of it and the two must not drift.
+
+  Today a HEM holds one chat identity by construction: sign-in does
+  `searchKeys('ETSEIC:self,')` and takes **`keys[0]`**, and contacts are a flat
+  `ETSEIC:peer,` namespace with nothing saying whose they are. The new format scopes
+  contacts by the owner identity's **KID**:
+
+  ```
+  IK     label  Onchato-IK-<handle>              DESCR  ETSEIC:self1,<handle>
+  PEER   label  Onchato-Peer-<name>              DESCR  ETSEIC:peer1,<ownerKID b64url>,<name>
+  ```
+
+  Points that are easy to get wrong when this is built:
+
+  - **`key_search` is an anchored prefix** (`'^' + b64(descr)`, `hem-sdk.js`), which is
+    the entire scoping mechanism — so the owner id must precede the name, and the name,
+    being user-supplied, must be read as the **whole tail**, never `split(',')[2]`.
+    That also removes today's bug where a contact called "Kowalski, Jan" displays as
+    "Kowalski" (`peerNameFromDescr`, `parseHandle`).
+  - **Budget is bytes, not characters.** `ETSEIC:peer1,` + 22 + `,` = 36 of 128, so 92
+    remain for a name that arrives from an invite capped at **64 characters** — which is
+    up to 128 bytes in UTF-8. Truncate with `gmarker.ts`'s byte-safe helpers, not
+    `String.slice`. `label` is capped at **32 characters** by firmware.
+  - **A contact belongs to one identity**, because a HEM refuses to hold the same public
+    key twice whatever DESCR it sits under. The client can predict this without touching
+    the device (it can compute `SHA-1(pub)[0:16]` itself) using one broad
+    `searchKeys('ETSEIC:peer1,')` **on the add path only** — that search returns KIDs and
+    DESCRs, not public keys, so it is cheap. Say which identity already holds the contact;
+    do not surface a device error.
+  - **Per-identity local state must key on the KID, not the handle.** It does not today:
+    `ec-local-contacts-<handle>` and `gcachePrefix()` = `ec-gcache-<handle>-` both use the
+    name, so two identities sharing a handle would share a group cache, and renaming
+    orphans both. Pre-MVP the old entries are simply cleared.
+  - Handles may repeat; the sign-in picker sorts **alphabetically by handle** and must
+    show a short KID beside it, or the wrong identity is chosen silently.
+  - **The group marker has the same flat-namespace problem** (`ETSEIC:chan`, and ordinary
+    members hold a `GK_pub` entry too). Not designed yet — but if the DESCR generation is
+    being spent, it should be spent once.
+
+  No backward compatibility: pre-MVP, the old format is dropped rather than read.
 
 ## Status
 

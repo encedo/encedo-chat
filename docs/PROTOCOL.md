@@ -166,6 +166,93 @@ The whole Chat↔HSM boundary is **one crypto call in two modes** plus key manag
 
 Contacts are public keys (confidentiality not critical); **integrity is critical** — an attacker swapping a contact's IK_pub achieves a perfect MITM. Protection: (1) fingerprint-in-DESCR check on every use; (2) HSM authentication (OIDC token or PKI client cert) gates key modification as a privileged op; (3) out-of-band fingerprint verification at import.
 
+> **Proposal — several identities in one HEM: DESCR scoped by the identity's KID** *(v6, 2026-08-09; not yet normative — §4.2 above stands until this is accepted).*
+>
+> §4.2 gives one identity per device: `CHAT:self:ik:<principal>` names the user, and
+> contacts sit beside it in a flat namespace with nothing saying whose they are. A
+> client therefore takes the first `self` entry it finds and shows **every** contact in
+> the device. Two identities on one HEM — a personal one and a work one, or a throwaway
+> — are not merely unsupported; they would silently share a contact book, which is the
+> opposite of what a second identity is for.
+>
+> **Format.** Two HSM fields with different consumers, and both are used deliberately:
+> `label` is what a human sees in the device's own key list (**32 characters**, a
+> firmware limit), `descr` is what the client searches and reads (**128 bytes**).
+> ```
+> IK     label  Onchato-IK-<handle>                       (truncated to fit)
+>        DESCR  ETSEIC:self1,<handle>
+> PEER   label  Onchato-Peer-<name>                       (truncated to fit)
+>        DESCR  ETSEIC:peer1,<owner_KID base64url>,<name>
+> ```
+> The identity's ID is **the KID of its own IK entry** — nothing new is minted, stored or
+> risked being lost, and it is portable for free because `KID = SHA-1(IK_pub)[0:16]` is
+> derived from the key's content, so the same identity on another device has the same ID.
+> The `self` entry does not name itself: its KID *is* the name, and `key_search` returns it.
+>
+> **The name appears in both fields on purpose.** They have different budgets (32 vs 128)
+> and different readers; `label` is a truncated copy for the device's UI and **`descr` is
+> authoritative**. Putting the name only in `label` would cap contact names at 19
+> characters; putting it only in `descr` would leave thirty keys labelled identically in
+> the device's key list, which is the one job `label` has.
+>
+> **Scoping falls out of the search API.** `key_search` matches an **anchored prefix**, so
+> `ETSEIC:peer1,<owner_KID>,` returns exactly one identity's contacts and nothing else —
+> the filter is free. This fixes the field order for every future generation: **identifiers
+> of fixed width first, free text last, and the tail read whole.** A name is user-supplied
+> and may contain the delimiter, so it must never be read by ordinal position.
+>
+> **A contact belongs to exactly one identity.** Not a policy choice — `KID` indexes the
+> key's *content*, so a HEM refuses to hold the same public key twice whatever DESCR it
+> sits under. Two identities cannot each own a contact; the second import fails. Because
+> the KID is computable by the client from the public key alone, this is **predictable
+> without touching the device**: one broad `key_search("ETSEIC:peer1,")` on the add path
+> (it returns KIDs and DESCRs, not public keys, so it is cheap and happens only there)
+> tells the client which identity already holds that key, and it can say so instead of
+> surfacing a device error. A client-side contact book, if it has one, may still hold the
+> contact for the second identity — at the cost of the portability that putting it in the
+> HEM buys.
+>
+> **What is removed, and why it is safe.**
+> - The **creation timestamp** — never read by the client, and available from a separate
+>   API call for anything that wants it, so it does not belong in a 128-byte field.
+> - The **role tag** (`ik`) — every entry under `self`/`peer` is an identity key; when a
+>   second kind arrives (a PQ public key, §15) the generation in the prefix distinguishes
+>   it, which is what a generation is for.
+> - The **`fp=` fingerprint of §4.2** — redundant with the KID, which the *device* derives
+>   from the key's content. Verifying `KID == SHA-1(pub)[0:16]` gives what the field gave,
+>   without spending 32 bytes. Note what this does and does not buy, since §4.4 leans on
+>   it: neither the field nor the KID defends against an attacker who can write to the HEM
+>   at all (they would replace the key and its identifier together). The real protection is
+>   §4.4's (3) — out-of-band verification at import, and pinning what was verified. The
+>   self-consistent field only ever caught corruption.
+>
+> **Generation in the prefix stays** (`self1`, `peer1`), even though this revision does not
+> keep backward compatibility — the project is pre-MVP and the old format is simply
+> dropped. It costs one character now and is the only thing that will make the *next*
+> change cheap.
+>
+> **A note for review, because SHA-1 draws the eye.** `KID = SHA-1(pub)[0:16]` is a
+> firmware-defined index on key content. Hijacking a specific KID is a **second preimage
+> on 128 truncated bits (2¹²⁸)**; SHA-1's practical weakness is chosen-prefix *collision*
+> (~2⁶³ on the full 160 bits), which requires controlling both inputs and is bounded below
+> by the generic 2⁶⁴ birthday cost once the output is truncated to 128 bits — so replacing
+> it with truncated SHA-256 (the RFC 7093 construction, as used for X.509 SKIDs) would
+> change no attack cost here. It is kept.
+>
+> **Client-visible consequences.** Sign-in becomes a choice: one `key_search("ETSEIC:self1,")`
+> lists the identities, sorted **alphabetically by handle** (stable, unlike creation order).
+> Handles may repeat — the KID distinguishes them — so the picker must show a short KID
+> beside the name, or two identities named the same are indistinguishable and the wrong one
+> is chosen silently. Any client-side state kept per identity must be keyed by the **KID**
+> rather than the handle: keyed by a name it collides between two identities that share one,
+> and is orphaned when a name is edited.
+>
+> **Open, and deliberately not decided here:** the group marker (§8) has the same flat
+> namespace — `key_search("ETSEIC:chan")` returns the groups of every identity on the
+> device, for ordinary members as much as for admins. The design of that field belongs with
+> §8; only its *timing* belongs here, because a generation of the DESCR format should not be
+> spent twice.
+
 ---
 
 ## 5. Rendezvous & discovery
