@@ -247,11 +247,21 @@ Contacts are public keys (confidentiality not critical); **integrity is critical
 > rather than the handle: keyed by a name it collides between two identities that share one,
 > and is orphaned when a name is edited.
 >
-> **Open, and deliberately not decided here:** the group marker (§8) has the same flat
-> namespace — `key_search("ETSEIC:chan")` returns the groups of every identity on the
-> device, for ordinary members as much as for admins. The design of that field belongs with
-> §8; only its *timing* belongs here, because a generation of the DESCR format should not be
-> spent twice.
+> **Two identities may be signed in at once** (two tabs, two windows) and this is supported
+> rather than tolerated — it is what makes the feature testable by one person. It does not
+> weaken §9.1: that rule is *one active session per identity*, enforced on a topic derived
+> from the IK, so two different identities are two different topics and never see one
+> another, while a duplicate of the same identity is still caught. What it does impose is
+> exactly the requirement above: two identities signed in at once share one browser origin
+> and therefore one local store, so a per-identity key carrying the *handle* rather than the
+> KID is not merely stale — two identities that happen to share a name write over each
+> other's state.
+>
+> **The group marker (§8) is scoped by its own field, not by this one.** A marker is written
+> only by the group's admin, and there the admin *is* the owner, so a multi-identity client
+> scopes by the existing `admin_hint`. That holds only while admins alone write markers; the
+> §8 Proposal that has members write one too introduces an owner field for precisely this
+> reason.
 
 ---
 
