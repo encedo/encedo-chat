@@ -229,10 +229,9 @@ async function fingerprint(pubB64: string): Promise<string> {
  * here is bounded, and running out of time is reported as itself rather than as
  * a failure of whatever came next.
  */
-const HEM_STATUS_MS = 5_000   // the gate — a deliberate sign-in can afford to wait
-const HEM_POLL_MS = 2_000     // the background watch — /status is fast, and a tick must not outlive its interval
-const HEM_POLL_EVERY_MS = 5_000
-const HEM_VERSION_MS = 2_000  // decoration; it may fail without meaning anything
+const HEM_VERSION_MS = 2_000    // the reachability probe: is a device there at all
+const HEM_RETRY_MS = 3_000      // how long to wait after a probe that found nothing
+const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talked to
 class HemTimeout extends Error {
   constructor(what: string, ms: number) { super(`${what} did not answer in ${ms} ms`); this.name = 'HemTimeout' }
 }
@@ -266,22 +265,20 @@ async function hemGet(url: string, path: string, ms: number): Promise<any> {
 }
 
 /**
- * Read `/api/system/status` — the endpoint that says whether the device is in a
- * state to be talked to. This is the gate, and it is the ONLY thing signing in
- * waits for.
+ * Two endpoints, two questions, asked in that order.
+ *
+ * `/api/system/version` answers "is a device there at all". It is unauthenticated
+ * and cheap, so it is what the badge watches: an answer turns it green and
+ * unlocks Sign in, and nothing else is attempted until it does.
+ *
+ * `/api/system/status` answers "is it in a state to be talked to", and is read
+ * once the user commits — after the badge is green, before anything is
+ * authorised. Splitting them this way keeps the thing that runs on a timer as
+ * small as it can be, and leaves the heavier question for the moment somebody
+ * actually asks for a session.
  */
+const probeVersion = (url: string, ms = HEM_VERSION_MS) => hemGet(url, '/api/system/version', ms)
 const probeStatus = (url: string, ms = HEM_STATUS_MS) => hemGet(url, '/api/system/status', ms)
-
-/**
- * `/api/system/version` reports firmware and is informational. It never decides
- * whether we proceed, and nothing that matters waits on it: a device that
- * answers `/status` and then goes quiet on `/version` is a working device with a
- * missing caption, so this resolves to null rather than delaying a sign-in by
- * its own budget.
- */
-async function probeVersion(url: string): Promise<any | null> {
-  try { return await hemGet(url, '/api/system/version', HEM_VERSION_MS) } catch { return null }
-}
 
 /**
  * Sign-in stays disabled until the device has answered `/status`.
@@ -311,53 +308,59 @@ function setHemReady(ready: boolean) {
  * longer than a timer can.
  */
 let probing = false
-async function refreshStatus(opts: { quiet?: boolean; ms?: number } = {}) {
+async function refreshStatus(opts: { quiet?: boolean } = {}) {
   const url = val('hsm'), dot = $('status-dot'), hint = $('status-hint')
+  // A background check leaves the last answer standing until it has a new one:
+  // blanking these on a timer makes a healthy device flicker and keeps erasing
+  // the explanation of why an unreachable one is unreachable.
   if (!opts.quiet) { dot.className = 'dot'; hint.textContent = ''; setHemReady(false) }
-  if (!url) { setHemReady(false); return }
-  if (probing) return // one in flight is enough; the next tick will pick it up
+  if (!url) { setHemReady(false); return false }
+  if (probing) return false
   probing = true
   try {
-    const status: any = await probeStatus(url, opts.ms)
+    const v: any = await probeVersion(url)
     dot.className = 'dot ok'
     setHemReady(true)
-    const host = typeof status?.host === 'string' ? status.host : ''
-    hint.textContent = `HEM ok${host ? ` · ${host}` : ''}`
-    // The firmware line arrives when it arrives; the dot is already green.
-    void probeVersion(url).then((v) => {
-      if (v?.fwv && val('hsm') === url) hint.textContent = `HEM ok — fw ${v.fwv}${host ? ` · ${host}` : ''}`
-    })
+    hint.textContent = `HEM ok${v?.fwv ? ` — fw ${v.fwv}` : ''}`
+    return true
   } catch (e: any) {
     dot.className = 'dot bad'
     setHemReady(false)
     hint.textContent = e?.name === 'HemTimeout' ? tr('HEM nie odpowiada (timeout)') : tr('HEM nieosiągalny (adres / CORS)')
+    return false
   } finally { probing = false }
 }
 
 /**
- * Keep watching while the login screen is up.
+ * Keep asking while the login screen is up, and stop the moment a device answers.
  *
- * A device that was not plugged in when the page loaded is the ordinary case,
- * and before this the answer stayed "not answering" until the user thought to
- * touch the address field. Nothing about plugging a HEM in tells the page, so
- * the page has to keep asking.
+ * Nothing tells a page that a HEM has been plugged in, so the page has to keep
+ * asking — but each attempt is CANCELLED at its budget and the next is scheduled
+ * only once the previous has settled. A fixed interval would start a new attempt
+ * beside one still running; this cannot, so an absent device costs exactly one
+ * open request at a time and a present one is noticed within a cycle.
  */
 let hemPollT: any = null
+function stopHemPoll() { clearTimeout(hemPollT); hemPollT = null }
 function startHemPoll() {
-  clearInterval(hemPollT)
-  hemPollT = setInterval(() => {
-    if ($('login').hidden) { clearInterval(hemPollT); hemPollT = null; return } // signed in — nothing to watch
-    void refreshStatus({ quiet: true, ms: HEM_POLL_MS })
-  }, HEM_POLL_EVERY_MS)
+  stopHemPoll()
+  const tick = async () => {
+    if ($('login').hidden) return stopHemPoll() // signed in — nothing to watch
+    const ok = await refreshStatus({ quiet: true })
+    if ($('login').hidden) return stopHemPoll()
+    // Green ends the watch: the badge is what unlocks Sign in, and from here the
+    // next word on this device comes from the user pressing it.
+    if (!ok) hemPollT = setTimeout(tick, HEM_RETRY_MS)
+  }
+  void tick()
 }
-$('hsm').addEventListener('blur', refreshStatus)
+$('hsm').addEventListener('blur', () => startHemPoll())
 // Typing a new address re-probes shortly after the typing stops. Without this the
 // button could only be unlocked by leaving the field, and the field arrives
 // pre-filled — so the first probe also runs now, or a default address would sit
 // there with the button dead and nothing to click.
 let hsmProbeT: any
-$('hsm').addEventListener('input', () => { clearTimeout(hsmProbeT); hsmProbeT = setTimeout(() => void refreshStatus(), 600) })
-void refreshStatus()
+$('hsm').addEventListener('input', () => { clearTimeout(hsmProbeT); hsmProbeT = setTimeout(startHemPoll, 600) })
 startHemPoll()
 
 // ---- login / register ----
@@ -473,8 +476,8 @@ $('go').addEventListener('click', async () => {
     b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj'
     // Re-probe rather than simply re-enabling: an attempt that failed because the
     // device went away must not leave a live-looking button behind it.
-    void refreshStatus({ quiet: true })
-    startHemPoll()
+    startHemPoll() // re-probe: an attempt that failed because the device went away
+                   // must not leave a live-looking button behind it
   }
 })
 $('pass').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') ($('go') as HTMLButtonElement).click() })
@@ -849,7 +852,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     toast(tr('Brak połączenia z przekaźnikiem — odśwież stronę'))
   })
   $('login').hidden = true; $('app').hidden = false
-  clearInterval(hemPollT); hemPollT = null // the login screen is gone; stop watching for a device
+  stopHemPoll() // the login screen is gone; nothing left to watch for
   // Said HERE and not at boot: an empty contact list is what the user is about
   // to look at, and this is the sentence that explains it. Once per device.
   if (sweptPreKid > 0) {
