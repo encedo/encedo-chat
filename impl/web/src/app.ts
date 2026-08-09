@@ -797,7 +797,7 @@ function renderContacts() {
     const unseen = room?.unseen ?? 0
     const dotTitle = inRoom ? 'W rozmowie' : online ? 'Online (widoczny na Waszym topicu)' : 'Offline'
     const src = c.source === 'hem' ? { i: '🔒', t: tr('W HEM (trwałe, przenośne)') } : { i: '💻', t: tr('Lokalnie (ta przeglądarka)') }
-    const b = document.createElement('button'); b.className = 'contact' + (activePub === c.pub ? ' active' : '') + (unseen ? ' unread' : '')
+    const b = document.createElement('button'); b.className = 'contact' + (activePub === c.pub && chatOnScreen() ? ' active' : '') + (unseen ? ' unread' : '')
     // The unread pill is the whole point of the background model: a message that
     // arrived while you were elsewhere lights here instead of yanking the view.
     const pill = unseen ? `<span class="c-unread" title="${unseen} nieprzeczytane">${unseen > 99 ? '99+' : unseen}</span>` : ''
@@ -1675,8 +1675,8 @@ function renderNetwork() {
     <div class="net-row"><span class="k">${tr('Transport')}</span><span class="v">${escapeHtml(s.transport)}${WEBRTC_OFF ? ' <span class="net-tag">' + tr('bez WebRTC') + '</span>' : ''}</span></div>
     <div class="net-row"><span class="k">${tr('Węzeł (relay)')}</span><span class="v" title="${escapeHtml(s.relay)}">${escapeHtml(relayHost)}${isFailover ? ' <span class="net-tag">' + tr('failover') + '</span>' : ''}</span></div>
     ${nodesRow}
-    ${relayPeer ? `<div class="net-row"><span class="k">${tr('PeerId węzła')}</span><span class="v mono">${escapeHtml(relayPeer.slice(0, 14))}…</span></div>` : ''}
-    <div class="net-row"><span class="k">${tr('Twój PeerId')}</span><span class="v mono">${escapeHtml(s.self.slice(0, 14))}…</span></div>
+    ${relayPeer ? `<div class="net-row"><span class="k">${tr('PeerId węzła')}</span><span class="v mono" title="${escapeHtml(relayPeer)}">${escapeHtml(relayPeer)}</span></div>` : ''}
+    <div class="net-row"><span class="k">${tr('Twój PeerId')}</span><span class="v mono" title="${escapeHtml(s.self)}">${escapeHtml(s.self)}</span></div>
     ${capReport && capReport.degraded.length ? `<div class="net-row wrap"><span class="k">${tr('Platforma')}</span><span class="v chips" title="${escapeHtml(capReport.ua)}">`
       + capReport.degraded.map((c) => `<span class="net-node">○ ${escapeHtml(c.id)}</span>`).join('')
       + `</span></div>` : ''}
@@ -1693,6 +1693,15 @@ function startNetwork() { renderNetwork(); clearInterval(netTimer); netTimer = s
 function stopNetwork() { clearInterval(netTimer); netTimer = null }
 
 // ---- chat ----
+/**
+ * Is a conversation actually ON SCREEN? On a phone the list and the chat swap, so
+ * after the back arrow nothing is — and a row left highlighted then points at a
+ * conversation the user is not looking at. The room itself stays open either way;
+ * this is only about what the list claims.
+ */
+const COMPACT = matchMedia('(max-width:900px),(max-height:560px)')
+const chatOnScreen = () => !COMPACT.matches || $('app').classList.contains('chat-open')
+
 const msgEls = new Map<string, HTMLElement>() // msg id → its reactions container (both directions share the id)
 const QUICK_EMOJI = ['👍', '❤️', '😂', '😮']
 function addReaction(msgId: string, emoji: string) {
@@ -2344,7 +2353,9 @@ async function activateRoom(pub: string) {
   // fingerprint (comparable out of band) plus the HSM key id when it has one.
   const peerFp = fpCache.get(room.contact.pub) ?? await fingerprint(room.contact.pub)
   fpCache.set(room.contact.pub, peerFp)
-  $('sess-peer').textContent = tr('🔑 ') + peerFp + (room.contact.kid ? ' · KID ' + shortKid(room.contact.kid) : '')
+  // No key glyph here: the row is labelled "odcisk klucza" already, and the two
+  // extra characters were enough to wrap the fingerprint's last one.
+  $('sess-peer').textContent = peerFp + (room.contact.kid ? ' · KID ' + shortKid(room.contact.kid) : '')
   $('sess-peer').title = room.contact.kid ? `KID ${room.contact.kid}` : room.contact.pub
   // The name leads the tooltip now that the header can cut it short; the
   // fingerprint (the out-of-band MITM check) follows, as before.
@@ -2691,7 +2702,7 @@ function renderGroups() {
   btn.addEventListener('click', openGroupModal); add.appendChild(btn); pane.appendChild(add)
   if (!groupsUI.size) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = tr('(brak grup — utwórz)'); pane.appendChild(e); return }
   for (const gu of groupsUI.values()) {
-    const b = document.createElement('button'); b.className = 'contact' + (activeGid === gu.gid ? ' active' : '') + (gu.unseen ? ' unread' : '')
+    const b = document.createElement('button'); b.className = 'contact' + (activeGid === gu.gid && chatOnScreen() ? ' active' : '') + (gu.unseen ? ' unread' : '')
     const pill = gu.unseen ? `<span class="c-unread">${gu.unseen > 99 ? '99+' : gu.unseen}</span>` : ''
     const admin = iAmAdmin(gu)
     b.innerHTML = `<div class="avatar">👥</div><div class="c-info"><div class="c-name">${escapeHtml(groupDisplay(gu))}</div>`
@@ -2699,10 +2710,6 @@ function renderGroups() {
       // Admin-only affordances, on the list itself: no need to open a group to
       // manage it. The members button opens the SAME popover the chat header
       // uses — one implementation, so the two cannot drift.
-      // NOT admin-only, and that is the point: what breaks is one member's
-      // outgoing direction, and only that member holds the sender key that fixes
-      // it. An admin button would be the wrong hand on the wrong lever.
-      + `<button class="g-edit" data-skd="1" title="${tr('Wyślij ponownie mój klucz do wszystkich')}">🔑</button>`
       // The key button is NOT admin-only, and that is the point: what breaks is
       // one member's outgoing direction, and only that member holds the sender
       // key that repairs it. An admin button would be the wrong hand on the
@@ -3127,7 +3134,8 @@ function openGroupModal() {
   if (!contactsCache.length) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = tr('Najpierw dodaj kontakty — członkowie grupy muszą być kontaktami.'); list.appendChild(e) }
   for (const c of contactsCache) {
     const row = document.createElement('label'); row.className = 'gmember'
-    row.innerHTML = `<input type="checkbox" value="${escapeHtml(c.pub)}"><div class="gavatar">${escapeHtml(initials(c.name))}</div><span>${escapeHtml(c.name)}</span>`
+    row.innerHTML = `<div class="gavatar">${escapeHtml(initials(c.name))}</div><span class="gm-name">${escapeHtml(c.name)}</span>`
+      + `<input type="checkbox" value="${escapeHtml(c.pub)}">`
     list.appendChild(row)
   }
   ;($('group-name') as HTMLInputElement).value = ''; clr('group-msg')
@@ -3173,7 +3181,7 @@ document.addEventListener('visibilitychange', () => {
  * desktop it changes nothing.
  */
 const showChatPane = (on: boolean) => $('app').classList.toggle('chat-open', on)
-$('btn-back').addEventListener('click', () => { showChatPane(false); renderContacts() })
+$('btn-back').addEventListener('click', () => { showChatPane(false); renderContacts(); renderGroups() })
 
 /**
  * Keep the app exactly as tall as the VISIBLE viewport.

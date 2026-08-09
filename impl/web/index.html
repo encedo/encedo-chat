@@ -97,9 +97,9 @@
   .nodes-panel{width:100%;margin-top:12px;border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--bg)}
   .nodes-head{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:4px}
   .node-add{border:none;background:none;color:var(--accent);font-size:12px;cursor:pointer;width:auto;margin:0;padding:0}
-  .node-row{display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:13px}
+  .node-row{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:6px 2px;font-size:13px}
   .node-row input[type=checkbox]{width:auto;margin:0;flex-shrink:0}
-  .node-row .n-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+  .node-row .n-name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
   .node-row .n-x{color:var(--muted);cursor:pointer;font-size:16px;padding:0 4px;flex-shrink:0}
   /* Order is the failover order (row 1 = primary), so the arrows are a real
      control, not decoration. Touch needs a finger-sized target — hence padding
@@ -131,10 +131,10 @@
   .splitter:hover,.splitter.drag{background:var(--border)}
   /* Group participants: a cluster of overlapping avatars + a popover of the full list. */
   .avatar-cluster{display:inline-flex;align-items:center;cursor:pointer}
-  .avatar-cluster .ga{width:22px;height:22px;border-radius:50%;margin-left:-7px;border:2px solid var(--card);display:grid;place-items:center;font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-soft)}
+  .avatar-cluster .ga{min-width:22px;height:22px;padding:0 3px;border-radius:7px;margin-left:-7px;border:2px solid var(--card);display:grid;place-items:center;font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-soft)}
   .avatar-cluster .ga:first-child{margin-left:0}
   .avatar-cluster .ga.more{color:var(--muted);background:var(--bg)}
-  .avatar-cluster.sm .ga{width:18px;height:18px;font-size:9px;margin-left:-6px}
+  .avatar-cluster.sm .ga{min-width:18px;height:18px;padding:0 2px;border-radius:6px;font-size:9px;margin-left:-6px}
   /* Opened from the group list it is anchored to a sidebar row, which is in a
      different stacking context than the chat header — so it goes fixed and is
      positioned inline against the anchor's rect. */
@@ -374,6 +374,9 @@
   .store-opt{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);cursor:pointer;padding:7px 10px;border:1px solid var(--border);border-radius:8px}
   .group-members{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;margin-top:4px}
   .gmember{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);cursor:pointer;padding:6px 8px;border-radius:6px}
+  /* Name against the left margin, box against the right: the column then reads
+     as a list of people with a choice beside each, not a column of boxes. */
+  .gmember .gm-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .gmember:hover{background:var(--bg)}
   .gavatar{width:34px;height:34px;border-radius:8px;flex-shrink:0;display:grid;place-items:center;font-weight:600;font-size:12px;color:var(--accent);background:var(--accent-soft)}
   .store-opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
@@ -382,7 +385,12 @@
   /* Bytes left for a name, counted in UTF-8 because that is what the 128-byte
      DESCR field holds. Muted until it runs out, then it is the only thing on the
      label that has changed colour. */
-  .bytes-left{float:right;font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400}
+  /* The counter is a SIBLING of the label, never a child: applyDom() sets
+     textContent on every [data-i18n] element, so a span inside one is deleted the
+     first time the language pass runs — which is before anyone sees the form. */
+  .label-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  .label-row label{margin:0}
+  .bytes-left{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;flex-shrink:0}
   .bytes-left.full{color:var(--err)}
   #id-picker{display:flex;flex-direction:column;gap:6px;margin-top:10px}
   #id-picker[hidden]{display:none}
@@ -528,7 +536,7 @@
       <div class="hint" id="status-hint"></div>
       <label data-i18n="Hasło">Hasło</label>
       <input id="pass" type="password" autocomplete="off">
-      <div id="reg-handle-wrap" hidden><label data-i18n="Handle (widoczny dla kontaktów)">Handle (widoczny dla kontaktów)<span class="bytes-left" id="handle-bytes"></span></label><input id="handle" type="text" placeholder="np. alice" data-i18n-placeholder="np. alice" autocomplete="off"></div>
+      <div id="reg-handle-wrap" hidden><div class="label-row"><label data-i18n="Handle (widoczny dla kontaktów)">Handle (widoczny dla kontaktów)</label><span class="bytes-left" id="handle-bytes"></span></div><input id="handle" type="text" placeholder="np. alice" data-i18n-placeholder="np. alice" autocomplete="off"></div>
       <button class="btn" id="go" data-i18n="Zaloguj">Zaloguj</button>
       <!-- Shown only when a HEM holds more than one identity; one signs straight in. -->
       <div id="id-picker" hidden></div>
@@ -633,7 +641,7 @@
          that check, since it is the only thing standing between a link and a
          man in the middle. -->
     <label data-i18n="Klucz publiczny albo link zaproszenia">Klucz publiczny albo link zaproszenia</label><textarea id="add-pub" placeholder="wklej pubkey albo link zaproszenia…" data-i18n-placeholder="wklej pubkey albo link zaproszenia…"></textarea>
-    <label data-i18n="Nazwa">Nazwa<span class="bytes-left" id="add-name-bytes"></span></label><input id="add-name" type="text" placeholder="np. bob" data-i18n-placeholder="np. bob" autocomplete="off">
+    <div class="label-row"><label data-i18n="Nazwa">Nazwa</label><span class="bytes-left" id="add-name-bytes"></span></div><input id="add-name" type="text" placeholder="np. bob" data-i18n-placeholder="np. bob" autocomplete="off">
     <label data-i18n="Zapis">Zapis</label>
     <div class="store-opts" id="add-store">
       <label class="store-opt"><input type="radio" name="store" value="hem" checked> <span data-i18n="🔒 W HEM — trwałe, przenośne między urządzeniami">🔒 W HEM — trwałe, przenośne między urządzeniami</span></label>

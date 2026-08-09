@@ -374,7 +374,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '⚡ Jednorazowo — nie zapisuj nigdzie (tylko ten czat)': '⚡ Just this once — save nothing (this chat only)',
     '⚡ Jednorazowo — po przeładowaniu kontakt zniknie': '⚡ Just this once — the contact is gone after a reload',
     '⚪ Relay': '⚪ Relay',
-    '⚪ Tylko przez węzeł — rozmówca nie pozna Twojego IP': '⚪ Through the node only — the other side never learns your IP',
+    '⚪ Tylko przez węzeł — rozmówca nie pozna Twojego IP': '⚪ Through the node only - hide my IP from peer',
     '⚪ Tylko węzeł': '⚪ Node only',
     '💻 Tylko lokalnie — ta przeglądarka, nic nie trafia do HEM': '💻 This browser only — nothing reaches the HEM',
     '💻 Zapisz w tym profilu — zostaje na tym urządzeniu': '💻 Save in this profile — stays on this device',
