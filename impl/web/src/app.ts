@@ -730,6 +730,10 @@ async function refreshContacts() {
   catch (e: any) { toast(tr('Błąd listy kontaktów: ') + (e?.message ?? e)) }
   for (const c of contactsCache) if (!fpCache.has(c.pub)) fpCache.set(c.pub, await fingerprint(c.pub))
   renderContacts()
+  // Groups name their members out of this list, so the list arriving is exactly
+  // when a group's members stop being eight characters of a public key.
+  renderGroups()
+  if (activeGid) void activateGroup(activeGid)
   void syncPresence()
 }
 
@@ -934,11 +938,8 @@ async function renameContact(c: Contact, name: string) {
   if (!session) return
   try {
     await session.book.rename(c, name)
-    // Anything already showing the old name: the contact list, the open room's
-    // header, and every group this contact is a member of.
-    for (const gu of groupsUI.values()) {
-      const m = gu.members.find((x) => x.pub === c.pub); if (m) m.name = name
-    }
+    // Group member lists need no patching any more: they hold keys and look the
+    // name up when they are drawn.
     await refreshContacts()
     if (activePub === c.pub) { $('peer-name').textContent = name; $('peer-name').title = name }
     if (activeGid) renderGroups()
@@ -1585,7 +1586,7 @@ $('members-pop').addEventListener('click', (e: any) => {
   if (tog) { e.stopPropagation(); const list = $('members-pop').querySelector('.m-add-list') as HTMLElement | null; if (list) list.hidden = !list.hidden; return }
   const add = (e.target as HTMLElement).closest('[data-add-pub]') as HTMLElement | null
   if (add) { e.stopPropagation(); const pub = add.getAttribute('data-add-pub')!
-    void changeMembers(gu.gid, [...gu.members, { pub, name: memberName(pub) }], `${memberName(pub)} dodany do grupy`); return }
+    void changeMembers(gu.gid, [...gu.members, { pub }], `${memberName(pub)} dodany do grupy`); return }
 })
 
 // ---- copy my pubkey ----
@@ -2492,17 +2493,35 @@ function sendComposer() {
 // ---- groups (§8: Sender Keys over the shared topic) ------------------------
 // A group is another kind of room in the same chat pane. It reuses the transcript
 // (with sender labels via `who`); membership + keys are the engine's (session.groups).
-interface GroupUI { gid: string; name: string; epoch: number; members: { pub: string; name: string }[]; room: GroupRoom | null; log: Ev[]; unseen: number }
+/**
+ * `members` holds KEYS, not names.
+ *
+ * It used to store the name resolved at the moment the group was joined or
+ * restored, and that moment is the wrong one: `restoreGroups` reads localStorage
+ * and wins its race against `refreshContacts`, which reads the HEM (a search plus
+ * one getPubKey per contact). So on every device that restored a group, every
+ * member's name froze to eight characters of a public key before the contact
+ * list existed — and nothing recomputed it. The admin's own device looked fine
+ * only because it had created the group interactively, from contacts already
+ * loaded.
+ *
+ * Resolving at paint time removes the race rather than ordering it, and takes
+ * the staleness after adding or renaming a contact with it.
+ */
+interface GroupUI { gid: string; name: string; epoch: number; members: { pub: string }[]; room: GroupRoom | null; log: Ev[]; unseen: number }
 const groupsUI = new Map<string, GroupUI>()
 
 const memberName = (pub: string): string =>
   session && pub === session.pub ? 'Ty' : (contactsCache.find((c) => c.pub === pub)?.name ?? (fpCache.get(pub) ?? pub.slice(0, 8)))
 const groupDisplay = (gu: GroupUI): string =>
-  gu.name || gu.members.filter((m) => m.pub !== session?.pub).map((m) => m.name).join(', ') || 'Grupa'
+  gu.name || gu.members.filter((m) => m.pub !== session?.pub).map((m) => memberName(m.pub)).join(', ') || 'Grupa'
 
 // Overlapping-avatar cluster (inner .ga spans; the caller wraps in .avatar-cluster).
-function avatarClusterHTML(members: { pub: string; name: string }[], max = 5): string {
-  let html = members.slice(0, max).map((m) => `<span class="ga" title="${escapeHtml(m.name)}">${escapeHtml(initials(m.name))}</span>`).join('')
+function avatarClusterHTML(members: { pub: string }[], max = 5): string {
+  let html = members.slice(0, max).map((m) => {
+    const n = memberName(m.pub)
+    return `<span class="ga" title="${escapeHtml(n)}">${escapeHtml(initials(n))}</span>`
+  }).join('')
   if (members.length > max) html += `<span class="ga more">+${members.length - max}</span>`
   return html
 }
@@ -2516,8 +2535,9 @@ function renderMembersPop(gu: GroupUI) {
   const admin = isGroupAdmin(gu)
   const rows = gu.members.map((m) => {
     const you = m.pub === session?.pub, online = you || onlinePubs.has(m.pub) // you are, by definition, here
-    return `<div class="member-row"><div class="gavatar">${escapeHtml(initials(m.name))}</div>`
-      + `<span class="m-name">${escapeHtml(m.name)}</span>`
+    const nm = memberName(m.pub)
+    return `<div class="member-row"><div class="gavatar">${escapeHtml(initials(nm))}</div>`
+      + `<span class="m-name">${escapeHtml(nm)}</span>`
       + `<span class="dot ${online ? 'ok' : ''}" title="${online ? 'online' : 'offline / nieznany'}"></span>`
       + (admin && !you ? `<button class="m-rm" data-rm="${escapeHtml(m.pub)}" title="${tr('Usuń z grupy')}">×</button>` : '')
       + `</div>`
@@ -2542,7 +2562,7 @@ function renderMembersPop(gu: GroupUI) {
  * admin-ness stays stable. The other members redistribute their own fresh keys
  * when they receive the new epoch (see onGroupInvite).
  */
-async function changeMembers(gid: string, newMembers: { pub: string; name: string }[], note: string) {
+async function changeMembers(gid: string, newMembers: { pub: string }[], note: string) {
   const gu = groupsUI.get(gid); if (!gu || !client) return
   $('members-pop').hidden = true
   try {
@@ -2821,7 +2841,7 @@ async function addRestoredGroup(snap: any, name: string): Promise<string | null>
   try {
     const [gidHex] = await client.groups.restore([snap])
     if (!groupsUI.has(gidHex)) {
-      const members = (snap.roster as { pub: string }[]).map((m) => ({ pub: m.pub, name: memberName(m.pub) }))
+      const members = (snap.roster as { pub: string }[]).map((m) => ({ pub: m.pub }))
       const gu: GroupUI = { gid: gidHex, name: name || 'Grupa', epoch: snap.epoch, members, log: [], unseen: 0, room: null }
       groupsUI.set(gidHex, gu)
       gu.room = await client.openGroup(gidHex, groupHandlers(gidHex))
@@ -3013,7 +3033,7 @@ async function distributeGroup(gid: string, name: string, only?: string) {
     // `continue`, not `return`: one member we cannot build an SKD for must not
     // cost the sender key to everyone standing behind them in the roster.
     const skd = await client.groups.skdFor(gid, m.pub); if (!skd) continue
-    const contact = contactsCache.find((c) => c.pub === m.pub) ?? { name: m.name, pub: m.pub, source: 'local' as const }
+    const contact = contactsCache.find((c) => c.pub === m.pub) ?? { name: memberName(m.pub), pub: m.pub, source: 'local' as const }
     await openRoomFor(contact, false) // ensure a background 1:1 room; sendGroupSkd queues until it is up
     // openRoomFor returns immediately when a room already EXISTS, and a room that
     // is still opening has no conv yet — so this is reached with conv === null
@@ -3022,7 +3042,7 @@ async function distributeGroup(gid: string, name: string, only?: string) {
     if (conv) { conv.sendGroupSkd({ ...skd, name }); pendingSkd.delete(`${gid}|${m.pub}`) }
     else {
       pendingSkd.add(`${gid}|${m.pub}`)
-      ecLog(`group: 1:1 to ${m.name} not ready — SKD queued for when it is`)
+      ecLog(`group: 1:1 to ${contact.name} not ready — SKD queued for when it is`)
     }
   }
 }
@@ -3155,7 +3175,7 @@ $('group-create').addEventListener('click', async () => {
     // it inside the HSM, a software one falls back to a scalar. The app does not
     // choose — and must not, or the two paths drift.
     const gid = await client.groups.createGroupWithNewKey(`chat-gk-${name}`.slice(0, 32), roster, name)
-    const gu: GroupUI = { gid, name, epoch: 0, members: roster.map((m) => ({ pub: m.pub, name: memberName(m.pub) })), log: [], unseen: 0, room: null }
+    const gu: GroupUI = { gid, name, epoch: 0, members: roster.map((m) => ({ pub: m.pub })), log: [], unseen: 0, room: null }
     groupsUI.set(gid, gu)
     gu.room = await client.openGroup(gid, groupHandlers(gid))
     closeGroupModal()
