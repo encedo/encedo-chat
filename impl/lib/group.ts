@@ -28,7 +28,7 @@ import { groupTopicFromSecret } from './rendezvous.ts'
 import { seal, sendChainFrom, newSendChain, SenderReceiver, tag, verify, type SendChain, type ReceiverOpts } from './senderkey.ts'
 import { x25519FromPriv } from './x25519.ts'
 import type { SkdFields } from './envelope.ts'
-import { buildMarker } from './gmarker.ts'
+import { buildMarker, type KeyRef } from './gmarker.ts'
 
 const enc = new TextEncoder()
 const MSG_MAC_INFO = enc.encode('encedo-group-msg-mac')
@@ -430,13 +430,36 @@ export class GroupManager {
     return gid
   }
 
+  /** This identity, as the marker's owner and (when I administer) its admin. */
+  private me(): KeyRef { return { kid: this.gkBackend?.adminKid, pub: unb64(this.id.pub) } }
+
   /** The §8 marker DESCR for a roster I admin. Format and budget: `gmarker.ts`. */
   private async markerFor(roster: Member[], name?: string): Promise<string> {
     // KIDs come from the HSM where a member carries one (imported contacts do);
     // `kidOf` derives it from the public key otherwise. Same value either way.
     const { descr } = await buildMarker({
-      admin: { kid: this.gkBackend?.adminKid, pub: unb64(this.id.pub) },
+      owner: this.me(), // a group I administer: owner and admin are the same party
+      admin: this.me(),
       members: roster.map((m) => ({ kid: m.kid, pub: unb64(m.pub) })),
+      name,
+    })
+    return descr
+  }
+
+  /**
+   * The marker a MEMBER writes on its own `GK_pub` entry (§8 Proposal): the group
+   * belongs to me, somebody else administers it, and no roster travels — that is
+   * the admin's authority and it arrives attested in the distribution, so copying
+   * it here would only put the membership graph on one more device.
+   */
+  async memberMarker(gidHex: string, name?: string): Promise<string | null> {
+    const rec = this.recs.get(gidHex)
+    if (!rec) return null
+    const admin = rec.roster[0]
+    if (!admin) return null
+    const { descr } = await buildMarker({
+      owner: this.me(),
+      admin: { kid: admin.kid, pub: unb64(admin.pub) },
       name,
     })
     return descr

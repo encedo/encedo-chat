@@ -6,7 +6,7 @@
  * group list on any device holding the same HEM, without a byte of group state
  * having been stored anywhere on the network.
  *
- *     ETSEIC:chan,<admin_KID>,<name ≤16>,<roster blob>
+ *     ETSEIC:chan1:<owner hint>:<admin hint>:<name ≤16>:<roster blob>
  *
  * What it deliberately does NOT hold: `group_secret` (the topic seed) and
  * sender keys (content). Those are client-side and forward-secret; a HEM dump
@@ -17,6 +17,12 @@
  * - **No `iat`.** The HSM already timestamps its own key entries, and spending
  *   ten of 128 bytes to repeat what the key record answers is not a trade worth
  *   making.
+ * - **The OWNER comes first, and it is not the admin.** A device may hold several
+ *   identities (§4), and every one of them searches the same `ETSEIC:chan`
+ *   namespace — so a marker has to say which identity's group list it belongs
+ *   to. While only admins wrote markers the admin hint answered that by
+ *   accident, because admin and owner were the same party. A MEMBER's marker
+ *   breaks it: its admin is somebody else.
  * - **A KID is taken from the HEM when we hold one, and derived only when we do
  *   not.** The HEM KID is `SHA1(pub)[0:16]` (GROUPS-DESIGN.md) — deterministic
  *   and global, which is exactly why a hint the admin writes resolves on
@@ -61,11 +67,14 @@ export const MARKER_SEARCH = 'ETSEIC:chan'
 /** What this build WRITES: generation 1 of the compact format. */
 export const MARKER_PREFIX = 'ETSEIC:chan1:'
 /**
- * The unversioned format written before 2026-08-07 — full admin KID in hex,
- * comma-separated. Still READ (a device already carries markers in it), never
- * written. This is what the version digit is for.
+ * Generation 1 is REDEFINED here rather than followed by a generation 2 — the
+ * owner hint goes in and nothing reads what came before, which is sound only
+ * because the devices holding older markers are being erased (pre-MVP). Note
+ * what that decision rests on: the new field goes in BEFORE the admin hint, so a
+ * surviving old record would not fail to parse, it would parse as a different
+ * group under the wrong identity. The digit stays unspent for the first change
+ * after MVP, and `MARKER_SEARCH` still finds every generation.
  */
-const LEGACY_PREFIX = 'ETSEIC:chan,'
 
 /**
  * What overrunning `DESCR_MAX` costs HERE, which is worse than a clipped string:
@@ -98,11 +107,20 @@ export function crc32(bytes: Uint8Array): number {
 
 export interface MarkerFields {
   /**
+   * Which identity on THIS device the group belongs to — 8 hex chars (4 bytes).
+   *
+   * A local index and nothing more: it decides whose list a marker appears in,
+   * on a device its owner already controls. Nothing crosses a trust boundary
+   * here, which is why four bytes is enough where a claim about someone else
+   * would need the whole thing.
+   */
+  ownerKid: string
+  /**
    * Whom to ask for a re-sync — as a **hint**, not as proof.
    *
-   * 8 hex chars (4 bytes) in the current format, the full KID in a legacy
-   * marker. Four bytes are grindable (~2^32), so this selects a candidate among
-   * keys the device already holds; the admin's `rk_i` MAC is what decides.
+   * 8 hex chars (4 bytes). Four bytes are grindable (~2^32), so this selects a
+   * candidate among keys the device already holds; the admin's `rk_i` MAC is
+   * what decides. On a group we administer it equals `ownerKid`.
    */
   adminKid: string
   /** Display label, ≤16 characters. */
@@ -127,8 +145,10 @@ export interface MarkerFields {
  * omitted rather than silently written short.
  */
 export async function buildMarker(m: {
+  /** The identity on this device whose group list this marker belongs to. */
+  owner: KeyRef
   admin: KeyRef
-  /** Members in roster order. Omit to skip the blob. */
+  /** Members in roster order. Omit to skip the blob — a member's marker does. */
   members?: KeyRef[]
   name?: string
 }): Promise<{ descr: string; rosterIncluded: boolean; nameIncluded: boolean }> {
@@ -158,15 +178,17 @@ export async function buildMarker(m: {
   // The hint is 4 bytes of the KID, so it needs a hex KID to cut. A device that
   // labels its keys some other way still has the public key, and `hemKid`
   // derives the same value the HSM would — so derive rather than refuse.
-  const adminHex = isHexKid(adminKid)
-    ? adminKid
-    : m.admin.pub ? await hemKid(m.admin.pub) : null
-  if (!adminHex) throw new Error('marker: the admin needs a hex KID or a public key')
-  const adminHint = b64url(unhex(adminHex.slice(0, HINT_HEX)))
+  const hintOf = async (r: KeyRef, kid: string | undefined, what: string) => {
+    const h = kid && isHexKid(kid) ? kid : r.pub ? await hemKid(r.pub) : null
+    if (!h) throw new Error(`marker: the ${what} needs a hex KID or a public key`)
+    return b64url(unhex(h.slice(0, HINT_HEX)))
+  }
+  const adminHint = await hintOf(m.admin, adminKid, 'admin')
+  const ownerHint = await hintOf(m.owner, await kidOf(m.owner), 'owner')
 
   // A separator would break the positional format, so it cannot survive in one.
   const wanted = [...(m.name ?? '').replace(/[:,]/g, ' ')].slice(0, NAME_MAX).join('')
-  const head = `${MARKER_PREFIX}${adminHint}:`
+  const head = `${MARKER_PREFIX}${ownerHint}:${adminHint}:`
   let name = sliceBytes(wanted, Math.max(0, DESCR_MAX - byteLen(head) - 1 - byteLen(blob)))
   let descr = `${head}${name}:${blob}`
   let rosterIncluded = blob.length > 0
@@ -179,33 +201,25 @@ export async function buildMarker(m: {
 }
 
 /**
- * Parse a DESCR written by `buildMarker`, in either generation. Null when it is
- * not a group marker.
- *
- * Both are read because markers outlive builds: one is already sitting in a HEM
- * the moment the format changes, and a device that cannot read its own past
- * shows the user an empty group list.
+ * Parse a DESCR written by `buildMarker`. Null when it is not a marker this
+ * build wrote — including one from an older generation, which is the point of
+ * having a generation at all.
  */
 export function parseMarker(descr: string): MarkerFields | null {
-  const v1 = descr.startsWith(MARKER_PREFIX)
-  const legacy = !v1 && descr.startsWith(LEGACY_PREFIX)
-  if (!v1 && !legacy) return null
-  const sep = v1 ? ':' : ','
-  const parts = descr.slice((v1 ? MARKER_PREFIX : LEGACY_PREFIX).length).split(sep)
-  if (parts.length < 3) return null
-  const name = parts[1]
-  const blobS = parts.slice(2).join(sep) // the blob is last and base64url: no separator in it
+  if (!descr.startsWith(MARKER_PREFIX)) return null
+  const parts = descr.slice(MARKER_PREFIX.length).split(':')
+  if (parts.length < 4) return null
+  const name = parts[2]
+  const blobS = parts.slice(3).join(':') // the blob is last and base64url: no separator in it
 
-  let adminKid: string
-  if (v1) {
+  const hint = (field: string): string | null => {
     let raw: Uint8Array
-    try { raw = unb64url(parts[0]) } catch { return null }
-    if (raw.length !== 4) return null
-    adminKid = hex(raw)
-  } else {
-    adminKid = parts[0]
-    if (!adminKid || !isHexKid(adminKid)) return null
+    try { raw = unb64url(field) } catch { return null }
+    return raw.length === 4 ? hex(raw) : null
   }
+  const ownerKid = hint(parts[0])
+  const adminKid = hint(parts[1])
+  if (!ownerKid || !adminKid) return null
   const hints: string[] = []
   let crc = 0
   if (blobS) {
@@ -216,7 +230,7 @@ export function parseMarker(descr: string): MarkerFields | null {
     const o = n * 4
     crc = ((blob[o] << 24) | (blob[o + 1] << 16) | (blob[o + 2] << 8) | blob[o + 3]) >>> 0
   }
-  return { adminKid, name, hints, crc }
+  return { ownerKid, adminKid, name, hints, crc }
 }
 
 /**
