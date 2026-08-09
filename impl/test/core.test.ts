@@ -2,6 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { deriveRoom, hemIdentityFrom, hemContactBook, localContactBook, mergedContactBook, type Identity } from '../lib/core.ts'
 import { topicFromSecret, announceMacKey } from '../lib/rendezvous.ts'
+import { buildPeerDescr, buildSelfDescr, peerSearchPrefix, hemKid } from '../lib/descr.ts'
+import { unb64 } from '../lib/wc.ts'
 
 const P = { networkId: 'main', dateUTC: '2026-07-27' }
 const fakeId = (ss: Uint8Array): Identity => ({ handle: 'x', pub: '', ecdh: async () => ss })
@@ -41,28 +43,95 @@ test('hemIdentityFrom: ecdh uses base64 pubkey, or ecdhKid when a peer kid is gi
   assert.deepEqual(ext, { t: 'tok', kid: 'kid7', extKid: 'peerKid9' })
 })
 
-test('hemContactBook: add imports ETSEIC:peer descr + 32B pub; list parses name/pub; remove deletes', async () => {
+test('hemContactBook: writes the scoped record, reads only ours, and sees a collision coming', async () => {
   const PUB = 'UC88Dc7X8pxWQvcjUQDKAWXZqYycmJjnoZABKmwwnAM=' // a real 32-byte X25519 pub (base64)
-  const calls: any = {}
-  const hem = {
-    authorizePassword: async (_pw: any, scope: string) => 'tok:' + scope,
-    importPublicKey: async (_t: string, label: string, type: string, bytes: Uint8Array, descrB64: string) => {
-      calls.import = { label, type, len: bytes.length, descr: new TextDecoder().decode(Uint8Array.from(atob(descrB64), (c) => c.charCodeAt(0))) }
-      return { kid: 'K1' }
-    },
-    searchKeys: async (_t: string, pat: string) => { calls.search = pat; return [{ kid: 'K1', description: new TextEncoder().encode('ETSEIC:peer,bob,ik') }] },
-    getPubKey: async (_t: string, _kid: string) => ({ pubkey: PUB }),
-    deleteKey: async (_t: string, kid: string) => { calls.del = kid },
+  const OTHER = 'aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789AbCdEfg='
+  const MINE = '0123456789abcdef0123456789abcdef'
+  const THEIRS = 'fedcba9876543210fedcba9876543210'
+  const enc = (s: string) => new TextEncoder().encode(s)
+
+  const mk = (entries: any[]) => {
+    const calls: any = { searches: [] }
+    const hem = {
+      authorizePassword: async (_pw: any, scope: string) => 'tok:' + scope,
+      importPublicKey: async (_t: string, label: string, type: string, bytes: Uint8Array, descrB64: string) => {
+        calls.import = { label, type, len: bytes.length, descr: new TextDecoder().decode(Uint8Array.from(atob(descrB64), (c) => c.charCodeAt(0))) }
+        return { kid: 'K1' }
+      },
+      updateKey: async (_t: string, kid: string, label: string, descrB64: string) => {
+        calls.update = { kid, label, descr: new TextDecoder().decode(Uint8Array.from(atob(descrB64), (c) => c.charCodeAt(0))) }
+      },
+      // The device matches an anchored PREFIX — the stub must too, or the test
+      // would pass with scoping that does not work.
+      searchKeys: async (_t: string, pat: string) => {
+        calls.searches.push(pat)
+        return entries.filter((e) => new TextDecoder().decode(e.description).startsWith(pat))
+      },
+      getPubKey: async (_t: string, _kid: string) => ({ pubkey: PUB }),
+      deleteKey: async (_t: string, kid: string) => { calls.del = kid },
+    }
+    return { hem, calls }
   }
-  const book = hemContactBook(hem)
+
+  // --- ours and a second identity's contact live side by side in one device
+  const mineDescr = buildPeerDescr(MINE, 'bob')!
+  const theirsDescr = buildPeerDescr(THEIRS, 'carol')!
+  const { hem, calls } = mk([
+    { kid: 'K1', description: enc(mineDescr) },
+    { kid: 'K9', description: enc(theirsDescr) },
+    { kid: THEIRS, description: enc(buildSelfDescr('Work')) },
+  ])
+  const book = hemContactBook(hem, MINE)
+
   await book.add('bob', PUB)
-  assert.equal(calls.import.label, 'chat-peer-bob'); assert.equal(calls.import.type, 'CURVE25519')
-  assert.equal(calls.import.len, 32); assert.equal(calls.import.descr, 'ETSEIC:peer,bob,ik')
+  assert.equal(calls.import.label, 'Onchato-Peer-bob')
+  assert.equal(calls.import.type, 'CURVE25519')
+  assert.equal(calls.import.len, 32)
+  assert.equal(calls.import.descr, mineDescr, 'the record names the identity that owns it')
+
   const list = await book.list()
-  assert.equal(calls.search, 'ETSEIC:peer,')
-  assert.equal(list.length, 1); assert.equal(list[0].name, 'bob'); assert.equal(list[0].pub, PUB); assert.equal(list[0].kid, 'K1'); assert.equal(list[0].source, 'hem')
+  assert.ok(calls.searches.includes(peerSearchPrefix(MINE)), 'the list is scoped to this identity')
+  assert.equal(list.length, 1, "the other identity's contact is not ours to show")
+  assert.equal(list[0].name, 'bob'); assert.equal(list[0].pub, PUB); assert.equal(list[0].kid, 'K1'); assert.equal(list[0].source, 'hem')
+
+  await book.rename(list[0], 'Bob Nowak')
+  assert.equal(calls.update.label, 'Onchato-Peer-Bob Nowak')
+  assert.equal(calls.update.descr, buildPeerDescr(MINE, 'Bob Nowak'), 'both fields move together')
+
   await book.remove(list[0])
   assert.equal(calls.del, 'K1')
+})
+
+test('adding a key another identity already holds is refused BEFORE the device is touched', async () => {
+  // The device would refuse it anyway — KID indexes the key's content — but as a
+  // firmware error naming nothing. The client can predict it, because the KID is
+  // SHA-1 of the public key it is holding.
+  const OTHER_PUB = 'UC88Dc7X8pxWQvcjUQDKAWXZqYycmJjnoZABKmwwnAM='
+  const MINE = '0123456789abcdef0123456789abcdef'
+  const THEIRS = 'fedcba9876543210fedcba9876543210'
+  const enc = (s: string) => new TextEncoder().encode(s)
+  const otherKid = await hemKid(unb64(OTHER_PUB))
+
+  let imported = false
+  const hem = {
+    authorizePassword: async () => 'tok',
+    importPublicKey: async () => { imported = true; return { kid: 'X' } },
+    searchKeys: async (_t: string, pat: string) => [
+      { kid: otherKid, description: enc(buildPeerDescr(THEIRS, 'carol')!) },
+      { kid: THEIRS, description: enc(buildSelfDescr('Work')) },
+    ].filter((e) => new TextDecoder().decode(e.description).startsWith(pat)),
+  }
+
+  await assert.rejects(
+    () => hemContactBook(hem, MINE).add('carol', OTHER_PUB),
+    (e: any) => {
+      assert.equal(e.name, 'ContactHeldByOtherIdentity')
+      assert.equal(e.ownerKid, THEIRS)
+      assert.equal(e.ownerHandle, 'Work', 'the message can name the identity, not just a hex blob')
+      return true
+    },
+  )
+  assert.equal(imported, false, 'nothing was written')
 })
 
 test('mergedContactBook: add routes by persistent, remove by source, list concatenates', async () => {

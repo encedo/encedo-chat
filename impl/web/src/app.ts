@@ -256,7 +256,7 @@ $('go').addEventListener('click', async () => {
       const { kid } = await hem.createKeyPair(gen, `chat-ik-${handle}`, 'CURVE25519', btoa(`ETSEIC:self,${handle},ik,${iat}`))
       const use = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
       const { pubkey } = await hem.getPubKey(use, kid)
-      await enterApp(hemIdentityFrom(hem, kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM', kid, hemGkBackend(hem, kid))
+      await enterApp(hemIdentityFrom(hem, kid, handle, pubkey), mergedContactBook(hemContactBook(hem, kid), makeLocalBook(handle, localStorage)), 'HEM', kid, hemGkBackend(hem, kid))
     } else {
       const listTok = await hem.authorizePassword(pass, 'keymgmt:list')
       const keys: any[] = await hem.searchKeys(listTok, 'ETSEIC:self,')
@@ -264,7 +264,7 @@ $('go').addEventListener('click', async () => {
       const key = keys[0]; const handle = parseHandle(key.description)
       const use = await hem.authorizePassword(null, `keymgmt:use:${key.kid}`)
       const { pubkey } = await hem.getPubKey(use, key.kid)
-      await enterApp(hemIdentityFrom(hem, key.kid, handle, pubkey), mergedContactBook(hemContactBook(hem), makeLocalBook(handle, localStorage)), 'HEM', key.kid, hemGkBackend(hem, key.kid))
+      await enterApp(hemIdentityFrom(hem, key.kid, handle, pubkey), mergedContactBook(hemContactBook(hem, key.kid), makeLocalBook(handle, localStorage)), 'HEM', key.kid, hemGkBackend(hem, key.kid))
     }
   } catch (e: any) { setMsg('msg', tr('Błąd: ') + (e?.message ?? e), 'err') }
   finally { const b = $('go') as HTMLButtonElement; b.disabled = false; b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj' }

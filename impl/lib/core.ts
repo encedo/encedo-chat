@@ -22,6 +22,9 @@ import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
 import { watchSelfSession, type SelfWatch } from './selfsession.ts'
 import { watchPresenceRotating, rendezvousDay, type PresenceWatch } from './presence.ts'
 import { GroupManager, type AdminGk, type GkBackend } from './group.ts'
+import {
+  SELF_PREFIX, buildPeerDescr, parsePeerDescr, parseSelfDescr, peerSearchPrefix, peerLabel, hemKid,
+} from './descr.ts'
 import { joinGroup, type GroupRoom, type GroupRoomOpts } from './grouproom.ts'
 import { b64, unb64 } from './wc.ts'
 
@@ -143,19 +146,67 @@ export interface ContactBook {
   rename(c: Contact, name: string): Promise<void>
 }
 
-const td = new TextDecoder()
-const peerNameFromDescr = (d: Uint8Array | null) => (d ? td.decode(d).split('\0')[0].split(',')[1] : undefined) ?? '(?)'
+/**
+ * The contact's key is already in this HEM, under a DIFFERENT identity.
+ *
+ * A device refuses to hold one public key twice whatever DESCR it sits under —
+ * `KID` indexes the key's *content* — so a contact belongs to exactly one
+ * identity per device (§4 Proposal). Raised BEFORE the device is touched, so the
+ * app can say who holds them instead of surfacing an import failure.
+ */
+export class ContactHeldByOtherIdentity extends Error {
+  // Fields written out rather than declared as constructor parameters: Node
+  // strips types, it does not compile them, and a parameter property is syntax
+  // it refuses outright.
+  readonly ownerKid: string
+  readonly ownerHandle: string | null
+  readonly contactKid: string
+  constructor(ownerKid: string, ownerHandle: string | null, contactKid: string) {
+    super(`this key is already a contact of ${ownerHandle ?? ownerKid.slice(0, 8)}`)
+    this.name = 'ContactHeldByOtherIdentity'
+    this.ownerKid = ownerKid
+    this.ownerHandle = ownerHandle
+    this.contactKid = contactKid
+  }
+}
+
+const asB64 = (s: string) => b64(new TextEncoder().encode(s)) // DESCRs go to the HEM base64'd
 
 /**
- * HEM-backed contact book: peers live in the HSM as CURVE25519 public keys with
- * DESCR `ETSEIC:peer,<name>,ik` — HSM-anchored + portable (same HEM elsewhere =
- * same contacts). The pubkey isn't returned by search, so it's fetched per kid.
+ * HEM-backed contact book for ONE identity: peers live in the HSM as CURVE25519
+ * public keys under `ETSEIC:peer1,<ownerKid>,<name>` — HSM-anchored + portable
+ * (same HEM elsewhere = same contacts), and scoped, because `key_search` matches
+ * an anchored prefix and `ownerKid` precedes the name.
+ *
+ * `ownerKid` is the KID of this identity's own IK entry: an id that already
+ * exists, is derived from the key's content, and therefore needs neither storage
+ * nor a migration to be portable.
+ *
+ * The pubkey isn't returned by search, so it's fetched per kid.
  */
-export function hemContactBook(hem: any): ContactBook {
+export function hemContactBook(hem: any, ownerKid: string): ContactBook {
+  /** Who owns the key with this KID, if anyone — one broad search, add path only. */
+  const findOwner = async (contactKid: string): Promise<{ ownerKid: string } | null> => {
+    const listTok = await hem.authorizePassword(null, 'keymgmt:list')
+    const all: any[] = await hem.searchKeys(listTok, peerSearchPrefix())
+    const hit = all.find((k) => String(k.kid).toLowerCase() === contactKid)
+    const owner = hit && parsePeerDescr(hit.description)?.ownerKid
+    return owner ? { ownerKid: owner } : null
+  }
+  /** The handle of an identity on this device, for the message. Null if it has none. */
+  const handleOf = async (kid: string): Promise<string | null> => {
+    try {
+      const listTok = await hem.authorizePassword(null, 'keymgmt:list')
+      const selves: any[] = await hem.searchKeys(listTok, SELF_PREFIX)
+      const me = selves.find((k) => String(k.kid).toLowerCase() === kid)
+      return me ? parseSelfDescr(me.description)?.handle ?? null : null
+    } catch { return null }
+  }
+
   return {
     async list() {
       const listTok = await hem.authorizePassword(null, 'keymgmt:list')
-      const keys: any[] = await hem.searchKeys(listTok, 'ETSEIC:peer,')
+      const keys: any[] = await hem.searchKeys(listTok, peerSearchPrefix(ownerKid))
       const out: Contact[] = []
       // one getPubKey per contact — current FW's api/search doesn't return pubkeys.
       // TODO(newer FW): api/search returns the public keys directly → drop this loop
@@ -163,14 +214,23 @@ export function hemContactBook(hem: any): ContactBook {
       for (const k of keys) {
         const useTok = await hem.authorizePassword(null, `keymgmt:use:${k.kid}`)
         const { pubkey } = await hem.getPubKey(useTok, k.kid)
-        out.push({ name: peerNameFromDescr(k.description), pub: pubkey, kid: k.kid, source: 'hem' })
+        out.push({ name: parsePeerDescr(k.description)?.name || '(?)', pub: pubkey, kid: k.kid, source: 'hem' })
       }
       return out
     },
     async add(name: string, pubB64: string) {
+      const descr = buildPeerDescr(ownerKid, name)
+      if (!descr) throw new Error('add: this identity has no usable KID')
+      // The collision is predictable without touching the device, because the KID
+      // is SHA-1 of the very public key we are holding. Checking first turns a
+      // firmware error into a sentence about which identity already has them.
+      const contactKid = await hemKid(unb64(pubB64))
+      const held = await findOwner(contactKid)
+      if (held && held.ownerKid !== ownerKid) {
+        throw new ContactHeldByOtherIdentity(held.ownerKid, await handleOf(held.ownerKid), contactKid)
+      }
       const impTok = await hem.authorizePassword(null, 'keymgmt:imp')
-      const descrB64 = b64(new TextEncoder().encode(`ETSEIC:peer,${name},ik`))
-      await hem.importPublicKey(impTok, `chat-peer-${name}`, 'CURVE25519', unb64(pubB64), descrB64)
+      await hem.importPublicKey(impTok, peerLabel(name), 'CURVE25519', unb64(pubB64), asB64(descr))
     },
     async remove(c: Contact) {
       if (!c.kid) return
@@ -179,9 +239,13 @@ export function hemContactBook(hem: any): ContactBook {
     },
     async rename(c: Contact, name: string) {
       if (!c.kid) throw new Error('rename: this contact has no HEM key')
+      const descr = buildPeerDescr(ownerKid, name)
+      if (!descr) throw new Error('rename: this identity has no usable KID')
       const updTok = await hem.authorizePassword(null, 'keymgmt:upd')
-      const descrB64 = b64(new TextEncoder().encode(`ETSEIC:peer,${name},ik`))
-      await hem.updateKey(updTok, c.kid, `chat-peer-${name}`.slice(0, 32), descrB64)
+      // Both fields, always: the label is a caption the device shows and the
+      // DESCR is what the client reads, and a rename that moved only one of them
+      // would leave the two disagreeing about the same contact.
+      await hem.updateKey(updTok, c.kid, peerLabel(name), asB64(descr))
     },
   }
 }
