@@ -3073,6 +3073,8 @@ async function addRestoredGroup(snap: any, name: string): Promise<string | null>
  * rather than asserting the unkind one.
  */
 const RECOVER_TIMEOUT_MS = 45_000
+/** How long after sign-in to go looking for groups the browser has forgotten. */
+const RECOVERY_DELAY_MS = 20_000
 async function recoverGroupsFromDevice() {
   if (!client || !session?.kid) return
   let found: Awaited<ReturnType<typeof client.groups.deviceGroups>> = []
@@ -3151,7 +3153,14 @@ async function restoreGroups() {
   // The cache is what this browser remembers; the device is what the HEM knows.
   // Anything in the second and not the first is a group we have to be let back
   // into — which needs contacts loaded, so it runs after them.
-  void refreshContacts().then(() => recoverGroupsFromDevice())
+  //
+  // DELAYED, because it is recovery and not the way in. Reading the marker list
+  // costs a key search plus a token and a getPubKey per group — 4.2 s of device
+  // time in a measured sign-in, spent competing with the room the user is
+  // waiting for, and usually to confirm there is nothing to do. A group that IS
+  // missing needs a round of `group-skd-req` over a 1:1 anyway, so half a minute
+  // later changes nothing about when it comes back.
+  setTimeout(() => { void refreshContacts().then(() => recoverGroupsFromDevice()) }, RECOVERY_DELAY_MS)
 }
 
 /** One-time upgrade: a B1 plaintext blob (ec-groups-<handle>) → encrypt each group
