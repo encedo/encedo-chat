@@ -20,6 +20,27 @@ import { joinGroup, type GroupRoom } from '../lib/grouproom.ts'
 const P = { networkId: 'grepair', dateUTC: '2026-08-09' }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
+/**
+ * Wait for a condition instead of for a duration.
+ *
+ * These tests used fixed 30 ms sleeps, which pass alone and fail in the full
+ * suite: `node --test` runs files in parallel, and an in-memory hub plus four
+ * WebCrypto operations can take longer than that on a contended machine. A flaky
+ * test is worse than a slow one — it teaches everyone to re-run rather than to
+ * look.
+ *
+ * Asserting that something did NOT happen still needs a settle period; there is
+ * no condition to wait for. Those keep a sleep, and a generous one.
+ */
+async function until(what: string, cond: () => boolean, ms = 4_000): Promise<void> {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    if (cond()) return
+    await sleep(5)
+  }
+  throw new Error(`timed out after ${ms} ms waiting for: ${what}`)
+}
+
 async function softId(): Promise<GroupId> {
   const k = await generateX25519()
   return { pub: b64(k.pub), ecdh: async (peerPubB64: string) => k.dh(unb64(peerPubB64)) }
@@ -92,7 +113,8 @@ test('a member without one sender key is deaf to that sender ONLY, and says so',
   // peers[2] never got peers[1]'s sender key.
   const { peers } = await makeGroup(3, [[1, 2]])
   await peers[1].room!.sendText('slyszycie mnie?')
-  await sleep(30)
+  await until('the healthy direction to deliver, and the deaf one to ask',
+    () => peers[0].recv.length > 0 && peers[2].asked.length > 0)
 
   // The healthy direction is untouched — which is exactly why this is invisible
   // in use: the group works, for everyone except one pair, in one direction.
@@ -103,14 +125,15 @@ test('a member without one sender key is deaf to that sender ONLY, and says so',
 
   // The other direction still works, so nothing about the deaf member looks broken.
   await peers[2].room!.sendText('ja slysze')
-  await sleep(30)
+  await until('the other direction still works', () => peers[1].recv.length > 0)
   assert.deepEqual(peers[1].recv, [{ from: peers[2].id.pub, body: 'ja slysze' }])
 })
 
 test('a burst of unreadable frames costs ONE request, not one per frame', async () => {
   const { peers } = await makeGroup(3, [[1, 2]])
   for (let i = 0; i < 5; i++) await peers[1].room!.sendText('msg ' + i)
-  await sleep(60)
+  await until('the first ask', () => peers[2].asked.length > 0)
+  await sleep(120) // and then a quiet period: the claim is that NO second ask follows
   assert.equal(peers[2].recv.length, 0)
   assert.deepEqual(peers[2].asked, [peers[1].id.pub], 'rate-limited to one ask per member')
 })
@@ -118,7 +141,7 @@ test('a burst of unreadable frames costs ONE request, not one per frame', async 
 test('handing the key over closes it — on the LIVE room, with no re-join', async () => {
   const { gid, peers } = await makeGroup(3, [[1, 2]])
   await peers[1].room!.sendText('pierwsza')
-  await sleep(30)
+  await until('the sender to be heard by the member that CAN read it', () => peers[0].recv.length > 0)
   assert.equal(peers[2].recv.length, 0)
 
   // What answering the request does: the sender builds an SKD for the asker and
@@ -126,7 +149,7 @@ test('handing the key over closes it — on the LIVE room, with no re-join', asy
   // the key up without being torn down — a repair must not cost a re-join.
   await peers[2].mgr.applySkd(peers[1].id.pub, (await peers[1].mgr.skdFor(gid, peers[2].id.pub))!)
   await peers[1].room!.sendText('druga')
-  await sleep(30)
+  await until('the repaired member to open it', () => peers[2].recv.length > 0)
   assert.deepEqual(peers[2].recv, [{ from: peers[1].id.pub, body: 'druga' }])
 })
 
@@ -138,7 +161,7 @@ test('a re-sent SKD carries the counter its chain is at', async () => {
   assert.equal((await peers[1].mgr.skdFor(gid, peers[2].id.pub))!.ctr, 0, 'nothing sent yet')
   await peers[1].room!.sendText('raz')
   await peers[1].room!.sendText('dwa')
-  await sleep(30)
+  await until('both to reach a member', () => peers[0].recv.length === 2)
   assert.equal((await peers[1].mgr.skdFor(gid, peers[2].id.pub))!.ctr, 2, 'two messages in, the chain is at 2')
 })
 
@@ -155,14 +178,19 @@ test('the request is never provoked by anyone who is not an authenticated member
   const tap = (evt: any) => { if (evt.detail.topic === topic) real ??= evt.detail.data }
   peers[0].node.services.pubsub.addEventListener('message', tap)
   await peers[1].room!.sendText('prawdziwa')
-  await sleep(30)
+  // Wait for BOTH: the tap on peers[0] fires synchronously as the frame is
+  // delivered, while peers[2] verifies a MAC before it can ask — so waiting only
+  // for the capture cleared `asked` a moment before the genuine ask arrived, and
+  // the forged frame then took the blame for it. That was this test's own race.
+  await until('the real frame captured AND the genuine ask recorded',
+    () => real !== null && peers[2].asked.length > 0)
   assert.ok(real, 'captured a real frame to tamper with')
   peers[2].asked.length = 0 // that genuine frame legitimately asked; start clean
 
   const forged = real!.slice()
   forged[forged.length - 40] ^= 0xff // inside the MAC/ciphertext region
   await peers[0].node.services.pubsub.publish(topic, forged)
-  await sleep(30)
+  await sleep(200) // absence has no condition to wait for
   assert.deepEqual(peers[2].asked, [], 'a frame that fails our MAC asks for nothing')
   assert.equal(peers[2].recv.length, 0)
 })

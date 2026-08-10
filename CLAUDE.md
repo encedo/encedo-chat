@@ -357,6 +357,29 @@ handle to the identity's KID (§4) and `browser-test` went on seeding
 harness now derives the id with the app's own `hemKid`, so the two cannot drift.
 Same rule as the login flow: change it and change the harness in the same commit.
 
+**A test that depends on an ORDER needs a margin, not a plausible number.**
+Two flakes, both only in the full suite (`node --test` runs files in parallel)
+and both green when their file runs alone, so both invited a re-run rather than
+a look:
+
+- `room-eh2.test.ts` holds B's acks back so A gives up first — 60 ms re-send +
+  200 ms grace ≈ 260 ms, against a 900 ms hold. That is 640 ms of slack, and a
+  loaded machine (parallel webpack builds, GC) stalls the loop for longer: on
+  resume the overdue ack fires first, the message is confirmed, `lost` never
+  happens, and the wait times out with the give-up path looking broken. The hold
+  is 2.5 s now. `until` also prints the condition's own source, because "timed
+  out waiting for the condition" names neither the fact nor the test.
+- `group-repair.test.ts` cleared the "who asked" list once the frame was
+  captured — but the tap fires synchronously on delivery while the receiver
+  verifies a MAC first, so the genuine ask landed *after* the clear and the
+  forged frame took the blame. It now waits for both. Fixed sleeps in that file
+  became `until(what, cond)` at the same time.
+
+The shape to watch for: a test asserting that X happens before Y, with X and Y
+set by two timers whose gap is smaller than a stall. Reproducing it needs the
+real cause — CPU busy-loops do **not** do it, because competing for CPU is not
+the same as stalling one process's event loop.
+
 **Never pipe `browser-test` through `tail`** — it buffers and hides all progress;
 redirect to a file instead. And watch what it leaves behind: leaked browsers from
 repeated runs are what once exhausted this machine (`pgrep -f chrome`, `free -m`).

@@ -69,7 +69,10 @@ function hub(
 const until = async (cond: () => boolean, ms = 5000) => {
   const t0 = Date.now()
   while (!cond()) {
-    if (Date.now() - t0 > ms) throw new Error('timed out waiting for the condition')
+    // The condition's own source is the description — a timeout here used to say
+    // only "timed out waiting for the condition", which in a suite this size
+    // names neither the fact that was missing nor the test that wanted it.
+    if (Date.now() - t0 > ms) throw new Error(`timed out after ${ms} ms waiting for: ${cond}`)
     await new Promise((r) => setTimeout(r, 10))
   }
 }
@@ -442,7 +445,15 @@ test('a confirmation that arrives after we gave up corrects the ⚠', async (t) 
     // Hold B's answers back, but only once the conversation is running: the
     // handshake and the first exchange have to get through for A to know that
     // this peer confirms at all.
-    delayMs: (d, from) => (holdAcks && from === 'peer-b' && d[0] !== 0x01 && d[0] !== 0x02 && d[0] !== 0x03 ? 900 : 0),
+    // 2.5 s, not the 900 ms this started with. What the test needs is an ORDER —
+    // A must give up (60 ms re-send, then a 200 ms grace: ~260 ms) BEFORE the ack
+    // lands — and 900 ms left only ~640 ms of slack. A loaded machine running the
+    // whole suite in parallel stalls the loop for longer than that, the overdue
+    // ack then fires first, the message is confirmed, and `lost` never happens:
+    // the scenario silently does not occur and the wait below times out with the
+    // give-up path looking broken. The margin is the fix; the numbers below are
+    // deliberately far apart.
+    delayMs: (d, from) => (holdAcks && from === 'peer-b' && d[0] !== 0x01 && d[0] !== 0x02 && d[0] !== 0x03 ? 2_500 : 0),
     retry: { retryMs: [60], giveUpMs: 200, maxInflightMs: 5_000 },
     onUndeliveredA: (id) => lost.push(id),
     onLateDeliveredA: (id, ms) => late.push([id, ms]),
@@ -458,7 +469,7 @@ test('a confirmation that arrives after we gave up corrects the ⚠', async (t) 
   await until(() => lost.includes(second), 3000)
   assert.deepEqual(late, [], 'nothing is late yet — it is still ⚠')
 
-  await until(() => late.length === 1, 4000)
+  await until(() => late.length === 1, 6000)
   assert.equal(late[0][0], second, 'the late confirmation lands on the message it belongs to')
   assert.ok(late[0][1] >= 200, 'and it reports how long that took')
   assert.equal(got.length, 2, 'the peer did have it all along')
