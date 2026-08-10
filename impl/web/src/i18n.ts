@@ -147,6 +147,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Link': 'Link',
     'Link skopiowany': 'Link copied',
     'Lista węzłów': 'Node list',
+    'Loguję jako {name}…': 'Signing in as {name}…',
     'Lokalnie (ta przeglądarka)': 'Locally (this browser)',
     'Masz już kontakt „{name}"': 'You already have a contact called “{name}”',
     'Masz już konto?': 'Already have an account?',

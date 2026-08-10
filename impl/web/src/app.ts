@@ -441,6 +441,9 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
  * indistinguishable and picking the wrong one is silent — same contacts missing,
  * same messages not arriving, no error anywhere.
  */
+/** Set while the picker is open; whoever finishes the sign-in takes it away. */
+let closeIdentityModal: () => void = () => {}
+
 function showIdentityPicker(ids: Array<{ kid: string; handle: string }>, onPick: (id: { kid: string; handle: string }) => void) {
   const box = $('identity-list')
   box.innerHTML = ''
@@ -455,17 +458,32 @@ function showIdentityPicker(ids: Array<{ kid: string; handle: string }>, onPick:
     kid.className = 'id-kid'
     kid.textContent = id.kid.slice(0, 8)
     row.append(name, kid)
-    row.addEventListener('click', () => { close(); onPick(id) })
+    row.addEventListener('click', () => {
+      // NOT closed here. Signing in takes a few seconds of device time, and
+      // closing would uncover the login form — password still filled, Sign-in
+      // button live — which reads as "the click did nothing". The modal stays and
+      // becomes the progress, and `enterApp` takes it away with the login screen.
+      box.innerHTML = ''
+      const busy = document.createElement('div')
+      busy.className = 'hint'
+      busy.textContent = tr('Loguję jako {name}…', { name: id.handle })
+      box.appendChild(busy)
+      cancel.hidden = true
+      onPick(id)
+    })
     box.appendChild(row)
   }
 
   const cancel = $('identity-cancel')
+  cancel.hidden = false
   const close = () => {
     $('scrim').classList.remove('open'); $('identity-modal').classList.remove('open')
     cancel.removeEventListener('click', onCancel)
     $('scrim').removeEventListener('click', onCancel)
     document.removeEventListener('keydown', onKey)
+    closeIdentityModal = () => {}
   }
+  closeIdentityModal = close
   // Cancel RELOADS rather than merely closing. By this point we hold an
   // authorised token and the key derived from the password; a user who backs out
   // means "not this identity" or "not now", and a reload is the only ending that
@@ -525,7 +543,7 @@ $('go').addEventListener('click', async () => {
       if (ids.length === 1) { await signInAs(hem, ids[0]); return }
       showIdentityPicker(ids, (chosen) => { void signInAs(hem, chosen) })
     }
-  } catch (e: any) { setMsg('msg', tr('Błąd: ') + (e?.message ?? e), 'err') }
+  } catch (e: any) { closeIdentityModal(); setMsg('msg', tr('Błąd: ') + (e?.message ?? e), 'err') }
   finally {
     const b = $('go') as HTMLButtonElement
     b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj'
@@ -906,6 +924,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     ecLog(`session failed to start: ${e?.message ?? e}`)
     toast(tr('Brak połączenia z przekaźnikiem — odśwież stronę'))
   })
+  closeIdentityModal() // the picker, if one was open, goes with the login screen
   $('login').hidden = true; $('app').hidden = false
   stopHemPoll() // the login screen is gone; nothing left to watch for
   // Said HERE and not at boot: an empty contact list is what the user is about
