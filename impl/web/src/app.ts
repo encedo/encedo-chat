@@ -232,6 +232,79 @@ async function fingerprint(pubB64: string): Promise<string> {
 const HEM_VERSION_MS = 2_000    // the reachability probe: is a device there at all
 const HEM_RETRY_MS = 3_000      // how long to wait after a probe that found nothing
 const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talked to
+
+/**
+ * `?debug=1`: narrate what is being asked of the device, in the words someone
+ * debugging would use — "access token for scope keymgmt:list", not "POST /api/…".
+ *
+ * Every line carries the `[HEM]` prefix so one filter isolates the whole
+ * conversation with the device.
+ *
+ * **Nothing secret is ever printed.** The arguments are picked per method, not
+ * dumped: `authorizePassword` shows its SCOPE and never its first argument,
+ * imports show a label and never the bytes, and no token appears anywhere. The
+ * SDK's own `debug` flag prints headers and bodies, which is why it is not what
+ * this turns on.
+ *
+ * The wrapper is a Proxy that applies each method to the TARGET rather than to
+ * itself. That is not style: the SDK keeps its state in `#private` fields, and a
+ * method invoked with the proxy as `this` cannot read them.
+ */
+const HEM_TRACE = new URLSearchParams(location.search).has('debug')
+const HEM_SLOW_MS = 500
+const kidish = (v: any) => typeof v === 'string' ? v.slice(0, 12) + (v.length > 12 ? '…' : '') : '?'
+const HEM_CALLS: Record<string, (a: any[]) => string> = {
+  hemCheckin: () => 'checkin (clock sync + connection test)',
+  getVersion: () => 'device version',
+  getStatus: () => 'device status',
+  getAttestation: () => 'device attestation',
+  authorizePassword: (a) => `access token for scope ${a[1]}`,
+  authorizeRemote: (a) => `remote access token for scope ${a[0]}`,
+  listKeys: () => 'key list',
+  searchKeys: (a) => `key search "${a[1]}"`,
+  getPubKey: (a) => `public key of KID=${kidish(a[1])}`,
+  createKeyPair: (a) => `new ${a[2]} key pair, label "${a[1]}"`,
+  importPublicKey: (a) => `import of ${a[2]} public key, label "${a[1]}"`,
+  updateKey: (a) => `update of KID=${kidish(a[1])} → label "${a[2]}"`,
+  deleteKey: (a) => `delete of KID=${kidish(a[1])}`,
+  ecdh: (a) => `ECDH: KID=${kidish(a[1])} × a peer public key`,
+  ecdhKid: (a) => `ECDH: KID=${kidish(a[1])} × KID=${kidish(a[2])}`,
+  deriveKey: (a) => `derived key, label "${a[1]}"`,
+}
+function traceHem(hem: any): any {
+  if (!HEM_TRACE) return hem
+  const say = (msg: string, style = 'color:#8a6d3b') => console.log(`%c[HEM] %c${msg}`, 'color:#b58900;font-weight:600', style)
+  return new Proxy(hem, {
+    get(target, prop, recv) {
+      const v = Reflect.get(target, prop, recv)
+      const describe = typeof prop === 'string' ? HEM_CALLS[prop] : undefined
+      if (typeof v !== 'function' || !describe) return v
+      return (...args: any[]) => {
+        let what: string
+        try { what = describe(args) } catch { what = String(prop) }
+        say(`Req ${what}`)
+        const t0 = performance.now()
+        // Applied to `target`: the SDK reads #private fields, which a method
+        // called with the proxy as `this` cannot see.
+        const out = v.apply(target, args)
+        if (!out || typeof out.then !== 'function') return out
+        return out.then(
+          (r: any) => {
+            const ms = Math.round(performance.now() - t0)
+            // Only the slow ones: a line per answer would bury the questions.
+            if (ms >= HEM_SLOW_MS) say(`… ${what} — ${ms} ms`, 'color:#a08a5b')
+            return r
+          },
+          (e: any) => {
+            say(`✗ ${what} — ${e?.code ?? e?.name ?? 'error'}: ${e?.message ?? e}`, 'color:#b23c26')
+            throw e
+          },
+        )
+      }
+    },
+  })
+}
+
 /**
  * Two endpoints, two questions, asked in that order.
  *
@@ -252,8 +325,8 @@ const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talk
  * once. That was live here, and the fix belongs in the transport — so it is now
  * in the SDK and this file no longer issues its own requests.
  */
-const probeVersion = (url: string, ms = HEM_VERSION_MS) => new HEM(url).getVersion({ timeoutMs: ms })
-const probeStatus = (url: string, ms = HEM_STATUS_MS) => new HEM(url).getStatus({ timeoutMs: ms })
+const probeVersion = (url: string, ms = HEM_VERSION_MS) => traceHem(new HEM(url)).getVersion({ timeoutMs: ms })
+const probeStatus = (url: string, ms = HEM_STATUS_MS) => traceHem(new HEM(url)).getStatus({ timeoutMs: ms })
 
 /** Ran out of time, as opposed to answering with a refusal or not being there. */
 const isTimeout = (e: any) => e?.code === 'timeout' || e?.code === 'aborted'
@@ -428,7 +501,9 @@ $('go').addEventListener('click', async () => {
       )
       return // the button is re-enabled in `finally`, so the operation can simply be repeated
     }
-    const hem = new HEM(url); await hem.hemCheckin()
+    // Wrapped once here, so every later call — core's contact book, the group
+    // backend, every ECDH — narrates itself without any of them knowing.
+    const hem = traceHem(new HEM(url)); await hem.hemCheckin()
     if (mode === 'register') {
       const handle = val('handle'); if (!handle) { setMsg('msg', tr('Podaj handle.'), 'err'); return }
       const gen = await hem.authorizePassword(pass, 'keymgmt:gen')
