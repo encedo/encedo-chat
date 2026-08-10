@@ -232,53 +232,31 @@ async function fingerprint(pubB64: string): Promise<string> {
 const HEM_VERSION_MS = 2_000    // the reachability probe: is a device there at all
 const HEM_RETRY_MS = 3_000      // how long to wait after a probe that found nothing
 const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talked to
-class HemTimeout extends Error {
-  constructor(what: string, ms: number) { super(`${what} did not answer in ${ms} ms`); this.name = 'HemTimeout' }
-}
-
-/**
- * A probe that is genuinely CANCELLED when its time is up, not merely stopped
- * being waited for.
- *
- * This is why it does not go through the SDK. Racing an SDK call against a timer
- * abandons the promise and leaves the HTTP request open, so a login screen
- * watching an unplugged device accumulated one hanging request per tick — and
- * the moment the device appeared, a minute of them completed at once, ahead of
- * everything the page actually wanted to do. `#req` builds its own fetch options
- * and takes no signal, and `hem-sdk-js` is a submodule we do not fork, so the
- * two unauthenticated GETs the login screen needs are issued directly. Drop this
- * the day the SDK accepts a signal.
- *
- * `AbortSignal.timeout` rejects with a DOMException, so it is normalised to the
- * one error type the callers already tell apart from a refusal.
- */
-async function hemGet(url: string, path: string, ms: number): Promise<any> {
-  const base = url.replace(/\/+$/, '')
-  try {
-    const res = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(ms), headers: { Accept: 'application/json' } })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    return await res.json()
-  } catch (e: any) {
-    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') throw new HemTimeout(path, ms)
-    throw e
-  }
-}
-
 /**
  * Two endpoints, two questions, asked in that order.
  *
- * `/api/system/version` answers "is a device there at all". It is unauthenticated
- * and cheap, so it is what the badge watches: an answer turns it green and
- * unlocks Sign in, and nothing else is attempted until it does.
+ * `getVersion` answers "is a device there at all". It is unauthenticated and
+ * cheap, so it is what the badge watches: an answer turns it green and unlocks
+ * Sign in, and nothing else is attempted until it does.
  *
- * `/api/system/status` answers "is it in a state to be talked to", and is read
- * once the user commits — after the badge is green, before anything is
- * authorised. Splitting them this way keeps the thing that runs on a timer as
- * small as it can be, and leaves the heavier question for the moment somebody
- * actually asks for a session.
+ * `getStatus` answers "is it in a state to be talked to", and is read once the
+ * user commits — after the badge is green, before anything is authorised.
+ * Splitting them this way keeps the thing that runs on a timer as small as it
+ * can be, and leaves the heavier question for the moment somebody actually asks
+ * for a session.
+ *
+ * `timeoutMs` genuinely CANCELS the request rather than stopping the wait for
+ * it, which is the whole point of the budget: racing a promise against a timer
+ * leaves the socket open, and a screen polling an absent device that way piles
+ * up one connection per attempt until the device appears and they all land at
+ * once. That was live here, and the fix belongs in the transport — so it is now
+ * in the SDK and this file no longer issues its own requests.
  */
-const probeVersion = (url: string, ms = HEM_VERSION_MS) => hemGet(url, '/api/system/version', ms)
-const probeStatus = (url: string, ms = HEM_STATUS_MS) => hemGet(url, '/api/system/status', ms)
+const probeVersion = (url: string, ms = HEM_VERSION_MS) => new HEM(url).getVersion({ timeoutMs: ms })
+const probeStatus = (url: string, ms = HEM_STATUS_MS) => new HEM(url).getStatus({ timeoutMs: ms })
+
+/** Ran out of time, as opposed to answering with a refusal or not being there. */
+const isTimeout = (e: any) => e?.code === 'timeout' || e?.code === 'aborted'
 
 /**
  * Sign-in stays disabled until the device has answered `/status`.
@@ -326,7 +304,7 @@ async function refreshStatus(opts: { quiet?: boolean } = {}) {
   } catch (e: any) {
     dot.className = 'dot bad'
     setHemReady(false)
-    hint.textContent = e?.name === 'HemTimeout' ? tr('HEM nie odpowiada (timeout)') : tr('HEM nieosiągalny (adres / CORS)')
+    hint.textContent = isTimeout(e) ? tr('HEM nie odpowiada (timeout)') : tr('HEM nieosiągalny (adres / CORS)')
     return false
   } finally { probing = false }
 }
@@ -440,7 +418,7 @@ $('go').addEventListener('click', async () => {
       $('status-dot').className = 'dot ok'
     } catch (e: any) {
       $('status-dot').className = 'dot bad'
-      const timedOut = e?.name === 'HemTimeout'
+      const timedOut = isTimeout(e)
       await ask(
         timedOut ? tr('HEM nie odpowiedział') : tr('Nie mogę połączyć się z HEM'),
         timedOut
