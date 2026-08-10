@@ -139,6 +139,13 @@
   .avatar-cluster .ga:first-child{margin-left:0}
   .avatar-cluster .ga.more{color:var(--muted);background:var(--bg)}
   .avatar-cluster.sm .ga{min-width:20px;height:18px;padding:0 4px;border-radius:6px;font-size:9px;margin-left:-6px}
+  /* MUST stay AFTER the .sm rule. Both selectors weigh the same, so source order
+     decides — and the `.ga:first-child` reset above sits BEFORE `.sm`, which
+     therefore re-applied the negative margin to the FIRST badge and pushed it out
+     of the row, where it was clipped. Visible on the group list and not in the
+     chat header, because only the list is `.sm`. Third time this file has been
+     bitten by equal specificity; see also #btn-back. */
+  .avatar-cluster.sm .ga:first-child{margin-left:0}
   /* Opened from the group list it is anchored to a sidebar row, which is in a
      different stacking context than the chat header — so it goes fixed and is
      positioned inline against the anchor's rect. */
@@ -399,8 +406,7 @@
   .label-row label{margin:0}
   .bytes-left{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;flex-shrink:0}
   .bytes-left.full{color:var(--err)}
-  #id-picker{display:flex;flex-direction:column;gap:6px;margin-top:10px}
-  #id-picker[hidden]{display:none}
+  #identity-list{display:flex;flex-direction:column;gap:6px;margin-top:4px;max-height:min(50vh,320px);overflow-y:auto}
   .id-opt{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;
     padding:9px 11px;border:1px solid var(--border);border-radius:8px;background:var(--bg);
     color:var(--text);font-size:14px;font-family:inherit;cursor:pointer;text-align:left}
@@ -545,8 +551,6 @@
       <input id="pass" type="password" autocomplete="off">
       <div id="reg-handle-wrap" hidden><div class="label-row"><label data-i18n="Handle (widoczny dla kontaktów)">Handle (widoczny dla kontaktów)</label><span class="bytes-left" id="handle-bytes"></span></div><input id="handle" type="text" placeholder="np. alice" data-i18n-placeholder="np. alice" autocomplete="off"></div>
       <button class="btn" id="go" data-i18n="Zaloguj">Zaloguj</button>
-      <!-- Shown only when a HEM holds more than one identity; one signs straight in. -->
-      <div id="id-picker" hidden></div>
       <div class="toggle"><span id="toggle-pre" data-i18n="Nie masz konta?">Nie masz konta?</span> <a id="toggle" data-i18n="Zarejestruj tożsamość">Zarejestruj tożsamość</a></div>
       <div class="toggle" style="margin-top:6px;font-size:12px;opacity:.85">bez HEM: <a id="go-soft" data-i18n="tożsamość software (dev)">tożsamość software (dev)</a></div>
       <div class="nodes-sec">
@@ -744,6 +748,17 @@
     <label data-i18n="Powtórz nowe hasło">Powtórz nowe hasło</label><input id="pw-new2" type="password" autocomplete="new-password">
     <div class="msg" id="pw-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="pw-save" style="flex:1;border-radius:8px" data-i18n="Zapisz">Zapisz</button><button class="btn-ghost" id="pw-cancel" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
+  <!-- Shown only when a HEM holds more than one identity; one signs straight in.
+       A modal rather than a list under the form, because the form still shows a
+       password field and a live Sign-in button: two contradictory things to do at
+       once, with nothing saying which one is now the right one. -->
+  <div class="modal" id="identity-modal" role="dialog" aria-modal="true" aria-labelledby="identity-title">
+    <h2 id="identity-title" data-i18n="Wybierz tożsamość">Wybierz tożsamość</h2>
+    <div class="msub" data-i18n="Ten HEM trzyma więcej niż jedną tożsamość. Krótki identyfikator obok nazwy rozróżnia je, gdy nazwy się powtarzają.">Ten HEM trzyma więcej niż jedną tożsamość. Krótki identyfikator obok nazwy rozróżnia je, gdy nazwy się powtarzają.</div>
+    <div id="identity-list"></div>
+    <div class="modal-actions"><button class="btn-ghost" id="identity-cancel" style="flex:1" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
   <div class="modal" id="group-modal">

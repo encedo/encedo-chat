@@ -424,12 +424,8 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
  * same messages not arriving, no error anywhere.
  */
 function showIdentityPicker(ids: Array<{ kid: string; handle: string }>, onPick: (id: { kid: string; handle: string }) => void) {
-  const box = $('id-picker')
+  const box = $('identity-list')
   box.innerHTML = ''
-  const head = document.createElement('div')
-  head.className = 'hint'
-  head.textContent = tr('Wybierz tożsamość:')
-  box.appendChild(head)
   for (const id of ids) {
     const row = document.createElement('button')
     row.type = 'button'
@@ -441,10 +437,27 @@ function showIdentityPicker(ids: Array<{ kid: string; handle: string }>, onPick:
     kid.className = 'id-kid'
     kid.textContent = id.kid.slice(0, 8)
     row.append(name, kid)
-    row.addEventListener('click', () => { box.hidden = true; onPick(id) })
+    row.addEventListener('click', () => { close(); onPick(id) })
     box.appendChild(row)
   }
-  box.hidden = false
+
+  const cancel = $('identity-cancel')
+  const close = () => {
+    $('scrim').classList.remove('open'); $('identity-modal').classList.remove('open')
+    cancel.removeEventListener('click', onCancel)
+    $('scrim').removeEventListener('click', onCancel)
+    document.removeEventListener('keydown', onKey)
+  }
+  // Cancel RELOADS rather than merely closing. By this point we hold an
+  // authorised token and the key derived from the password; a user who backs out
+  // means "not this identity" or "not now", and a reload is the only ending that
+  // leaves none of that behind. Same reasoning as the sign-out button.
+  const onCancel = () => { close(); location.reload() }
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+  cancel.addEventListener('click', onCancel)
+  $('scrim').addEventListener('click', onCancel)
+  document.addEventListener('keydown', onKey)
+  $('scrim').classList.add('open'); $('identity-modal').classList.add('open')
 }
 
 $('go').addEventListener('click', async () => {

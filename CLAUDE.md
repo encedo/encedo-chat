@@ -412,6 +412,15 @@ inside it. "I cannot see the chat at all, scrolling does not work."
 so source order decides; putting it after silently disables the back button on
 every phone. This has now been broken twice — check it when moving CSS around.
 
+**Equal specificity, third occurrence: `.avatar-cluster.sm .ga`.** The cluster
+resets the first badge's negative margin with `.avatar-cluster .ga:first-child`,
+and the `.sm` variant — same weight, declared later — put the margin back on the
+first badge, which the row then clipped. It showed on the group list and not in
+the chat header, because only the list is `.sm`. When a variant rule lands after
+a `:first-child`/`:last-child` reset of the same weight, the reset needs
+repeating for the variant. Two selectors that weigh the same are decided by
+position, and position is the thing that moves when a file is tidied.
+
 Pinned by the `browser-test` "phone layout" scenario, which runs **both
 orientations** (390×780 and 852×393) on whichever browser is B, and by
 `node net/phone-shot.ts <dir>` — screenshots at real device metrics (iPhone 16,

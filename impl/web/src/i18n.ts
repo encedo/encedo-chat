@@ -257,6 +257,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Ta przeglądarka nie wystarczy': 'This browser is not enough',
     'Tak': 'Yes',
     'Ten adres używa znaków spoza ASCII i może udawać inny. Przeglądarka otworzy: {host}.': 'This address uses non-ASCII characters and may be impersonating another. The browser will open: {host}.',
+    'Ten HEM trzyma więcej niż jedną tożsamość. Krótki identyfikator obok nazwy rozróżnia je, gdy nazwy się powtarzają.': 'This HEM holds more than one identity. The short id beside each name tells them apart when the names repeat.',
     'Ten klucz jest już kontaktem tożsamości „{who}”, a urządzenie trzyma każdy klucz tylko raz.': 'This key is already a contact of the identity “{who}”, and a device holds each key only once.',
     'To nie wygląda na multiaddr (…/p2p/<PeerId>).': 'That does not look like a multiaddr (…/p2p/<PeerId>).',
     'To tożsamość, na której jesteś zalogowany. Znikną jej klucze, kontakty i grupy, a aplikacja wróci do ekranu logowania. Nieodwracalne — klucza nie da się odtworzyć.':
@@ -323,7 +324,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Wszystkie topiki na jednym połączeniu. Więcej węzłów (i failover) dodasz z edytowalnej listy w oknie logowania.': 'Every topic on one connection. Add more nodes (and failover) from the editable list on the sign-in screen.',
     'Wybierz co najmniej jednego członka.': 'Select at least one member.',
     'Wybierz kontakt': 'Choose a contact',
-    'Wybierz tożsamość:': 'Choose an identity:',
+    'Wybierz tożsamość': 'Choose an identity',
     'Wygasł': 'Expired',
     'wygasł': 'expired',
     'Wyjdziesz poza aplikację. Strona {host} pozna Twój adres IP i czas wejścia — tego rozmowa nie ujawnia.': 'You are leaving the app. {host} will learn your IP address and the time you arrived — the conversation itself reveals neither.',
