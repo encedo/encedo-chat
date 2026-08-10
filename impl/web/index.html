@@ -402,6 +402,9 @@
   /* The counter is a SIBLING of the label, never a child: applyDom() sets
      textContent on every [data-i18n] element, so a span inside one is deleted the
      first time the language pass runs — which is before anyone sees the form. */
+  /* Which build is on screen. Small and muted on purpose: nobody needs it until
+     somebody is describing a fault, and then it is the first question asked. */
+  .build-id{margin-top:14px;text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--muted);opacity:.75;user-select:text}
   .label-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
   .label-row label{margin:0}
   .bytes-left{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;flex-shrink:0}
@@ -563,6 +566,7 @@
         </div>
       </div>
       <div class="msg" id="msg"></div>
+      <div class="build-id" id="build-id-login"></div>
     </div>
   </div>
 
@@ -848,6 +852,7 @@
     <div class="d-section" style="margin-top:22px" data-i18n="Reset urządzenia">Reset urządzenia</div>
     <div class="hint" style="margin-bottom:8px" data-i18n="Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.">Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.</div>
     <button class="btn" id="btn-wipeout" style="margin-top:2px;background:none;color:var(--err);border:1px solid var(--err)" data-i18n="🧨 Wipeout — wyczyść wszystko">🧨 Wipeout — wyczyść wszystko</button>
+    <div class="build-id" id="build-id-settings"></div>
   </aside>
 </body>
 </html>

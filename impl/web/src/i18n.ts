@@ -307,6 +307,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Wczytać oficjalną listę?': 'Load the official list?',
     'Wczytaj oficjalną listę węzłów': 'Load the official node list',
     'Wczytano {n} węzłów': 'Loaded {n} nodes',
+    'Wersja i commit tej wersji aplikacji': 'The version and commit this build came from',
     'węzeł': 'node',
     'Węzeł (relay)': 'Node (relay)',
     'Węzły sieci': 'Network nodes',

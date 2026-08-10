@@ -1,6 +1,21 @@
 const path = require('path')
 const webpack = require('webpack')
 const HtmlWebpackPlugin = require('html-webpack-plugin')
+const { execSync } = require('child_process')
+
+// Which build is this? Stamped in so a screenshot or a bug report identifies the
+// code that produced it — the version alone cannot, because several builds carry
+// one version. A tree with no git (a tarball, a container without .git) still
+// builds; it just says `nogit` instead of a hash.
+const VERSION = require('../package.json').version
+const COMMIT = (() => {
+  try {
+    const h = execSync('git rev-parse --short=8 HEAD', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+    // A dirty tree is not the commit it claims to be, and saying so costs one character.
+    const dirty = execSync('git status --porcelain', { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+    return h + (dirty ? '+' : '')
+  } catch { return 'nogit' }
+})()
 
 // Browser build of the web GUI. No node polyfills (engine is WebCrypto),
 // top-level await. Minified in production, readable in development.
@@ -44,7 +59,11 @@ module.exports = (_env, argv) => {
       ],
     },
     plugins: [
-      new webpack.DefinePlugin({ __EC_ALLOW_KEYS__: JSON.stringify(allowKeys) }),
+      new webpack.DefinePlugin({
+        __EC_ALLOW_KEYS__: JSON.stringify(allowKeys),
+        __EC_VERSION__: JSON.stringify(VERSION),
+        __EC_COMMIT__: JSON.stringify(COMMIT),
+      }),
       new webpack.NormalModuleReplacementPlugin(/^node:/, (r) => { r.request = r.request.replace(/^node:/, '') }),
       new HtmlWebpackPlugin({ template: './index.html', filename: 'index.html', chunks: ['app'] }),
       new HtmlWebpackPlugin({ template: './webrtc-test.html', filename: 'webrtc-test.html', chunks: ['webrtc-test'] }),

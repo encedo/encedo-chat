@@ -252,6 +252,24 @@ const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talk
  * key from that bundle.
  */
 declare const __EC_ALLOW_KEYS__: boolean
+declare const __EC_VERSION__: string
+declare const __EC_COMMIT__: string
+
+/**
+ * Which build is on screen — `v0.1.1 (a1b2c3d4)`, in the login card and at the
+ * foot of Settings.
+ *
+ * The version alone does not identify a build: several carry one version, and
+ * the question a bug report has to answer first is which code produced the
+ * behaviour. The hash is stamped in at build time by webpack, with a trailing
+ * `+` when the tree was dirty — a build from uncommitted work is not the commit
+ * it names, and one character says so.
+ */
+const BUILD_ID = `v${__EC_VERSION__} (${__EC_COMMIT__})`
+for (const id of ['build-id-login', 'build-id-settings']) {
+  const el = document.getElementById(id)
+  if (el) { el.textContent = BUILD_ID; el.title = tr('Wersja i commit tej wersji aplikacji') }
+}
 const SHOW_KEYS = __EC_ALLOW_KEYS__ && new URLSearchParams(location.search).has('keys')
 const HEM_TRACE = new URLSearchParams(location.search).has('debug') || SHOW_KEYS
 if (HEM_TRACE) {
