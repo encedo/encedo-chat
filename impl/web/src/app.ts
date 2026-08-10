@@ -35,6 +35,7 @@ import {
   SELF_NAME_MAX, PEER_NAME_MAX,
 } from '../../lib/descr.ts'
 import { enableProtoLog } from '../../lib/protolog.ts'
+import { cachePubKeys, traceHem } from '../../lib/hemwrap.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
@@ -235,133 +236,43 @@ const HEM_RETRY_MS = 3_000      // how long to wait after a probe that found not
 const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talked to
 
 /**
- * `?debug=1`: narrate what is being asked of the device, in the words someone
- * debugging would use — "access token for scope keymgmt:list", not "POST /api/…".
- *
- * Every line carries the `[HEM]` prefix so one filter isolates the whole
- * conversation with the device.
- *
- * **Nothing secret is ever printed.** The arguments are picked per method, not
- * dumped: `authorizePassword` shows its SCOPE and never its first argument,
- * imports show a label and never the bytes, and no token appears anywhere. The
- * SDK's own `debug` flag prints headers and bodies, which is why it is not what
- * this turns on.
- *
- * The wrapper is a Proxy that applies each method to the TARGET rather than to
- * itself. That is not style: the SDK keeps its state in `#private` fields, and a
- * method invoked with the proxy as `this` cannot read them.
- */
-/**
  * Two switches, and `keys` IMPLIES `debug` rather than depending on it.
  *
- *   `?debug=1`           what is being asked of the device, and every protocol
- *                        derivation and state transition — but values elided.
- *   `?keys=1`            all of the above, plus the secret bytes themselves.
+ *   `?debug=1`   what is being asked of the device, and every protocol
+ *                derivation and state transition — but values elided.
+ *   `?keys=1`    all of the above, plus the secret bytes themselves.
  *
  * They are separate because a debug console gets pasted into a bug report, and a
  * transcript plus a root key is the conversation itself. They are not
  * independent because a switch that only widens lines nobody is printing would
  * do nothing at all — asking for the strongest output has to give you output.
+ *
+ * Compile-time gate (webpack DefinePlugin, EC_ALLOW_KEYS): built with 0 the
+ * second is `false && …`, the minifier drops the branch, and no URL can print a
+ * key from that bundle.
  */
-// Compile-time gate (webpack DefinePlugin, EC_ALLOW_KEYS): built with 0 this is
-// `false && …`, the minifier drops the branch, and no URL can print a key from
-// that bundle. The code stays; the capability does not ship.
 declare const __EC_ALLOW_KEYS__: boolean
 const SHOW_KEYS = __EC_ALLOW_KEYS__ && new URLSearchParams(location.search).has('keys')
 const HEM_TRACE = new URLSearchParams(location.search).has('debug') || SHOW_KEYS
 if (HEM_TRACE) {
   enableProtoLog({ events: true, keys: SHOW_KEYS, sink: (line) => console.log(`%c${line}`, 'color:#2a8c6a') })
 }
-const HEM_SLOW_MS = 500
-const HEM_CACHED_MS = 5 // faster than any round trip — it was answered locally
-const kidish = (v: any) => typeof v === 'string' ? v.slice(0, 12) + (v.length > 12 ? '…' : '') : '?'
-const HEM_CALLS: Record<string, (a: any[]) => string> = {
-  hemCheckin: () => 'checkin (clock sync + connection test)',
-  getVersion: () => 'device version',
-  getStatus: () => 'device status',
-  getAttestation: () => 'device attestation',
-  authorizePassword: (a) => `access token for scope ${a[1]}`,
-  authorizeRemote: (a) => `remote access token for scope ${a[0]}`,
-  listKeys: () => 'key list',
-  searchKeys: (a) => `key search "${a[1]}"`,
-  getPubKey: (a) => `public key of KID=${kidish(a[1])}`,
-  createKeyPair: (a) => `new ${a[2]} key pair, label "${a[1]}"`,
-  importPublicKey: (a) => `import of ${a[2]} public key, label "${a[1]}"`,
-  updateKey: (a) => `update of KID=${kidish(a[1])} → label "${a[2]}"`,
-  deleteKey: (a) => `delete of KID=${kidish(a[1])}`,
-  ecdh: (a) => `ECDH: KID=${kidish(a[1])} × a peer public key`,
-  ecdhKid: (a) => `ECDH: KID=${kidish(a[1])} × KID=${kidish(a[2])}`,
-  deriveKey: (a) => `derived key, label "${a[1]}"`,
-}
 
 /**
- * Remember a public key under its KID for the session.
- *
- * `KID = SHA-1(pub)[0:16]` is a hash of the key's own content, so the answer
- * cannot change while the entry exists — and the current firmware does not
- * return public keys from `key_search`, so the contact book pays one `getPubKey`
- * per contact on every load. A trace of one sign-in fetched the same key three
- * times, at about a second each.
- *
- * The PROMISE is cached, so two callers that want the same key while the device
- * is working share the call. A failure is not remembered.
+ * Wrap a HEM for this session: remember public keys, and narrate the calls when
+ * debugging. `traceHem` stays OUTERMOST so every call is announced, including
+ * the ones the cache answers — and both layers hand out methods bound to the
+ * real object, without which the SDK's `#private` fields are unreachable
+ * (see lib/hemwrap.ts).
  */
-function cachePubKeys(hem: any): any {
-  const byKid = new Map<string, Promise<any>>()
-  return new Proxy(hem, {
-    get(target, prop, recv) {
-      const v = Reflect.get(target, prop, recv)
-      if (prop !== 'getPubKey' || typeof v !== 'function') return v
-      return (token: string, kid: string, ...rest: any[]) => {
-        const k = String(kid).toLowerCase()
-        let p = byKid.get(k)
-        if (!p) {
-          p = v.apply(target, [token, kid, ...rest])
-          p!.catch(() => byKid.delete(k))
-          byKid.set(k, p!)
-        }
-        return p
-      }
-    },
-  })
-}
-
-function traceHem(hem: any): any {
-  if (!HEM_TRACE) return hem
-  const say = (msg: string, style = 'color:#8a6d3b') => console.log(`%c[HEM] %c${msg}`, 'color:#b58900;font-weight:600', style)
-  return new Proxy(hem, {
-    get(target, prop, recv) {
-      const v = Reflect.get(target, prop, recv)
-      const describe = typeof prop === 'string' ? HEM_CALLS[prop] : undefined
-      if (typeof v !== 'function' || !describe) return v
-      return (...args: any[]) => {
-        let what: string
-        try { what = describe(args) } catch { what = String(prop) }
-        say(`Req ${what}`)
-        const t0 = performance.now()
-        // Applied to `target`: the SDK reads #private fields, which a method
-        // called with the proxy as `this` cannot see.
-        const out = v.apply(target, args)
-        if (!out || typeof out.then !== 'function') return out
-        return out.then(
-          (r: any) => {
-            const ms = Math.round(performance.now() - t0)
-            // Nothing across a network answers this fast: it came from the SDK's
-            // token cache or ours. Saying so matters — several lines in a trace
-            // of one sign-in looked like device traffic and were not.
-            if (ms < HEM_CACHED_MS) say(`✓ ${what} ‹cached›`, 'color:#7a8b7a')
-            // Only the slow ones otherwise: a line per answer would bury the questions.
-            else if (ms >= HEM_SLOW_MS) say(`… ${what} — ${ms} ms`, 'color:#a08a5b')
-            return r
-          },
-          (e: any) => {
-            say(`✗ ${what} — ${e?.code ?? e?.name ?? 'error'}: ${e?.message ?? e}`, 'color:#b23c26')
-            throw e
-          },
-        )
-      }
-    },
-  })
+const wrapHem = (hem: any) => {
+  const cached = cachePubKeys(hem)
+  if (!HEM_TRACE) return cached
+  return traceHem(cached, (msg, kind) => console.log(
+    `%c[HEM] %c${msg}`,
+    'color:#b58900;font-weight:600',
+    kind === 'error' ? 'color:#b23c26' : kind === 'cached' ? 'color:#7a8b7a' : kind === 'slow' ? 'color:#a08a5b' : 'color:#8a6d3b',
+  ))
 }
 
 /**
@@ -384,8 +295,8 @@ function traceHem(hem: any): any {
  * once. That was live here, and the fix belongs in the transport — so it is now
  * in the SDK and this file no longer issues its own requests.
  */
-const probeVersion = (url: string, ms = HEM_VERSION_MS) => traceHem(new HEM(url)).getVersion({ timeoutMs: ms })
-const probeStatus = (url: string, ms = HEM_STATUS_MS) => traceHem(new HEM(url)).getStatus({ timeoutMs: ms })
+const probeVersion = (url: string, ms = HEM_VERSION_MS) => wrapHem(new HEM(url)).getVersion({ timeoutMs: ms })
+const probeStatus = (url: string, ms = HEM_STATUS_MS) => wrapHem(new HEM(url)).getStatus({ timeoutMs: ms })
 
 /** Ran out of time, as opposed to answering with a refusal or not being there. */
 const isTimeout = (e: any) => e?.code === 'timeout' || e?.code === 'aborted'
@@ -562,7 +473,7 @@ $('go').addEventListener('click', async () => {
     }
     // Wrapped once here, so every later call — core's contact book, the group
     // backend, every ECDH — narrates itself without any of them knowing.
-    const hem = traceHem(cachePubKeys(new HEM(url))); await hem.hemCheckin()
+    const hem = wrapHem(new HEM(url)); await hem.hemCheckin()
     if (mode === 'register') {
       const handle = val('handle'); if (!handle) { setMsg('msg', tr('Podaj handle.'), 'err'); return }
       const gen = await hem.authorizePassword(pass, 'keymgmt:gen')
