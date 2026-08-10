@@ -25,6 +25,10 @@ firmware.
 - `hem-sdk-js/` — the Encedo HEM SDK as a **git submodule** (→ `encedo/hem-sdk-js`).
   Our HEM client — do not fork; update via `git submodule update --remote`.
 - `CLAUDE.md` (this file), `README.md`, `LICENSE` at root.
+- `hem_usage.md` — **which operations reach the HSM and what they cost**, by
+  protocol section and by what the user is doing, with measured per-call times.
+  Read it before adding anything that talks to the device; the short version is
+  that a message costs nothing and every cost is a setup cost.
 
 The v5 deployment (`encedo/onchato.com`) and older iterations live in a separate
 local workspace, not in this repo.
