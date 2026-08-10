@@ -5,8 +5,9 @@ same thing: **by protocol section** (does §5 need the device? does §7?) and **
 what the user is doing** (signing in, adding a contact, sending a message).
 
 Numbers are measured, from `?debug=1` traces of a real device over the local
-network, 2026-08-09/10 (Firefox, `my.ence.do` at 192.168.7.1, HTTPS with
-connection reuse). Reproduce by signing in with `?debug=1` and filtering:
+network, 2026-08-10 (Firefox, `my.ence.do` at 192.168.7.1, HTTPS with connection
+reuse), with `keymgmt:get` accepted by the firmware. Reproduce by signing in with
+`?debug=1` and filtering:
 
 ```bash
 grep -E '^\[(HEM|§|ec )' log.txt
@@ -138,31 +139,43 @@ Measured on a device with one contact and one group: **17 device calls, ~22.7 s
 of device time** (wall clock is less — some overlap).
 
 ```
-device version              0.8 s      the badge probe
-device status               0.6 s      the gate
-checkin                     1.5 s
-token keymgmt:list          2.9 s      ← the session's first token
-key search ETSEIC:self1,    0.6 s      which identities are on this device
-token keymgmt:use:<myIK>    1.7 s
-my own public key           0.6 s
-key search ETSEIC:peer1,…   0.7 s      the contact book, scoped to this identity
-  per contact:  token 2.5 s + public key 0.6 s
-ecdh (self-topic §9.1)      1.5 s
-ecdh (cache base §10)       1.5 s
-  per contact:  ecdh (pair secret) 1.5 s
-ecdh (EH-2, per conversation opened) 1.0–1.5 s
+device version              0.68 s     the badge probe
+device status               0.58 s     the gate
+checkin                     1.62 s
+token keymgmt:list          1.65 s     the session's first token
+key search ETSEIC:self1,    0.58 s     which identities are on this device
+token keymgmt:get           1.66 s     ONE token, every public key from here on
+my own public key           0.58 s
+key search ETSEIC:peer1,…   0.71 s     the contact book, scoped to this identity
+token keymgmt:use:<myIK>    2.35 s     for the ECDHs; the only per-key token left
+ecdh (self-topic §9.1)      0.63 s
+ecdh (cache base §10)       1.25 s
+  per contact:  public key 0.6–1.1 s + ecdh (pair secret) 1.25 s
+ecdh (EH-2, per conversation opened) 0.62 s
 ```
+
+Total device time in that trace: **15.3 s**, with one contact and one group —
+and the group's marker read is not in it at all, because recovery now runs
+twenty seconds after sign-in rather than competing with the room.
 
 As a formula:
 
 ```
-sign-in ≈ 12 s  +  4.7 s × contacts        (today)
-        ≈ 12 s  +  2.2 s × contacts        (with a KID-independent read scope)
-        ≈ 11 s  +  1.5 s × contacts        (if key_search also returned public keys)
+sign-in ≈ 12.3 s + 2.4 s × contacts        (today)
+        ≈ 11.7 s + 1.3 s × contacts        (if key_search also returned public keys)
 ```
 
-The per-contact term is the whole story, and it is **serial** —
-`watchContacts` awaits each contact in turn. Ten contacts is around a minute.
+| contacts | today | before `keymgmt:get` |
+|---|---|---|
+| 1 | 14.7 s | 16.6 s |
+| 5 | 24.2 s | 35.4 s |
+| 10 | 36.1 s | 58.9 s |
+
+**The win is in the slope, not the intercept.** One broad token costs 1.66 s and
+replaces one 2.5 s token per contact, so with a single contact it saves under a
+second; with ten it saves twenty-three. The per-contact term is what matters at
+any real size, and it is **serial** — `watchContacts` awaits each contact in
+turn.
 
 Reading the device's group list (`ETSEIC:chan`, ~4.2 s with one group) is
 **recovery, not the way in**, so it runs twenty seconds after sign-in rather than
@@ -196,9 +209,11 @@ competing with the room the user is waiting for.
 and per group. On the measured trace that is 29% of all device time with a
 single contact; with ten it is half a minute.
 
-**`keymgmt:get`** does most of that today: it is KID-independent, so one token
-reads every public key instead of one token per key. The client tries it once
-and remembers whether the device accepted it (`pubKeyReader` in `lib/core.ts`).
+**`keymgmt:get`** does most of that today, and the firmware accepts it
+(confirmed on a device, 2026-08-10): it is KID-independent, so one token reads
+every public key instead of one token per key. The client tries it once and
+remembers the answer (`pubKeyReader` in `lib/core.ts`), so a device that wanted
+the narrow scope would still work.
 
 **HKDF inside the HSM** (the §4.3 target) changes the shape of §5, and not
 entirely for the better:
