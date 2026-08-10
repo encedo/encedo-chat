@@ -33,6 +33,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'no
 import { createServer, type Server } from 'node:http'
 import { tmpdir, homedir } from 'node:os'
 import { join, extname } from 'node:path'
+import { hemKid } from '../lib/descr.ts'
 
 /**
  * By default this serves `web/dist` from THIS checkout, so it tests the code in
@@ -673,13 +674,21 @@ async function main() {
     // doing its job. `__pub` is a deliberate hook — a public key is public.
     const pubA = await A.eval<string>(`return window.__pub`)
     const pubB = await B.eval<string>(`return window.__pub`)
-    step(`identities ready — A ${pubA.slice(0, 12)}…  B ${pubB.slice(0, 12)}…`)
+    // Per-identity storage hangs off the identity's KID, not its handle (§4): a
+    // handle is a caption two identities may share, and editing one used to
+    // orphan everything stored under the old spelling. The harness derives it
+    // with the APP'S OWN function rather than repeating the rule, or the two
+    // would drift and this test would start seeding into nowhere — which is
+    // exactly what it did when the namespace moved.
+    const idA = await hemKid(new Uint8Array(Buffer.from(pubA, 'base64')))
+    const idB = await hemKid(new Uint8Array(Buffer.from(pubB, 'base64')))
+    step(`identities ready — A ${pubA.slice(0, 12)}… (${idA.slice(0, 8)})  B ${pubB.slice(0, 12)}… (${idB.slice(0, 8)})`)
 
     // A also gets a second, unreachable contact — the "switch away and back" test
     // needs somewhere to switch TO.
     const ghostPub = Buffer.from(Array.from({ length: 32 }, (_, i) => (i * 7 + 13) & 0xff)).toString('base64')
-    await A.eval(`localStorage.setItem('ec-local-contacts-sim-a', ${JSON.stringify(JSON.stringify([{ name: 'sim-b', pub: pubB }, { name: 'ghost', pub: ghostPub }]))}); return 1`)
-    await B.eval(`localStorage.setItem('ec-local-contacts-sim-b', ${JSON.stringify(JSON.stringify([{ name: 'sim-a', pub: pubA }]))}); return 1`)
+    await A.eval(`localStorage.setItem('ec-local-contacts-${idA}', ${JSON.stringify(JSON.stringify([{ name: 'sim-b', pub: pubB }, { name: 'ghost', pub: ghostPub }]))}); return 1`)
+    await B.eval(`localStorage.setItem('ec-local-contacts-${idB}', ${JSON.stringify(JSON.stringify([{ name: 'sim-a', pub: pubA }]))}); return 1`)
     await Promise.all([A.reload(APP_URL), B.reload(APP_URL)])
     await Promise.all([login(A, 'sim-a'), login(B, 'sim-b')])
 
@@ -1305,8 +1314,8 @@ async function main() {
     // readable ec-groups plaintext, and not JSON we can eyeball group_secret out of.
     const cacheShape = await A.eval<{ enc: boolean; plaintext: boolean; readable: boolean }>(`
       const keys = Object.keys(localStorage);
-      const encK = keys.find((k) => k.startsWith('ec-gcache-sim-a-'));
-      return { enc: !!encK, plaintext: keys.includes('ec-groups-sim-a'),
+      const encK = keys.find((k) => k.startsWith('ec-gcache-${idA}-'));
+      return { enc: !!encK, plaintext: keys.includes('ec-groups-${idA}'),
                readable: encK ? localStorage.getItem(encK).trim().startsWith('{') : false };
     `)
     if (!cacheShape.enc) throw new Error('no encrypted ec-gcache blob after reload')

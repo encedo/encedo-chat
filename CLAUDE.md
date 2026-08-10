@@ -349,6 +349,14 @@ Firefox then silently falls back to the user's real profile and hits its lock),
 and BiDi answers with structured RemoteValues rather than JSON, so results need
 converting back to plain data.
 
+**The harness seeds localStorage directly, so a change to a STORAGE KEY breaks it
+as surely as a change to the login flow.** Per-identity state moved from the
+handle to the identity's KID (§4) and `browser-test` went on seeding
+`ec-local-contacts-<handle>` into nowhere — green locally, red in CI, with
+"timed out waiting for contact list" and nothing about storage in it. The
+harness now derives the id with the app's own `hemKid`, so the two cannot drift.
+Same rule as the login flow: change it and change the harness in the same commit.
+
 **Never pipe `browser-test` through `tail`** — it buffers and hides all progress;
 redirect to a file instead. And watch what it leaves behind: leaked browsers from
 repeated runs are what once exhausted this machine (`pgrep -f chrome`, `free -m`).
