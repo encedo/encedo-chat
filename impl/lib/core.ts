@@ -346,9 +346,12 @@ export async function deriveRoom(
   id: Identity,
   peer: Peer,
   p: RoomParams,
-  eh2: { onState?: Eh2Options['onState']; ratchet?: Eh2Options['ratchet'] } = {},
+  eh2: { onState?: Eh2Options['onState']; ratchet?: Eh2Options['ratchet']; ss?: Uint8Array } = {},
 ): Promise<{ topic: string; keys: RoomKeys }> {
-  const ss = await id.ecdh(peer.pub, peer.kid)
+  // `ss` may be supplied by a caller that already holds it: on a HEM every one
+  // of these is a device round trip of one to two seconds, and the same pair
+  // secret is wanted by the presence watch, the rotation offset and the room.
+  const ss = eh2.ss ?? await id.ecdh(peer.pub, peer.kid)
   const topic = await topicFromSecret(ss, p)
   const macKey = await announceMacKey(ss, p)
   // The EH-2 DHs run against the peer's EPHEMERAL keys, so no contact `kid`
@@ -578,6 +581,8 @@ export interface SessionOpts {
    *  whether they are in that group, which is the app's roster to read. `from` is
    *  the sender's IK pub, as for `onGroupSkd` and for the same reason. */
   onGroupSkdReq?: ChatOpts['onGroupSkdReq']
+  /** The pair secret, when the caller already holds it — see `deriveRoom`. */
+  ss?: Uint8Array
   /** Our own transport state — see `LinkState`. */
   onLink?: (state: LinkState) => void
   /**
@@ -759,11 +764,37 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // computed once (from the same ss as the topic) and cached; a forced override
   // (`?rot=<hour>`) skips the derivation entirely so both test ends share it.
   const offsetCache = new Map<string, number>()
+  /**
+   * `ss = ECDH(IK_me, IK_peer)`, once per contact per session.
+   *
+   * Three things want it — the presence watch, the rotation offset and opening
+   * the room — and on a HEM each derivation was a separate device round trip of
+   * one to two seconds. A trace of one sign-in showed the identical secret being
+   * fetched three times.
+   *
+   * The PROMISE is cached, not the result, so callers that arrive while the
+   * device is still working share that call instead of starting another; that
+   * race is what produced two of the three.
+   *
+   * Holding it for the session widens nothing: `ss` is rendezvous-only and
+   * disjoint from every message-key DH (§4.3 note in CLAUDE.md), and the
+   * presence watch already keeps it alive for exactly as long.
+   */
+  const ssCache = new Map<string, Promise<Uint8Array>>()
+  const pairSecret = (peer: Peer): Promise<Uint8Array> => {
+    let p = ssCache.get(peer.pub)
+    if (!p) {
+      p = id.ecdh(peer.pub, peer.kid)
+      p.catch(() => ssCache.delete(peer.pub)) // a failed call must not be remembered as an answer
+      ssCache.set(peer.pub, p)
+    }
+    return p
+  }
   const offsetSecFor = async (peer: Peer): Promise<number> => {
     if (opts.forcedRotationSec != null) return opts.forcedRotationSec
     const cached = offsetCache.get(peer.pub)
     if (cached != null) return cached
-    const off = await rotationOffsetSec(await id.ecdh(peer.pub, peer.kid), params)
+    const off = await rotationOffsetSec(await pairSecret(peer), params)
     offsetCache.set(peer.pub, off)
     return off
   }
@@ -778,7 +809,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       // One ecdh for the pair; the rotating watch derives each day's topic from
       // this secret (date only changes the HKDF info), never a second HSM call.
       // The rotation offset comes from the same secret (or the forced override).
-      const ss = await id.ecdh(peer.pub, peer.kid)
+      const ss = await pairSecret(peer)
       const offsetSec = opts.forcedRotationSec ?? await rotationOffsetSec(ss, params)
       offsetCache.set(peer.pub, offsetSec)
       const watch = watchPresenceRotating(node, self, (dateUTC) => presenceFromSecret(ss, { ...params, dateUTC }), {
@@ -855,7 +886,9 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       const wasWatched = presence.has(peer.pub)
       presence.get(peer.pub)?.watch.stop(false) // false = handoff, do not unsubscribe
       presence.delete(peer.pub)
+      const ss = await pairSecret(peer) // paid for once; the watch and the offset used the same one
       const conv = await openRoom(id, peer, node, self, liveParams, {
+        ss,
         ...roomOpts,
         // A group SKD on this 1:1 room feeds the group manager (§8), then the app
         // is told — but only AFTER applySkd resolves: the app's handler calls
@@ -959,7 +992,7 @@ async function openRoom(
     opts.onSecurity?.(p, state)
     if (state === 'established') plane?.onPeer(p)
   }
-  const { topic, keys } = await deriveRoom(id, peer, params, { onState: onSecurity })
+  const { topic, keys } = await deriveRoom(id, peer, params, { onState: onSecurity, ss: opts.ss })
   log(`room derived: topic ${topic.slice(0, 16)}…`)
 
   const room = joinChat(node, topic, keys, {

@@ -273,6 +273,7 @@ if (HEM_TRACE) {
   enableProtoLog({ events: true, keys: SHOW_KEYS, sink: (line) => console.log(`%c${line}`, 'color:#2a8c6a') })
 }
 const HEM_SLOW_MS = 500
+const HEM_CACHED_MS = 5 // faster than any round trip — it was answered locally
 const kidish = (v: any) => typeof v === 'string' ? v.slice(0, 12) + (v.length > 12 ? '…' : '') : '?'
 const HEM_CALLS: Record<string, (a: any[]) => string> = {
   hemCheckin: () => 'checkin (clock sync + connection test)',
@@ -292,6 +293,39 @@ const HEM_CALLS: Record<string, (a: any[]) => string> = {
   ecdhKid: (a) => `ECDH: KID=${kidish(a[1])} × KID=${kidish(a[2])}`,
   deriveKey: (a) => `derived key, label "${a[1]}"`,
 }
+
+/**
+ * Remember a public key under its KID for the session.
+ *
+ * `KID = SHA-1(pub)[0:16]` is a hash of the key's own content, so the answer
+ * cannot change while the entry exists — and the current firmware does not
+ * return public keys from `key_search`, so the contact book pays one `getPubKey`
+ * per contact on every load. A trace of one sign-in fetched the same key three
+ * times, at about a second each.
+ *
+ * The PROMISE is cached, so two callers that want the same key while the device
+ * is working share the call. A failure is not remembered.
+ */
+function cachePubKeys(hem: any): any {
+  const byKid = new Map<string, Promise<any>>()
+  return new Proxy(hem, {
+    get(target, prop, recv) {
+      const v = Reflect.get(target, prop, recv)
+      if (prop !== 'getPubKey' || typeof v !== 'function') return v
+      return (token: string, kid: string, ...rest: any[]) => {
+        const k = String(kid).toLowerCase()
+        let p = byKid.get(k)
+        if (!p) {
+          p = v.apply(target, [token, kid, ...rest])
+          p!.catch(() => byKid.delete(k))
+          byKid.set(k, p!)
+        }
+        return p
+      }
+    },
+  })
+}
+
 function traceHem(hem: any): any {
   if (!HEM_TRACE) return hem
   const say = (msg: string, style = 'color:#8a6d3b') => console.log(`%c[HEM] %c${msg}`, 'color:#b58900;font-weight:600', style)
@@ -312,8 +346,12 @@ function traceHem(hem: any): any {
         return out.then(
           (r: any) => {
             const ms = Math.round(performance.now() - t0)
-            // Only the slow ones: a line per answer would bury the questions.
-            if (ms >= HEM_SLOW_MS) say(`… ${what} — ${ms} ms`, 'color:#a08a5b')
+            // Nothing across a network answers this fast: it came from the SDK's
+            // token cache or ours. Saying so matters — several lines in a trace
+            // of one sign-in looked like device traffic and were not.
+            if (ms < HEM_CACHED_MS) say(`✓ ${what} ‹cached›`, 'color:#7a8b7a')
+            // Only the slow ones otherwise: a line per answer would bury the questions.
+            else if (ms >= HEM_SLOW_MS) say(`… ${what} — ${ms} ms`, 'color:#a08a5b')
             return r
           },
           (e: any) => {
@@ -524,7 +562,7 @@ $('go').addEventListener('click', async () => {
     }
     // Wrapped once here, so every later call — core's contact book, the group
     // backend, every ECDH — narrates itself without any of them knowing.
-    const hem = traceHem(new HEM(url)); await hem.hemCheckin()
+    const hem = traceHem(cachePubKeys(new HEM(url))); await hem.hemCheckin()
     if (mode === 'register') {
       const handle = val('handle'); if (!handle) { setMsg('msg', tr('Podaj handle.'), 'err'); return }
       const gen = await hem.authorizePassword(pass, 'keymgmt:gen')
@@ -956,7 +994,23 @@ let contactsCache: Contact[] = []
 /** pub → fingerprint. Peers are shown exactly like our own identity: the
  *  8-byte SHA-256 of the key, not the raw base64 nobody can compare by eye. */
 const fpCache = new Map<string, string>()
-async function refreshContacts() {
+/**
+ * Reload the contact list — at most one load at a time.
+ *
+ * Sign-in called this twice: once from `enterApp`, once from `restoreGroups`
+ * (group recovery needs contacts to resolve an admin hint). On a HEM that is the
+ * whole book twice — a key search plus one getPubKey per contact, seconds of
+ * device time — and a trace showed exactly that. Callers that arrive while a
+ * load is running now await THAT one instead of starting another, which keeps
+ * both call sites honest about needing fresh contacts.
+ */
+let contactsLoad: Promise<void> | null = null
+function refreshContacts(): Promise<void> {
+  if (contactsLoad) return contactsLoad
+  contactsLoad = loadContacts().finally(() => { contactsLoad = null })
+  return contactsLoad
+}
+async function loadContacts() {
   if (!session) return
   try { contactsCache = await session.book.list() }
   catch (e: any) { toast(tr('Błąd listy kontaktów: ') + (e?.message ?? e)) }

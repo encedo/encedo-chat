@@ -157,3 +157,39 @@ test('mergedContactBook: add routes by persistent, remove by source, list concat
   await book.remove({ name: 'perm', pub: 'P', kid: 'K', source: 'hem' })
   assert.deepEqual(hemCalls.removed, ['K'])
 })
+
+test('the pair secret is fetched once per contact, however many derivations want it', async () => {
+  // On a HEM every ecdh is a device round trip of one to two seconds, and a
+  // trace of one sign-in showed the same secret being fetched three times: the
+  // presence watch, the rotation offset and opening the room each paid for it.
+  let calls = 0
+  const ss = new Uint8Array(32).fill(3)
+  const id: Identity = { handle: 'x', pub: 'PUB', ecdh: async () => { calls++; return ss } }
+  // The shape `startSession` now uses: one memo, holding the PROMISE.
+  const cache = new Map<string, Promise<Uint8Array>>()
+  const pairSecret = (pub: string) => {
+    let p = cache.get(pub)
+    if (!p) { p = id.ecdh(pub); cache.set(pub, p) }
+    return p
+  }
+  // Concurrent callers must share the in-flight call, not start their own —
+  // that race is what produced two of the three.
+  const [a, b] = await Promise.all([pairSecret('peer'), pairSecret('peer')])
+  const c = await pairSecret('peer')
+  assert.equal(calls, 1, 'one device call')
+  assert.equal(a, b); assert.equal(b, c)
+  await pairSecret('other')
+  assert.equal(calls, 2, 'a different contact is a different secret')
+})
+
+test('deriveRoom accepts a secret already paid for, and derives the same room', async () => {
+  const ss = new Uint8Array(32).fill(9)
+  let calls = 0
+  const id: Identity = { handle: 'x', pub: '', ecdh: async () => { calls++; return ss } }
+  const peer = { pub: Buffer.from(new Uint8Array(32).fill(7)).toString('base64') }
+  const fresh = await deriveRoom(id, peer, P)
+  const callsAfterFresh = calls
+  const reused = await deriveRoom(id, peer, P, { ss })
+  assert.equal(reused.topic, fresh.topic, 'the same room, whoever computed the secret')
+  assert.equal(calls, callsAfterFresh, 'and no further ecdh for the topic')
+})
