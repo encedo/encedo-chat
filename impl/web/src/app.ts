@@ -263,7 +263,11 @@ const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talk
  * independent because a switch that only widens lines nobody is printing would
  * do nothing at all — asking for the strongest output has to give you output.
  */
-const SHOW_KEYS = new URLSearchParams(location.search).has('keys')
+// Compile-time gate (webpack DefinePlugin, EC_ALLOW_KEYS): built with 0 this is
+// `false && …`, the minifier drops the branch, and no URL can print a key from
+// that bundle. The code stays; the capability does not ship.
+declare const __EC_ALLOW_KEYS__: boolean
+const SHOW_KEYS = __EC_ALLOW_KEYS__ && new URLSearchParams(location.search).has('keys')
 const HEM_TRACE = new URLSearchParams(location.search).has('debug') || SHOW_KEYS
 if (HEM_TRACE) {
   enableProtoLog({ events: true, keys: SHOW_KEYS, sink: (line) => console.log(`%c${line}`, 'color:#2a8c6a') })

@@ -906,6 +906,20 @@ git submodule update --init --recursive     # hem-sdk-js: the build imports it d
 cd impl && npm run web:deploy               # → impl/web/dist (what nginx serves)
 ```
 
+**Key material in the console is a BUILD decision, not a URL one.** `?debug=1`
+narrates the protocol with values elided; `?keys=1` prints the secret bytes
+(`lib/protolog.ts`, and it implies `?debug`). While this is R&D the deploy keeps
+both. For the MVP deploy, build with the capability compiled out:
+
+```bash
+EC_ALLOW_KEYS=0 npm run web:deploy      # ?keys=1 is dead code — no URL can revive it
+```
+
+The switch is `webpack.DefinePlugin` → `__EC_ALLOW_KEYS__`, so with 0 the branch
+is `false && …`, the minifier removes it, and the built bundle contains no
+`keys` parameter at all (checked: zero occurrences of the string). `?debug=1` is
+unaffected — it prints no secrets and stays useful for support.
+
 `web:deploy` is `npm ci` **only when `package-lock.json` actually changed**
 (compared against a stamp inside `node_modules`), then the build. Reinstalling
 598 packages to deploy a one-line UI change cost ~31 s of every deploy, and

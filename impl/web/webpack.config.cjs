@@ -6,6 +6,14 @@ const HtmlWebpackPlugin = require('html-webpack-plugin')
 // top-level await. Minified in production, readable in development.
 module.exports = (_env, argv) => {
   const prod = argv.mode === 'production'
+  // `?keys=1` prints the protocol's secret material (lib/protolog.ts). That is a
+  // development capability and it must be possible to build WITHOUT it — not
+  // merely to leave the flag untyped — so the switch is compile-time: with
+  // EC_ALLOW_KEYS=0 the branch is `false && …` and the minifier removes it, and
+  // no URL can bring it back. Default ON while this is R&D; the MVP deploy sets
+  // it to 0.
+  const allowKeys = process.env.EC_ALLOW_KEYS !== '0'
+  if (prod && !allowKeys) console.log('[build] ?keys=1 disabled — no key material can be printed by this bundle')
   return {
     context: path.resolve(__dirname),
     entry: { app: './src/app.ts', 'webrtc-test': './src/webrtc-test.ts' },
@@ -36,6 +44,7 @@ module.exports = (_env, argv) => {
       ],
     },
     plugins: [
+      new webpack.DefinePlugin({ __EC_ALLOW_KEYS__: JSON.stringify(allowKeys) }),
       new webpack.NormalModuleReplacementPlugin(/^node:/, (r) => { r.request = r.request.replace(/^node:/, '') }),
       new HtmlWebpackPlugin({ template: './index.html', filename: 'index.html', chunks: ['app'] }),
       new HtmlWebpackPlugin({ template: './webrtc-test.html', filename: 'webrtc-test.html', chunks: ['webrtc-test'] }),
