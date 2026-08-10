@@ -30,6 +30,7 @@ import { x25519FromPriv } from './x25519.ts'
 import type { SkdFields } from './envelope.ts'
 import { buildMarker, parseMarker, type KeyRef } from './gmarker.ts'
 import { groupLabel } from './descr.ts'
+import { plog, val } from './protolog.ts'
 
 const enc = new TextEncoder()
 const MSG_MAC_INFO = enc.encode('encedo-group-msg-mac')
@@ -197,6 +198,7 @@ export class GroupSession {
    */
   setSenderKey(memberPub: string, chainKey: Uint8Array, ctr = 0): void {
     if (memberPub === this.id.pub) return
+    plog('§8', `sender key seeded for a member: chain=${val(chainKey)} at ctr=${ctr} (gid=${val(this.gid)} epoch=${this.epoch})`)
     this.receivers.set(memberPub, SenderReceiver.from(chainKey, ctr, this.receiverOpts))
   }
   hasSenderKey(memberPub: string): boolean { return this.receivers.has(memberPub) }
@@ -232,6 +234,8 @@ export class GroupSession {
     const ctr = this.send_.n
     const header = encodeHeader({ gid: this.gid, senderId: this.mySenderId, epoch: this.epoch, ctr })
     const { ct } = await seal(this.send_, header, plaintext)
+    plog('§8', `group send gid=${val(this.gid)} epoch=${this.epoch} ctr=${ctr} sender_id=${val(this.mySenderId)}`
+      + `: chain→chain', ${this.members.length - 1} per-recipient MAC(s), ct=${ct.length} B`)
     const recips: Uint8Array[] = []
     for (const m of this.members) {
       if (m.pub === this.id.pub) continue
@@ -266,7 +270,10 @@ export class GroupSession {
     if (!mine) return null // not addressed to us
     if (!(await verify(await this.macKeyFor(sender.pub), headerBytes, ct, mine))) return null // forged / tampered
     const recv = this.receivers.get(sender.pub)
-    if (!recv) { this.onNeedSenderKey?.(sender.pub); return null } // distribution has not reached us — ask
+    if (!recv) {
+      plog('§8', `group recv: MAC verified for sender_id=${val(h.senderId)} but no sender key held — asking for one`)
+      this.onNeedSenderKey?.(sender.pub); return null // distribution has not reached us — ask
+    }
     const pt = await recv.open(h.ctr, headerBytes, ct)
     return pt ? { from: sender.pub, pt } : null
   }

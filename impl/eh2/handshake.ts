@@ -32,6 +32,7 @@
  */
 
 import { subtle, hkdfBits, concat } from '../lib/wc.ts'
+import { plog, val } from '../lib/protolog.ts'
 import { nowMs } from '../lib/time.ts'
 import type { Dh } from '../lib/x25519.ts'
 import { generateX25519 } from '../lib/x25519.ts'
@@ -174,6 +175,7 @@ export async function initiate(opts: {
     ts: opts.now ?? nowMs(),
     initiatorId: await initiatorId(ik.pub),
   })
+  plog('§6.1', `I → msg1: EK_i=${val(ekI.pub)} pq_pub=${val(pq.pub)} initiator_id=${val(await initiatorId(ik.pub))} (${msg1.length} B)`)
   return { msg1, state: { ik, peerIkPub, ekI, pq, msg1Bytes: msg1, maxSkewMs: opts.maxSkewMs ?? MAX_SKEW_MS } }
 }
 
@@ -196,7 +198,12 @@ export async function initiatorComplete(
   const ss = await state.pq.decapsulate(msg2.pqCt)
 
   const h1 = await hashMsg1(state.msg1Bytes)
+  // Logged BEFORE the derivation: deriveSK wipes dh1/dh2/ss on its way out (only
+  // dh3 survives, as the first ratchet step's input), so reading them afterwards
+  // prints zeros and looks like a broken DH.
+  plog('§6.3', `I ikm (responder perspective): DH(IK_r,EK_i)=${val(dh1)} DH(EK_r,IK_i)=${val(dh2)} DH(EK_r,EK_i)=${val(dh3)} mlkem_ss=${val(ss)}`)
   const sk = await deriveSK(dh1, dh2, dh3, ss, h1)
+  plog('§6.2', `I h1=${val(h1)} → SK=${val(sk)}`)
 
   const key = await macKey(sk)
   const h2p = await h2Partial(state.msg1Bytes, msg2.ekPub, msg2.pqCt, msg2.ts)
@@ -205,7 +212,10 @@ export async function initiatorComplete(
     throw new HandshakeError('mac_r does not verify — responder is not the expected peer (or the transcript was tampered with)')
   }
 
-  const macI = await mac(key, LABEL_I, await hashH3(h2p, msg2.macR))
+  plog('§6.2', `I verified mac_r over h2_partial=${val(h2p)} — responder authenticated`)
+  const h3 = await hashH3(h2p, msg2.macR)
+  const macI = await mac(key, LABEL_I, h3)
+  plog('§6.1', `I → msg3: h3=${val(h3)} mac_i=${val(macI)}`)
   return {
     msg3: encodeMsg3({ macI }),
     result: { role: 'initiator', sk, ekSelf: state.ekI, ekPeerPub: msg2.ekPub, firstStepIkm: dh3 },
@@ -260,7 +270,9 @@ export async function respond(opts: {
   const dh3 = await ekR.dh(msg1.ekPub)     // DH(EK_r, EK_i)
 
   const h1 = await hashMsg1(opts.msg1)
+  plog('§6.3', `R ikm: DH(IK_r,EK_i)=${val(dh1)} DH(EK_r,IK_i)=${val(dh2)} DH(EK_r,EK_i)=${val(dh3)} mlkem_ss=${val(ss)}`)
   const sk = await deriveSK(dh1, dh2, dh3, ss, h1)
+  plog('§6.2', `R h1=${val(h1)} → SK=${val(sk)}`)
 
   // EK_r_priv is not retained past this point: dh3 already carries everything
   // the first ratchet step needs (§6.2 zeroization, see HandshakeResult).
@@ -269,6 +281,7 @@ export async function respond(opts: {
   const h2p = await h2Partial(opts.msg1, ekR.pub, ct, tsR)
   const macR = await mac(key, LABEL_R, h2p)
 
+  plog('§6.1', `R → msg2: EK_r=${val(ekR.pub)} pq_ct=${val(ct)} mac_r=${val(macR)}`)
   return {
     msg2: encodeMsg2({ ekPub: ekR.pub, pqCt: ct, ts: tsR, macR }),
     state: { sk, h3: await hashH3(h2p, macR), ekPeerPub: msg1.ekPub, firstStepIkm: dh3 },
@@ -287,6 +300,7 @@ export async function responderComplete(state: ResponderState, msg3Bytes: Uint8A
     wipe(state.sk, state.firstStepIkm)
     throw new HandshakeError('mac_i does not verify — initiator is not authenticated, drop the session')
   }
+  plog('§6.2', 'R verified mac_i — initiator authenticated, the session may accept data')
   return {
     role: 'responder',
     sk: state.sk,

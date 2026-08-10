@@ -34,6 +34,7 @@ import {
   kidOf, SELF_PREFIX, buildSelfDescr, parseSelfDescr, selfLabel, byteLen, sliceBytes, unhex,
   SELF_NAME_MAX, PEER_NAME_MAX,
 } from '../../lib/descr.ts'
+import { enableProtoLog } from '../../lib/protolog.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
@@ -250,7 +251,23 @@ const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talk
  * itself. That is not style: the SDK keeps its state in `#private` fields, and a
  * method invoked with the proxy as `this` cannot read them.
  */
-const HEM_TRACE = new URLSearchParams(location.search).has('debug')
+/**
+ * Two switches, and `keys` IMPLIES `debug` rather than depending on it.
+ *
+ *   `?debug=1`           what is being asked of the device, and every protocol
+ *                        derivation and state transition — but values elided.
+ *   `?keys=1`            all of the above, plus the secret bytes themselves.
+ *
+ * They are separate because a debug console gets pasted into a bug report, and a
+ * transcript plus a root key is the conversation itself. They are not
+ * independent because a switch that only widens lines nobody is printing would
+ * do nothing at all — asking for the strongest output has to give you output.
+ */
+const SHOW_KEYS = new URLSearchParams(location.search).has('keys')
+const HEM_TRACE = new URLSearchParams(location.search).has('debug') || SHOW_KEYS
+if (HEM_TRACE) {
+  enableProtoLog({ events: true, keys: SHOW_KEYS, sink: (line) => console.log(`%c${line}`, 'color:#2a8c6a') })
+}
 const HEM_SLOW_MS = 500
 const kidish = (v: any) => typeof v === 'string' ? v.slice(0, 12) + (v.length > 12 ? '…' : '') : '?'
 const HEM_CALLS: Record<string, (a: any[]) => string> = {
@@ -2086,7 +2103,7 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
 }
 const setTyping = (on: boolean, name = '') => { $('typing-ind').textContent = on ? `${name} pisze…` : '' }
 /** `?debug=1` adds per-frame lines (every handshake frame, every sealed payload). */
-const DEBUG = new URLSearchParams(location.search).has('debug')
+const DEBUG = HEM_TRACE // `?keys=1` implies it, so one flag does not half-enable the other
 // Transport diagnostics answer a support question ("send me what the Network
 // tab says"), not a daily one — and on a phone there is no console to ask
 // instead, which is why they are hidden rather than deleted. The harness runs
