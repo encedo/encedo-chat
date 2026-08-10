@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { deriveRoom, hemIdentityFrom, hemContactBook, localContactBook, mergedContactBook, type Identity } from '../lib/core.ts'
+import { deriveRoom, hemIdentityFrom, hemContactBook, localContactBook, mergedContactBook, pubKeyReader, type Identity } from '../lib/core.ts'
 import { topicFromSecret, announceMacKey } from '../lib/rendezvous.ts'
 import { buildPeerDescr, buildSelfDescr, peerSearchPrefix, hemKid } from '../lib/descr.ts'
 import { unb64 } from '../lib/wc.ts'
@@ -192,4 +192,44 @@ test('deriveRoom accepts a secret already paid for, and derives the same room', 
   const reused = await deriveRoom(id, peer, P, { ss })
   assert.equal(reused.topic, fresh.topic, 'the same room, whoever computed the secret')
   assert.equal(calls, callsAfterFresh, 'and no further ecdh for the topic')
+})
+
+test('one broad token reads every public key, and a device that refuses it still works', async () => {
+  // getPubKey is documented as needing keymgmt:use:<KID>, which is per-key: ten
+  // contacts meant ten authorisations, each two round trips. `keymgmt:get` is
+  // KID-independent. Firmware that does not know it refuses, so the first
+  // attempt decides and the answer is remembered.
+  const modern = { scopes: [] as string[], async authorizePassword(_p: any, s: string) { this.scopes.push(s); return 't' }, async getPubKey(_t: string, kid: string) { return { pubkey: 'P:' + kid } } }
+  const readModern = pubKeyReader(modern)
+  assert.equal(await readModern('K1'), 'P:K1')
+  assert.equal(await readModern('K2'), 'P:K2')
+  assert.deepEqual(modern.scopes, ['keymgmt:get', 'keymgmt:get'], 'never a per-key scope')
+
+  const legacy = {
+    scopes: [] as string[],
+    async authorizePassword(_p: any, s: string) {
+      this.scopes.push(s)
+      if (s === 'keymgmt:get') throw Object.assign(new Error('unknown scope'), { code: 'http_403' })
+      return 't'
+    },
+    async getPubKey(_t: string, kid: string) { return { pubkey: 'P:' + kid } },
+  }
+  const readLegacy = pubKeyReader(legacy)
+  assert.equal(await readLegacy('K1'), 'P:K1')
+  assert.equal(await readLegacy('K2'), 'P:K2')
+  assert.deepEqual(legacy.scopes, ['keymgmt:get', 'keymgmt:use:K1', 'keymgmt:use:K2'],
+    'the broad scope is tried ONCE, then never again on this device')
+})
+
+test('a failure after the broad scope has worked is reported, not retried narrowly', async () => {
+  // Otherwise a device that goes away mid-session would look like one that wants
+  // the old scope, and every later read would pay for two authorisations.
+  let n = 0
+  const hem = {
+    async authorizePassword() { return 't' },
+    async getPubKey(_t: string, kid: string) { if (++n > 1) throw new Error('device asleep'); return { pubkey: 'P:' + kid } },
+  }
+  const read = pubKeyReader(hem)
+  assert.equal(await read('K1'), 'P:K1')
+  await assert.rejects(() => read('K2'), /device asleep/)
 })

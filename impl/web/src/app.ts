@@ -12,7 +12,7 @@
  */
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
-import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
+import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import { decodeInvite, inviteLink, type Invite } from '../../lib/invite.ts'
 import type { GkBackend } from '../../lib/group.ts'
@@ -401,8 +401,9 @@ $('toggle').addEventListener('click', () => {
  * local key (`identityKey`).
  */
 async function signInAs(hem: any, id: { kid: string; handle: string }) {
-  const use = await hem.authorizePassword(null, `keymgmt:use:${id.kid}`)
-  const { pubkey } = await hem.getPubKey(use, id.kid)
+  // The same broad read the contact book uses; the narrow `use:<kid>` token is
+  // still taken later, by the ECDH that genuinely needs it.
+  const pubkey = await pubKeyReader(hem)(id.kid)
   await enterApp(
     hemIdentityFrom(hem, id.kid, id.handle, pubkey),
     mergedContactBook(hemContactBook(hem, id.kid), makeLocalBook(await identityKey(pubkey, id.kid), localStorage)),

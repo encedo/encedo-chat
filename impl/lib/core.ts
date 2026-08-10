@@ -71,6 +71,7 @@ export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: stri
  */
 export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
   const use = (kid: string) => hem.authorizePassword(null, `keymgmt:use:${kid}`)
+  const readPub = pubKeyReader(hem)
   const asB64 = (s: string) => b64(new TextEncoder().encode(s)) // DESCRs go to the HEM base64'd
   const fromKid = (kid: string): AdminGk => ({
     kid,
@@ -122,8 +123,7 @@ export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
         const text = descrText(k.description)
         if (!text) continue
         try {
-          const { pubkey } = await hem.getPubKey(await use(k.kid), k.kid)
-          out.push({ kid: String(k.kid), pub: unb64(pubkey), descr: text })
+          out.push({ kid: String(k.kid), pub: unb64(await readPub(k.kid)), descr: text })
         } catch { /* a key we cannot read is not a group we can rejoin */ }
       }
       return out
@@ -178,6 +178,46 @@ export interface ContactBook {
   rename(c: Contact, name: string): Promise<void>
 }
 
+
+/**
+ * A token that can read ANY public key, instead of one per key.
+ *
+ * `getPubKey` is documented as needing `keymgmt:use:<KID>`, and that scope is
+ * per-key: loading ten contacts meant ten authorisations, each of them two round
+ * trips (a challenge, then the signed assertion) at about 2.5 s. In a measured
+ * sign-in the token requests were 43% of all device time, and two of the four
+ * existed only to read a public key.
+ *
+ * `keymgmt:get` is KID-independent — one token, every public key. Firmware that
+ * does not know it refuses, so the first attempt decides and the answer is
+ * remembered for the session: a device that wants the narrow scope pays what it
+ * always paid, and one that does not stops paying per contact.
+ *
+ * Reading a PUBLIC key is the one operation where a broad scope costs nothing to
+ * give away: what it authorises is handing out material that is public by
+ * definition. The narrow scopes that matter — `use:<KID>` for an ECDH, `imp`,
+ * `del` — are untouched.
+ */
+export function pubKeyReader(hem: any): (kid: string) => Promise<string> {
+  let broad: boolean | null = null // null = not yet known for this device
+  return async (kid: string) => {
+    if (broad !== false) {
+      try {
+        const tok = await hem.authorizePassword(null, 'keymgmt:get')
+        const { pubkey } = await hem.getPubKey(tok, kid)
+        broad = true
+        return pubkey
+      } catch (e: any) {
+        if (broad === true) throw e // it worked before; this is a real failure
+        broad = false               // the device wants the per-key scope
+      }
+    }
+    const tok = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
+    const { pubkey } = await hem.getPubKey(tok, kid)
+    return pubkey
+  }
+}
+
 /**
  * The contact's key is already in this HEM, under a DIFFERENT identity.
  *
@@ -217,6 +257,7 @@ const asB64 = (s: string) => b64(new TextEncoder().encode(s)) // DESCRs go to th
  * The pubkey isn't returned by search, so it's fetched per kid.
  */
 export function hemContactBook(hem: any, ownerKid: string): ContactBook {
+  const readPub = pubKeyReader(hem)
   /** Who owns the key with this KID, if anyone — one broad search, add path only. */
   const findOwner = async (contactKid: string): Promise<{ ownerKid: string } | null> => {
     const listTok = await hem.authorizePassword(null, 'keymgmt:list')
@@ -244,9 +285,7 @@ export function hemContactBook(hem: any, ownerKid: string): ContactBook {
       // TODO(newer FW): api/search returns the public keys directly → drop this loop
       // and read `pub` straight off the search entry (one call for the whole list).
       for (const k of keys) {
-        const useTok = await hem.authorizePassword(null, `keymgmt:use:${k.kid}`)
-        const { pubkey } = await hem.getPubKey(useTok, k.kid)
-        out.push({ name: parsePeerDescr(k.description)?.name || '(?)', pub: pubkey, kid: k.kid, source: 'hem' })
+        out.push({ name: parsePeerDescr(k.description)?.name || '(?)', pub: await readPub(k.kid), kid: k.kid, source: 'hem' })
       }
       return out
     },
