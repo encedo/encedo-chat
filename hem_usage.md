@@ -57,8 +57,10 @@ Two properties worth knowing before optimising anything:
 | **add / rename / remove a contact** | a token for the scope (`imp` / `upd` / `del`) + the operation |
 
 The per-contact `getPubKey` exists because the current firmware does not return
-public keys from `key_search`. It is the single biggest scaling term in sign-in
-— see §6 below.
+public keys from `key_search`. It no longer drags a token behind it — one
+`keymgmt:get` covers every read — so what remains is one ~0.6 s call per
+contact, next to the ~1.25 s `ecdh` the presence watch needs. Those two are the
+whole per-contact term; see §6 for what the newer firmware removes.
 
 ### §5 — Rendezvous
 
@@ -135,8 +137,8 @@ identity derives `base` locally, so its cache opens with no device at all.
 
 ### Signing in
 
-Measured on a device with one contact and one group: **17 device calls, ~22.7 s
-of device time** (wall clock is less — some overlap).
+Measured on a device with one contact and one group — **14 device calls**, and
+the wall clock is less than their sum because some overlap.
 
 ```
 device version              0.68 s     the badge probe
