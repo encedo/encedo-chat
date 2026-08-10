@@ -2177,13 +2177,46 @@ void (async () => {
   ecLog(formatReport(rep))
   for (const d of rep.degraded) ecLog(`capability (degraded): ${d.id} — ${d.note}`)
   if (rep.ok) return
+  refuse(rep)
+})()
+
+/**
+ * Replace the login card with what is missing — and with a way to ask again.
+ *
+ * Reported on WebKitGTK: X25519 failed once, the card said the browser was not
+ * enough, and RESTARTING THE APP fixed it. Whatever the platform was doing, our
+ * half was worse: one probe decided it, and the only way back was to quit. The
+ * probe retries internally now, and this is the second line of defence — the
+ * user can ask again without leaving.
+ *
+ * A successful retry RELOADS rather than restoring the form. The card's markup
+ * is gone by then, and putting it back would produce nodes with none of the
+ * listeners the app attached at start-up — a login screen that looks right and
+ * responds to nothing is worse than a reload.
+ */
+function refuse(rep: Awaited<ReturnType<typeof probeCapabilities>>) {
   const card = document.querySelector('.login-card')
   if (!card) return
   card.innerHTML = `<h1>${escapeHtml(tr('Ta przeglądarka nie wystarczy'))}</h1>`
     + `<div class="sub">${escapeHtml(tr('Encedo Chat potrzebuje kilku funkcji, których tu brakuje. Bez nich nie da się nawet ustalić wspólnego pokoju, więc logowanie jest wyłączone.'))}</div>`
-    + rep.missing.map((m) => `<div class="msg err" style="display:block">${escapeHtml(m.id)} — ${escapeHtml(m.note ?? '')}</div>`).join('')
+    // `error` is the platform's own words. It is the difference between "your
+    // browser cannot" and "your browser would not, this time" — and without it
+    // the last report of this could not be diagnosed at all.
+    + rep.missing.map((m) => `<div class="msg err" style="display:block">${escapeHtml(m.id)} — ${escapeHtml(m.note ?? '')}`
+      + (m.error ? `<br><span style="opacity:.75;font-family:var(--mono);font-size:11px">${escapeHtml(m.error)}</span>` : '')
+      + `</div>`).join('')
+    + `<button class="btn" id="cap-retry" style="margin-top:12px">${escapeHtml(tr('Spróbuj ponownie'))}</button>`
     + `<div class="nodes-hint" style="margin-top:14px">${escapeHtml(rep.ua)}</div>`
-})()
+  const retry = document.getElementById('cap-retry') as HTMLButtonElement | null
+  retry?.addEventListener('click', async () => {
+    retry.disabled = true; retry.textContent = tr('…')
+    const again = await probeCapabilities()
+    capReport = again
+    ecLog(formatReport(again))
+    if (again.ok) { location.reload(); return }
+    refuse(again) // same card, this attempt's error — so a repeat is visible as one
+  })
+}
 
 /**
  * Per-peer handshake state. The badge shows ONE thing, but a room can have more

@@ -17,11 +17,28 @@
  * build already does, so its absence is a note and not an error.
  */
 
+/**
+ * A required probe that fails is retried before the platform is declared unfit.
+ * Three attempts 150 ms apart costs under half a second on a machine that has a
+ * genuine problem, and rescues one that only needed a moment.
+ */
+const REQUIRED_TRIES = 3
+const RETRY_MS = 150
+
 export interface Capability {
   id: string
   /** Missing this means the app cannot work at all. */
   required: boolean
   ok: boolean
+  /**
+   * What the platform actually threw, when it threw. Kept because a swallowed
+   * exception made a real report unanswerable: X25519 failed once on WebKitGTK,
+   * worked after a restart, and `catch {}` meant nobody could say whether it was
+   * NotSupportedError, OperationError or something else entirely.
+   */
+  error?: string
+  /** How many attempts this took. >1 means the platform needed a moment. */
+  tries?: number
   /** What the user loses. Empty when it is fine. */
   note?: string
 }
@@ -41,8 +58,31 @@ export interface CapabilityReport {
  */
 export async function probeCapabilities(): Promise<CapabilityReport> {
   const caps: Capability[] = []
-  const add = (id: string, required: boolean, ok: boolean, note?: string) =>
-    caps.push({ id, required, ok, note: ok ? undefined : note })
+  const add = (id: string, required: boolean, ok: boolean, note?: string, error?: string, tries?: number) =>
+    caps.push({ id, required, ok, note: ok ? undefined : note, error, tries: tries && tries > 1 ? tries : undefined })
+
+  /**
+   * Try a probe more than once before calling the platform unfit.
+   *
+   * A capability that fails and then succeeds on a restart was never absent —
+   * WebKitGTK brings its crypto backend up lazily, and the first call in a fresh
+   * process can lose that race. One attempt turned that into a permanent refusal
+   * with no way back except restarting the app.
+   *
+   * Only the REQUIRED probes retry: a missing optional is a note, and spending
+   * half a second confirming it would delay every start for nothing.
+   */
+  const attempt = async (fn: () => Promise<boolean>, tries = REQUIRED_TRIES): Promise<{ ok: boolean; error?: string; tries: number }> => {
+    let error: string | undefined
+    for (let n = 1; n <= tries; n++) {
+      try {
+        if (await fn()) return { ok: true, error: undefined, tries: n }
+        error = 'returned false' // no exception, but the answer was wrong — say so
+      } catch (e: any) { error = `${e?.name ?? 'Error'}: ${e?.message ?? e}` }
+      if (n < tries) await new Promise((r) => setTimeout(r, RETRY_MS))
+    }
+    return { ok: false, error, tries }
+  }
 
   const subtle = globalThis.crypto?.subtle
 
@@ -51,37 +91,31 @@ export async function probeCapabilities(): Promise<CapabilityReport> {
 
   // The one that decides everything. Generate, export and derive — a webview
   // that merely knows the name is not one that can do the handshake.
-  let x25519 = false
-  if (subtle) {
-    try {
-      const kp = (await subtle.generateKey({ name: 'X25519' }, false, ['deriveBits'])) as CryptoKeyPair
-      const pub = await subtle.exportKey('raw', kp.publicKey)
-      const peer = await subtle.importKey('raw', pub, { name: 'X25519' }, false, [])
-      const bits = await subtle.deriveBits({ name: 'X25519', public: peer }, kp.privateKey, 256)
-      x25519 = new Uint8Array(bits).length === 32
-    } catch { x25519 = false }
-  }
-  add('X25519', true, x25519,
-    'Ta przeglądarka nie umie X25519 w WebCrypto — bez tego nie da się ustalić pokoju ani uzgodnić szyfrowania. Zaktualizuj przeglądarkę (na Androidzie: System WebView w sklepie Play).')
+  // The steps are exactly what `generateX25519()` does at runtime — a probe that
+  // tested less than the app uses would pass and then fail where it matters.
+  const x = await attempt(async () => {
+    const kp = (await subtle!.generateKey({ name: 'X25519' }, false, ['deriveBits'])) as CryptoKeyPair
+    const pub = await subtle!.exportKey('raw', kp.publicKey)
+    const peer = await subtle!.importKey('raw', pub, { name: 'X25519' }, false, [])
+    const bits = await subtle!.deriveBits({ name: 'X25519', public: peer }, kp.privateKey, 256)
+    return new Uint8Array(bits).length === 32
+  }, subtle ? REQUIRED_TRIES : 0)
+  add('X25519', true, x.ok,
+    'Ta przeglądarka nie umie X25519 w WebCrypto — bez tego nie da się ustalić pokoju ani uzgodnić szyfrowania. Zaktualizuj przeglądarkę (na Androidzie: System WebView w sklepie Play).',
+    x.error, x.tries)
 
-  let hkdf = false
-  if (subtle) {
-    try {
-      const k = await subtle.importKey('raw', new Uint8Array(32), 'HKDF', false, ['deriveBits'])
-      hkdf = (await subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: new Uint8Array(0) }, k, 256)).byteLength === 32
-    } catch { hkdf = false }
-  }
-  add('HKDF', true, hkdf, 'Brak HKDF-SHA256 w WebCrypto.')
+  const h = await attempt(async () => {
+    const k = await subtle!.importKey('raw', new Uint8Array(32), 'HKDF', false, ['deriveBits'])
+    return (await subtle!.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: new Uint8Array(0) }, k, 256)).byteLength === 32
+  }, subtle ? REQUIRED_TRIES : 0)
+  add('HKDF', true, h.ok, 'Brak HKDF-SHA256 w WebCrypto.', h.error, h.tries)
 
-  let aead = false
-  if (subtle) {
-    try {
-      const k = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
-      const ct = await subtle.encrypt({ name: 'AES-GCM', iv: new Uint8Array(12) }, k as CryptoKey, new Uint8Array(4))
-      aead = ct.byteLength > 4
-    } catch { aead = false }
-  }
-  add('AES-GCM', true, aead, 'Brak AES-GCM w WebCrypto.')
+  const a = await attempt(async () => {
+    const k = await subtle!.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+    const ct = await subtle!.encrypt({ name: 'AES-GCM', iv: new Uint8Array(12) }, k as CryptoKey, new Uint8Array(4))
+    return ct.byteLength > 4
+  }, subtle ? REQUIRED_TRIES : 0)
+  add('AES-GCM', true, a.ok, 'Brak AES-GCM w WebCrypto.', a.error, a.tries)
 
   add('WebSocket', true, typeof WebSocket === 'function',
     'Brak WebSocket — nie da się połączyć z węzłem sieci.')
@@ -108,6 +142,9 @@ export async function probeCapabilities(): Promise<CapabilityReport> {
 
 /** One line per capability — for the debug log and for a bug report. */
 export function formatReport(r: CapabilityReport): string {
-  const line = (c: Capability) => `${c.ok ? '✓' : c.required ? '✖' : '·'} ${c.id}${c.ok ? '' : ` — ${c.note ?? ''}`}`
+  const line = (c: Capability) =>
+    `${c.ok ? '✓' : c.required ? '✖' : '·'} ${c.id}`
+    + (c.tries ? ` (took ${c.tries} attempts)` : '')
+    + (c.ok ? '' : ` — ${c.note ?? ''}${c.error ? ` [${c.error}]` : ''}`)
   return [`platform: ${r.ua}`, ...r.caps.map(line)].join('\n')
 }
