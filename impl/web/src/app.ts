@@ -22,6 +22,7 @@ import type { GkBackend } from '../../lib/group.ts'
 import { t as tr, setLocale, getLocale, applyDom } from './i18n.ts'
 import { probeCapabilities, formatReport } from '../../lib/capabilities.ts'
 import { splitByLinks } from '../../lib/linkify.ts'
+import { splitByMentions, resolveMention, mentionText, closeMentions, mentionsPub } from '../../lib/mentions.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -1721,6 +1722,7 @@ $('attach-drop').addEventListener('click', () => showAttach(null))
 function clearComposer() {
   ;($('msg-input') as HTMLInputElement).value = ''
   showAttach(null)
+  closeMentionPop() // a picker left open would offer the previous group's members
 }
 
 // ---- theme ---------------------------------------------------------------
@@ -2556,9 +2558,47 @@ let linkWarnMuted = false
  * would visit: a phishing link works by showing one thing and going to another,
  * and here there is no separate label that could disagree with the target.
  */
+/** The roster a mention is resolved against: the group on screen, or nobody.
+ *  A 1:1 has no roster and therefore no mentions — `@ala#3a7f1c02` is just what
+ *  the other person typed. */
+const mentionRoster = (): { pub: string }[] => (activeGid ? groupsUI.get(activeGid)?.members : null) ?? []
+
+/**
+ * Draw the mentions in a plain piece of a message.
+ *
+ * The chip carries MY name for that key (`memberName`), never the name that
+ * travelled — see `lib/mentions.ts` for why that is the whole point. A hint
+ * that is not exactly one member of this group stays the text it arrived as,
+ * so no message can stage the presence of somebody who is not here.
+ */
+function renderMentions(into: HTMLElement, text: string) {
+  const pubs = mentionRoster().map((m) => m.pub)
+  for (const part of splitByMentions(text)) {
+    const m = part.mention
+    const pub = m && pubs.length ? resolveMention(m.hint, pubs) : null
+    if (!pub) { into.appendChild(document.createTextNode(part.text)); continue }
+    const me = pub === session?.pub
+    const chip = document.createElement('span')
+    // `.you`, not `.me`: the sidebar's own `.me` row is a flex box with padding,
+    // and an unscoped class name would have handed all of it to this chip — it
+    // did, and the chip came out as a bar across the bubble. Fourth time this
+    // stylesheet has punished a name that was already taken.
+    chip.className = 'mention' + (me ? ' you' : '')
+    // textContent, like every other piece of a body: a mention is not markup.
+    chip.textContent = '@' + (me ? (session?.handle || tr('Ty')) : memberName(pub))
+    chip.title = me
+      ? tr('To Ty — ktoś zwrócił się do Ciebie ({hint})', { hint: m!.hint })
+      : tr('Wzmianka o {name} ({hint})', { name: memberName(pub), hint: m!.hint })
+    into.appendChild(chip)
+  }
+}
+
 function renderBody(into: HTMLElement, text: string) {
   for (const part of splitByLinks(text)) {
-    into.appendChild(document.createTextNode(part.text))
+    // Mentions are looked for only OUTSIDE the links: `…/@ala#3a7f1c02` is a
+    // fragment of somebody's URL, not a person in this conversation.
+    if (!part.link) renderMentions(into, part.text)
+    else into.appendChild(document.createTextNode(part.text))
     const l = part.link
     if (!l?.href) continue // refused (credentials, bad scheme): text only, no arrow
     const a = document.createElement('a')
@@ -2764,7 +2804,12 @@ function sendComposer() {
   if (activeGid) { // a group is on screen — broadcast to it
     const gu = groupsUI.get(activeGid); if (!gu?.room) return
     inp.value = ''
-    gu.room.sendText(t).then((id) => recordGroup(gu, { t: 'msg', kind: 'me', text: t, ts: nowMs(), id, sent: true })).catch((e) => ecLog('group send failed: ' + (e?.message ?? e)))
+    // "@Ala" typed straight through becomes "@Ala#3a7f1c02" here — the picker
+    // already writes whole tokens, this is for the message written in one go.
+    // Myself out of the roster: nobody mentions themselves, and "Ty" is not a
+    // name anybody else would recognise.
+    const body = closeMentions(t, gu.members.filter((m) => m.pub !== session?.pub).map((m) => ({ pub: m.pub, name: memberName(m.pub) })))
+    gu.room.sendText(body).then((id) => recordGroup(gu, { t: 'msg', kind: 'me', text: body, ts: nowMs(), id, sent: true })).catch((e) => ecLog('group send failed: ' + (e?.message ?? e)))
     return
   }
   const room = activeRoom(); if (!room?.conv) return
@@ -2773,8 +2818,108 @@ function sendComposer() {
   record(room, { t: 'msg', kind: 'me', text: t, ts: nowMs(), id }); inp.value = ''
 }
 ;($('send') as HTMLButtonElement).onclick = sendComposer
-;($('msg-input') as HTMLInputElement).oninput = () => activeRoom()?.conv?.noteActivity()
-;($('msg-input') as HTMLInputElement).onkeydown = (e: any) => { if (e.key === 'Enter') sendComposer() }
+;($('msg-input') as HTMLInputElement).oninput = () => { activeRoom()?.conv?.noteActivity(); updateMentionPop() }
+;($('msg-input') as HTMLInputElement).onkeydown = (e: any) => {
+  if (mentionKey(e)) return // the picker is open: Enter picks a person, it does not send
+  if (e.key === 'Enter') sendComposer()
+}
+;($('msg-input') as HTMLInputElement).addEventListener('click', updateMentionPop)
+;($('msg-input') as HTMLInputElement).addEventListener('blur', () => closeMentionPop())
+
+// ---- the @ picker ---------------------------------------------------------
+/**
+ * Typing `@` in a group offers its members, and picking one writes the WHOLE
+ * token (`@Ala#3a7f1c02`) into the composer.
+ *
+ * The token is what will be sent, character for character, and it is visible
+ * while it is being written — there is no hidden state behind the text, and no
+ * rich-text composer to keep in step with a plain-text body. What is typed is
+ * what travels; only the reader's chip is prettier, because only the reader
+ * knows what they call that key.
+ */
+let mentionAt = -1 // where the '@' being completed sits, -1 = the picker is closed
+let mentionSel = 0
+let mentionHits: Array<{ pub: string; name: string }> = []
+
+const closeMentionPop = () => { mentionAt = -1; $('mention-pop').hidden = true }
+
+/** Members of the group on screen, myself excluded, that match what was typed. */
+function mentionCandidates(query: string): Array<{ pub: string; name: string }> {
+  const q = query.toLowerCase()
+  return mentionRoster()
+    .filter((m) => m.pub !== session?.pub)
+    .map((m) => ({ pub: m.pub, name: memberName(m.pub) }))
+    .filter((m) => !q || m.name.toLowerCase().includes(q))
+    // What was typed first, then alphabetically: typing "an" should offer Anna
+    // before Marianna, and both before nobody.
+    .sort((a, b) => {
+      const pa = a.name.toLowerCase().startsWith(q) ? 0 : 1, pb = b.name.toLowerCase().startsWith(q) ? 0 : 1
+      return pa - pb || a.name.localeCompare(b.name)
+    })
+    .slice(0, 8)
+}
+
+function updateMentionPop() {
+  const inp = $('msg-input') as HTMLInputElement
+  if (!activeGid) return closeMentionPop() // a 1:1 has no roster to offer
+  const caret = inp.selectionStart ?? inp.value.length
+  const upto = inp.value.slice(0, caret)
+  const at = upto.lastIndexOf('@')
+  if (at < 0) return closeMentionPop()
+  // The same word-opening rule the parser uses, so the picker cannot offer to
+  // complete something that would never be read back as a mention.
+  if (at > 0 && !/[\s([{"'„«]/.test(upto[at - 1])) return closeMentionPop()
+  const query = upto.slice(at + 1)
+  if (query.length > 24 || /[@#]/.test(query)) return closeMentionPop()
+  mentionHits = mentionCandidates(query)
+  if (!mentionHits.length) return closeMentionPop()
+  mentionAt = at; mentionSel = 0
+  paintMentionPop()
+}
+
+function paintMentionPop() {
+  const pop = $('mention-pop'), inp = $('msg-input') as HTMLInputElement
+  pop.innerHTML = ''
+  mentionHits.forEach((h, i) => {
+    const row = document.createElement('button')
+    row.className = 'mrow-pick' + (i === mentionSel ? ' on' : '')
+    const av = document.createElement('span'); av.className = 'ga'; av.textContent = initials(h.name)
+    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = h.name
+    row.append(av, nm)
+    row.addEventListener('mousedown', (e) => { e.preventDefault(); pickMention(i) }) // mousedown: the input must not lose focus first
+    pop.appendChild(row)
+  })
+  const r = inp.getBoundingClientRect()
+  pop.style.left = Math.round(r.left) + 'px'
+  pop.style.width = Math.round(Math.min(320, Math.max(180, r.width))) + 'px'
+  pop.style.bottom = Math.round(window.innerHeight - r.top + 6) + 'px'
+  pop.hidden = false
+}
+
+function pickMention(i: number) {
+  const hit = mentionHits[i]
+  const inp = $('msg-input') as HTMLInputElement
+  if (!hit || mentionAt < 0) return closeMentionPop()
+  const caret = inp.selectionStart ?? inp.value.length
+  const token = mentionText(hit.name, hit.pub) + ' '
+  inp.value = inp.value.slice(0, mentionAt) + token + inp.value.slice(caret)
+  const pos = mentionAt + token.length
+  closeMentionPop()
+  inp.focus(); inp.setSelectionRange(pos, pos)
+}
+
+/** Keys the picker owns while it is open. Returns true when it took the key. */
+function mentionKey(e: KeyboardEvent): boolean {
+  if (mentionAt < 0) return false
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault()
+    mentionSel = (mentionSel + (e.key === 'ArrowDown' ? 1 : mentionHits.length - 1)) % mentionHits.length
+    paintMentionPop(); return true
+  }
+  if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(mentionSel); return true }
+  if (e.key === 'Escape') { e.preventDefault(); closeMentionPop(); return true }
+  return false
+}
 
 // ---- groups (§8: Sender Keys over the shared topic) ------------------------
 // A group is another kind of room in the same chat pane. It reuses the transcript
@@ -2794,7 +2939,10 @@ function sendComposer() {
  * Resolving at paint time removes the race rather than ordering it, and takes
  * the staleness after adding or renaming a contact with it.
  */
-interface GroupUI { gid: string; name: string; epoch: number; members: { pub: string }[]; room: GroupRoom | null; log: Ev[]; unseen: number }
+interface GroupUI { gid: string; name: string; epoch: number; members: { pub: string }[]; room: GroupRoom | null; log: Ev[]; unseen: number
+  /** Among the unread ones, at least one says my name. Lives beside `unseen`
+   *  and clears with it: a count says how much, this says whether it is for me. */
+  called?: boolean }
 const groupsUI = new Map<string, GroupUI>()
 
 const memberName = (pub: string): string =>
@@ -3009,7 +3157,8 @@ function renderGroups() {
   if (!groupsUI.size) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = tr('(brak grup — utwórz)'); pane.appendChild(e); return }
   for (const gu of groupsUI.values()) {
     const b = document.createElement('button'); b.className = 'contact' + (activeGid === gu.gid && chatOnScreen() ? ' active' : '') + (gu.unseen ? ' unread' : '')
-    const pill = gu.unseen ? `<span class="c-unread">${gu.unseen > 99 ? '99+' : gu.unseen}</span>` : ''
+    const pill = (gu.called ? `<span class="c-at" title="${tr('Ktoś zwrócił się do Ciebie')}">@</span>` : '')
+      + (gu.unseen ? `<span class="c-unread">${gu.unseen > 99 ? '99+' : gu.unseen}</span>` : '')
     const admin = iAmAdmin(gu)
     b.innerHTML = `<div class="avatar">👥</div><div class="c-info"><div class="c-name">${escapeHtml(groupDisplay(gu))}</div>`
       + `<div class="c-sub"><span class="avatar-cluster sm">${avatarClusterHTML(gu.members, 4)}</span> ${gu.members.length} · 🔐</div></div>` + pill
@@ -3071,7 +3220,11 @@ function renderGroups() {
 function recordGroup(gu: GroupUI, ev: Ev) {
   gu.log.push(ev); if (gu.log.length > LOG_CAP) gu.log.shift()
   if (activeGid === gu.gid && $('app').classList.contains('chat-open')) applyEv(ev)
-  else if (ev.t === 'msg' && ev.kind === 'peer') { gu.unseen++; renderGroups() }
+  else if (ev.t === 'msg' && ev.kind === 'peer') {
+    gu.unseen++
+    if (session && mentionsPub(ev.text, session.pub)) gu.called = true
+    renderGroups()
+  }
   // A send must be durable at once (a spent counter cannot be reused after a fast
   // reload); a receive is self-healing (the chain re-walks) so it can debounce.
   if (ev.t === 'msg') { if (ev.kind === 'me') void persistGroups(); else schedulePersist() }
@@ -3270,7 +3423,7 @@ async function activateGroup(gid: string) {
   const sameTarget = activeGid === gid // as in activateRoom: a new audience empties the composer, a repaint does not
   activeGid = gid; activePub = null // a group takes over — no 1:1 is "active"
   if (!sameTarget) clearComposer()
-  gu.unseen = 0
+  gu.unseen = 0; gu.called = false
   $('chat-empty').hidden = true; $('chat-view').hidden = false
   showChatPane(true)
   $('peer-avatar').textContent = tr('👥')

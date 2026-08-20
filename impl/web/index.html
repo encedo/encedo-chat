@@ -184,6 +184,10 @@
   .contact .c-info{flex:1;min-width:0}
   .contact.unread .c-name{font-weight:700}
   .contact .c-unread{flex-shrink:0;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--accent);color:var(--accent-ink);font-size:11px;font-weight:700;display:grid;place-items:center;font-variant-numeric:tabular-nums}
+  /* "Somebody called you" sits next to the count and must not read as another
+     count: outlined where the unread pill is filled. */
+  .contact .c-at{flex-shrink:0;width:18px;height:18px;border-radius:9px;border:1px solid var(--accent);
+    color:var(--accent);font-size:11px;font-weight:700;display:grid;place-items:center}
   .contact .c-x{color:var(--muted);opacity:0;font-size:16px;padding:0 4px}
   .contact:hover .c-x{opacity:.7}
   .add-row{padding:8px 12px}
@@ -358,6 +362,22 @@
     font-weight:700;line-height:1.4;vertical-align:baseline}
   .b-text .lnk:hover{filter:brightness(.94)}
   .b-text .lnk.warn{background:var(--warn-soft);color:var(--warn)}
+  /* A mention is a chip, not a link — nothing opens, and what it reads is MY
+     name for that key (see lib/mentions.ts). The one addressed to ME is filled
+     rather than tinted: that is the one that has to be findable by glance,
+     from across a transcript nobody scrolled yet. */
+  .b-text .mention{padding:0 4px;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-weight:600}
+  .b-text .mention.you{background:var(--accent);color:var(--accent-ink)}
+  /* The picker: same surface as the members popover, anchored above the
+     composer by script (position:fixed — the composer sits in a scrolling pane). */
+  .mention-pop{position:fixed;z-index:14;background:var(--card);border:1px solid var(--border);border-radius:10px;
+    box-shadow:0 12px 30px rgba(18,38,63,.15);padding:4px;max-height:232px;overflow-y:auto}
+  .mention-pop .mrow-pick{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border:none;border-radius:8px;
+    background:none;color:var(--text);font-size:13px;text-align:left;cursor:pointer}
+  .mention-pop .mrow-pick.on,.mention-pop .mrow-pick:hover{background:var(--accent-soft)}
+  .mention-pop .mrow-pick .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mention-pop .ga{min-width:22px;height:20px;flex-shrink:0;padding:0 5px;border-radius:7px;display:grid;place-items:center;
+    font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-soft)}
   @media (pointer:coarse){.b-text .lnk{padding:2px 8px}}
   /* An inline edit affordance next to a name. Hidden until the row is hovered
      on a mouse, always visible on touch (no hover to reveal it). */
@@ -640,6 +660,10 @@
        whenever no conversation is open — so opening it from the group list for a
        group that is not on screen showed nothing at all. -->
   <div class="members-pop" id="members-pop" hidden></div>
+  <!-- The @ picker. Body-level for the same reason the members popover is: the
+       composer lives inside #chat-view, which is `hidden` until a conversation
+       is open, and a popup clipped by its own pane is a popup nobody sees. -->
+  <div class="mention-pop" id="mention-pop" hidden></div>
   <div class="scrim" id="scrim"></div>
   <div class="toast" id="toast"></div>
 
