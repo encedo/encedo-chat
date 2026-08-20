@@ -75,6 +75,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Adres HEM': 'HEM address',
     'aktywny': 'active',
     'Anuluj': 'Cancel',
+    'bez HEM:': 'without a HEM:',
     'bez WebRTC': 'no WebRTC',
     'Bezpośredni kanał jest szybszy i nie przechodzi przez węzeł, ale rozmówca widzi wtedy Twój adres IP. Wybór dotyczy rozmów otwieranych od teraz — trwającej nie przełączamy, bo to zerwałoby kanał w środku zdania. Odznaka w nagłówku pokazuje stan faktyczny każdej rozmowy.':
       'A direct channel is faster and does not pass through the node, but the other side sees your IP address. This applies to conversations opened from now on — a running one is not switched, which would cut the channel mid-sentence. The badge in the header shows what each conversation is actually doing.',
