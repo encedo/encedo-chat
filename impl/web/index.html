@@ -49,9 +49,13 @@
      exactly when it is no longer needed. The app removes it when it is ready. */
   #boot{position:fixed;inset:0;z-index:99;display:grid;place-items:center;gap:18px;
     background:var(--bg);align-content:center}
-  #boot .mark{font-family:var(--mono);font-size:15px;letter-spacing:.02em;color:var(--text);
+  /* The wordmark: a green dot and the name, in the mono face. Defined ONCE and
+     worn by both places that show it — the splash and the login card — because
+     the two sit one frame apart and a reader sees them as the same thing. The
+     size is the only difference, and it comes from whatever wears the class. */
+  .mark{font-family:var(--mono);font-size:15px;letter-spacing:.02em;color:var(--text);
     display:flex;align-items:center;gap:9px}
-  #boot .mark i{width:7px;height:7px;border-radius:50%;background:var(--accent);display:block}
+  .mark i{width:.5em;height:.5em;border-radius:50%;background:var(--accent);display:block;flex-shrink:0}
   #boot .ring{width:26px;height:26px;border-radius:50%;border:2px solid var(--border);
     border-top-color:var(--accent);animation:boot-spin .8s linear infinite}
   /* Only after a wait long enough to mean something is wrong, and in both
@@ -565,7 +569,7 @@
   </div>
   <div class="login-wrap" id="login">
     <div class="login-card">
-      <h1>⚡ onchato</h1>
+      <h1 class="mark"><i></i> onchato</h1>
       <p class="sub" data-i18n="Zaloguj się swoim HEM.">Zaloguj się swoim HEM.</p>
       <label data-i18n="Adres HEM">Adres HEM</label>
       <div class="row"><input id="hsm" type="text" value="https://my.ence.do" autocomplete="off"><span class="dot" id="status-dot" title="status HEM" data-i18n-title="status HEM"></span></div>
