@@ -9,7 +9,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { b64 } from '../lib/wc.ts'
-import { findMentions, splitByMentions, pubHint, mentionText, resolveMention, closeMentions, mentionsPub } from '../lib/mentions.ts'
+import { findMentions, splitByMentions, pubHint, mentionText, mentionName, resolveMention, closeMentions, mentionsPub } from '../lib/mentions.ts'
 
 /** A public key whose first four bytes are known, so the hint is predictable. */
 const keyOf = (a: number, b: number, c: number, d: number): string =>
@@ -98,4 +98,23 @@ test('mentionsPub answers the only question the unread mark asks', () => {
   assert.ok(mentionsPub('no i @Ala#3a7f1c02 ?', ALA))
   assert.ok(!mentionsPub('no i @Ala#3a7f1c02 ?', BOB))
   assert.ok(!mentionsPub('zwykła wiadomość', ALA))
+})
+
+test('what the picker pointed at settles a tie its name cannot', () => {
+  // Two members called Ala: the sentence alone is ambiguous, the click is not.
+  const twins = [{ pub: ALA, name: 'Ala' }, { pub: BOB, name: 'Ala' }]
+  const picked = new Map([['ala', BOB]])
+  assert.equal(closeMentions('@Ala halo', twins, picked), '@Ala#ff001122 halo')
+  // …and it settles nothing else: an unpicked name is still resolved from the
+  // roster, or left alone.
+  assert.equal(closeMentions('@Ala halo', twins, new Map([['bob', BOB]])), '@Ala halo')
+})
+
+test('the name the picker writes is the name closeMentions looks for', () => {
+  // A contact called "A#B @C" would otherwise be written into the composer in a
+  // form the parser can never read back.
+  const odd = [{ pub: ALA, name: 'A#B @C' }]
+  const written = '@' + mentionName(odd[0].name)
+  assert.equal(written, '@AB C')
+  assert.equal(closeMentions(written + ' halo', [{ pub: ALA, name: mentionName(odd[0].name) }]), '@AB C#3a7f1c02 halo')
 })

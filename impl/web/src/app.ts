@@ -22,7 +22,7 @@ import type { GkBackend } from '../../lib/group.ts'
 import { t as tr, setLocale, getLocale, applyDom } from './i18n.ts'
 import { probeCapabilities, formatReport } from '../../lib/capabilities.ts'
 import { splitByLinks } from '../../lib/linkify.ts'
-import { splitByMentions, resolveMention, mentionText, closeMentions, mentionsPub } from '../../lib/mentions.ts'
+import { splitByMentions, resolveMention, mentionName, closeMentions, mentionsPub } from '../../lib/mentions.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -1723,6 +1723,7 @@ function clearComposer() {
   ;($('msg-input') as HTMLInputElement).value = ''
   showAttach(null)
   closeMentionPop() // a picker left open would offer the previous group's members
+  mentionPicks.clear() // …and its choices would name people the new group does not have
 }
 
 // ---- theme ---------------------------------------------------------------
@@ -2397,7 +2398,13 @@ async function attachFile(f: File) {
   // and cleared now, before the encrypt/upload await, so what is sent is what
   // the user saw when they picked the file — not whatever they typed since.
   const inp = $('msg-input') as HTMLInputElement
-  const caption = inp.value.trim()
+  // A caption is a body like any other, so its mentions close here too — a file
+  // sent with "@Ala popatrz" must reach Ala the same way the sentence alone would.
+  const gm = gid ? groupsUI.get(gid) : null
+  const caption = gm
+    ? closeMentions(inp.value.trim(), gm.members.filter((m) => m.pub !== session?.pub).map((m) => ({ pub: m.pub, name: memberName(m.pub) })), mentionPicks)
+    : inp.value.trim()
+  mentionPicks.clear()
   inp.value = ''
 
   // The bubble appears NOW, before any work — on an 80 MB file the encrypt and
@@ -2808,7 +2815,8 @@ function sendComposer() {
     // already writes whole tokens, this is for the message written in one go.
     // Myself out of the roster: nobody mentions themselves, and "Ty" is not a
     // name anybody else would recognise.
-    const body = closeMentions(t, gu.members.filter((m) => m.pub !== session?.pub).map((m) => ({ pub: m.pub, name: memberName(m.pub) })))
+    const body = closeMentions(t, gu.members.filter((m) => m.pub !== session?.pub).map((m) => ({ pub: m.pub, name: memberName(m.pub) })), mentionPicks)
+    mentionPicks.clear()
     gu.room.sendText(body).then((id) => recordGroup(gu, { t: 'msg', kind: 'me', text: body, ts: nowMs(), id, sent: true })).catch((e) => ecLog('group send failed: ' + (e?.message ?? e)))
     return
   }
@@ -2828,18 +2836,23 @@ function sendComposer() {
 
 // ---- the @ picker ---------------------------------------------------------
 /**
- * Typing `@` in a group offers its members, and picking one writes the WHOLE
- * token (`@Ala#3a7f1c02`) into the composer.
+ * Typing `@` in a group offers its members, and picking one writes `@Ala`.
  *
- * The token is what will be sent, character for character, and it is visible
- * while it is being written — there is no hidden state behind the text, and no
- * rich-text composer to keep in step with a plain-text body. What is typed is
- * what travels; only the reader's chip is prettier, because only the reader
- * knows what they call that key.
+ * The key hint is attached at SEND time (`closeMentions`), not here. The first
+ * version wrote the whole `@Ala#3a7f1c02` into the field so that what you see
+ * would be exactly what travels — true, and worth nothing next to the fact that
+ * you then have to write the rest of the sentence around eight characters of a
+ * key. Nobody is composing a wire format; they are talking to Ala.
+ *
+ * What that costs is one piece of state: WHICH Ala was pointed at, for the case
+ * where a group holds two. `mentionPicks` carries exactly that to the send, and
+ * nothing else — an unpicked name is still resolved from the roster.
  */
 let mentionAt = -1 // where the '@' being completed sits, -1 = the picker is closed
 let mentionSel = 0
 let mentionHits: Array<{ pub: string; name: string }> = []
+/** lower-cased name the picker wrote → the key it meant. Emptied with the composer. */
+const mentionPicks = new Map<string, string>()
 
 const closeMentionPop = () => { mentionAt = -1; $('mention-pop').hidden = true }
 
@@ -2901,9 +2914,12 @@ function pickMention(i: number) {
   const inp = $('msg-input') as HTMLInputElement
   if (!hit || mentionAt < 0) return closeMentionPop()
   const caret = inp.selectionStart ?? inp.value.length
-  const token = mentionText(hit.name, hit.pub) + ' '
-  inp.value = inp.value.slice(0, mentionAt) + token + inp.value.slice(caret)
-  const pos = mentionAt + token.length
+  // The same shape `closeMentions` looks for — a name it cannot find again is a
+  // mention that silently loses its hint.
+  const written = '@' + mentionName(hit.name) + ' '
+  mentionPicks.set(mentionName(hit.name).toLowerCase(), hit.pub)
+  inp.value = inp.value.slice(0, mentionAt) + written + inp.value.slice(caret)
+  const pos = mentionAt + written.length
   closeMentionPop()
   inp.focus(); inp.setSelectionRange(pos, pos)
 }

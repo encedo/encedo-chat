@@ -63,10 +63,14 @@ export function pubHint(pub: string): string {
  * A name is what the mention looked like, so it travels as typed — minus the
  * two characters that would make the token unparseable, and minus anything
  * that could smuggle a second line into a message body.
+ *
+ * Exported because the composer writes this same form: what is typed has to be
+ * a string `closeMentions` can find again, or the hint never gets attached.
  */
-function safeName(name: string): string {
+export function mentionName(name: string): string {
   return name.replace(/[@#]/g, '').replace(/\s+/g, ' ').trim().slice(0, 48).trim()
 }
+const safeName = mentionName
 
 /** Build the text that travels: `@Ala#3a7f1c02`. */
 export function mentionText(name: string, pub: string): string {
@@ -132,13 +136,23 @@ export function splitByMentions(text: string): Array<{ text: string; mention?: F
  * Finish the mentions somebody typed by hand: `@Ala` becomes `@Ala#3a7f1c02`
  * when exactly one member of the roster is called that.
  *
- * The picker in the composer writes whole tokens, so this is for the message
- * typed straight through. It matches the LONGEST roster name that fits at that
- * position (so "Ala Nowak" wins over "Ala" when both are members) and refuses
- * on a tie of that longest name: two people called Ala means the message keeps
- * the plain word, which is what the sender wrote anyway.
+ * This is the ONLY place a hint is attached — what is typed, whether by hand or
+ * by the picker, is the bare `@Ala` that a person wants to read while writing.
+ * It matches the LONGEST roster name that fits at that position (so "Ala Nowak"
+ * wins over "Ala" when both are members) and refuses on a tie of that longest
+ * name: two people called Ala means the message keeps the plain word, which is
+ * what the sender wrote anyway.
+ *
+ * `picked` is what the composer's picker chose, keyed by the lower-cased name it
+ * wrote. It settles exactly that tie — the sender pointed at a row, so which Ala
+ * they meant is known rather than guessed — and nothing else: a name that was
+ * never picked is still resolved from the roster alone.
  */
-export function closeMentions(text: string, roster: Array<{ pub: string; name: string }>): string {
+export function closeMentions(
+  text: string,
+  roster: Array<{ pub: string; name: string }>,
+  picked?: Map<string, string>,
+): string {
   if (!text.includes('@') || !roster.length) return text
   const done = findMentions(text)
   const named = roster.filter((r) => safeName(r.name)).sort((a, b) => b.name.length - a.name.length)
@@ -157,9 +171,12 @@ export function closeMentions(text: string, roster: Array<{ pub: string; name: s
     })
     if (!fits.length) continue
     const best = fits.filter((r) => r.name.length === fits[0].name.length)
-    if (best.length > 1 && new Set(best.map((r) => r.pub)).size > 1) continue // two people, same name: no guessing
-    out += text.slice(at, start) + mentionText(best[0].name, best[0].pub)
-    at = start + 1 + best[0].name.length
+    const chose = picked?.get(safeName(best[0].name).toLowerCase())
+    const one = (chose && best.find((r) => r.pub === chose)) ?? best[0]
+    // Two people, one name, nobody pointed at either: keep the plain word.
+    if (!chose && best.length > 1 && new Set(best.map((r) => r.pub)).size > 1) continue
+    out += text.slice(at, start) + mentionText(one.name, one.pub)
+    at = start + 1 + one.name.length
   }
   return out + text.slice(at)
 }
