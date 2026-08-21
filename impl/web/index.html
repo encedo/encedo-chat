@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Encedo Chat</title>
+<title>onchato</title>
 <style>
   /* The palette is shared with the public page (`landing.html`): a cool ground
      biased green rather than a neutral grey, ink that is green-black, and ONE
@@ -438,6 +438,12 @@
   /* Which build is on screen. Small and muted on purpose: nobody needs it until
      somebody is describing a fault, and then it is the first question asked. */
   .build-id{margin-top:14px;text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--muted);opacity:.75;user-select:text}
+  /* Login card footer: the way out on the left, the build id on the right, one
+     baseline. The build id keeps its own margin so the settings copy — which has
+     no row around it — is unchanged. */
+  .build-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+  .home-link{margin-top:14px;font-family:var(--mono);font-size:10.5px;color:var(--muted);opacity:.75;text-decoration:none}
+  .home-link:hover{color:var(--accent);opacity:1;text-decoration:underline}
   .label-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
   .label-row label{margin:0}
   .bytes-left{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;flex-shrink:0}
@@ -599,7 +605,16 @@
         </div>
       </div>
       <div class="msg" id="msg"></div>
-      <div class="build-id" id="build-id-login"></div>
+      <div class="build-row">
+        <!-- The way back to the landing page. From /chat there was none: the app is
+             what answers the address, so somebody who wanted to read about the
+             product had to edit the URL. The href is repeated by app.ts from
+             CANONICAL_ORIGIN, and hardcoded here so it still works if the bundle
+             never runs — which is exactly the case where somebody is stuck on this
+             screen looking for a way out. -->
+        <a class="home-link" id="home-link" href="https://onchato.com/" target="_blank" rel="noopener noreferrer">onchato.com</a>
+        <div class="build-id" id="build-id-login"></div>
+      </div>
     </div>
   </div>
 

@@ -1,5 +1,5 @@
 /**
- * app.ts — Encedo Chat web GUI (mockup skin). Login (HEM) → dashboard.
+ * app.ts — onchato web GUI (mockup skin). Login (HEM) → dashboard.
  *
  * Identity in the HEM (hem-sdk-js). Rendezvous/messages via the SAME engine as
  * the CLI (../../lib, WebCrypto). Browser libp2p peer dials the onchato relay.
@@ -1454,6 +1454,13 @@ $('welcome-share').addEventListener('click', () => { closeWelcome(); void openSh
  */
 const CANONICAL_ORIGIN = 'https://onchato.com'
 const CANONICAL_PATH = '/chat'
+// The login card's way back to the landing. The markup carries the same address
+// so the link survives a dead bundle; this makes the constant the one that decides,
+// so a moved domain cannot leave a stale link on the screen people log in from.
+{
+  const home = document.getElementById('home-link') as HTMLAnchorElement | null
+  if (home) { home.href = CANONICAL_ORIGIN + '/'; home.textContent = new URL(CANONICAL_ORIGIN).host }
+}
 
 /**
  * True when this document is NOT a page on the web — i.e. it is the app shell.
@@ -2216,7 +2223,7 @@ function refuse(rep: Awaited<ReturnType<typeof probeCapabilities>>) {
   const card = document.querySelector('.login-card')
   if (!card) return
   card.innerHTML = `<h1>${escapeHtml(tr('Ta przeglądarka nie wystarczy'))}</h1>`
-    + `<div class="sub">${escapeHtml(tr('Encedo Chat potrzebuje kilku funkcji, których tu brakuje. Bez nich nie da się nawet ustalić wspólnego pokoju, więc logowanie jest wyłączone.'))}</div>`
+    + `<div class="sub">${escapeHtml(tr('onchato potrzebuje kilku funkcji, których tu brakuje. Bez nich nie da się nawet ustalić wspólnego pokoju, więc logowanie jest wyłączone.'))}</div>`
     // `error` is the platform's own words. It is the difference between "your
     // browser cannot" and "your browser would not, this time" — and without it
     // the last report of this could not be diagnosed at all.

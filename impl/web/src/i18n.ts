@@ -108,7 +108,6 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Dołączono do grupy „{name}”': 'Joined the group “{name}”',
     'Dwuklik = kopiuj klucz publiczny': 'Double-click to copy the public key',
     'Ekran': 'Screen',
-    'Encedo Chat potrzebuje kilku funkcji, których tu brakuje. Bez nich nie da się nawet ustalić wspólnego pokoju, więc logowanie jest wyłączone.': 'Encedo Chat needs a few capabilities this browser does not have. Without them it cannot even derive a shared room, so signing in is disabled.',
     'failover': 'failover',
     'Failover po liście węzłów: gdy pierwszy węzeł nie odpowiada, sesja przechodzi na następny. Węzły są zmeshowane, więc przełączenie nie dzieli rozmówców.': 'Failover down the node list: when the first node does not answer, the session moves to the next. The nodes are meshed, so switching does not separate you from anyone.',
     'Grupa idzie przez relay (GossipSub) — nie WebRTC': 'Groups go over the relay (GossipSub), not WebRTC',
@@ -205,6 +204,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Opuść grupę': 'Leave group',
     'Opuścić grupę?': 'Leave the group?',
     'Opuszczono grupę „{name}”': 'Left the group “{name}”',
+    'onchato potrzebuje kilku funkcji, których tu brakuje. Bez nich nie da się nawet ustalić wspólnego pokoju, więc logowanie jest wyłączone.':
+      'onchato needs a few capabilities this browser does not have. Without them it cannot even derive a shared room, so signing in is disabled.',
     'Otwieram…': 'Opening…',
     'Otwórz': 'Open',
     'Otwórz {host} w nowej karcie': 'Open {host} in a new tab',
