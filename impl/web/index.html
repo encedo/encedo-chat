@@ -275,6 +275,15 @@
   .mrow.out .b-react{order:-1}
   .b-react button{background:var(--card);border:1px solid var(--border);border-radius:14px;cursor:pointer;font-size:14px;line-height:1;padding:3px 6px}
   .b-react button:hover{background:var(--accent-soft);border-color:var(--accent)}
+  /* The pin control sits in the same bar as the emoji, so it has to look like a
+     control and not like a reaction: an icon, and the accent only once it is on. */
+  .b-react button.b-pin{display:grid;place-items:center;padding:3px 5px;color:var(--muted)}
+  .b-react button.b-pin.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+  /* A kept message wears a hairline in the accent — side-agnostic, because these
+     appear on both sides of the transcript, and quiet enough to be worn by a
+     whole block of them at the top without shouting. */
+  .mrow.pinned .bubble{box-shadow:inset 0 0 0 1px var(--accent)}
+  .sysline.pinhdr{font-weight:600;color:var(--accent);margin:2px 0 6px}
   .b-reactions{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px}
   .b-reactions:empty{display:none}
   .rchip{font-size:12px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1px 6px;line-height:1.35}
@@ -579,7 +588,7 @@
       <div id="reg-handle-wrap" hidden><div class="label-row"><label data-i18n="Handle (widoczny dla kontaktów)">Handle (widoczny dla kontaktów)</label><span class="bytes-left" id="handle-bytes"></span></div><input id="handle" type="text" placeholder="np. alice" data-i18n-placeholder="np. alice" autocomplete="off"></div>
       <button class="btn" id="go" data-i18n="Zaloguj">Zaloguj</button>
       <div class="toggle"><span id="toggle-pre" data-i18n="Nie masz konta?">Nie masz konta?</span> <a id="toggle" data-i18n="Zarejestruj tożsamość">Zarejestruj tożsamość</a></div>
-      <div class="toggle" style="margin-top:6px;font-size:12px;opacity:.85"><span data-i18n="bez HEM:">bez HEM:</span> <a id="go-soft" data-i18n="tożsamość software (dev)">tożsamość software (dev)</a></div>
+      <div class="toggle" style="margin-top:6px;font-size:12px;opacity:.85"><span data-i18n="bez HEM:">bez HEM:</span> <a id="go-soft" data-i18n="tożsamość software (sandbox)">tożsamość software (sandbox)</a></div>
       <div class="nodes-sec">
         <button class="nodes-toggle" id="nodes-toggle" title="Węzły sieci — wybierz/edytuj" data-i18n-title="Węzły sieci — wybierz/edytuj">+</button>
         <div class="nodes-panel" id="nodes-panel" hidden>

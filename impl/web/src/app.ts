@@ -38,6 +38,7 @@ import {
 import { enableProtoLog } from '../../lib/protolog.ts'
 import { cachePubKeys, traceHem } from '../../lib/hemwrap.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
+import { sealPins, openPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../../lib/pincache.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
 // The published relay list, compiled in — see DEFAULT_NODES below for why.
@@ -156,10 +157,17 @@ let linkState: 'online' | 'reconnecting' | 'offline' = 'online'
 // another. The module-level render state (msgEls/stateEls/security DOM, the
 // scroll counter) always describes whichever room is on screen.
 type Ev =
-  | { t: 'msg'; kind: 'me' | 'peer'; text: string; ts: number; id?: string; ooo?: boolean; who?: string; sent?: boolean }
+  | { t: 'msg'; kind: 'me' | 'peer'; text: string; ts: number; id?: string; ooo?: boolean; who?: string; sent?: boolean
+      /** Came back from the pin store on entry — it is on screen BECAUSE it is
+       *  pinned, which is why unpinning takes it away again. */
+      pinned?: boolean }
   | { t: 'react'; id: string; emoji: string }
   | { t: 'delivery'; id: string; state: 'ok' | 'lost' | 'late'; ms?: number }
   | { t: 'sys'; text: string }
+  // The count line above a restored pin block. It carries no text: the count
+  // it shows is whatever the room holds NOW, so unpinning cannot leave a line
+  // claiming a number that is no longer true.
+  | { t: 'pinhdr' }
   // A file is its own event, not a message with a marker: it carries what is
   // needed to fetch and decrypt, and its bubble has an action rather than text.
   | { t: 'file'; kind: 'me' | 'peer'; who?: string; ts: number; file: FileEnv }
@@ -2067,7 +2075,7 @@ function insertByTime(box: HTMLElement, row: HTMLElement, ts: number) {
   box.insertBefore(row, at)
 }
 
-function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string, outOfOrder = false, who?: string, sent = false) {
+function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string, outOfOrder = false, who?: string, sent = false, pinned = false) {
   const box = $('messages')
   if (kind === 'sys') {
     const stick = atBottom()
@@ -2077,7 +2085,11 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   }
   const stick = (atBottom() && !outOfOrder) || kind === 'me' // sending always follows your own message
   const row = document.createElement('div'); row.className = 'mrow ' + (kind === 'me' ? 'out' : 'in')
+    + (pinned || (id && isPinned(id)) ? ' pinned' : '')
   row.dataset.ts = String(ts ?? nowMs())
+  // Restored FROM the store, as opposed to a live message that happens to be
+  // pinned: only the first kind vanishes when it is unpinned.
+  if (pinned) row.dataset.frompin = '1'
   const bub = document.createElement('div'); bub.className = 'bubble'
   if (who && kind === 'peer') { const w = document.createElement('div'); w.className = 'b-who'; w.textContent = who; bub.appendChild(w) }
   const t = document.createElement('div'); t.className = 'b-text'; renderBody(t, text)
@@ -2089,7 +2101,10 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
     late.title = tr('Dotarła po nowszych wiadomościach — wstawiona w miejscu, w którym została napisana')
     m.appendChild(late)
   }
-  if (kind === 'me' && id) {
+  // A restored pin carries no delivery state: the acknowledgement it once had
+  // died with the session, and defaulting to "wysyłam…" would leave every kept
+  // message of ours sending forever.
+  if (kind === 'me' && id && !pinned) {
     // Delivery state for our own messages. Instant-only: this says the peer's
     // client holds it, never that anyone read it.
     const st = document.createElement('span'); st.className = 'b-state'
@@ -2107,7 +2122,7 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   bub.append(t, m, rx); row.appendChild(bub)
   if (id) {
     msgEls.set(id, rx)
-    attachReactionBar(row, id)
+    attachReactionBar(row, id, true)
     // Touch has no hover: tap the bubble to reveal its reaction bar (one row at a
     // time), tap again to hide. On desktop hover still shows it; this just adds a
     // way in for fingers without a permanently-visible bar on every message.
@@ -2281,6 +2296,154 @@ function paintTransport(room: Room) {
 }
 
 
+// ---- pinned messages (local, §10 at rest) ---------------------------------
+/**
+ * A conversation here is ephemeral on purpose — a reload takes the transcript,
+ * and nothing on the device remembers it. Pinning is the exception a person
+ * opens by hand: the chosen message is sealed into this browser under the
+ * identity's own key (`lib/pincache.ts`), and comes back at the TOP of the
+ * conversation the next time the page is loaded.
+ *
+ * Three shapes follow from what that is:
+ *
+ * - **Nothing goes over the wire.** The other side is never told; a pin is a
+ *   note to self, not a signal, so there is no protocol here to review.
+ * - **Read once per page-load, per room.** Re-entering a room replays its log,
+ *   which already holds what was read — so a second read would duplicate. The
+ *   pins are unshifted INTO that log, which is also why they land first and why
+ *   ordering needs no special case anywhere else.
+ * - **A fresh pin does not move.** It is written to the store and marked where
+ *   it sits; only the next page-load brings it back at the top. Reordering a
+ *   transcript under someone's eyes is not worth the tidiness.
+ *
+ * Consent is asked once per session for each direction, in RAM only, like the
+ * link warning: a dismissal that survived a reload would outlive the reason it
+ * was given.
+ */
+const pins = new Map<string, Pin[]>()   // roomId (peer pub | gidHex) → kept messages
+const pinsLoaded = new Set<string>()    // rooms whose store was read this page-load
+let pinConsent = false
+let unpinConsent = false
+
+// Keyed by KID like every other per-identity store — a second identity on the
+// same HEM must not see the first one's pins.
+const pinsKey = (roomId: string) => 'ec-pins-' + (session?.idKey ?? '') + '-' + roomId
+const pinRoomId = (): string | null => activeGid ?? activePub
+const roomPins = (roomId: string | null): Pin[] => (roomId ? pins.get(roomId) ?? [] : [])
+const isPinned = (id: string): boolean => roomPins(pinRoomId()).some((p) => p.id === id)
+const activeLog = (): Ev[] | null => (activeGid ? groupsUI.get(activeGid)?.log ?? null : activeRoom()?.log ?? null)
+
+/** Read a room's pins once per page-load and put them at the head of its log. */
+async function loadPins(roomId: string, log: Ev[]) {
+  if (pinsLoaded.has(roomId)) return
+  pinsLoaded.add(roomId) // claimed BEFORE the awaits: two fast entries must not both read
+  const blob = localStorage.getItem(pinsKey(roomId)); if (!blob) return
+  const base = await ensureCacheBase(); if (!base) return
+  const kept = await openPins(base, roomId, blob)
+  if (!kept?.length) return
+  pins.set(roomId, kept)
+  log.unshift({ t: 'pinhdr' }, ...kept.map((p): Ev => ({
+    t: 'msg', kind: p.mine ? 'me' : 'peer', text: p.text, ts: p.ts, id: p.id, who: p.who, pinned: true,
+  })))
+  ecLog(`pins: restored ${kept.length} for ${roomId.slice(0, 12)}…`, 'debug')
+}
+
+async function persistPins(roomId: string) {
+  if (wiping) return
+  const kept = roomPins(roomId)
+  if (!kept.length) { localStorage.removeItem(pinsKey(roomId)); return }
+  const base = await ensureCacheBase()
+  if (!base) { toast(tr('Nie udało się zapisać — brak klucza tej tożsamości')); return }
+  try { localStorage.setItem(pinsKey(roomId), await sealPins(base, roomId, kept)) }
+  catch (e: any) {
+    // A full quota is the realistic failure, and it must not look like success.
+    ecLog('pins: save failed — ' + (e?.message ?? e))
+    toast(tr('Nie udało się zapisać przypiętej wiadomości'))
+  }
+}
+
+/** The count line above the restored block; repainted rather than re-replayed. */
+function repaintPinHeader() {
+  const el = $('messages').querySelector('.sysline.pinhdr') as HTMLElement | null
+  if (!el) return
+  const n = roomPins(pinRoomId()).length
+  if (!n) el.remove(); else el.textContent = tr('📌 Przypięte ({n})', { n })
+}
+
+async function togglePin(row: HTMLElement, id: string, btn: HTMLButtonElement) {
+  const roomId = pinRoomId(); if (!roomId) return
+  const kept = roomPins(roomId)
+  if (kept.some((p) => p.id === id)) {
+    if (!unpinConsent) {
+      const r = await ask(tr('Odpiąć wiadomość?'),
+        tr('Odpięcie skasuje ją z pamięci tej przeglądarki. Ten komunikat pokaże się raz na sesję.'), tr('Odepnij'))
+      if (!r.ok) return
+      unpinConsent = true
+    }
+    pins.set(roomId, withoutPin(kept, id))
+    await persistPins(roomId)
+    // A bubble that is on screen only BECAUSE it was pinned goes with the pin —
+    // it was a copy from the store. A live message just loses its mark; deleting
+    // it would take a real piece of the conversation with it.
+    if (row.dataset.frompin) {
+      row.remove(); msgEls.delete(id); stateEls.delete(id)
+      const log = activeLog()
+      const at = log?.findIndex((e) => e.t === 'msg' && e.id === id && e.pinned) ?? -1
+      if (log && at >= 0) log.splice(at, 1)
+    } else {
+      row.classList.remove('pinned'); paintPinBtn(btn, false)
+    }
+    repaintPinHeader()
+    return
+  }
+  if (!pinConsent) {
+    const r = await ask(tr('Przypiąć wiadomość?'),
+      tr('Przypięcie zapisze ją w zaszyfrowanej formie w pamięci tej przeglądarki, żeby przetrwała przeładowanie. Ten komunikat pokaże się raz na sesję.'),
+      tr('Przypnij'))
+    if (!r.ok) return
+    pinConsent = true
+  }
+  const ev = activeLog()?.find((e) => e.t === 'msg' && e.id === id) as Extract<Ev, { t: 'msg' }> | undefined
+  if (!ev) return
+  const next = withPin(kept, { id, text: ev.text, ts: ev.ts, who: ev.who, mine: ev.kind === 'me', pinnedAt: nowMs() })
+  if (!next) { toast(tr('W tej rozmowie można przypiąć {n} wiadomości — odepnij coś, żeby zrobić miejsce', { n: PIN_LIMIT })); return }
+  if (next === kept) return // already pinned; nothing to write
+  pins.set(roomId, next)
+  await persistPins(roomId)
+  row.classList.add('pinned'); paintPinBtn(btn, true)
+  repaintPinHeader()
+}
+
+// The two icons are ONE drawing at two angles, and drawn rather than typed for
+// the reason the link arrow is: no font renders a pushpin the same way twice.
+// Tilted = a pin you could still push in. Upright and struck through = one that
+// is in, and comes out.
+//
+// Neither is filled. The filled version was tried and is a smudge at 14px — the
+// slash disappears into it — and it was never needed: the pinned state already
+// arrives in the accent colour with a tinted button behind it, so the fill was
+// a third voice saying the same thing, badly.
+const PIN_PATH = '<path d="M12 17v5"/><path d="M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.8l-1.8-.9a2 2 0 0 1-1.1-1.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/>'
+const pinSvg = (on: boolean) =>
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"'
+  + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+  + (on ? PIN_PATH + '<path d="M4 4l16 16"/>' : `<g transform="rotate(45 12 12)">${PIN_PATH}</g>`)
+  + '</svg>'
+
+function paintPinBtn(btn: HTMLButtonElement, on: boolean) {
+  btn.innerHTML = pinSvg(on) // our own constant markup, never message content
+  btn.title = on ? tr('Odepnij — skasuje z pamięci przeglądarki') : tr('Przypnij — zachowa w tej przeglądarce')
+  btn.setAttribute('aria-label', btn.title)
+  btn.classList.toggle('on', on)
+}
+
+function pinButton(row: HTMLElement, id: string): HTMLButtonElement {
+  const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'b-pin'
+  paintPinBtn(btn, isPinned(id))
+  btn.addEventListener('click', () => { row.classList.remove('tapped'); void togglePin(row, id, btn) })
+  return btn
+}
+
 /**
  * The quick-reaction bar, for any bubble that has an id.
  *
@@ -2289,8 +2452,17 @@ function paintTransport(room: Room) {
  * `activeRoom()` — which is null whenever a group is on screen, so the bar was
  * inert in every group without anything saying so.
  */
-function attachReactionBar(row: HTMLElement, id: string) {
+function attachReactionBar(row: HTMLElement, id: string, canPin = false) {
   const bar = document.createElement('div'); bar.className = 'b-react'
+  // Files are NOT pinnable, by decision: the blob behind a file bubble is swept
+  // from the store on its own schedule, so a kept file would become a button
+  // that lies about what it can still fetch. The caption is not offered either —
+  // half a message kept under the whole message's promise is worse than none.
+  if (canPin) bar.appendChild(pinButton(row, id))
+  // A message restored FROM the store gets the pin control and nothing else: a
+  // reaction sent for it would travel with an id the other side stopped holding
+  // when its own transcript went, so it would land nowhere and say nothing.
+  if (row.dataset.frompin) { row.appendChild(bar); return }
   for (const e of QUICK_EMOJI) {
     const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = e
     btn.addEventListener('click', () => {
@@ -2654,10 +2826,18 @@ const record = (room: Room, ev: Ev) => {
   else if (ev.t === 'msg' && ev.kind === 'peer') { room.unseen++; renderContacts() }
 }
 function applyEv(ev: Ev) {
-  if (ev.t === 'msg') appendMsg(ev.kind, ev.text, ev.ts, ev.id, ev.ooo, ev.who, ev.sent)
+  if (ev.t === 'msg') appendMsg(ev.kind, ev.text, ev.ts, ev.id, ev.ooo, ev.who, ev.sent, ev.pinned)
   else if (ev.t === 'react') addReaction(ev.id, ev.emoji)
   else if (ev.t === 'delivery') setDelivery(ev.id, ev.state, ev.ms)
   else if (ev.t === 'file') appendFile(ev.kind, ev.file, ev.ts, ev.who)
+  else if (ev.t === 'pinhdr') {
+    const n = roomPins(pinRoomId()).length
+    if (n) {
+      const s = document.createElement('div'); s.className = 'sysline pinhdr'
+      s.textContent = tr('📌 Przypięte ({n})', { n })
+      $('messages').appendChild(s)
+    }
+  }
   else appendMsg('sys', ev.text)
 }
 
@@ -2697,6 +2877,9 @@ async function activateRoom(pub: string) {
   $('sess-peerid').textContent = room.conv ? room.conv.peerId.slice(0, 16) + '…' : '…'
   // Rebuild the transcript from the log; the module render state (msgEls/stateEls)
   // now describes this room.
+  // Read what was kept BEFORE the replay: the pins go to the head of the log, so
+  // the replay itself puts them at the top with no special case.
+  await loadPins(pub, room.log)
   $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false)
   for (const ev of room.log) applyEv(ev)
   paintSecurity(room); paintTransport(room); paintStatus()
@@ -3455,6 +3638,7 @@ async function activateGroup(gid: string) {
   setBadge($('transport-badge'), 'badge relay', tr('⚪ Relay'), tr('Grupa idzie przez relay (GossipSub) — nie WebRTC'))
   $('transport-badge').title = tr('Grupa idzie przez relay (GossipSub) — nie WebRTC')
   $('sess-peerid').textContent = gid.slice(0, 12) + '…'
+  await loadPins(gid, gu.log) // as in activateRoom: before the replay, so they land first
   $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false)
   for (const ev of gu.log) applyEv(ev)
   startRotation(); renderGroups()

@@ -174,6 +174,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Nie udało się odzyskać grupy „{name}”': 'Could not recover the group “{name}”',
     'Nie udało się usunąć grupy: ': 'Could not delete the group: ',
     'Nie udało się wczytać listy: ': 'Could not load the list: ',
+    'Nie udało się zapisać przypiętej wiadomości': 'Could not save the pinned message',
+    'Nie udało się zapisać — brak klucza tej tożsamości': 'Could not save — this identity has no local key',
     'Nie udało się zmienić nazwy grupy: ': 'Could not rename the group: ',
     'Nie udało się zmienić nazwy: ': 'Could not rename: ',
     'Nie udało się zmienić składu grupy': 'Could not change the group membership',
@@ -192,6 +194,11 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'np. Lab1': 'e.g. Lab1',
     'np. Zespół': 'e.g. Team',
     'Obecne hasło': 'Current password',
+    'Odepnij': 'Unpin',
+    'Odepnij — skasuje z pamięci przeglądarki': 'Unpin — removes it from this browser',
+    'Odpiąć wiadomość?': 'Unpin this message?',
+    'Odpięcie skasuje ją z pamięci tej przeglądarki. Ten komunikat pokaże się raz na sesję.':
+      'Unpinning erases it from this browser. This notice is shown once a session.',
     'Odcisk': 'Fingerprint',
     'Odeślij swój profil': 'Send yours back',
     'Opuść': 'Leave',
@@ -235,6 +242,11 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Przeciągnij, aby zmienić szerokość (dwuklik = reset)': 'Drag to resize (double-click to reset)',
     'Przejdź do najnowszej wiadomości': 'Jump to the latest message',
     'Przełączono na węzeł {name} (poprzedni niedostępny)': 'Switched to node {name} (the previous one is unavailable)',
+    'Przypiąć wiadomość?': 'Pin this message?',
+    'Przypięcie zapisze ją w zaszyfrowanej formie w pamięci tej przeglądarki, żeby przetrwała przeładowanie. Ten komunikat pokaże się raz na sesję.':
+      'Pinning stores it encrypted in this browser so it survives a reload. This notice is shown once a session.',
+    'Przypnij': 'Pin',
+    'Przypnij — zachowa w tej przeglądarce': 'Pin — keeps it in this browser',
     'Przynajmniej jeden węzeł musi być aktywny.': 'At least one node must be enabled.',
     'Reset urządzenia': 'Device reset',
     'Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji': 'This pair\'s room rotation: UTC midnight + offset (§5.4) — time until the next one',
@@ -271,7 +283,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Topiki': 'Topics',
     'Tożsamość': 'Identity',
     'Tożsamość programowa — brak klucza w HSM': 'Software identity — no key in an HSM',
-    'tożsamość software (dev)': 'software identity (dev)',
+    'tożsamość software (sandbox)': 'software identity (sandbox)',
     'Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.':
       'An identity kept in this browser and sealed with a password. No HEM needed — for trying the messenger out.',
     'Tożsamość zostaje ta sama — zmienia się wyłącznie hasło, którym jest zaszyfrowana. Kontakty i grupy bez zmian.':
@@ -315,6 +327,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Wczytano {n} węzłów': 'Loaded {n} nodes',
     'Wersja i commit tej wersji aplikacji': 'The version and commit this build came from',
     'węzeł': 'node',
+    'W tej rozmowie można przypiąć {n} wiadomości — odepnij coś, żeby zrobić miejsce':
+      'This conversation can keep {n} pinned messages — unpin one to make room',
     'Węzeł (relay)': 'Node (relay)',
     'Węzły sieci': 'Network nodes',
     'Węzły sieci — wybierz/edytuj': 'Network nodes — choose / edit',
@@ -396,6 +410,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '🔐 Secure': '🔐 Secure',
     '🔒 E2E interim': '🔒 E2E interim',
     '🔒 W HEM — trwałe, przenośne między urządzeniami': '🔒 In the HEM — durable, portable between devices',
+    '📌 Przypięte ({n})': '📌 Pinned ({n})',
     '🟢 Automatycznie': '🟢 Automatic',
     '🟢 Automatycznie — bezpośrednio, gdy się da': '🟢 Automatic — direct when it can be',
     '🟢 Direct': '🟢 Direct',

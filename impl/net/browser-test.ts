@@ -1335,6 +1335,49 @@ async function main() {
     if (!delivered2) throw new Error('after reload, A could not broadcast to the group (chain state lost?)')
     step('after reload the send chain continued — A still broadcasts to the member')
 
+    // ---- pins: the one thing allowed to survive a reload ---------------------
+    scenario('a pinned message comes back as the first one in the room')
+    // A transcript is ephemeral by design, so this asserts BOTH halves of the
+    // exception: what is kept is encrypted at rest under the identity's own key,
+    // and it comes back at the TOP rather than wherever it originally sat.
+    const pinText = `przypnij-${Date.now().toString(36)}`
+    await A.eval(`${pickTestowa} document.getElementById('msg-input').value = ${JSON.stringify(pinText)}; document.getElementById('send').click(); return 1`)
+    await A.waitFor('the message to pin is in the transcript',
+      `return document.getElementById('messages').textContent.includes(${JSON.stringify(pinText)})`, 20_000)
+    // The pin control lives in the hover bar; a programmatic click does not need
+    // the hover, but it DOES need the once-a-session consent answered.
+    await A.eval(`
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(pinText)}));
+      if (!row) throw new Error('no row to pin');
+      row.querySelector('.b-pin').click(); return 1`)
+    await A.waitFor('the pin consent dialog opened',
+      `return document.getElementById('ask-modal').classList.contains('open')`, 10_000)
+    await A.eval(`document.getElementById('ask-yes').click(); return 1`)
+    await A.waitFor('the message is marked as pinned', `
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(pinText)}));
+      return !!row && row.classList.contains('pinned')`, 10_000)
+    step('a message was pinned, after the once-a-session consent')
+
+    const pinShape = await A.eval<{ enc: boolean; readable: boolean }>(`
+      const k = Object.keys(localStorage).find((k) => k.startsWith('ec-pins-${idA}-'));
+      return { enc: !!k, readable: k ? localStorage.getItem(k).trim().startsWith('{') : false };
+    `)
+    if (!pinShape.enc) throw new Error('no ec-pins blob after pinning (nothing was kept)')
+    if (pinShape.readable) throw new Error('the pin blob is readable JSON — not encrypted at rest')
+    step('the pin store on disk is encrypted and keyed by the identity')
+
+    await A.reload(APP_URL)
+    await login(A, 'sim-a')
+    await A.waitFor('A restored the group after the pin reload',
+      `return !!document.querySelector('#pane-groups .contact')`, 20_000)
+    await A.eval(`${pickTestowa} return 1`)
+    await A.waitFor('the pinned message is back, first in the room', `
+      const rows = [...document.querySelectorAll('#messages .mrow')];
+      return rows.length > 0 && rows[0].classList.contains('pinned')
+        && rows[0].textContent.includes(${JSON.stringify(pinText)})
+        && !!document.querySelector('#messages .sysline.pinhdr')`, 25_000)
+    step('after a reload the pinned message is the first thing in the room')
+
     // ---- invite: a link carries a key, a fingerprint says it is the right one -
     scenario('an invite link travels from A to B and adds the contact')
     const share = await A.eval<any>(`
