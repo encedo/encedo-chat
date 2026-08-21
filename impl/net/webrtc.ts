@@ -107,7 +107,7 @@ export function webrtcLink(opts: WebRTCOpts): WebRTCLink {
   pc.oniceconnectionstatechange = () => opts.onState?.('ice=' + pc.iceConnectionState)
 
   if (opts.initiator) {
-    wire(pc.createDataChannel('encedo'))
+    wire(pc.createDataChannel('onchato'))
     void (async () => {
       try {
         const offer = await pc.createOffer()

@@ -1,5 +1,5 @@
 /**
- * ec.ts — Encedo Chat, one terminal client (IRC-style). The product CLI.
+ * ec.ts — onchato, one terminal client (IRC-style). The product CLI.
  *
  *   node cli/ec.ts register --hsm <url> [--handle h]     HEM identity (or --store <file> for software)
  *   node cli/ec.ts whoami                                 show my identity + fingerprint

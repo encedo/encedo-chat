@@ -1,4 +1,4 @@
-// Encedo Chat shell (Tauri 2). The frontend is the SAME webpack bundle the web
+// onchato shell (Tauri 2). The frontend is the SAME webpack bundle the web
 // app serves (../web/dist) — this only wraps it in a native window. No app logic
 // lives here: identity (HEM/software), EH-2 + ratchet, rendezvous and the
 // WebRTC/relay transport all run in the webview, exactly as on the web.
@@ -13,5 +13,5 @@
 pub fn run() {
     tauri::Builder::default()
         .run(tauri::generate_context!())
-        .expect("error while running Encedo Chat");
+        .expect("error while running onchato");
 }

@@ -3,5 +3,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    encedo_chat_lib::run()
+    onchato_lib::run()
 }

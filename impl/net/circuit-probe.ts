@@ -20,7 +20,7 @@ import { onchatoRelay } from './onchato.ts'
 
 process.on('unhandledRejection', (e: any) => console.log('  unhandledRejection:', e?.message ?? e))
 
-const PROTO = '/encedo-chat/probe/1.0.0'
+const PROTO = '/onchato/probe/1.0.0'
 // keep ws/wss (incl. /http-path/…) but NOT /p2p-circuit — those go to the circuit transport
 const wsFilter = (addrs) => addrs.filter((ma) => { const s = ma.toString(); return /\/(wss?)(\/|$)/.test(s) && !s.includes('/p2p-circuit') })
 

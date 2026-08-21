@@ -1,4 +1,4 @@
-# Encedo Chat
+# onchato
 
 A synchronous, HSM-anchored, post-quantum-hybrid peer-to-peer messenger.
 Minimal infrastructure, metadata-privacy by design, end-to-end encrypted with
@@ -16,7 +16,7 @@ long-term keys held in an Encedo HEM (hardware security module).
   anyone can run their own network. Messages travel WebRTC-direct, or through a
   blind relay when direct is impossible.
 - **PQ-hybrid confidentiality from day one** — X25519 + ML-KEM-768.
-- **Dual-use** — one core, two channels: enterprise (Encedo Chat) and the open
+- **Dual-use** — one core, two channels: enterprise (Encedo) and the open
   network (onchato).
 
 > **Status: design phase.** The protocol and architecture are complete and

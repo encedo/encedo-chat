@@ -1,7 +1,7 @@
 [package]
-name = "encedo-chat"
-version = "0.1.1"
-description = "Encedo Chat desktop (Tauri 2) — a native shell over the web bundle"
+name = "onchato"
+version = "0.2.0"
+description = "onchato desktop (Tauri 2) — a native shell over the web bundle"
 edition = "2021"
 rust-version = "1.77"
 
@@ -10,7 +10,7 @@ rust-version = "1.77"
 # Android, `rlib` so main.rs can link it on desktop. The `_lib` suffix avoids a
 # name clash with the binary target of the same package.
 [lib]
-name = "encedo_chat_lib"
+name = "onchato_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

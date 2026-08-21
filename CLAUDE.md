@@ -31,7 +31,7 @@ firmware.
   that a message costs nothing and every cost is a setup cost.
 
 The v5 deployment (`encedo/onchato.com`) and older iterations live in a separate
-local workspace, not in this repo.
+local workspace, not in this repo — since 2026-08-21 under `dep/` beside it.
 
 ## HEM / SDK reality vs. design  ← the important one
 

@@ -9,7 +9,7 @@ import { createPeer, dial } from '../../net/peer.ts'
 import { webrtcLink, type Signal, type WebRTCLink } from '../../net/webrtc.ts'
 
 const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
-const TOPIC = 'encedo-webrtc-test-v6'
+const TOPIC = 'onchato-webrtc-test-v6'
 const enc = new TextEncoder()
 const dec = new TextDecoder()
 const logEl = document.getElementById('log') as HTMLElement

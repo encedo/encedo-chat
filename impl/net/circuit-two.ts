@@ -15,7 +15,7 @@ import { multiaddr } from '@multiformats/multiaddr'
 
 process.on('unhandledRejection', (e: any) => console.log('unhandledRejection:', e?.message ?? e))
 
-const PROTO = '/encedo-chat/probe/1.0.0'
+const PROTO = '/onchato/probe/1.0.0'
 const wsFilter = (addrs) => addrs.filter((ma) => { const s = ma.toString(); return /\/(wss?)(\/|$)/.test(s) && !s.includes('/p2p-circuit') })
 const RELAY = process.env.PROBE_RELAY!
 const relayId = multiaddr(RELAY).getPeerId()!

@@ -1,4 +1,4 @@
-# Encedo Chat — desktop (Tauri 2)
+# onchato — desktop (Tauri 2)
 
 A native desktop shell over the **same web bundle** the browser app uses
 (`../web/dist`). No app logic lives here — identity, EH-2 + ratchet, rendezvous
@@ -65,8 +65,8 @@ Artifacts land in:
 Install + run the `.deb`:
 
 ```bash
-sudo dpkg -i "src-tauri/target/release/bundle/deb/Encedo Chat_0.1.0_arm64.deb"
-encedo-chat        # or launch "Encedo Chat" from the app menu
+sudo dpkg -i "src-tauri/target/release/bundle/deb/onchato_0.2.0_arm64.deb"
+onchato            # or launch "onchato" from the app menu
 ```
 
 ## Other distributions
