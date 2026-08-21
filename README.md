@@ -6,7 +6,12 @@ long-term keys held in an Encedo HEM (hardware security module).
 
 - **Instant-only** — both parties online during a conversation; no offline
   messages, no server-side history, no mailbox. Rooms are deterministic and
-  crypto-derived ("meet in the park").
+  crypto-derived ("meet in the park"). The transcript lives in RAM: a reload
+  takes it, and the device remembers nothing — **except what you pin**. A
+  pinned message is sealed into that one browser under your own identity key,
+  never leaves it, and is never announced to the other side; the app says so
+  before it keeps the first one. That is the whole of what persists, chosen by
+  hand, one message at a time.
 - **Minimal infra** — a small set of operator-run libp2p discovery nodes;
   anyone can run their own network. Messages travel WebRTC-direct, or through a
   blind relay when direct is impossible.

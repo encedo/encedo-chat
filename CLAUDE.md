@@ -357,6 +357,32 @@ handle to the identity's KID (§4) and `browser-test` went on seeding
 harness now derives the id with the app's own `hemKid`, so the two cannot drift.
 Same rule as the login flow: change it and change the harness in the same commit.
 
+**Pins are the only thing allowed to outlive a reload** (`lib/pincache.ts`,
+`ec-pins-<kid>-<roomId>`; roomId = peer pub for a 1:1, gidHex for a group). The
+key schedule is §10's with its own salt — `base = ECDH(IK, emp_pub)`,
+`k_room = HKDF(base, "encedo-chat-pin-cache-v1", roomId)` — so it works
+identically for a HEM identity and a software profile, and a pin blob cannot be
+opened as a group-cache blob even by us after a refactor. Four things about it
+are decisions, not details:
+
+- **Read once per page-load, per room**, and unshifted into that room's log.
+  Everything else follows from this: the replay puts them at the top, re-entering
+  a room does not read again (it replays), and a fresh pin does not move — it is
+  written and marked where it sits.
+- **A full room refuses the 33rd** (`PIN_LIMIT`) instead of evicting the oldest.
+  Dropping what somebody deliberately kept is worse than saying no.
+- **Files are not pinnable at all**, captions included: the blob behind a file
+  bubble is swept on its own schedule, so a kept file becomes a button that lies.
+- **A restored pin is not a live message.** It carries no delivery state (the
+  ack died with the session — `kind === 'me'` alone would render "wysyłam…"
+  forever) and offers no reactions (they would travel with an id the other side
+  no longer holds). Unpinning removes the bubble only when it came FROM the
+  store (`dataset.frompin`); a message pinned in this session just loses its mark.
+
+Nothing about pins goes over the wire, so `PROTOCOL.md` is untouched. The
+storage-key rule above applies: `browser-test` asserts the blob is encrypted and
+identity-keyed, and that a pinned message is first in the room after a reload.
+
 **A test that depends on an ORDER needs a margin, not a plausible number.**
 Two flakes, both only in the full suite (`node --test` runs files in parallel)
 and both green when their file runs alone, so both invited a re-run rather than
