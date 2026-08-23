@@ -15,6 +15,7 @@
 import { topicFromSecret, announceMacKey, todayUTC, rotationOffsetSec, type RvParams } from './rendezvous.ts'
 import { joinChat, type RoomKeys, type ChatOpts, type Eh2Options } from './room.ts'
 import type { SkdFields, FileMeta } from './envelope.ts'
+import type { QuoteRef } from './quote.ts'
 import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { createMqttPeer } from '../net/mqtt-node.ts'
@@ -487,7 +488,7 @@ export interface Conversation {
    *  rotation instead of a global midnight. Equals `forcedRotationSec` when set.
    *  Optional because `openRoom` does not know it — `session.open` fills it in. */
   rotationOffsetSec?: number
-  sendText(body: string): string // returns the sent message id (for reactions)
+  sendText(body: string, re?: QuoteRef): string // returns the sent message id (for reactions/replies)
   /** Send a message marked undelivered again, keeping its id. False = nothing to resend. */
   resend(id: string): boolean
   sendReaction(toId: string, emoji: string): void
@@ -1088,7 +1089,7 @@ async function openRoom(
   return {
     peerId: self,
     topic,
-    sendText: (body) => { const mid = room.sendText(body); stopTyping(); return mid },
+    sendText: (body, re) => { const mid = room.sendText(body, re); stopTyping(); return mid },
     resend: (mid) => room.resend(mid),
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),
     sendGroupSkd: (skd) => room.sendGroupSkd(skd),

@@ -220,6 +220,47 @@ sits **outside** the anchor, the arrow points at exactly the URL in the message,
 `target`/`rel`/`referrerpolicy` are set, and a `javascript:` URL produces no
 anchor at all.
 
+### Replying to a message — `lib/quote.ts` + the `re` field
+
+A reply is an ordinary `msg` (or `file`) envelope with **one optional field**,
+`re = { id, au?, text }` — the answered message's id, four bytes of its author's
+public key as a hex hint, and a clamped one-line copy of what it said. Nothing
+else changed: no new type, no version bump, no crypto and no transport. A build
+that does not know the field decodes the message and shows it, which is exactly
+what a reply reads as without its quote.
+
+Three decisions worth keeping:
+
+- **The quoted text travels.** An id-only quote would be the "correct" design
+  and would render as "message unavailable" for most replies anybody sends: the
+  transcript is ephemeral by design, so the other side usually does not hold the
+  message being answered. The id is still there and buys the one thing it can —
+  clicking a quote scrolls to the original *when it happens to be on screen*.
+  The snippet is content that already went down this channel under this key, so
+  it adds length, not exposure (`QUOTE_MAX` = 160 code points, sliced by code
+  point so an emoji is never cut in half; a receiver accepts up to 400).
+- **The author is a key hint, not a name** — the same rule as `mentions.ts`.
+  Names are local, so the reader resolves the hint against the people in *this*
+  conversation and sees their own name for that key. Matching nobody, or two
+  people at once, shows the words **without** a name rather than attributing
+  them to somebody the reader cannot see.
+- **A broken `re` costs the quote, never the message.** `decodeEnvelope` drops a
+  malformed quote and keeps the sentence somebody wrote.
+
+⚠️ Watch the identifier: in a **1:1** the room's `onMessage(from, …)` gives the
+**transport PeerId** (`room.ts`: `node.peerId.toString()`), while in a **group**
+the same-shaped callback gives the member's **identity key**. The UI therefore
+fills `au` from `contact.pub` in a 1:1 and from `from` in a group — hinting off
+a PeerId would hash the wrong bytes and name nobody. This is the third time this
+pair has been confused (see the sender-key note in §8).
+
+`docs/PROTOCOL.md` does **not** describe `re` — the specs are frozen for the
+external review and adding a wire field to them is the user's call, not mine.
+Covered by `test/quote.test.ts` (snippet bounds, hint, refusals, and that a
+broken quote never drops its message) and a `grouproom` scenario where the quote
+reaches a third member who is party to neither side of it. **Not** covered by
+`browser-test` — no scenario clicks ↩ yet.
+
 ### Sessions and rooms — `lib/core.ts`
 
 **One transport per client, many rooms on it.** `startSession(id, …)` owns the

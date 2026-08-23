@@ -22,7 +22,8 @@ import type { GkBackend } from '../../lib/group.ts'
 import { t as tr, setLocale, getLocale, applyDom } from './i18n.ts'
 import { probeCapabilities, formatReport } from '../../lib/capabilities.ts'
 import { splitByLinks } from '../../lib/linkify.ts'
-import { splitByMentions, resolveMention, mentionName, closeMentions, mentionsPub } from '../../lib/mentions.ts'
+import { splitByMentions, resolveMention, mentionName, closeMentions, mentionsPub, pubHint } from '../../lib/mentions.ts'
+import { makeQuote, type QuoteRef } from '../../lib/quote.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -160,7 +161,12 @@ type Ev =
   | { t: 'msg'; kind: 'me' | 'peer'; text: string; ts: number; id?: string; ooo?: boolean; who?: string; sent?: boolean
       /** Came back from the pin store on entry — it is on screen BECAUSE it is
        *  pinned, which is why unpinning takes it away again. */
-      pinned?: boolean }
+      pinned?: boolean
+      /** The message this one answers, quoted (`lib/quote.ts`). */
+      re?: QuoteRef
+      /** Author's public key. Not shown — it is what a REPLY to this bubble puts
+       *  in its own quote, and what resolves a quote of it to a name. */
+      au?: string }
   | { t: 'react'; id: string; emoji: string }
   | { t: 'delivery'; id: string; state: 'ok' | 'lost' | 'late'; ms?: number }
   | { t: 'sys'; text: string }
@@ -170,7 +176,7 @@ type Ev =
   | { t: 'pinhdr' }
   // A file is its own event, not a message with a marker: it carries what is
   // needed to fetch and decrypt, and its bubble has an action rather than text.
-  | { t: 'file'; kind: 'me' | 'peer'; who?: string; ts: number; file: FileEnv }
+  | { t: 'file'; kind: 'me' | 'peer'; who?: string; ts: number; file: FileEnv; au?: string }
 interface Room {
   contact: Contact
   conv: Conversation | null
@@ -2103,7 +2109,7 @@ function insertByTime(box: HTMLElement, row: HTMLElement, ts: number) {
   box.insertBefore(row, at)
 }
 
-function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string, outOfOrder = false, who?: string, sent = false, pinned = false) {
+function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string, outOfOrder = false, who?: string, sent = false, pinned = false, re?: QuoteRef, au?: string) {
   const box = $('messages')
   if (kind === 'sys') {
     const stick = atBottom()
@@ -2120,6 +2126,7 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   if (pinned) row.dataset.frompin = '1'
   const bub = document.createElement('div'); bub.className = 'bubble'
   if (who && kind === 'peer') { const w = document.createElement('div'); w.className = 'b-who'; w.textContent = who; bub.appendChild(w) }
+  if (re) bub.appendChild(quoteBlock(re))
   const t = document.createElement('div'); t.className = 'b-text'; renderBody(t, text)
   const m = document.createElement('div'); m.className = 'b-meta'; m.textContent = utcHHMM(ts ?? nowMs()) + ' UTC'
   if (outOfOrder) {
@@ -2148,6 +2155,10 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   }
   const rx = document.createElement('div'); rx.className = 'b-reactions'
   bub.append(t, m, rx); row.appendChild(bub)
+  // What a reply to THIS bubble needs to quote: which message, and whose. Both
+  // on the row, because that is what the reply button has in its hand.
+  if (id) row.dataset.mid = id
+  if (au) row.dataset.au = au
   if (id) {
     msgEls.set(id, rx)
     attachReactionBar(row, id, true)
@@ -2371,7 +2382,7 @@ async function loadPins(roomId: string, log: Ev[]) {
   if (!kept?.length) return
   pins.set(roomId, kept)
   log.unshift({ t: 'pinhdr' }, ...kept.map((p): Ev => ({
-    t: 'msg', kind: p.mine ? 'me' : 'peer', text: p.text, ts: p.ts, id: p.id, who: p.who, pinned: true,
+    t: 'msg', kind: p.mine ? 'me' : 'peer', text: p.text, ts: p.ts, id: p.id, who: p.who, pinned: true, re: p.re, au: p.au,
   })))
   ecLog(`pins: restored ${kept.length} for ${roomId.slice(0, 12)}…`, 'debug')
 }
@@ -2433,7 +2444,7 @@ async function togglePin(row: HTMLElement, id: string, btn: HTMLButtonElement) {
   }
   const ev = activeLog()?.find((e) => e.t === 'msg' && e.id === id) as Extract<Ev, { t: 'msg' }> | undefined
   if (!ev) return
-  const next = withPin(kept, { id, text: ev.text, ts: ev.ts, who: ev.who, mine: ev.kind === 'me', pinnedAt: nowMs() })
+  const next = withPin(kept, { id, text: ev.text, ts: ev.ts, who: ev.who, mine: ev.kind === 'me', pinnedAt: nowMs(), re: ev.re, au: ev.au })
   if (!next) { toast(tr('W tej rozmowie można przypiąć {n} wiadomości — odepnij coś, żeby zrobić miejsce', { n: PIN_LIMIT })); return }
   if (next === kept) return // already pinned; nothing to write
   pins.set(roomId, next)
@@ -2482,6 +2493,14 @@ function pinButton(row: HTMLElement, id: string): HTMLButtonElement {
  */
 function attachReactionBar(row: HTMLElement, id: string, canPin = false) {
   const bar = document.createElement('div'); bar.className = 'b-react'
+  // Reply comes first: it is the one control here that continues the
+  // conversation rather than decorating it. It is also the one that still works
+  // on a message restored from a pin — a reply carries its own quote, so the
+  // other side does not have to be holding the message it answers.
+  const rb = document.createElement('button'); rb.type = 'button'; rb.className = 'b-reply'
+  rb.textContent = '↩'; rb.title = tr('Odpowiedz'); rb.setAttribute('aria-label', tr('Odpowiedz'))
+  rb.addEventListener('click', () => startReply(row))
+  bar.appendChild(rb)
   // Files are NOT pinnable, by decision: the blob behind a file bubble is swept
   // from the store on its own schedule, so a kept file would become a button
   // that lies about what it can still fetch. The caption is not offered either —
@@ -2510,16 +2529,107 @@ function attachReactionBar(row: HTMLElement, id: string, canPin = false) {
   row.appendChild(bar)
 }
 
+// ---- replies ---------------------------------------------------------------
+/**
+ * Answering one particular message, the way Signal and Slack do it: pick a
+ * bubble, write, and the reply carries a quote of what it answers.
+ *
+ * What travels is `re` on the message envelope (`lib/quote.ts`): the quoted
+ * message's id, a hint at its author's key, and a short copy of its text. The
+ * COPY is the part that looks redundant and is not — this transcript dies with
+ * the page, so a quote that referred to an id and nothing else would render as
+ * "message unavailable" for most of the replies anybody sends. The id is still
+ * there, and buys the one thing it can: clicking the quote scrolls to the
+ * original when it does happen to be on screen.
+ *
+ * The author travels as a key hint for the same reason a mention does — names
+ * are local, so the reader resolves the hint against the people in THIS
+ * conversation and sees their own name for that key. A hint that matches nobody
+ * there shows the words without a name rather than attributing them to somebody
+ * the reader cannot see.
+ */
+let replyTo: { id: string; au?: string; text: string; who: string } | null = null
+
+/** The quoted author, in the reader's own words. Empty when the hint matches
+ *  nobody here, or two people at once — a quote never guesses whose words. */
+function quoteAuthorName(hint?: string): string {
+  if (!hint) return ''
+  if (session && pubHint(session.pub) === hint) return tr('Ty')
+  const pool = activeGid
+    ? (groupsUI.get(activeGid)?.members ?? []).map((m) => ({ pub: m.pub, name: memberName(m.pub) }))
+    : (() => { const r = activeRoom(); return r ? [{ pub: r.contact.pub, name: r.contact.name }] : [] })()
+  const hits = pool.filter((p) => pubHint(p.pub) === hint)
+  return hits.length === 1 ? hits[0].name : ''
+}
+
+/** The quote drawn inside a bubble: who, one clipped line, and a way back. */
+function quoteBlock(re: QuoteRef): HTMLElement {
+  const b = document.createElement('button'); b.type = 'button'; b.className = 'b-quote'
+  b.title = tr('Pokaż cytowaną wiadomość')
+  const who = quoteAuthorName(re.au)
+  if (who) { const w = document.createElement('div'); w.className = 'q-who'; w.textContent = who; b.appendChild(w) }
+  const t = document.createElement('div'); t.className = 'q-text'; t.textContent = re.text
+  b.appendChild(t)
+  b.addEventListener('click', () => jumpToMessage(re.id))
+  return b
+}
+
+/** Take the reader to the quoted message — when it is still here. Usually it is
+ *  not (a reload takes the transcript), and saying so is better than a click
+ *  that does nothing. The id is base64 of six bytes, so it needs no escaping. */
+function jumpToMessage(id: string) {
+  const row = $('messages').querySelector(`.mrow[data-mid="${id}"]`) as HTMLElement | null
+  if (!row) { toast(tr('Cytowanej wiadomości nie ma już w tej rozmowie')); return }
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  row.classList.add('flash'); setTimeout(() => row.classList.remove('flash'), 1600)
+}
+
+/** What this bubble says, for the quote — its text, or the file it holds. */
+function rowQuoteText(row: HTMLElement): string {
+  const txt = row.querySelector('.b-text')?.textContent?.trim()
+  if (txt) return txt
+  const file = row.querySelector('.f-name')?.textContent?.trim()
+  return file ? '📄 ' + file : ''
+}
+
+function startReply(row: HTMLElement) {
+  const id = row.dataset.mid; if (!id) return
+  row.classList.remove('tapped')
+  const who = row.classList.contains('out')
+    ? tr('Ty')
+    : (row.querySelector('.b-who')?.textContent?.trim() || (activeGid ? '' : activeRoom()?.contact.name) || '')
+  replyTo = { id, au: row.dataset.au, text: rowQuoteText(row), who }
+  paintReplyBar()
+  ;($('msg-input') as HTMLInputElement).focus()
+}
+const cancelReply = () => { replyTo = null; paintReplyBar() }
+function paintReplyBar() {
+  $('reply-bar').hidden = !replyTo
+  if (!replyTo) return
+  $('reply-who').textContent = replyTo.who || tr('Wiadomość')
+  $('reply-text').textContent = replyTo.text
+}
+/** The `re` field for the message being sent — and the reply state is spent by
+ *  reading it, so one pick answers one message. */
+function takeReply(): QuoteRef | undefined {
+  if (!replyTo) return undefined
+  const q = makeQuote(replyTo.id, replyTo.text, replyTo.au)
+  cancelReply()
+  return q
+}
+$('reply-cancel').addEventListener('click', cancelReply)
+
 // ---- files ----------------------------------------------------------------
 /** A file bubble: icon, name, size, and one action. Rendered like any other
  *  event so switching rooms replays it from the log. */
-function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string) {
+function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string, au?: string) {
   const box = $('messages')
   const row = document.createElement('div'); row.className = 'mrow ' + (kind === 'me' ? 'out' : 'in')
   const bub = document.createElement('div'); bub.className = 'bubble'
   if (who && kind === 'peer') {
     const w = document.createElement('div'); w.className = 'b-who'; w.textContent = who; bub.appendChild(w)
   }
+  if (env.re) bub.appendChild(quoteBlock(env.re))
   const wrap = document.createElement('div'); wrap.className = 'b-file' + (fileGone(env) ? ' gone' : '')
   const ico = document.createElement('span'); ico.className = 'f-ico'; ico.textContent = '📄'
   const info = document.createElement('div'); info.className = 'f-info'
@@ -2555,6 +2665,8 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string)
   const rx = document.createElement('div'); rx.className = 'b-reactions'
   bub.append(meta, rx)
   if (env.id) msgEls.set(env.id, rx)
+  if (env.id) row.dataset.mid = env.id
+  if (au) row.dataset.au = au
   row.appendChild(bub)
   if (env.id) attachReactionBar(row, env.id)
   box.appendChild(row)
@@ -2606,6 +2718,9 @@ async function attachFile(f: File) {
     : inp.value.trim()
   mentionPicks.clear()
   inp.value = ''
+  // A file answers a message the same way a sentence does — same field, spent
+  // here so the bar is gone by the time the upload starts.
+  const re = takeReply()
 
   // The bubble appears NOW, before any work — on an 80 MB file the encrypt and
   // upload take long enough that a line of system text is indistinguishable
@@ -2616,9 +2731,10 @@ async function attachFile(f: File) {
     cid: '', name: f.name, size: f.size, mime: f.type || 'application/octet-stream',
     key: '', chunk: 0, chunks: 0, alg: '',
     ...(caption ? { body: caption } : {}),
+    ...(re ? { re } : {}),
   } as unknown as FileEnv
-  if (gid) recordGroup(groupsUI.get(gid)!, { t: 'file', kind: 'me', ts: pending.ts, file: pending })
-  else record(room!, { t: 'file', kind: 'me', ts: pending.ts, file: pending })
+  if (gid) recordGroup(groupsUI.get(gid)!, { t: 'file', kind: 'me', ts: pending.ts, file: pending, au: session?.pub })
+  else record(room!, { t: 'file', kind: 'me', ts: pending.ts, file: pending, au: session?.pub })
 
   const show = (label: string, sub?: string) => {
     const els = fileEls.get(pending); if (!els) return
@@ -2641,6 +2757,7 @@ async function attachFile(f: File) {
       key: b64(key), chunk: manifest.chunk, chunks: manifest.chunks, alg: manifest.alg,
       exp: nowMs() + FILE_TTL_MS,
       ...(caption ? { body: caption } : {}),
+      ...(re ? { re } : {}),
     }
     // Evidence line (debug only). Everything needed to fetch the blob from the
     // store and open it — which is the point: paste it into net/file-decrypt.ts
@@ -2854,10 +2971,10 @@ const record = (room: Room, ev: Ev) => {
   else if (ev.t === 'msg' && ev.kind === 'peer') { room.unseen++; renderContacts() }
 }
 function applyEv(ev: Ev) {
-  if (ev.t === 'msg') appendMsg(ev.kind, ev.text, ev.ts, ev.id, ev.ooo, ev.who, ev.sent, ev.pinned)
+  if (ev.t === 'msg') appendMsg(ev.kind, ev.text, ev.ts, ev.id, ev.ooo, ev.who, ev.sent, ev.pinned, ev.re, ev.au)
   else if (ev.t === 'react') addReaction(ev.id, ev.emoji)
   else if (ev.t === 'delivery') setDelivery(ev.id, ev.state, ev.ms)
-  else if (ev.t === 'file') appendFile(ev.kind, ev.file, ev.ts, ev.who)
+  else if (ev.t === 'file') appendFile(ev.kind, ev.file, ev.ts, ev.who, ev.au)
   else if (ev.t === 'pinhdr') {
     const n = roomPins(pinRoomId()).length
     if (n) {
@@ -2908,7 +3025,7 @@ async function activateRoom(pub: string) {
   // Read what was kept BEFORE the replay: the pins go to the head of the log, so
   // the replay itself puts them at the top with no special case.
   await loadPins(pub, room.log)
-  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false)
+  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false); cancelReply()
   for (const ev of room.log) applyEv(ev)
   paintSecurity(room); paintTransport(room); paintStatus()
   startRotation(); renderContacts()
@@ -2958,11 +3075,14 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
           renderContacts()
         }
         if (room === activeRoom()) { peerTyping = false; setTyping(false) }
-        record(room, { t: 'msg', kind: 'peer', text: msg.body, ts: msg.ts, id: msg.id, ooo: meta.outOfOrder })
+        // `au` is the CONTACT's identity key, not `from`: in a 1:1 `from` is the
+        // transport PeerId (`room.ts`), and a quote hint taken from it would
+        // name nobody. In a group the same callback's `from` IS the identity key.
+        record(room, { t: 'msg', kind: 'peer', text: msg.body, ts: msg.ts, id: msg.id, ooo: meta.outOfOrder, re: msg.re, au: contact.pub })
       },
       onTyping: (_from, state) => { peerTyping = state === 'start'; if (room === activeRoom()) setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => record(room, { t: 'react', id: r.to, emoji: r.emoji }),
-      onFile: (_from, f) => record(room, { t: 'file', kind: 'peer', ts: nowMs(), file: f }),
+      onFile: (_from, f) => record(room, { t: 'file', kind: 'peer', ts: nowMs(), file: f, au: contact.pub }),
       onForeign: () => {
         // The user is the only one who can fix this, so say it in the transcript
         // rather than in a console nobody has open. Two windows on one identity
@@ -3022,24 +3142,28 @@ function sendComposer() {
   if (activeGid) { // a group is on screen — broadcast to it
     const gu = groupsUI.get(activeGid); if (!gu?.room) return
     inp.value = ''
+    const re = takeReply()
     // "@Ala" typed straight through becomes "@Ala#3a7f1c02" here — the picker
     // already writes whole tokens, this is for the message written in one go.
     // Myself out of the roster: nobody mentions themselves, and "Ty" is not a
     // name anybody else would recognise.
     const body = closeMentions(t, gu.members.filter((m) => m.pub !== session?.pub).map((m) => ({ pub: m.pub, name: memberName(m.pub) })), mentionPicks)
     mentionPicks.clear()
-    gu.room.sendText(body).then((id) => recordGroup(gu, { t: 'msg', kind: 'me', text: body, ts: nowMs(), id, sent: true })).catch((e) => ecLog('group send failed: ' + (e?.message ?? e)))
+    gu.room.sendText(body, re).then((id) => recordGroup(gu, { t: 'msg', kind: 'me', text: body, ts: nowMs(), id, sent: true, re, au: session?.pub }))
+      .catch((e) => ecLog('group send failed: ' + (e?.message ?? e)))
     return
   }
   const room = activeRoom(); if (!room?.conv) return
-  const id = room.conv.sendText(t)
+  const re = takeReply()
+  const id = room.conv.sendText(t, re)
   ecLog(`sent "${t.slice(0, 40)}" (id ${id}); secured peers: ${room.conv.secured().length}`)
-  record(room, { t: 'msg', kind: 'me', text: t, ts: nowMs(), id }); inp.value = ''
+  record(room, { t: 'msg', kind: 'me', text: t, ts: nowMs(), id, re, au: session?.pub }); inp.value = ''
 }
 ;($('send') as HTMLButtonElement).onclick = sendComposer
 ;($('msg-input') as HTMLInputElement).oninput = () => { activeRoom()?.conv?.noteActivity(); updateMentionPop() }
 ;($('msg-input') as HTMLInputElement).onkeydown = (e: any) => {
   if (mentionKey(e)) return // the picker is open: Enter picks a person, it does not send
+  if (e.key === 'Escape' && replyTo) { cancelReply(); return } // out of the reply, not out of the room
   if (e.key === 'Enter') sendComposer()
 }
 ;($('msg-input') as HTMLInputElement).addEventListener('click', updateMentionPop)
@@ -3667,20 +3791,20 @@ async function activateGroup(gid: string) {
   $('transport-badge').title = tr('Grupa idzie przez relay (GossipSub) — nie WebRTC')
   $('sess-peerid').textContent = gid.slice(0, 12) + '…'
   await loadPins(gid, gu.log) // as in activateRoom: before the replay, so they land first
-  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false)
+  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false); cancelReply()
   for (const ev of gu.log) applyEv(ev)
   startRotation(); renderGroups()
 }
 
 const groupHandlers = (gid: string) => ({
-  onMessage: (from: string, env: { body: string; ts: number; id: string }) =>
-    recordGroup(groupsUI.get(gid)!, { t: 'msg', kind: from === session?.pub ? 'me' : 'peer', text: env.body, ts: env.ts, id: env.id, who: memberName(from) }),
+  onMessage: (from: string, env: { body: string; ts: number; id: string; re?: QuoteRef }) =>
+    recordGroup(groupsUI.get(gid)!, { t: 'msg', kind: from === session?.pub ? 'me' : 'peer', text: env.body, ts: env.ts, id: env.id, who: memberName(from), re: env.re, au: from }),
   onReaction: (_from: string, r: { to: string; emoji: string }) =>
     recordGroup(groupsUI.get(gid)!, { t: 'react', id: r.to, emoji: r.emoji }),
   // A file in a group is the same envelope as in a 1:1 — every member holds the
   // key it carries, so each fetches the blob itself within its short life.
   onFile: (from: string, f: FileEnv) =>
-    recordGroup(groupsUI.get(gid)!, { t: 'file', kind: from === session?.pub ? 'me' : 'peer', ts: nowMs(), file: f, who: memberName(from) }),
+    recordGroup(groupsUI.get(gid)!, { t: 'file', kind: from === session?.pub ? 'me' : 'peer', ts: nowMs(), file: f, who: memberName(from), au: from }),
   // A member we cannot decrypt: ask them to hand their sender key over again.
   onNeedSenderKey: (memberPub: string) => { void askForSenderKey(gid, memberPub) },
   onLog: (m: string) => ecLog('group: ' + m, 'debug'),

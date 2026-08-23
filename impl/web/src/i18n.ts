@@ -75,6 +75,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Adres HEM': 'HEM address',
     'aktywny': 'active',
     'Anuluj': 'Cancel',
+    'Anuluj odpowiedź': 'Cancel reply',
     'bez HEM:': 'without a HEM:',
     'bez WebRTC': 'no WebRTC',
     'Bezpośredni kanał jest szybszy i nie przechodzi przez węzeł, ale rozmówca widzi wtedy Twój adres IP. Wybór dotyczy rozmów otwieranych od teraz — trwającej nie przełączamy, bo to zerwałoby kanał w środku zdania. Odznaka w nagłówku pokazuje stan faktyczny każdej rozmowy.':
@@ -95,6 +96,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Błąd zapisu: ': 'Save failed: ',
     'Błąd: ': 'Error: ',
     'Ciemny': 'Dark',
+    'Cytowanej wiadomości nie ma już w tej rozmowie': 'The quoted message is no longer in this conversation',
     'Czekam na potwierdzenie od klienta rozmówcy': 'Waiting for their client to acknowledge',
     'Członkowie': 'Members',
     'Dalej': 'Continue',
@@ -198,6 +200,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Odpiąć wiadomość?': 'Unpin this message?',
     'Odpięcie skasuje ją z pamięci tej przeglądarki. Ten komunikat pokaże się raz na sesję.':
       'Unpinning erases it from this browser. This notice is shown once a session.',
+    'Odpowiedz': 'Reply',
     'Odcisk': 'Fingerprint',
     'Odeślij swój profil': 'Send yours back',
     'Opuść': 'Leave',
@@ -228,6 +231,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Podaj nowe hasło.': 'Enter a new password.',
     'Podaj ten odcisk osobno — głosem albo osobiście. Odbiorca porówna go z tym, co zobaczy po kliknięciu linku; to jedyne, co wykrywa podmianę klucza po drodze.':
       'Give this fingerprint separately — by voice or in person. They will compare it with what the link shows them; it is the only thing that catches a key swapped in transit.',
+    'Pokaż cytowaną wiadomość': 'Show the quoted message',
     'Pokój otwarty — czekam na {name}…': 'Room open — waiting for {name}…',
     'Potwierdzenie przyszło już po tym, jak przestaliśmy ponawiać — wiadomość jednak dotarła': 'The acknowledgement arrived after we stopped retrying — the message did get through',
     'Powtórz hasło': 'Repeat the password',
@@ -333,6 +337,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Węzeł (relay)': 'Node (relay)',
     'Węzły sieci': 'Network nodes',
     'Węzły sieci — wybierz/edytuj': 'Network nodes — choose / edit',
+    'Wiadomość': 'Message',
     'Wiadomość… (Enter = wyślij)': 'Message… (Enter to send)',
     'Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.': 'Wipeout erases the local software identity, every contact and all state in this browser — like a new machine (§10). Irreversible. It does not touch keys in an HSM.',
     'wklej pubkey albo link zaproszenia…': 'paste their public key or an invite link…',

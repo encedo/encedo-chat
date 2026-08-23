@@ -33,6 +33,7 @@
  */
 
 import { subtle, hkdfBits, b64, unb64, randomBytes } from './wc.ts'
+import type { QuoteRef } from './quote.ts'
 
 /** One kept message. `id` is the message id it was pinned from. */
 export interface Pin {
@@ -45,6 +46,12 @@ export interface Pin {
   /** Was it ours — the bubble comes back on the same side it went out on. */
   mine: boolean
   pinnedAt: number
+  /** If it was a reply, the message it answered (`quote.ts`) — kept so a
+   *  restored bubble is still an answer to something and not a loose remark. */
+  re?: QuoteRef
+  /** Author's public key, so a reply TO the restored bubble can name whose
+   *  words it quotes. Additive: a list written before this field still opens. */
+  au?: string
 }
 
 /** How many a single conversation may keep. Reached = refuse, never evict. */

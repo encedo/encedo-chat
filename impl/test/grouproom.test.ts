@@ -11,6 +11,8 @@ import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
 import { b64, unb64, randomBytes } from '../lib/wc.ts'
 import { GroupManager, softwareGk, type GroupId, type Member } from '../lib/group.ts'
 import { joinGroup, type GroupRoom } from '../lib/grouproom.ts'
+import { makeQuote } from '../lib/quote.ts'
+import { pubHint } from '../lib/mentions.ts'
 
 const P = { networkId: 'groom', dateUTC: '2026-08-01' }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -40,7 +42,7 @@ function hub() {
   }
 }
 
-interface Peer { id: GroupId; mgr: GroupManager; node: any; recv: { from: string; body: string }[]; react: { from: string; to: string; emoji: string }[]; room?: GroupRoom }
+interface Peer { id: GroupId; mgr: GroupManager; node: any; recv: { from: string; body: string; re?: any }[]; react: { from: string; to: string; emoji: string }[]; room?: GroupRoom }
 
 /** n members, cross-distributed sender keys, each joined to the group room. */
 async function makeGroup(n: number): Promise<{ gid: string; topic: string; peers: Peer[] }> {
@@ -59,7 +61,7 @@ async function makeGroup(n: number): Promise<{ gid: string; topic: string; peers
   for (const s of peers) for (const r of peers) if (r !== s) await r.mgr.applySkd(s.id.pub, (await s.mgr.skdFor(gid, r.id.pub))!)
   for (const p of peers) {
     p.room = await joinGroup(p.node, p.mgr.session(gid)!, {
-      onMessage: (from, env) => p.recv.push({ from, body: env.body }),
+      onMessage: (from, env) => p.recv.push({ from, body: env.body, re: env.re }),
       onReaction: (from, env) => p.react.push({ from, to: env.to, emoji: env.emoji }),
     })
   }
@@ -70,10 +72,24 @@ test('3 members: a text broadcast reaches the others, not the sender', async () 
   const { peers } = await makeGroup(3)
   const id = await peers[0].room!.sendText('czesc grupo')
   await sleep(30)
-  assert.deepEqual(peers[1].recv, [{ from: peers[0].id.pub, body: 'czesc grupo' }])
-  assert.deepEqual(peers[2].recv, [{ from: peers[0].id.pub, body: 'czesc grupo' }])
+  assert.deepEqual(peers[1].recv, [{ from: peers[0].id.pub, body: 'czesc grupo', re: undefined }])
+  assert.deepEqual(peers[2].recv, [{ from: peers[0].id.pub, body: 'czesc grupo', re: undefined }])
   assert.equal(peers[0].recv.length, 0, 'the sender does not receive its own broadcast')
   assert.ok(id.length > 0)
+})
+
+test('a reply arrives quoting what it answers', async () => {
+  const { peers } = await makeGroup(3)
+  const first = await peers[0].room!.sendText('kto niesie namiot?')
+  await sleep(30)
+  await peers[1].room!.sendText('ja', makeQuote(first, 'kto niesie namiot?', peers[0].id.pub))
+  await sleep(30)
+  // The quote reaches the third member too — including the member who is not
+  // either party to it, which is the case a 1:1 cannot show.
+  const q = peers[2].recv.find((m) => m.body === 'ja')?.re
+  assert.equal(q?.id, first)
+  assert.equal(q?.text, 'kto niesie namiot?')
+  assert.equal(q?.au, pubHint(peers[0].id.pub)) // whose words, as a key, not as a name
 })
 
 test('a reaction is delivered to the group', async () => {
@@ -93,7 +109,7 @@ test('a garbage/forged frame on the topic surfaces nothing', async () => {
   // a real one still flows afterwards
   await peers[0].room!.sendText('real')
   await sleep(30)
-  assert.deepEqual(peers[1].recv, [{ from: peers[0].id.pub, body: 'real' }])
+  assert.deepEqual(peers[1].recv, [{ from: peers[0].id.pub, body: 'real', re: undefined }])
 })
 
 test('scale: 8 members, one broadcast reaches the other 7', async () => {

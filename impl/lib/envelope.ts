@@ -19,6 +19,7 @@
 
 import { randomBytes, b64 } from './wc.ts'
 import { nowMs } from './time.ts'
+import { isQuoteRef, type QuoteRef } from './quote.ts'
 
 export const ENVELOPE_V = 1
 
@@ -33,7 +34,13 @@ export interface BaseEnv {
   ts: number // sender clock, Unix epoch ms (UTC)
   seq: number // per-sender monotonic (dedup/order; UX only, NOT security)
 }
-export interface MsgEnv extends BaseEnv { t: 'msg'; body: string; format: MsgFormat }
+/**
+ * `re` is a reply: the message this one answers, quoted (`quote.ts`). Optional
+ * and additive on purpose — a build that does not know the field decodes the
+ * message and shows it, which is exactly what a reply reads as without its
+ * quote. Nothing in the crypto or the transport sees it.
+ */
+export interface MsgEnv extends BaseEnv { t: 'msg'; body: string; format: MsgFormat; re?: QuoteRef }
 export interface TypingEnv extends BaseEnv { t: 'typing'; state: TypingState }
 export interface PresenceEnv extends BaseEnv { t: 'presence'; state: PresenceState }
 export interface ReactionEnv extends BaseEnv { t: 'reaction'; to: string; emoji: string }
@@ -78,6 +85,8 @@ export interface FileEnv extends BaseEnv {
    * `MsgEnv` — rendered as text nodes, never as markup.
    */
   body?: string
+  /** The message this file answers, quoted — same field, same rules as `MsgEnv`. */
+  re?: QuoteRef
 }
 /**
  * Delivery confirmation. Instant-only product: this says "it reached the other
@@ -148,7 +157,7 @@ export const mkId = (): string => b64(randomBytes(6))
 const base = <T extends string>(t: T, seq: number) => ({ v: ENVELOPE_V, t, id: mkId(), ts: nowMs(), seq })
 
 // builders (fill v/id/ts); the room supplies the monotonic seq
-export const envMsg = (seq: number, body: string, format: MsgFormat = 'plain'): MsgEnv => ({ ...base('msg', seq), body, format })
+export const envMsg = (seq: number, body: string, format: MsgFormat = 'plain', re?: QuoteRef): MsgEnv => ({ ...base('msg', seq), body, format, ...(re ? { re } : {}) })
 export const envTyping = (seq: number, state: TypingState): TypingEnv => ({ ...base('typing', seq), state })
 export const envPresence = (seq: number, state: PresenceState): PresenceEnv => ({ ...base('presence', seq), state })
 export const envReaction = (seq: number, to: string, emoji: string): ReactionEnv => ({ ...base('reaction', seq), to, emoji })
@@ -170,13 +179,18 @@ const PRESENCE = new Set<string>(['active', 'away', 'leave'])
  * KNOWN type (drop). A valid base with an unknown `t` returns as UnknownEnv so
  * the dispatcher can ignore it without treating it as corrupt (forward-compat).
  */
+/** Drop a `re` that would not render; keep the envelope it rode in on. */
+const sanitizeQuote = (m: any) => { if (m.re !== undefined && !isQuoteRef(m.re)) delete m.re; return m }
+
 export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
   let m: any
   try { m = JSON.parse(td.decode(bytes)) } catch { return null }
   if (m?.v !== ENVELOPE_V) return null
   if (typeof m.t !== 'string' || typeof m.id !== 'string' || typeof m.ts !== 'number' || typeof m.seq !== 'number') return null
   switch (m.t) {
-    case 'msg': return (typeof m.body === 'string' && FORMATS.has(m.format)) ? (m as MsgEnv) : null
+    // A quote that does not decode loses the QUOTE, never the message: the
+    // sentence somebody wrote is not collateral for a broken decoration.
+    case 'msg': return (typeof m.body === 'string' && FORMATS.has(m.format)) ? (sanitizeQuote(m) as MsgEnv) : null
     case 'typing': return TYPING.has(m.state) ? (m as TypingEnv) : null
     case 'presence': return PRESENCE.has(m.state) ? (m as PresenceEnv) : null
     case 'reaction': return (typeof m.to === 'string' && typeof m.emoji === 'string') ? (m as ReactionEnv) : null
@@ -188,7 +202,7 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
       && typeof m.key === 'string' && typeof m.alg === 'string'
       && Number.isInteger(m.chunk) && m.chunk > 0
       && Number.isInteger(m.chunks) && m.chunks > 0
-      && (m.body === undefined || typeof m.body === 'string')) ? (m as FileEnv) : null
+      && (m.body === undefined || typeof m.body === 'string')) ? (sanitizeQuote(m) as FileEnv) : null
     case 'rtc': return (typeof m.to === 'string' && m.sig != null) ? (m as RtcEnv) : null
     case 'ack': return (typeof m.ref === 'string' && typeof m.rts === 'number') ? (m as AckEnv) : null
     case 'group-skd': return (typeof m.gid === 'string' && typeof m.gkPub === 'string' && typeof m.epoch === 'number'

@@ -23,6 +23,7 @@ import {
   type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta, type TypingState, type PresenceState, type RtcEnv, type AckEnv,
   type GroupSkdEnv, type GroupSkdReqEnv, type SkdFields,
 } from './envelope.ts'
+import type { QuoteRef } from './quote.ts'
 import { nowMs } from './time.ts'
 
 /**
@@ -986,8 +987,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   }
 
   return {
-    sendText: (body: string) => {
-      const e = envMsg(seq++, body)
+    sendText: (body: string, re?: QuoteRef) => {
+      const e = envMsg(seq++, body, 'plain', re)
       const bytes = encodeEnvelope(e)
       void emitContent(bytes)
       trackDelivery(e.id, bytes) // resend until the peer confirms, then mark it

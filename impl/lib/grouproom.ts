@@ -18,6 +18,7 @@
 
 import type { GroupSession } from './group.ts'
 import { envMsg, envReaction, envFile, encodeEnvelope, decodeEnvelope, type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta } from './envelope.ts'
+import type { QuoteRef } from './quote.ts'
 import { nowMs } from './time.ts'
 
 const T_GKEEPALIVE = 0x21 // a 1-byte mesh keepalive frame — NOT a group message (T_GMSG is 0x20)
@@ -45,8 +46,8 @@ export interface GroupRoomOpts {
 }
 
 export interface GroupRoom {
-  /** Broadcast a text message to the group. */
-  sendText(body: string): Promise<string>
+  /** Broadcast a text message to the group. `re` quotes the message it answers. */
+  sendText(body: string, re?: QuoteRef): Promise<string>
   /** Broadcast a reaction to a message id. */
   sendReaction(to: string, emoji: string): Promise<void>
   /** Broadcast a file's metadata. Same envelope as 1:1 — the bytes are already
@@ -128,8 +129,8 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
 
   return {
     topic,
-    async sendText(body: string) {
-      const env = envMsg(seq++, body)
+    async sendText(body: string, re?: QuoteRef) {
+      const env = envMsg(seq++, body, 'plain', re)
       await broadcast(encodeEnvelope(env))
       return env.id
     },

@@ -273,6 +273,17 @@
   .mrow.out .bubble{background:var(--bubble-out);border-bottom-right-radius:2px}
   .bubble .b-who{font-size:11px;font-weight:600;color:var(--accent);margin-bottom:2px}
   .bubble .b-text{color:var(--text);overflow-wrap:break-word;white-space:pre-wrap}
+  /* The quoted message, inside the bubble above the reply. A rule down the
+     leading edge and one clipped line: the answer is what the reader came for,
+     the quote is only what it is about. Clickable, so it can take them to the
+     original when that is still on screen. */
+  .bubble .b-quote{display:block;width:100%;text-align:left;border:none;border-left:2px solid var(--accent);
+    background:var(--card);border-radius:4px;padding:4px 8px;margin-bottom:6px;cursor:pointer;font:inherit}
+  .bubble .b-quote .q-who{font-size:11px;font-weight:600;color:var(--accent)}
+  .bubble .b-quote .q-text{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Where a click on a quote lands: two seconds of the accent, then gone. It has
+     to be visible over BOTH bubble colours, so it is a ring, not a fill. */
+  .mrow.flash .bubble{box-shadow:0 0 0 2px var(--accent)}
   .bubble .b-meta{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums}
   .mrow.out .b-meta{text-align:right}
   .sysline{text-align:center;font-size:12px;color:var(--muted)}
@@ -284,6 +295,10 @@
   /* The pin control sits in the same bar as the emoji, so it has to look like a
      control and not like a reaction: an icon, and the accent only once it is on. */
   .b-react button.b-pin{display:grid;place-items:center;padding:3px 5px;color:var(--muted)}
+  /* Reply is a control too, not a reaction — same shape as the pin, and the
+     accent on hover because it is the one here that starts something. */
+  .b-react button.b-reply{display:grid;place-items:center;padding:3px 6px;color:var(--muted);font-size:13px;line-height:1}
+  .b-react button.b-reply:hover{color:var(--accent)}
   .b-react button.b-pin.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
   /* A kept message wears a hairline in the accent — side-agnostic, because these
      appear on both sides of the transcript, and quiet enough to be worn by a
@@ -294,6 +309,16 @@
   .b-reactions:empty{display:none}
   .rchip{font-size:12px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1px 6px;line-height:1.35}
   .typing{font-size:12px;color:var(--muted);font-style:italic;min-height:16px;padding:0 20px 4px}
+  /* "Replying to …" sits between the transcript and the composer, above the
+     border the composer already draws — a strip, not a modal: it must be
+     dismissable with one thumb and never cover the message it quotes. */
+  .reply-bar{display:flex;align-items:center;gap:8px;padding:8px 20px 0}
+  .reply-bar .r-ico{color:var(--accent);font-size:14px;flex-shrink:0}
+  .reply-bar .r-body{flex:1;min-width:0;border-left:2px solid var(--accent);padding-left:8px}
+  .reply-bar .r-who{font-size:11px;font-weight:600;color:var(--accent)}
+  .reply-bar .r-text{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .reply-bar .x{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;flex-shrink:0;padding:4px 6px}
+  .reply-bar .x:hover{color:var(--err)}
   .composer{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--border)}
   /* The clip sits INSIDE the field, at its right edge — the field and the clip
      read as one control, so attaching feels like part of writing rather than a
@@ -541,6 +566,7 @@
     .chat-head .who{min-width:0}
     .messages{padding:12px}
     .composer{padding:10px 12px calc(10px + env(safe-area-inset-bottom))}
+    .reply-bar{padding:8px 12px 0}
     .profile-strip,.add-row{padding-bottom:calc(10px + env(safe-area-inset-bottom))}
     .to-bottom{right:14px;bottom:calc(72px + env(safe-area-inset-bottom))}
     #btn-back{display:grid}
@@ -679,6 +705,11 @@
         <div class="messages" id="messages"></div>
         <button class="to-bottom" id="to-bottom" hidden title="Przejdź do najnowszej wiadomości" data-i18n-title="Przejdź do najnowszej wiadomości">⬇<span class="unread" id="unread" hidden>0</span></button>
         <div class="typing" id="typing-ind"></div>
+        <div class="reply-bar" id="reply-bar" hidden>
+          <span class="r-ico" aria-hidden="true">↩</span>
+          <div class="r-body"><div class="r-who" id="reply-who"></div><div class="r-text" id="reply-text"></div></div>
+          <button class="x" id="reply-cancel" title="Anuluj odpowiedź" data-i18n-title="Anuluj odpowiedź" aria-label="Anuluj odpowiedź">✕</button>
+        </div>
         <div class="composer">
           <input type="file" id="file-input" hidden>
           <div class="composer-field">
