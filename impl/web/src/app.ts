@@ -224,7 +224,20 @@ let rotTimer: any = null
 // question, and dressing a question as an error teaches people to ignore red.
 const setMsg = (id: string, text: string, kind: 'err' | 'ok' | '') => { const m = $(id); m.textContent = text; m.className = 'msg ' + kind }
 const clr = (id: string) => { const m = $(id); m.textContent = ''; m.className = 'msg' }
-const initials = (s: string) => (s || '?').slice(0, 2).toUpperCase()
+/**
+ * Two letters for an avatar. NOT the first two: "DevMachine" and "DevBox" both
+ * came out "DE", and two people behind one badge is the thing a badge exists to
+ * prevent. Several words → first letter of the first and of the LAST word (Ala
+ * Kowalska → AK); one word → its first and last letter (DevM → DM). Iterated by
+ * code point, so an emoji or a Polish letter is never cut in half.
+ */
+const initials = (s: string) => {
+  const words = (s || '').trim().split(/\s+/).filter(Boolean)
+  if (!words.length) return '?'
+  const first = [...words[0]]
+  const second = words.length > 1 ? [...words[words.length - 1]][0] : first[first.length - 1]
+  return (first[0] + (second ?? '')).toUpperCase()
+}
 const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
 
 async function fingerprint(pubB64: string): Promise<string> {
@@ -1877,6 +1890,14 @@ async function copyPub() {
   toast(tr('Skopiowano klucz publiczny ✓'))
 }
 $('me-fp').addEventListener('dblclick', copyPub)       // double-click fingerprint → copy pubkey
+// The circle with your own initials opens the share card. It is what a hand
+// reaches for when somebody asks "how do I add you" — Settings keeps the same
+// button, this only shortens the road to it. Keyboard gets the same door: the
+// circle is a div, so it needs role/tabindex in the markup and Enter/Space here.
+$('me-avatar').addEventListener('click', () => void openShare())
+$('me-avatar').addEventListener('keydown', (e: any) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openShare() }
+})
 $('sess-id').addEventListener('dblclick', copyPub)     // double-click Tożsamość → copy pubkey
 
 // ---- placeholder tabs ----

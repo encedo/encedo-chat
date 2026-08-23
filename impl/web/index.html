@@ -173,7 +173,13 @@
   .fp{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .icon-btn{background:none;border:1px solid var(--border);color:var(--muted);width:34px;height:34px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-size:15px}
   .icon-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .icon-btn svg{display:block}
   .avatar{width:38px;height:38px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-weight:600;font-size:13px;color:var(--accent);background:var(--accent-soft)}
+  /* The circle with your own initials is where a hand goes looking for "this is
+     me, here is my address" — so it opens the share card. Settings keeps the same
+     button; this is the short way in, not a move. */
+  #me-avatar{cursor:pointer}
+  #me-avatar:hover,#me-avatar:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .search-wrap{padding:12px 16px 4px}
   .tabs{display:flex;gap:6px;padding:12px 16px}
   .tab{flex:1;padding:8px 0;text-align:center;background:none;border:none;border-radius:5px;color:var(--muted);font-weight:500}
@@ -420,10 +426,15 @@
   .store-opts{display:flex;flex-direction:column;gap:6px;margin-top:4px}
   .store-opt{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);cursor:pointer;padding:7px 10px;border:1px solid var(--border);border-radius:8px}
   .group-members{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;margin-top:4px}
-  .gmember{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);cursor:pointer;padding:6px 8px;border-radius:6px}
+  .gmember{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);cursor:pointer;padding:6px 8px;border-radius:6px;margin:0}
   /* Name against the left margin, box against the right: the column then reads
      as a list of people with a choice beside each, not a column of boxes. */
   .gmember .gm-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* The global `input{width:100%}` applies to a checkbox too: it took the whole
+     row, leaving the flex:1 name at zero width — the name was in the DOM and
+     invisible on screen. Three other rows already carry this fix; this is the
+     one that did not. */
+  .gmember input{width:auto;flex:none;margin:0;padding:0;accent-color:var(--accent)}
   .gmember:hover{background:var(--bg)}
   .gavatar{width:34px;height:34px;border-radius:8px;flex-shrink:0;display:grid;place-items:center;font-weight:600;font-size:12px;color:var(--accent);background:var(--accent-soft)}
   .store-opt:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
@@ -621,7 +632,7 @@
   <div class="app" id="app" hidden>
     <aside class="sidebar">
       <div class="me">
-        <div class="avatar" id="me-avatar">··</div>
+        <div class="avatar" id="me-avatar" role="button" tabindex="0" title="Udostępnij swój profil" data-i18n-title="Udostępnij swój profil">··</div>
         <div class="info"><div class="name" id="me-handle">—</div><div class="fp" id="me-fp" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer"></div></div>
         <button class="icon-btn" id="btn-settings" title="Ustawienia" data-i18n-title="Ustawienia">⚙</button>
         <!-- Leaving was reachable only from inside Settings, which is not where
@@ -629,7 +640,7 @@
              confirms — because a session's transcript is ephemeral and a reload
              takes it, so a stray hit next to a button people press often would
              cost the conversation. -->
-        <button class="icon-btn" id="btn-signout" title="Wyloguj" data-i18n-title="Wyloguj">⏻</button>
+        <button class="icon-btn" id="btn-signout" title="Wyloguj" data-i18n-title="Wyloguj" aria-label="Wyloguj"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3.5v8"/><path d="M7.8 6.6a7 7 0 1 0 8.4 0"/></svg></button>
       </div>
       <div class="search-wrap"><input id="contact-search" type="text" placeholder="Szukaj kontaktu…" data-i18n-placeholder="Szukaj kontaktu…" autocomplete="off"></div>
       <div class="tabs">
