@@ -261,6 +261,50 @@ broken quote never drops its message) and a `grouproom` scenario where the quote
 reaches a third member who is party to neither side of it. **Not** covered by
 `browser-test` — no scenario clicks ↩ yet.
 
+### Correcting a message — `lib/edits.ts` + the `edit` envelope
+
+A correction is its own envelope type, `edit = { to, body, format }`: `to` is the
+message being replaced, and the correction's **own** id is what delivery is
+tracked under. A separate type rather than a flag on `msg`, because an edit must
+not raise an unread count or get a bubble; an older build decodes it as
+`UnknownEnv`, ignores it, and **goes on showing the original text** — which is
+the whole reason the sender is shown proof rather than an assumption.
+
+**It is 1:1 only, and that is the design, not a stage.** Editing can only change
+what a client is still holding, and here a transcript dies with the page — so
+"it did not apply" is an ordinary outcome. A 1:1 correction rides the same
+delivery tracking a message does, so the sender is told *"they still see the old
+text"* when it fails, with a ↻ to try again. A group broadcast has no
+acknowledgements: there the sender could only ever be told "sent", and a
+correction nobody can vouch for invites you to believe you fixed something.
+So there is no ✏ in a group at all.
+
+The rest, decided with the user on 2026-08-24:
+
+- **Fifteen minutes**, counted from the message and not from the last edit
+  (`EDIT_WINDOW_MS`). The receiving side allows five minutes of clock skew
+  (`EDIT_SKEW_MS`) — the window is a product rule, not a security boundary.
+- **Only your own words**: `acceptEdit` refuses an incoming correction aimed at
+  a message of OURS, or at nothing (the usual case after a reload). Without that
+  rule the other end of a conversation could rewrite what we are on record as
+  having said.
+- **Both sides see "edytowano"**; nothing is ever swapped silently.
+- **A pin is a snapshot**: a correction does not rewrite the pin store, and a
+  bubble restored from a pin has no ✏ — the other side stopped holding that
+  message sessions ago.
+- An **empty** correction is not a delete-for-everyone; it just cancels.
+
+While it was being wired, `appendMsg` stopped taking ten positional arguments and
+now takes the log event (`MsgEv`); system lines got their own `appendSys`. The
+old signature was one `undefined`-through-six-slots away from a bug.
+
+Covered by `test/edits.test.ts` (window, skew, the who-may-edit-what rule, codec
+refusals, forward-compat) and a `room-eh2` scenario proving the correction
+reaches the peer, is not delivered as a message, and is acked **under its own
+id**. **Not** covered by `browser-test`. `docs/PROTOCOL.md` does not describe
+`edit` either — second wire addition kept out of the frozen specs, see the reply
+note above.
+
 ### Sessions and rooms — `lib/core.ts`
 
 **One transport per client, many rooms on it.** `startSession(id, …)` owns the

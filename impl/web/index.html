@@ -297,8 +297,14 @@
   .b-react button.b-pin{display:grid;place-items:center;padding:3px 5px;color:var(--muted)}
   /* Reply is a control too, not a reaction — same shape as the pin, and the
      accent on hover because it is the one here that starts something. */
-  .b-react button.b-reply{display:grid;place-items:center;padding:3px 6px;color:var(--muted);font-size:13px;line-height:1}
-  .b-react button.b-reply:hover{color:var(--accent)}
+  .b-react button.b-reply,.b-react button.b-edit{display:grid;place-items:center;padding:3px 6px;color:var(--muted);font-size:13px;line-height:1}
+  .b-react button.b-reply:hover,.b-react button.b-edit:hover{color:var(--accent)}
+  /* "edytowano" rides in the meta line, in the meta line's own colour — it is a
+     fact about the message, not a warning. It becomes one only when OUR
+     correction failed to arrive, because then the two sides are reading
+     different text and only we can see it. */
+  .edited-mark{font-style:italic}
+  .edited-mark.warn{color:var(--err);font-style:normal}
   .b-react button.b-pin.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
   /* A kept message wears a hairline in the accent — side-agnostic, because these
      appear on both sides of the transcript, and quiet enough to be worn by a
@@ -313,7 +319,7 @@
      border the composer already draws — a strip, not a modal: it must be
      dismissable with one thumb and never cover the message it quotes. */
   .reply-bar{display:flex;align-items:center;gap:8px;padding:8px 20px 0}
-  .reply-bar .r-ico{color:var(--accent);font-size:14px;flex-shrink:0}
+  .reply-bar .r-ico{color:var(--accent);font-size:14px;flex-shrink:0;display:grid;place-items:center}
   .reply-bar .r-body{flex:1;min-width:0;border-left:2px solid var(--accent);padding-left:8px}
   .reply-bar .r-who{font-size:11px;font-weight:600;color:var(--accent)}
   .reply-bar .r-text{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -706,7 +712,7 @@
         <button class="to-bottom" id="to-bottom" hidden title="Przejdź do najnowszej wiadomości" data-i18n-title="Przejdź do najnowszej wiadomości">⬇<span class="unread" id="unread" hidden>0</span></button>
         <div class="typing" id="typing-ind"></div>
         <div class="reply-bar" id="reply-bar" hidden>
-          <span class="r-ico" aria-hidden="true">↩</span>
+          <span class="r-ico" id="reply-ico" aria-hidden="true">↩</span>
           <div class="r-body"><div class="r-who" id="reply-who"></div><div class="r-text" id="reply-text"></div></div>
           <button class="x" id="reply-cancel" title="Anuluj odpowiedź" data-i18n-title="Anuluj odpowiedź" aria-label="Anuluj odpowiedź">✕</button>
         </div>

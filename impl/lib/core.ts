@@ -492,6 +492,10 @@ export interface Conversation {
   /** Send a message marked undelivered again, keeping its id. False = nothing to resend. */
   resend(id: string): boolean
   sendReaction(toId: string, emoji: string): void
+  /** Replace the text of a message we sent (1:1 only, `lib/edits.ts`). Returns
+   *  the correction's own id — delivery is tracked under it, so the UI can show
+   *  whether the other side actually got it. */
+  sendEdit(toId: string, body: string): string
   /** Hand a group's Sender-Key Distribution to this contact over the ratchet (§8). */
   sendGroupSkd(skd: SkdFields): void
   /** Ask this contact to hand ITS sender key for a group over again (§8 repair) —
@@ -1042,6 +1046,7 @@ async function openRoom(
     // WebRTC signaling needs a live session, which a join does not imply.
     onPresence: opts.onPresence,
     onReaction: opts.onReaction,
+    onEdit: opts.onEdit,
     onFile: opts.onFile,
     onSignal: (from, env) => plane?.onSignal(from, env),
     // Group Sender-Key Distribution rides this 1:1 ratchet (it authenticates
@@ -1092,6 +1097,7 @@ async function openRoom(
     sendText: (body, re) => { const mid = room.sendText(body, re); stopTyping(); return mid },
     resend: (mid) => room.resend(mid),
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),
+    sendEdit: (toId, body) => room.sendEdit(toId, body),
     sendGroupSkd: (skd) => room.sendGroupSkd(skd),
     sendGroupSkdReq: (gid, epoch) => room.sendGroupSkdReq(gid, epoch),
     sendFile: (f) => room.sendFile(f),

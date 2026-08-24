@@ -99,6 +99,8 @@ async function rooms(opts: {
    * against, which keeps them pinning the retry *mechanism*, not the constants.
    */
   retry?: { retryMs?: number[]; giveUpMs?: number; maxInflightMs?: number }
+  /** B side: corrections arriving for A's messages (`lib/edits.ts`). */
+  onEditB?: (from: string, e: any) => void
 }) {
   const net = hub(opts.drop, opts.duplicate, opts.delayMs)
   const ss = new Uint8Array(32).fill(0x5e)
@@ -131,6 +133,7 @@ async function rooms(opts: {
     firstAnnounceMs: 5,
     heartbeatMs: opts.heartbeatMs,
     onMessage: (from, m, meta) => { opts.collect.push(m.body); opts.onMessageB?.(from, m, meta) },
+    onEdit: opts.onEditB,
   })
   /** A second window for B's identity — same keys, new PeerId (a page reload). */
   const rejoinB = (id: string, collect: string[], logs?: string[]) =>
@@ -157,6 +160,29 @@ test('the handshake runs on discovery and content rides the ratchet', async (t) 
   A.sendText('i druga')
   await until(() => got.length === 2)
   assert.deepEqual(got, ['po ratchecie', 'i druga'])
+})
+
+test('a correction reaches the peer and is confirmed under its own id', async (t) => {
+  const got: string[] = []
+  const edits: any[] = []
+  const acked: string[] = []
+  const { A, B } = await rooms({ collect: got, onEditB: (_f, e) => edits.push(e), onDeliveredA: (id) => acked.push(id) })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().includes('peer-b') && B.secured().includes('peer-a'))
+
+  const mid = A.sendText('kto niesie namiot')
+  await until(() => got.length === 1)
+  const eid = A.sendEdit(mid, 'kto niesie namiot? bo ja mam śpiwory')
+  await until(() => edits.length === 1)
+  assert.equal(edits[0].to, mid)
+  assert.equal(edits[0].body, 'kto niesie namiot? bo ja mam śpiwory')
+  assert.equal(got.length, 1, 'a correction is not a message: it must not appear as one')
+
+  // The ack is the point of doing this in a 1:1 at all: it is what lets the UI
+  // say "they still see the old text" instead of assuming the fix landed. It
+  // confirms the CORRECTION's own id, not the id of the message it corrects.
+  assert.notEqual(eid, mid)
+  await until(() => acked.includes(eid))
 })
 
 test('content typed before the handshake completes is queued, not lost', async (t) => {

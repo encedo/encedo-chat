@@ -20,7 +20,8 @@ import { startHandshake, isHandshakeFrame, type Eh2Handshake } from '../eh2/esta
 import { T_MSG1 } from '../eh2/wire.ts'
 import {
   encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile, envRtc, envAck, envGroupSkd, envGroupSkdReq,
-  type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta, type TypingState, type PresenceState, type RtcEnv, type AckEnv,
+  envEdit,
+  type MsgEnv, type ReactionEnv, type EditEnv, type FileEnv, type FileMeta, type TypingState, type PresenceState, type RtcEnv, type AckEnv,
   type GroupSkdEnv, type GroupSkdReqEnv, type SkdFields,
 } from './envelope.ts'
 import type { QuoteRef } from './quote.ts'
@@ -73,6 +74,8 @@ export interface ChatOpts {
   onTyping?: (from: string, state: TypingState) => void
   onPresence?: (from: string, ev: PresenceEvent) => void
   onReaction?: (from: string, r: ReactionEnv) => void
+  /** A correction for a message this peer sent earlier (1:1 only — see `lib/edits.ts`). */
+  onEdit?: (from: string, e: EditEnv) => void
   onFile?: (from: string, f: FileEnv) => void
   onSignal?: (from: string, env: RtcEnv) => void // WebRTC signaling (control plane)
   /** A group Sender-Key Distribution arrived over this 1:1 ratchet (§8) — the
@@ -143,6 +146,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const onTyping = opts.onTyping ?? (() => {})
   const onPresence = opts.onPresence ?? (() => {})
   const onReaction = opts.onReaction ?? (() => {})
+  const onEdit = opts.onEdit ?? (() => {})
   const onFile = opts.onFile ?? (() => {})
   const onSignal = opts.onSignal ?? (() => {})
   const onGroupSkd = opts.onGroupSkd ?? (() => {})
@@ -346,6 +350,14 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         }
         break
       case 'reaction': touch(from); if (firstSeq(from, env.seq)) onReaction(from, env as ReactionEnv); break
+      // Confirmed like a message, because the sender is shown whether the
+      // correction landed: without the ack it would retry until it gave up and
+      // then report a failure that had already succeeded.
+      case 'edit':
+        touch(from)
+        void confirm(env.id)
+        if (firstSeq(from, env.seq)) onEdit(from, env as EditEnv)
+        break
       case 'file':
         touch(from)
         void confirm(env.id)
@@ -1010,6 +1022,18 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     sendTyping: (state: TypingState) => emitContent(encodeEnvelope(envTyping(seq++, state))),
     sendPresence: (state: PresenceState) => emitContent(encodeEnvelope(envPresence(seq++, state))),
     sendReaction: (to: string, emoji: string) => emitContent(encodeEnvelope(envReaction(seq++, to, emoji))),
+    /**
+     * Correct a message already sent. Tracked exactly like the message was, so
+     * the UI can say "they still see the old text" instead of assuming — the
+     * returned id is the one the ✓ / ⚠ hangs off, not the id being corrected.
+     */
+    sendEdit: (to: string, body: string) => {
+      const e = envEdit(seq++, to, body)
+      const bytes = encodeEnvelope(e)
+      void emitContent(bytes)
+      trackDelivery(e.id, bytes)
+      return e.id
+    },
     /** Hand a group's Sender-Key Distribution to this contact over the ratchet (§8). */
     sendGroupSkd: (skd: SkdFields) => emitContent(encodeEnvelope(envGroupSkd(seq++, skd))),
     /** Ask this contact to hand its sender key for `gid` over again (§8 repair). */

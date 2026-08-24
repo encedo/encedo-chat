@@ -24,6 +24,7 @@ import { probeCapabilities, formatReport } from '../../lib/capabilities.ts'
 import { splitByLinks } from '../../lib/linkify.ts'
 import { splitByMentions, resolveMention, mentionName, closeMentions, mentionsPub, pubHint } from '../../lib/mentions.ts'
 import { makeQuote, type QuoteRef } from '../../lib/quote.ts'
+import { canEdit, acceptEdit, EDIT_WINDOW_MS } from '../../lib/edits.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -164,6 +165,14 @@ type Ev =
       pinned?: boolean
       /** The message this one answers, quoted (`lib/quote.ts`). */
       re?: QuoteRef
+      /** When the text was last corrected (`lib/edits.ts`); `text` already holds
+       *  the correction. Its presence is what puts "edytowano" on the bubble. */
+      edited?: number
+      /** OUR correction's own message id, and what became of it. Kept on the
+       *  event so a room switch replays the truth: a correction that never
+       *  arrived must not come back looking like one that did. */
+      editId?: string
+      editState?: 'sending' | 'ok' | 'lost' | 'late'
       /** Author's public key. Not shown — it is what a REPLY to this bubble puts
        *  in its own quote, and what resolves a quote of it to a name. */
       au?: string }
@@ -177,6 +186,9 @@ type Ev =
   // A file is its own event, not a message with a marker: it carries what is
   // needed to fetch and decrypt, and its bubble has an action rather than text.
   | { t: 'file'; kind: 'me' | 'peer'; who?: string; ts: number; file: FileEnv; au?: string }
+/** The log event a bubble is rendered from. */
+type MsgEv = Extract<Ev, { t: 'msg' }>
+
 interface Room {
   contact: Contact
   conv: Conversation | null
@@ -940,7 +952,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
       for (const r of rooms.values()) { r.conv = null; r.inRoom = false }
       $('messages').innerHTML = ''
       msgEls.clear(); stateEls.clear(); setTyping(false)
-      appendMsg('sys', tr('Wykryto drugie okno zalogowane na tę samą tożsamość.')
+      appendSys(tr('Wykryto drugie okno zalogowane na tę samą tożsamość.')
         + tr(' Obie sesje zostały zamknięte — jedna tożsamość, jedna aktywna sesja.')
         + tr(' Zamknij nadmiarową kartę i odśwież tę, w której chcesz rozmawiać.'))
       linkState = 'offline'
@@ -1726,6 +1738,7 @@ let pendingAttach: File | null = null
 /** The chip is the whole of the pending state's UI, so this is the only place
  *  the variable and the DOM can drift apart — set them together, always. */
 function showAttach(f: File | null) {
+  if (f) cancelEdit() // a correction is text; the chip would take the send from it
   pendingAttach = f
   $('attach-chip').hidden = !f
   if (!f) return
@@ -2109,18 +2122,30 @@ function insertByTime(box: HTMLElement, row: HTMLElement, ts: number) {
   box.insertBefore(row, at)
 }
 
-function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: string, outOfOrder = false, who?: string, sent = false, pinned = false, re?: QuoteRef, au?: string) {
+/** A line the app says to itself in the transcript — not somebody's message. */
+function appendSys(text: string) {
   const box = $('messages')
-  if (kind === 'sys') {
-    const stick = atBottom()
-    const s = document.createElement('div'); s.className = 'sysline'; s.textContent = text; box.appendChild(s)
-    if (stick) box.scrollTop = box.scrollHeight
-    return
-  }
+  const stick = atBottom()
+  const s = document.createElement('div'); s.className = 'sysline'; s.textContent = text; box.appendChild(s)
+  if (stick) box.scrollTop = box.scrollHeight
+}
+
+/**
+ * One bubble, rendered from the log event itself rather than from a dozen
+ * positional arguments — the list had reached ten and every feature since has
+ * wanted to add to it, which is how a call site ends up passing `undefined`
+ * through six slots to reach the seventh.
+ */
+function appendMsg(ev: MsgEv) {
+  const { kind, text, id, who, re, au } = ev
+  const ts = ev.ts, outOfOrder = !!ev.ooo, sent = !!ev.sent, pinned = !!ev.pinned
+  const box = $('messages')
   const stick = (atBottom() && !outOfOrder) || kind === 'me' // sending always follows your own message
   const row = document.createElement('div'); row.className = 'mrow ' + (kind === 'me' ? 'out' : 'in')
     + (pinned || (id && isPinned(id)) ? ' pinned' : '')
   row.dataset.ts = String(ts ?? nowMs())
+  if (id) row.dataset.mid = id
+  if (au) row.dataset.au = au
   // Restored FROM the store, as opposed to a live message that happens to be
   // pinned: only the first kind vanishes when it is unpinned.
   if (pinned) row.dataset.frompin = '1'
@@ -2129,6 +2154,9 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   if (re) bub.appendChild(quoteBlock(re))
   const t = document.createElement('div'); t.className = 'b-text'; renderBody(t, text)
   const m = document.createElement('div'); m.className = 'b-meta'; m.textContent = utcHHMM(ts ?? nowMs()) + ' UTC'
+  // A corrected bubble says so, on both sides and always: silently swapping what
+  // somebody is reading is the one thing this feature must not do.
+  if (ev.edited) m.appendChild(editedMark(ev))
   if (outOfOrder) {
     // Same ⏱ as a late confirmation on our own side: one mark, one meaning —
     // "this one did not travel normally".
@@ -2155,10 +2183,6 @@ function appendMsg(kind: 'me' | 'peer' | 'sys', text: string, ts?: number, id?: 
   }
   const rx = document.createElement('div'); rx.className = 'b-reactions'
   bub.append(t, m, rx); row.appendChild(bub)
-  // What a reply to THIS bubble needs to quote: which message, and whose. Both
-  // on the row, because that is what the reply button has in its hand.
-  if (id) row.dataset.mid = id
-  if (au) row.dataset.au = au
   if (id) {
     msgEls.set(id, rx)
     attachReactionBar(row, id, true)
@@ -2501,6 +2525,17 @@ function attachReactionBar(row: HTMLElement, id: string, canPin = false) {
   rb.textContent = '↩'; rb.title = tr('Odpowiedz'); rb.setAttribute('aria-label', tr('Odpowiedz'))
   rb.addEventListener('click', () => startReply(row))
   bar.appendChild(rb)
+  // Correcting is 1:1 only (`lib/edits.ts`): a group broadcast carries no
+  // acknowledgements, so there the sender could never be told that the fix did
+  // not land. Own text messages only, and not one restored from a pin — the
+  // other side stopped holding that message sessions ago.
+  if (!activeGid && row.classList.contains('out') && !row.dataset.frompin && !row.querySelector('.b-file')) {
+    const eb = document.createElement('button'); eb.type = 'button'; eb.className = 'b-edit'
+    eb.innerHTML = PENCIL_SVG // our own constant markup, never message content
+    eb.title = tr('Edytuj'); eb.setAttribute('aria-label', tr('Edytuj'))
+    eb.addEventListener('click', () => startEdit(row))
+    bar.appendChild(eb)
+  }
   // Files are NOT pinnable, by decision: the blob behind a file bubble is swept
   // from the store on its own schedule, so a kept file would become a button
   // that lies about what it can still fetch. The caption is not offered either —
@@ -2598,14 +2633,23 @@ function startReply(row: HTMLElement) {
   const who = row.classList.contains('out')
     ? tr('Ty')
     : (row.querySelector('.b-who')?.textContent?.trim() || (activeGid ? '' : activeRoom()?.contact.name) || '')
+  cancelEdit()  // one strip, one job
   replyTo = { id, au: row.dataset.au, text: rowQuoteText(row), who }
-  paintReplyBar()
+  paintComposerBar()
   ;($('msg-input') as HTMLInputElement).focus()
 }
-const cancelReply = () => { replyTo = null; paintReplyBar() }
-function paintReplyBar() {
-  $('reply-bar').hidden = !replyTo
+const cancelReply = () => { replyTo = null; paintComposerBar() }
+/** One strip above the composer, two things it can be about — never both. */
+function paintComposerBar() {
+  $('reply-bar').hidden = !replyTo && !editing
+  if (editing) {
+    $('reply-ico').innerHTML = PENCIL_SVG
+    $('reply-who').textContent = tr('Edytujesz wiadomość')
+    $('reply-text').textContent = editing.orig
+    return
+  }
   if (!replyTo) return
+  $('reply-ico').replaceChildren(document.createTextNode('↩'))
   $('reply-who').textContent = replyTo.who || tr('Wiadomość')
   $('reply-text').textContent = replyTo.text
 }
@@ -2617,7 +2661,151 @@ function takeReply(): QuoteRef | undefined {
   cancelReply()
   return q
 }
-$('reply-cancel').addEventListener('click', cancelReply)
+$('reply-cancel').addEventListener('click', () => { cancelReply(); cancelEdit() })
+
+
+// ---- editing what you already said -----------------------------------------
+/**
+ * A correction replaces the text of a message you already sent (`lib/edits.ts`),
+ * and it is **1:1 only**. The reason is not effort: a correction can only change
+ * what a client is still holding, and here a transcript dies with the page — so
+ * the sender has to be TOLD when it did not land. A 1:1 correction rides the
+ * delivery tracking a message does and can say "they still see the old text"; a
+ * group broadcast has no acknowledgements and could only ever say "sent", which
+ * invites you to believe you fixed something you did not.
+ *
+ * Everything else follows from that:
+ *
+ * - **Nothing changes silently.** Both sides get "edytowano" on the bubble, and
+ *   the sender additionally sees whether the correction arrived.
+ * - **Fifteen minutes**, from the message, not from the last edit.
+ * - **Only your own words.** An incoming correction may touch the messages of
+ *   the peer that sent it and never ours (`acceptEdit`).
+ * - **A pin is a snapshot** (decided): a kept copy is the text as it was pinned,
+ *   so a correction does not rewrite the store, and a restored pin is not
+ *   editable — the other side stopped holding that message long ago.
+ */
+let editing: { id: string; orig: string } | null = null
+
+/** The pencil, drawn rather than typed: `✏` is emoji-presentation on most
+ *  platforms and came out as a colour blob beside the line-art pin. Same
+ *  geometry and stroke as `pinSvg`, so the bar reads as one set of controls. */
+const PENCIL_SVG =
+  '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"'
+  + ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+  + '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"/><path d="M14 6l4 4"/></svg>'
+
+/** The live (non-pinned) event for a message id in this room. */
+const findMsgEv = (room: Room | null | undefined, id: string): MsgEv | undefined =>
+  room?.log.find((e) => e.t === 'msg' && e.id === id && !e.pinned) as MsgEv | undefined
+
+/** The "edytowano" span: what it says, and for our own correction, how it went. */
+function editedMark(ev: MsgEv): HTMLElement {
+  const s = document.createElement('span'); s.className = 'edited-mark'
+  paintEditedMark(s, ev)
+  return s
+}
+function paintEditedMark(s: HTMLElement, ev: MsgEv) {
+  s.textContent = tr(' · edytowano')
+  s.title = tr('Treść poprawiona przez autora o {t} UTC', { t: utcHHMM(ev.edited ?? nowMs()) })
+  s.classList.remove('warn') // textContent above already dropped an old ↻ button
+  if (ev.kind !== 'me' || !ev.editState) return
+  if (ev.editState === 'sending') {
+    s.textContent = tr(' · edytowano — wysyłam poprawkę…')
+    s.title = tr('Czekam na potwierdzenie od klienta rozmówcy')
+  } else if (ev.editState === 'lost') {
+    // The message arrived; the CORRECTION did not. Saying "undelivered" here
+    // would name the wrong thing — what is undelivered is the fix, and the
+    // consequence is specific enough to spell out.
+    s.textContent = tr(' · ⚠ poprawka nie dotarła')
+    s.title = tr('Rozmówca wciąż widzi starą treść — mimo ponowień nie ma potwierdzenia')
+    s.classList.add('warn')
+    const again = document.createElement('button')
+    again.type = 'button'; again.className = 'b-resend'; again.textContent = tr('↻')
+    again.title = tr('Wyślij poprawkę ponownie')
+    again.addEventListener('click', () => {
+      if (!ev.editId || !activeRoom()?.conv?.resend(ev.editId)) return
+      ev.editState = 'sending'; paintEditedMark(s, ev)
+    })
+    s.appendChild(again)
+  } else if (ev.editState === 'late') {
+    s.textContent = tr(' · edytowano (poprawka dotarła z opóźnieniem)')
+  }
+}
+
+/** Redraw one bubble after its text changed. The body goes through the SAME
+ *  renderer as the first time, so links and mentions in a corrected message are
+ *  found again rather than left as the text they used to be. */
+function repaintMsg(ev: MsgEv) {
+  if (!ev.id) return
+  const row = $('messages').querySelector(`.mrow[data-mid="${ev.id}"]`) as HTMLElement | null
+  if (!row) return
+  const body = row.querySelector('.b-text') as HTMLElement | null
+  if (body) { body.replaceChildren(); renderBody(body, ev.text) }
+  const meta = row.querySelector('.b-meta') as HTMLElement | null
+  if (!meta || !ev.edited) return
+  const mark = meta.querySelector('.edited-mark') as HTMLElement | null
+  if (mark) paintEditedMark(mark, ev)
+  else meta.appendChild(editedMark(ev))
+}
+
+/** Our own correction came back acknowledged, or did not. Handled where the room
+ *  is known rather than through a delivery event, because the ✓ belongs to a
+ *  bubble that already exists — and because the state has to survive a room
+ *  switch, which it does by living on the event. */
+function noteEditDelivery(room: Room, id: string, state: 'ok' | 'lost' | 'late'): boolean {
+  const ev = room.log.find((e) => e.t === 'msg' && e.editId === id) as MsgEv | undefined
+  if (!ev) return false
+  ev.editState = state
+  if (isViewing(room)) repaintMsg(ev)
+  return true
+}
+
+function startEdit(row: HTMLElement) {
+  const id = row.dataset.mid; if (!id) return
+  const room = activeRoom()
+  const ev = findMsgEv(room, id)
+  if (!ev) return
+  if (!canEdit(ev.ts)) { toast(tr('Poprawić można w ciągu {n} minut od wysłania', { n: Math.round(EDIT_WINDOW_MS / 60_000) })); return }
+  row.classList.remove('tapped')
+  cancelReply() // one strip, one job
+  editing = { id, orig: ev.text }
+  const inp = $('msg-input') as HTMLInputElement
+  inp.value = ev.text
+  paintComposerBar()
+  inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length)
+}
+/** Leaving edit mode also empties the composer: what is in it is the old message,
+ *  not a draft — carrying it into an ordinary send would say it twice. */
+function cancelEdit() {
+  if (!editing) return
+  editing = null
+  ;($('msg-input') as HTMLInputElement).value = ''
+  paintComposerBar()
+}
+
+/** Send the correction the composer is holding. Returns false when there is
+ *  nothing to correct, so the ordinary send path can carry on. */
+function sendEditComposer(): boolean {
+  if (!editing) return false
+  const inp = $('msg-input') as HTMLInputElement
+  const text = inp.value.trim()
+  const room = activeRoom()
+  const ev = findMsgEv(room, editing.id)
+  // An empty correction would be a deletion, and deleting for everybody is a
+  // different promise with different failure modes — not this feature.
+  if (!text || !room?.conv || !ev) { cancelEdit(); return true }
+  if (!canEdit(ev.ts)) { toast(tr('Poprawić można w ciągu {n} minut od wysłania', { n: Math.round(EDIT_WINDOW_MS / 60_000) })); cancelEdit(); return true }
+  if (text === ev.text) { cancelEdit(); return true } // nothing changed: do not tell the peer anything
+  const eid = room.conv.sendEdit(editing.id, text)
+  ecLog(`edited ${editing.id} → "${text.slice(0, 40)}" (correction id ${eid})`)
+  ev.text = text; ev.edited = nowMs(); ev.editId = eid; ev.editState = 'sending'
+  repaintMsg(ev)
+  inp.value = ''
+  editing = null
+  paintComposerBar()
+  return true
+}
 
 // ---- files ----------------------------------------------------------------
 /** A file bubble: icon, name, size, and one action. Rendered like any other
@@ -2971,7 +3159,7 @@ const record = (room: Room, ev: Ev) => {
   else if (ev.t === 'msg' && ev.kind === 'peer') { room.unseen++; renderContacts() }
 }
 function applyEv(ev: Ev) {
-  if (ev.t === 'msg') appendMsg(ev.kind, ev.text, ev.ts, ev.id, ev.ooo, ev.who, ev.sent, ev.pinned, ev.re, ev.au)
+  if (ev.t === 'msg') appendMsg(ev)
   else if (ev.t === 'react') addReaction(ev.id, ev.emoji)
   else if (ev.t === 'delivery') setDelivery(ev.id, ev.state, ev.ms)
   else if (ev.t === 'file') appendFile(ev.kind, ev.file, ev.ts, ev.who, ev.au)
@@ -2983,7 +3171,7 @@ function applyEv(ev: Ev) {
       $('messages').appendChild(s)
     }
   }
-  else appendMsg('sys', ev.text)
+  else appendSys(ev.text)
 }
 
 /**
@@ -3025,7 +3213,7 @@ async function activateRoom(pub: string) {
   // Read what was kept BEFORE the replay: the pins go to the head of the log, so
   // the replay itself puts them at the top with no special case.
   await loadPins(pub, room.log)
-  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false); cancelReply()
+  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false); cancelReply(); cancelEdit()
   for (const ev of room.log) applyEv(ev)
   paintSecurity(room); paintTransport(room); paintStatus()
   startRotation(); renderContacts()
@@ -3061,9 +3249,9 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
       onWebrtcState: (s) => noteTransport(room, s),
       onSecurity: (peer, state) => noteSecurity(room, peer, state),
       onLog: ecLog,
-      onDelivered: (id, ms) => record(room, { t: 'delivery', id, state: 'ok', ms }),
-      onUndelivered: (id) => record(room, { t: 'delivery', id, state: 'lost' }),
-      onLateDelivered: (id, ms) => record(room, { t: 'delivery', id, state: 'late', ms }),
+      onDelivered: (id, ms) => { if (!noteEditDelivery(room, id, 'ok')) record(room, { t: 'delivery', id, state: 'ok', ms }) },
+      onUndelivered: (id) => { if (!noteEditDelivery(room, id, 'lost')) record(room, { t: 'delivery', id, state: 'lost' }) },
+      onLateDelivered: (id, ms) => { if (!noteEditDelivery(room, id, 'late')) record(room, { t: 'delivery', id, state: 'late', ms }) },
       onMessage: (from, msg, meta) => {
         ecLog(`message from ${from.slice(0, 12)}…: "${msg.body.slice(0, 40)}"${meta.outOfOrder ? ' (out of order)' : ''}`)
         // A message IS activity: a peer that just wrote is not "away". Presence
@@ -3082,6 +3270,18 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
       },
       onTyping: (_from, state) => { peerTyping = state === 'start'; if (room === activeRoom()) setTyping(peerTyping, contact.name) },
       onReaction: (_from, r) => record(room, { t: 'react', id: r.to, emoji: r.emoji }),
+      // A correction for one of THEIR messages. `acceptEdit` is what keeps it to
+      // their own words and inside the window; a correction for a message we no
+      // longer hold (the usual case after a reload) simply has nothing to change.
+      onEdit: (_from, e) => {
+        const ev = findMsgEv(room, e.to)
+        if (!acceptEdit(ev ? { mine: ev.kind === 'me', ts: ev.ts } : undefined)) {
+          ecLog(`edit for ${e.to} not applied (no such live message, ours, or past the window)`, 'debug')
+          return
+        }
+        ev!.text = e.body; ev!.edited = nowMs()
+        if (isViewing(room)) repaintMsg(ev!)
+      },
       onFile: (_from, f) => record(room, { t: 'file', kind: 'peer', ts: nowMs(), file: f, au: contact.pub }),
       onForeign: () => {
         // The user is the only one who can fix this, so say it in the transcript
@@ -3133,6 +3333,7 @@ async function closeRoom(pub: string) {
 // The composer targets whichever room is on screen — wired once, not per open.
 function sendComposer() {
   const inp = $('msg-input') as HTMLInputElement
+  if (sendEditComposer()) return // the composer is holding a correction, not a message
   // A pending file takes the composer over. attachFile() reads the caption out
   // of this same input and clears it, so the text goes once, with the file —
   // and the chip is dropped BEFORE the awaits, so what is sent is what the user
@@ -3163,7 +3364,8 @@ function sendComposer() {
 ;($('msg-input') as HTMLInputElement).oninput = () => { activeRoom()?.conv?.noteActivity(); updateMentionPop() }
 ;($('msg-input') as HTMLInputElement).onkeydown = (e: any) => {
   if (mentionKey(e)) return // the picker is open: Enter picks a person, it does not send
-  if (e.key === 'Escape' && replyTo) { cancelReply(); return } // out of the reply, not out of the room
+  // out of the reply or the edit, not out of the room
+  if (e.key === 'Escape' && (replyTo || editing)) { cancelReply(); cancelEdit(); return }
   if (e.key === 'Enter') sendComposer()
 }
 ;($('msg-input') as HTMLInputElement).addEventListener('click', updateMentionPop)
@@ -3791,7 +3993,7 @@ async function activateGroup(gid: string) {
   $('transport-badge').title = tr('Grupa idzie przez relay (GossipSub) — nie WebRTC')
   $('sess-peerid').textContent = gid.slice(0, 12) + '…'
   await loadPins(gid, gu.log) // as in activateRoom: before the replay, so they land first
-  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false); cancelReply()
+  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false); cancelReply(); cancelEdit()
   for (const ev of gu.log) applyEv(ev)
   startRotation(); renderGroups()
 }

@@ -45,6 +45,19 @@ export interface TypingEnv extends BaseEnv { t: 'typing'; state: TypingState }
 export interface PresenceEnv extends BaseEnv { t: 'presence'; state: PresenceState }
 export interface ReactionEnv extends BaseEnv { t: 'reaction'; to: string; emoji: string }
 /**
+ * A correction: `to` is the id of the message being replaced, `body` what it
+ * says now. Its own `id` is the one delivery is tracked under, so the sender can
+ * be told whether the correction actually landed — which is the whole reason
+ * this is a 1:1 feature (`lib/edits.ts`).
+ *
+ * A separate type rather than a flag on `msg`, because an edit is not a message:
+ * it must not raise an unread count, ring anything, or get a bubble of its own.
+ * An older build decodes it as `UnknownEnv` and ignores it — and therefore goes
+ * on showing the ORIGINAL text, which is exactly why the sender is shown proof
+ * of delivery rather than a quiet assumption.
+ */
+export interface EditEnv extends BaseEnv { t: 'edit'; to: string; body: string; format: MsgFormat }
+/**
  * A file. The bytes are encrypted BEFORE they are uploaded and this envelope
  * carries everything needed to get them back — which is why it rides the
  * ratchet (or a group sender key) like any other message, and why the node
@@ -140,7 +153,7 @@ export interface GroupSkdReqEnv extends BaseEnv { t: 'group-skd-req'; gid: strin
 /** A valid envelope whose `t` this build doesn't know — carried for forward-compat. */
 export interface UnknownEnv extends BaseEnv { [k: string]: unknown }
 
-export type KnownEnv = MsgEnv | TypingEnv | PresenceEnv | ReactionEnv | FileEnv | RtcEnv | AckEnv | GroupSkdEnv | GroupSkdReqEnv
+export type KnownEnv = MsgEnv | TypingEnv | PresenceEnv | ReactionEnv | EditEnv | FileEnv | RtcEnv | AckEnv | GroupSkdEnv | GroupSkdReqEnv
 export type Envelope = KnownEnv | UnknownEnv
 export type FileMeta = Omit<FileEnv, keyof BaseEnv>
 
@@ -161,6 +174,7 @@ export const envMsg = (seq: number, body: string, format: MsgFormat = 'plain', r
 export const envTyping = (seq: number, state: TypingState): TypingEnv => ({ ...base('typing', seq), state })
 export const envPresence = (seq: number, state: PresenceState): PresenceEnv => ({ ...base('presence', seq), state })
 export const envReaction = (seq: number, to: string, emoji: string): ReactionEnv => ({ ...base('reaction', seq), to, emoji })
+export const envEdit = (seq: number, to: string, body: string, format: MsgFormat = 'plain'): EditEnv => ({ ...base('edit', seq), to, body, format })
 export const envFile = (seq: number, f: FileMeta): FileEnv => ({ ...base('file', seq), ...f })
 export const envRtc = (seq: number, to: string, sig: any): RtcEnv => ({ ...base('rtc', seq), to, sig })
 export const envAck = (seq: number, ref: string, rts: number = nowMs()): AckEnv => ({ ...base('ack', seq), ref, rts })
@@ -194,6 +208,10 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
     case 'typing': return TYPING.has(m.state) ? (m as TypingEnv) : null
     case 'presence': return PRESENCE.has(m.state) ? (m as PresenceEnv) : null
     case 'reaction': return (typeof m.to === 'string' && typeof m.emoji === 'string') ? (m as ReactionEnv) : null
+    // Same body rule as `msg`: plain text, a known format, nothing else — an
+    // edit replaces what a bubble says, so it cannot be looser than what put
+    // the text there in the first place.
+    case 'edit': return (typeof m.to === 'string' && m.to.length > 0 && typeof m.body === 'string' && FORMATS.has(m.format)) ? (m as EditEnv) : null
     // Every field is required: a file envelope missing its key, chunking or
     // algorithm is not a partially useful message, it is an undecryptable one,
     // and accepting it would put a permanently broken bubble in the transcript.
