@@ -900,6 +900,75 @@ async function main() {
       step('the blob in the store carries no plaintext')
     }
 
+    // ---- replying, and correcting -------------------------------------------
+    // Both features are conventions ABOUT a message that only exist once two
+    // real clients agree on them, and both have a property that unit tests
+    // cannot reach: the quote resolves the author against the READER's own
+    // contact book, and a correction has to replace text that is already on
+    // somebody else's screen.
+    scenario('a reply carries the message it answers')
+    const quoted = `cytat-${Date.now().toString(36)}`
+    await send(B, quoted)
+    await A.waitFor('the message to reply to reached A', seen(quoted), 25_000)
+    await A.eval(`
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(quoted)}));
+      if (!row) throw new Error('no row to reply to');
+      row.querySelector('.b-reply').click(); return 1`)
+    await A.waitFor('the composer says A is replying',
+      `return !document.getElementById('reply-bar').hidden`, 10_000)
+    const replyTok = `odp-${Date.now().toString(36)}`
+    await send(A, replyTok)
+    await B.waitFor('the reply reached B', seen(replyTok), 25_000)
+    const quote = await B.eval<any>(`
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(replyTok)}));
+      if (!row) return { found: false };
+      const q = row.querySelector('.b-quote');
+      return { found: true, hasQuote: !!q, text: q ? q.textContent : '',
+               who: q ? (q.querySelector('.q-who') || {}).textContent || '' : '' };`)
+    if (!quote.found) throw new Error('the reply was not rendered on B')
+    if (!quote.hasQuote) throw new Error('the reply arrived without its quote')
+    if (!String(quote.text).includes(quoted)) throw new Error(`the quote says "${quote.text}", not the message it answers`)
+    // B wrote the quoted message, so B's own client must resolve the author hint
+    // to itself. This is the half a codec test cannot check: the name is never
+    // on the wire, it is looked up per reader.
+    if (quote.who !== 'Ty') throw new Error(`the quoted author reads "${quote.who}" on B's screen, not "Ty"`)
+    step('the reply arrived quoting B\'s message, attributed by B\'s own client')
+    const barCleared = await A.eval<boolean>(`return document.getElementById('reply-bar').hidden`)
+    if (!barCleared) throw new Error('the reply strip is still open after sending')
+    step('the strip closes on send — one pick answers one message')
+
+    scenario('a correction replaces the text on both sides')
+    const typo = `pomylka-${Date.now().toString(36)}`
+    await send(A, typo)
+    await B.waitFor('the message to correct reached B', seen(typo), 25_000)
+    await A.eval(`
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(typo)}));
+      if (!row) throw new Error('no row to edit');
+      const b = row.querySelector('.b-edit');
+      if (!b) throw new Error('own message has no edit control');
+      b.click(); return 1`)
+    await A.waitFor('the composer is in edit mode', `
+      return !document.getElementById('reply-bar').hidden
+        && document.getElementById('reply-who').textContent.includes('Edytujesz')`, 10_000)
+    const fixed = `poprawione-${Date.now().toString(36)}`
+    await send(A, fixed)
+    await B.waitFor('B is reading the corrected text, not the old one', `
+      const t = document.getElementById('messages').textContent;
+      return t.includes(${JSON.stringify(fixed)}) && !t.includes(${JSON.stringify(typo)})`, 25_000)
+    const marked = await B.eval<boolean>(`
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(fixed)}));
+      return !!row && !!row.querySelector('.edited-mark')`)
+    if (!marked) throw new Error('the corrected bubble on B carries no "edytowano" mark')
+    step('the old text is gone on the other side, and the bubble says it was edited')
+    // The point of doing this in a 1:1 at all: the sender is TOLD. A correction
+    // that never arrived stays "wysyłam poprawkę…" and then goes red — so the
+    // absence of both is what proves this one landed.
+    await A.waitFor('A is told the correction arrived', `
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(fixed)}));
+      const m = row && row.querySelector('.edited-mark');
+      return !!m && !m.classList.contains('warn') && !m.textContent.includes('wysyłam poprawkę')`, 25_000)
+    step('the sender got the acknowledgement for the correction itself')
+
     scenario('transport upgrade to a direct DataChannel')
     // Assert on the CLASS, not the label. The harness runs with ?lang=pl, where
     // this badge reads "Bezpośrednio" — so matching the English word reported
@@ -1208,6 +1277,13 @@ async function main() {
     const groupSent = await A.eval<boolean>(`return document.getElementById('messages').textContent.includes('wysłano') && !document.getElementById('messages').textContent.includes('wysyłam')`)
     if (!groupSent) throw new Error('a group message should show "wysłano", not hang on "wysyłam"')
     step('a sent group message reads "wysłano" (no perpetual "wysyłam")')
+    // Editing is 1:1 only (`lib/edits.ts`): a broadcast has no acknowledgements,
+    // so the sender could never be told a correction did not land. The control
+    // is therefore absent here — not present and failing quietly.
+    const groupEdit = await A.eval<boolean>(`
+      return [...document.querySelectorAll('#messages .mrow.out')].some((r) => !!r.querySelector('.b-edit'))`)
+    if (groupEdit) throw new Error('a group message offers ✏ — editing cannot be honest without acks')
+    step('no edit control on a group message (no acks to prove a correction landed)')
     if (process.env.SHOT) { // capture the group view + Network tab at desktop width
       const dir = process.env.SHOT_DIR ?? '/tmp'
       await A.resize(1400, 860)

@@ -72,7 +72,7 @@ const until = async (cond: () => boolean, ms = 5000) => {
     // The condition's own source is the description — a timeout here used to say
     // only "timed out waiting for the condition", which in a suite this size
     // names neither the fact that was missing nor the test that wanted it.
-    if (Date.now() - t0 > ms) throw new Error(`timed out after ${ms} ms waiting for: ${cond}`)
+    if (Date.now() - t0 > ms) throw new Error(`timed out after ${Date.now() - t0} ms (budget ${ms}) waiting for: ${cond}`)
     await new Promise((r) => setTimeout(r, 10))
   }
 }
@@ -316,12 +316,19 @@ test('a lost message is re-sent until the peer confirms it', async (t) => {
     drop: (d) => d[0] === 0x10 && ++contentSeen <= 2,
     onDeliveredA: (id, ms) => delivered.push([id, ms]),
     onUndeliveredA: (id) => undelivered.push(id),
+    // Four re-sends, not two. What this test pins is that a lost message keeps
+    // being sent until it is confirmed — with only two, the THIRD send was the
+    // one and only chance, and its deadline sat on top of `giveUpMs`. A machine
+    // running twenty test files at once slips a timer past that and the test
+    // reports a broken give-up path instead of a busy laptop. (Both of these
+    // flakes came back on 2026-08-24 and cost a diagnosis each.)
+    retry: { retryMs: [200, 400, 800, 1600], giveUpMs: 5_000 },
   })
   t.after(() => { A.stop(); B.stop() })
   await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
 
   const id = A.sendText('musi dojść mimo strat')
-  await until(() => got.length === 1, 10_000)
+  await until(() => got.length === 1, 15_000)
   assert.deepEqual(got, ['musi dojść mimo strat'], 'exactly one copy reached the UI (duplicates deduped)')
   await until(() => delivered.length === 1, 5000)
   assert.equal(delivered[0][0], id, 'the confirmation carries the message id')
@@ -407,7 +414,11 @@ test('an outage longer than the old budget does not kill a message on a live ses
     drop: (d) => d[0] === 0x10 && outage, // content and acks both stop
     onDeliveredA: (id, ms) => delivered.push([id, ms]),
     onUndeliveredA: (id) => undelivered.push(id),
-    retry: { retryMs: [100, 200, 400, 800, 800], giveUpMs: 400, maxInflightMs: 10_000 },
+    // Sends land at 100, 300, 700, 1500, 2300, 3100, 4700 ms: the outage (1200 ms)
+    // outlasts the old budget (100+200+400 = 700) and several sends still follow
+    // it. With the previous schedule exactly one send fell after the gap, so a
+    // stalled event loop was indistinguishable from a broken backoff.
+    retry: { retryMs: [100, 200, 400, 800, 800, 800, 1600], giveUpMs: 2_000, maxInflightMs: 20_000 },
   })
   t.after(() => { A.stop(); B.stop() })
   await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
@@ -416,7 +427,7 @@ test('an outage longer than the old budget does not kill a message on a live ses
   const id = A.sendText('przetrwa dziurę w łączu')
   setTimeout(() => { outage = false }, 1200)
 
-  await until(() => got.length === 1, 8000)
+  await until(() => got.length === 1, 15_000)
   assert.deepEqual(got, ['przetrwa dziurę w łączu'], 'it arrived once the transport came back')
   await until(() => delivered.length === 1, 5000)
   assert.equal(delivered[0][0], id)
