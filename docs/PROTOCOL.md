@@ -74,7 +74,7 @@ Transport: **libp2p** (WebRTC + WebSocket Secure + GossipSub). Clients: one core
 ├───────────────────────────────────────────────────────────┤
 │ Core API                    — commands / events / snapshot│
 ├───────────────────────────────────────────────────────────┤
-│ Message layer               — Protobuf v1 · cache         │
+│ Message layer               — envelope (§7.4) · cache     │
 ├───────────────────────────────────────────────────────────┤
 │ Session layer                                             │
 │   EH-2 handshake · Double Ratchet · Sender Keys (groups)  │
@@ -509,7 +509,24 @@ Nonce via HKDF (not a bare counter) for defensive robustness against implementat
 - **Skipped-key bounds** (DoS protection against "future" DH publics): max 1000 per chain, 5 chains back, 24 h TTL.
 - **Bounded session lifetime** (S10 mitigation): forced background re-handshake every **4–8 h** (policy-configurable), transparent to the UI → hard upper bound on classical-PCS exposure. Reconnects and device switches also force a fresh EH-2 with new ML-KEM material; note that the daily topic rollover by itself does **not** break an established stream — the guaranteed cadence comes from the lifetime timer. Either way, PQ re-key is measured in hours, not months. The timer has a second, independent job: it is the hard bound on how long a hijacked live session can survive without the HSM (§9.3).
 - Message content travels **only** on the data plane (direct/relay stream) — never GossipSub.
-- Serialization: Protobuf v1 (`proto/` is the wire-format source of truth).
+- Serialization: the application envelope of §7.4, encoded as JSON. A binary encoding (Protobuf, CBOR) would be smaller on the wire and remains open as an optimisation (P3, §16); **nothing in the key schedule, the header or the AAD depends on the encoding** — the ratchet seals opaque bytes.
+
+### 7.4 Application payload (plaintext inside the seal) — **[v6 extension]**
+
+What §7.2 seals is a versioned application envelope, not a bare string:
+`{ v, t, id, ts, seq, …payload }`. `t` discriminates the payload type, `id` is a short per-message identifier (6 random bytes), `ts` the sender's UTC clock in ms, `seq` a per-sender counter used for de-duplication and display order — **UX only, not a security counter**; replay is prevented by the ratchet, not by `seq`. An unknown `t` decodes as an opaque envelope and is ignored, which is what makes payload additions backward-compatible. Types in use: `msg` (text, `format: plain`, never markup), `typing`, `presence`, `reaction`, `edit`, `file` (CID + content key for a blob encrypted before upload), `ack`, and the group distribution messages of §8. It is encoded as JSON; the encoding is an efficiency question, not a security one (§7.3, P3).
+
+Two payload conventions name a person or another message, and therefore belong in this document rather than only in the implementation:
+
+**Reply — `re` on `msg` / `file`.** `re = { id, au, text }`: the id of the message being answered, the first 4 bytes of its author's public key as a hint, and a bounded copy (≤ 160 code points) of what it said. The copy is there because the transcript is ephemeral (§1, synchronous model) — the receiver usually no longer holds the message being quoted. It is content that already travelled on this ratchet under this key, so quoting costs length, not exposure. The author travels as a **key hint, never a name**: the reader resolves it against the participants of that conversation and displays its own name for that key, and an unresolvable or ambiguous hint is displayed without a name. A quote therefore cannot assert the presence of a party outside the conversation.
+
+**Correction — `edit`.** `edit = { to, body, format }` replaces the displayed text of an earlier message. Its authenticity is exactly the ratchet's; on top of that the receiver accepts a correction **only from the peer whose message it names**, and only within **15 minutes** of that message (with ±5 min tolerated for clock skew, §14). It is **1:1 only**: a group broadcast (§8) carries no acknowledgements, so a sender could not be told that a correction failed to arrive.
+
+Consequences worth stating, because a correction is easy to mistake for a deletion:
+
+- A correction is a request to **display** different text, not a capability to remove text. A client that has already shown, logged or exported the original is unaffected. **No part of this protocol offers "delete for everyone".**
+- A correction that does not arrive leaves the two sides displaying different text. The sender is shown the delivery state of the correction itself (it is acknowledged under its own `id`), so the divergence is visible to the party that caused it.
+- Neither field changes the key schedule, the header, or the AEAD's AAD.
 
 ---
 
@@ -881,6 +898,8 @@ cache_encryption_key = HKDF-SHA256(cache_master_key, salt = device_id,
 | Skipped keys | 1000/chain, 5 chains, 24 h |
 | Session lifetime | 4–8 h, then forced re-handshake |
 | Group scale | 3–5 typical, 8–10 max |
+| Edit window (§7.4) | 15 min from the message; receiver tolerates ±5 min of clock skew |
+| Reply quote (§7.4) | ≤ 160 code points of the quoted text; 4-byte author key hint |
 
 No custom primitives anywhere. Frozen library choices in §17.4.
 
