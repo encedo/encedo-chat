@@ -52,11 +52,24 @@ jobs:
 
       # WebKitGTK and friends. Only Linux needs them: macOS uses WKWebView and
       # Windows uses WebView2, both supplied by the OS.
+      #
+      # `--no-upgrade` is what keeps this green. Half of this list is already on
+      # the runner image (curl, wget, file, pkg-config, build-essential,
+      # libssl-dev), so asking for it by name made apt try to UPGRADE those —
+      # and an arm64 run died on exactly that: 404 for libssl3, libssl-dev, curl
+      # and libcurl4 at the point versions the freshly fetched index still
+      # advertised but the pool had already replaced. Nothing here needs a newer
+      # curl than the image ships; the list stays complete so it also works on an
+      # image that lacks something, and nothing gets upgraded underneath us.
+      #
+      # `--no-install-recommends` drops ~100 packages this build never touches
+      # (gstreamer, pipewire, the desktop portals) — fewer archives to fetch is
+      # both faster and less to 404 on.
       - name: Linux system libraries
         if: startsWith(matrix.os, 'ubuntu')
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -y --no-upgrade --no-install-recommends -o Acquire::Retries=3 \
             libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
             librsvg2-dev libssl-dev libxdo-dev build-essential curl wget file pkg-config
 
