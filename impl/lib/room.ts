@@ -418,6 +418,14 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     role: 'initiator' | 'responder'
     startedAt: number
     /**
+     * The PeerId this attempt is currently addressed to — MUTABLE, because a
+     * peer can change PeerId in the middle of it (a re-dial) and answer our
+     * msg1 from the new one. Every closure below reads it rather than the id it
+     * was created with: keying a completed handshake by a corpse is how a
+     * finished session gets thrown away.
+     */
+    peer: string
+    /**
      * Set when this attempt is abandoned. Its handshake promise can still
      * resolve afterwards — the frames were already in flight — and installing
      * the session it produces is how a room ends up with two ratchets seconds
@@ -544,7 +552,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     // Reserve the slot BEFORE the first await: generating the ephemerals takes
     // a tick, and two Announces arriving back to back would otherwise both pass
     // the "already handshaking?" check and start two handshakes.
-    const attempt: Attempt = { h: null, role, startedAt: nowMs(), msg1 }
+    const attempt: Attempt = { h: null, role, startedAt: nowMs(), msg1, peer }
     handshakes.set(peer, attempt)
     try {
       const h = await startHandshake({ role, ik: eh2.ik, peerIkPub: eh2.peerIkPub, ratchet: eh2.ratchet })
@@ -554,33 +562,36 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       eh2.onState?.(peer, 'handshaking')
       h.session.then(
         (s) => {
-          if (attempt.cancelled) { log(`ignoring a handshake with ${short(peer)} that completed after it was abandoned`); return }
-          if (handshakes.get(peer) !== attempt) return // superseded by a newer attempt
-          clearAttempt(peer)
-          stuck.delete(peer)
-          const old = sessions.get(peer)
-          if (old) previous.set(peer, { session: old, until: nowMs() + PREVIOUS_GRACE_MS })
-          forgetStream(peer) // new ratchet ⇒ new stream: its `seq` starts from 1 again
-          failedAttempts.delete(peer) // a success wipes the record — those failures were crossfire
-          backoffUntil.delete(peer)
-          everEstablished.add(peer)
-          sessions.set(peer, s)
-          establishedAt.set(peer, nowMs())
-          retireOtherPeers(peer)
-          log(`EH-2 established with ${short(peer)} (${role}) — ratchet live, ${queued.length} queued frame(s) to flush`)
-          eh2.onState?.(peer, 'established')
+          const p = attempt.peer // may differ from `peer`: the answer came from elsewhere
+          if (attempt.cancelled) { log(`ignoring a handshake with ${short(p)} that completed after it was abandoned`); return }
+          if (handshakes.get(p) !== attempt) return // superseded by a newer attempt
+          clearAttempt(p)
+          stuck.delete(p)
+          const old = sessions.get(p)
+          if (old) previous.set(p, { session: old, until: nowMs() + PREVIOUS_GRACE_MS })
+          forgetStream(p) // new ratchet ⇒ new stream: its `seq` starts from 1 again
+          failedAttempts.delete(p) // a success wipes the record — those failures were crossfire
+          backoffUntil.delete(p)
+          everEstablished.add(p)
+          sessions.set(p, s)
+          establishedAt.set(p, nowMs())
+          retireOtherPeers(p)
+          log(`EH-2 established with ${short(p)} (${role}) — ratchet live, ${queued.length} queued frame(s) to flush`)
+          eh2.onState?.(p, 'established')
           void flushQueued()
         },
         (err: any) => {
-          if (attempt.cancelled || handshakes.get(peer) !== attempt) return
-          clearAttempt(peer)
-          giveUp(peer)
+          const p = attempt.peer
+          if (attempt.cancelled || handshakes.get(p) !== attempt) return
+          clearAttempt(p)
+          giveUp(p)
         },
       )
       const timer = setTimeout(() => {
-        if (handshakes.get(peer) !== attempt) return
-        clearAttempt(peer)
-        giveUp(peer)
+        const p = attempt.peer
+        if (handshakes.get(p) !== attempt) return
+        clearAttempt(p)
+        giveUp(p)
       }, attemptTimeoutMs)
       ;(timer as any).unref?.()
       attemptTimers.set(peer, timer)
@@ -594,7 +605,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       if (h.initial.length) {
         let resends = 0
         const resend = setInterval(() => {
-          if (handshakes.get(peer) !== attempt || ++resends > 3) { clearInterval(resend); return }
+          if (handshakes.get(attempt.peer) !== attempt || ++resends > 3) { clearInterval(resend); return }
           for (const f of h.initial) gossip(f)
         }, resendMs)
         ;(resend as any).unref?.()
@@ -722,11 +733,17 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
 
   /** Seen a peer: open the handshake if it is our turn (idempotent). */
   const maybeHandshake = (peer: string) => {
-    if (peer === self || inBackoff(peer)) return
-    if (sessions.has(peer) || handshakes.has(peer)) return
+    if (peer === self) return
+    // Every one of these used to be a silent `return`, and finding out which one
+    // had fired took a two-browser run and a guess: from the outside "we are not
+    // handshaking with the peer that is announcing at us" looks the same however
+    // it happened.
+    if (inBackoff(peer)) { dbg(`not handshaking ${short(peer)}: backing off for ${Math.round(((backoffUntil.get(peer) ?? 0) - nowMs()) / 1000)}s`); return }
+    if (sessions.has(peer)) { dbg(`not handshaking ${short(peer)}: a session with it is already live`); return }
+    if (handshakes.has(peer)) { dbg(`not handshaking ${short(peer)}: an attempt is already in flight`); return }
     // Do not keep offering to somebody who has stopped answering at all; the
     // next Announce brings them back.
-    if (!lastSeen.has(peer)) return
+    if (!lastSeen.has(peer)) { dbg(`not handshaking ${short(peer)}: it is not announcing`); return }
     // Whoever is in a room initiates on discovery — we do NOT wait for the lower
     // id. That wait deadlocked the presence→conversation upgrade: the peer we
     // want may only be in the light presence layer (announcing, but not in a
@@ -734,6 +751,56 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     // would. Both initiating is fine — a crossed pair of msg1s is resolved by
     // the tie-break in onHandshakeFrame (lower id keeps initiator, higher yields).
     void beginHandshake(peer, 'initiator')
+  }
+
+  /**
+   * An answer to our msg1 that came from a PeerId we are not handshaking with.
+   *
+   * This is what a re-dial looks like from the initiator's side. msg1 goes out
+   * on the TOPIC — it is a broadcast, addressed to nobody — so when the peer
+   * comes back under a new PeerId it answers from that one, while we are still
+   * calling the id it had before. Dropping the answer as "stray" is what turned
+   * a peer's reconnect into a conversation that never recovered: we kept
+   * offering to a corpse for as long as its presence entry survived, and every
+   * msg2 it sent us went in the bin.
+   *
+   * A PeerId is transport addressing, not identity. What decides whether this
+   * frame is ours is the handshake itself — the MAC and the `initiator_id`
+   * bound to our contact's IK — and that check is unchanged and still ahead of
+   * us. So the attempt follows the answer: it is re-keyed to the new id, timers
+   * and all, and the dead one is dropped so nothing keeps retrying at it.
+   *
+   * Only ever done for exactly ONE live initiator attempt. With two in flight
+   * there is no way to tell which one an answer belongs to, and guessing would
+   * be worse than waiting for the next msg1.
+   */
+  const followMovedPeer = (from: string): Attempt | undefined => {
+    const live = [...handshakes.entries()].filter(([, a]) => a.role === 'initiator' && a.h && !a.cancelled)
+    if (live.length !== 1) return undefined
+    const [old, attempt] = live[0]
+    if (old === from) return attempt
+    log(`the answer to our handshake came from ${short(from)}, not ${short(old)}`
+      + ' — the peer came back under a new PeerId; following it')
+    handshakes.delete(old)
+    attempt.peer = from
+    handshakes.set(from, attempt)
+    // Move the timers with it, or the timeout fires against an id that no longer
+    // owns this attempt and the whole thing is abandoned mid-flight.
+    for (const timers of [attemptTimers, resendTimers]) {
+      const t = timers.get(old)
+      if (t !== undefined) { timers.delete(old); timers.set(from, t) }
+    }
+    // Whether the old id is a corpse or a second window of the same identity is
+    // the question `retireOtherPeers` already answers, and it answers it the same
+    // way: silence. A peer that reloaded goes quiet at once; a second window
+    // keeps announcing, and dropping it would take a conversation away from
+    // somebody who is still here.
+    const silence = nowMs() - (lastSeen.get(old) ?? 0)
+    if (silence >= heartbeatMs * 1.5) {
+      lastSeen.delete(old); quiet.delete(old); backoffUntil.delete(old); failedAttempts.delete(old)
+      dbg(`${short(old)} has been silent for ${Math.round(silence / 1000)}s — dropping its presence with the attempt`)
+    }
+    return attempt
   }
 
   const onHandshakeFrame = async (data: Uint8Array, from: string): Promise<void> => {
@@ -760,7 +827,12 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       // Accepting it is safe even with a live session — the session is only
       // replaced once msg3 verifies, which needs the peer's real IK.
       attempt = (await beginHandshake(from, 'responder', data)) ?? undefined
-    } else if (!attempt) return // stray msg2/msg3 with no attempt of ours → ignore
+    } else if (!attempt) {
+      // Not a msg1, and we hold no attempt with this id: either the peer moved
+      // (see above) or the frame is genuinely not ours.
+      attempt = followMovedPeer(from)
+      if (!attempt) { dbg(`msg2/msg3 from ${short(from)} with no attempt of ours — ignored`); return }
+    }
     if (!attempt?.h) return
     try {
       const reply = await attempt.h.feed(data)

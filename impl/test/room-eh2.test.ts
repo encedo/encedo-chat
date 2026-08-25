@@ -11,6 +11,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { joinChat } from '../lib/room.ts'
 import { announceMacKey } from '../lib/rendezvous.ts'
+import { buildAnnounce } from '../lib/announce.ts'
 import { generateX25519 } from '../lib/x25519.ts'
 
 const TOPIC = 'test-topic'
@@ -145,7 +146,7 @@ async function rooms(opts: {
       onMessage: (_from, m) => collect.push(m.body),
       onLog: logs ? (m) => logs.push(m) : undefined,
     })
-  return { A, B, states, rejoinB, replaced }
+  return { A, B, states, rejoinB, replaced, net, macKey }
 }
 
 test('the handshake runs on discovery and content rides the ratchet', async (t) => {
@@ -186,6 +187,35 @@ test('a correction reaches the peer and is confirmed under its own id', async (t
   // confirms the CORRECTION's own id, not the id of the message it corrects.
   assert.notEqual(eid, mid)
   await until(() => acked.includes(eid))
+})
+
+test('a peer that answers from a NEW PeerId is followed, not ignored', async (t) => {
+  // Straight from a two-browser run. The peer's transport restarted, so it came
+  // back under a new PeerId; we were still calling the old one, and every msg2
+  // it sent us was dropped as "stray" — the initiator went on offering to a
+  // corpse until the corpse's presence entry expired, ~100 s of a conversation
+  // that looked broken to both people.
+  //
+  // Reproduced without any presence at all: announces are dropped in both
+  // directions, and ONE hand-made announce for a peer that does not exist makes
+  // A open a handshake with it. A's msg1 goes to the TOPIC, so B hears it and
+  // answers from its own id — the id A never learned about.
+  const got: string[] = []
+  const { A, B, net, macKey } = await rooms({
+    collect: got,
+    drop: (d, from) => d[0] === 0x7b && from !== 'peer-ghost', // 0x7b = '{': an Announce
+  })
+  t.after(() => { A.stop(); B.stop() })
+
+  const ghost = net.node('peer-ghost')
+  await ghost.services.pubsub.publish(TOPIC, await buildAnnounce('peer-ghost', macKey))
+
+  await until(() => A.secured().includes('peer-b'), 10_000)
+  assert.deepEqual(A.secured(), ['peer-b'], 'the session belongs to the peer that answered')
+
+  A.sendText('po przeprowadzce')
+  await until(() => got.length === 1)
+  assert.deepEqual(got, ['po przeprowadzce'])
 })
 
 test('a knock reaches a peer that is there, and is never re-sent at one that is not', async (t) => {
