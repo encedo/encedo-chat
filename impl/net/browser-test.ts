@@ -502,6 +502,16 @@ const scenario = (name: string) => console.log(`\n▸ ${name}`)
 // the scheme in the tooltip. Assert on the CLASS as well, because `direct` is
 // what the code sets only once a session is established: text is a label and
 // labels get reworded, the class is the state.
+// Every EH-2 wait below is 90 s, not 45: this is a LIVE relay and a real
+// GossipSub mesh, so the number is a network budget, not a product promise.
+//
+// ⚠ It was widened after "switching to another contact and back" flaked, and
+// widening did NOT fix that one — the console says why, and it is worth knowing
+// before anybody widens it again: after the network-cut scenario the peer comes
+// back under a NEW PeerId, and the initiator keeps attempting the old one while
+// `msg2` arrives from the new one, until it gives up on a peer that is no longer
+// announcing. That is a bug in peer replacement, not a slow handshake, and no
+// timeout can paper over it.
 const BADGE_GREEN = `const b = document.getElementById('e2e-badge');
   return b.classList.contains('direct') ? b.textContent : ''`
 const send = (b: Page, text: string) => b.eval(`
@@ -693,7 +703,7 @@ async function main() {
     await Promise.all([login(A, 'sim-a'), login(B, 'sim-b')])
 
     await Promise.all([openContact(A, 'sim-b'), openContact(B, 'sim-a')])
-    const [ba, bb] = await Promise.all([A.waitFor<string>('EH-2 on A', BADGE_GREEN, 45_000), B.waitFor<string>('EH-2 on B', BADGE_GREEN, 45_000)])
+    const [ba, bb] = await Promise.all([A.waitFor<string>('EH-2 on A', BADGE_GREEN, 90_000), B.waitFor<string>('EH-2 on B', BADGE_GREEN, 90_000)])
     step(`EH-2 established in both: "${ba.trim()}" / "${bb.trim()}"`)
 
     if (FAILOVER) {
@@ -1134,8 +1144,8 @@ async function main() {
     await A.reload(APP_URL)
     await login(A, 'sim-a')
     await openContact(A, 'sim-b')
-    await A.waitFor('EH-2 after reload (A)', BADGE_GREEN, 45_000)
-    await B.waitFor('EH-2 after reload (B)', BADGE_GREEN, 45_000)
+    await A.waitFor('EH-2 after reload (A)', BADGE_GREEN, 90_000)
+    await B.waitFor('EH-2 after reload (B)', BADGE_GREEN, 90_000)
     await roundTrip(A, B, 'after-reload')
     step('conversation re-established and messages flow again')
 
@@ -1198,7 +1208,7 @@ async function main() {
     await openContact(A, 'ghost')          // a peer that will never answer
     await sleep(2_000)
     await openContact(A, 'sim-b')          // …and back to the real conversation
-    await A.waitFor('EH-2 after switching back', BADGE_GREEN, 45_000)
+    await A.waitFor('EH-2 after switching back', BADGE_GREEN, 90_000)
     await roundTrip(A, B, 'after-switch')
     step('the original conversation resumed after switching away')
 
@@ -1423,6 +1433,62 @@ async function main() {
       return [...document.querySelectorAll('#messages .mrow.out')].some((r) => !!r.querySelector('.b-edit'))`)
     if (groupEdit) throw new Error('a group message offers ✏ — editing cannot be honest without acks')
     step('no edit control on a group message (no acks to prove a correction landed)')
+
+    // ---- mentions -----------------------------------------------------------
+    // The oldest debt in this harness: mentions shipped in August and nothing
+    // ever clicked one. Every property worth having is cross-client and cannot
+    // be reached by a unit test — the key hint travels, the NAME does not, and
+    // each reader resolves the hint against its own roster.
+    scenario('a mention resolves on the other side, by key and not by name')
+    const picked = await A.eval<any>(`
+      const inp = document.getElementById('msg-input');
+      inp.value = '@'; inp.dispatchEvent(new Event('input'));
+      const pop = document.getElementById('mention-pop');
+      if (pop.hidden || !pop.children.length) return { opened: false };
+      const names = [...pop.querySelectorAll('.nm')].map((n) => n.textContent);
+      pop.querySelector('.mrow-pick').dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      return { opened: true, names, field: inp.value };`)
+    if (!picked.opened) throw new Error('typing @ in a group offered nobody')
+    if (!picked.names.includes('sim-b')) throw new Error(`the picker offered ${JSON.stringify(picked.names)}, not the member`)
+    // What the composer shows is a NAME. The four bytes of key are attached at
+    // send — an earlier build wrote the whole token into the field and the
+    // person editing the sentence had to type around eight characters of hex.
+    if (!String(picked.field).startsWith('@sim-b') || String(picked.field).includes('#')) {
+      throw new Error(`the composer shows "${picked.field}" — the hint must not be in the field`)
+    }
+    step('typing @ offers the roster, and the field shows a name, not a key')
+
+    const mentionTok = `wzm-${Date.now().toString(36)}`
+    await A.eval(`
+      const inp = document.getElementById('msg-input');
+      inp.value = inp.value + ' ${mentionTok}';
+      document.getElementById('send').click(); return 1`)
+    await B.waitFor('the mention arrived at the person named', `
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(mentionTok)}));
+      if (!row) return false;
+      const c = row.querySelector('.mention');
+      return !!c && c.classList.contains('you');`, 25_000)
+    const asRead = await B.eval<any>(`
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(mentionTok)}));
+      const c = row.querySelector('.mention');
+      return { text: c.textContent, body: row.querySelector('.b-text').textContent, title: c.title };`)
+    // B is the one mentioned, so B's own client resolves the hint to itself and
+    // prints B's own name for it. The hint never appears as text: it is how the
+    // mention was addressed, not part of what was said.
+    if (!String(asRead.text).startsWith('@sim-b')) throw new Error(`the chip reads "${asRead.text}"`)
+    if (String(asRead.body).includes('#')) throw new Error('the key hint is visible as text in the message')
+    step('the mentioned member sees a chip their own client resolved, with no key in the text')
+
+    // A hint that matches nobody in this room stays plain text — a message does
+    // not get to stage the presence of somebody who is not in the conversation.
+    const strayTok = `obcy-${Date.now().toString(36)}`
+    await send(A, `@Nikt#deadbeef ${strayTok}`)
+    await B.waitFor('the stray mention arrived', seen(strayTok), 25_000)
+    const stray = await B.eval<boolean>(`
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(strayTok)}));
+      return !!row && !row.querySelector('.mention') && row.textContent.includes('@Nikt#deadbeef');`)
+    if (!stray) throw new Error('a hint matching nobody was drawn as a mention')
+    step('a hint that matches nobody here stays text, and is not drawn as anybody')
     if (process.env.SHOT) { // capture the group view + Network tab at desktop width
       const dir = process.env.SHOT_DIR ?? '/tmp'
       await A.resize(1400, 860)
@@ -1728,8 +1794,15 @@ async function main() {
     // may lose its context to the navigation — tolerate that, the waitFor confirms it.
     await B.eval(`window.confirm = () => true; document.getElementById('btn-wipeout').click(); return 1`).catch(() => {})
     await B.waitFor('B back at the login form', `return !!document.getElementById('go-soft') && document.getElementById('app').hidden`, 15_000)
-    const afterKeys = await B.eval<number>(`return Object.keys(localStorage).filter((k) => k.startsWith('ec-')).length`)
-    if (afterKeys !== 0) throw new Error(`wipeout left ${afterKeys} ec-* key(s) behind`)
+    // `ec-idkey-swept` is not state, it is a boot marker: the reload that follows
+    // the wipe runs the legacy sweep, finds the flag gone and writes it again. So
+    // whether it is here depends on how fast the check lands after the reload —
+    // which is why this used to fail as "1 key left behind" once every so often,
+    // naming nothing. Everything ELSE surviving is a real leak, and the message
+    // now says what it was.
+    const afterKeys = await B.eval<string[]>(`
+      return Object.keys(localStorage).filter((k) => k.startsWith('ec-') && k !== 'ec-idkey-swept')`)
+    if (afterKeys.length) throw new Error(`wipeout left ${afterKeys.length} ec-* key(s) behind: ${afterKeys.join(', ')}`)
     step(`wipeout cleared ${beforeKeys} ec-* key(s) and returned to login`)
 
     // ---- the published node list, fetched by its compiled-in CID -------------
