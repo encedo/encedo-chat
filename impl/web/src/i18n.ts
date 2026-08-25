@@ -149,6 +149,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Kolejność decyduje o wyborze: pierwszy aktywny węzeł jest podstawowy, kolejne to zapas. Zmiany działają natychmiast — bez wylogowania.': 'Order decides: the first enabled node is the primary, the rest are its fallbacks. Changes take effect immediately — no sign-out needed.',
     'Kontakt dodany. Żeby ta osoba mogła do Ciebie napisać, musi mieć też Twój klucz — odeślij jej ten link.':
       'Contact added. For them to reach you they need your key as well — send them this link.',
+    'Kto napisał — bez treści': 'Who wrote — without the text',
     'Kontakty': 'Contacts',
     'Kopiuj link': 'Copy the link',
     'Ktoś zwrócił się do Ciebie': 'Somebody called your name',
@@ -189,6 +190,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'nie wysłano': 'not sent',
     'Nie znaleziono profilu do zmiany.': 'No profile found to change.',
     'Niżej': 'Move down',
+    'Nowa wiadomość': 'New message',
     'Nowa grupa': 'New group',
     'Nowa tożsamość na tym urządzeniu. Hasła nie da się odzyskać ani zmienić bez niego — nie ma czego z nim porównać.':
       'A new identity on this device. The password cannot be recovered, and cannot be changed without it \u2014 there is nothing stored to compare it against.',
@@ -238,6 +240,11 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Podaj ten odcisk osobno — głosem albo osobiście. Odbiorca porówna go z tym, co zobaczy po kliknięciu linku; to jedyne, co wykrywa podmianę klucza po drodze.':
       'Give this fingerprint separately — by voice or in person. They will compare it with what the link shows them; it is the only thing that catches a key swapped in transit.',
     'Poprawić można w ciągu {n} minut od wysłania': 'A message can be corrected within {n} minutes of sending it',
+    'Powiadomienia': 'Notifications',
+    'Powiadomienia włączone': 'Notifications on',
+    'Powiadomienia wyłączone': 'Notifications off',
+    'Powiadomienie pojawia się tylko wtedy, gdy okno aplikacji nie jest na wierzchu. Treść wiadomości nie trafia do niego nigdy — powiadomienie widać na ekranie blokady i w historii powiadomień systemu, czyli w miejscach, w których ta aplikacja nic innego nie zostawia.':
+      'A notification appears only while the app window is not in front. The text of a message never goes into one — a notification shows on the lock screen and in the system notification history, places this app leaves nothing else.',
     'Pokaż cytowaną wiadomość': 'Show the quoted message',
     'Pokój otwarty — czekam na {name}…': 'Room open — waiting for {name}…',
     'Potwierdzenie przyszło już po tym, jak przestaliśmy ponawiać — wiadomość jednak dotarła': 'The acknowledgement arrived after we stopped retrying — the message did get through',
@@ -257,6 +264,9 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Przypiąć wiadomość?': 'Pin this message?',
     'Przypięcie zapisze ją w zaszyfrowanej formie w pamięci tej przeglądarki, żeby przetrwała przeładowanie. Ten komunikat pokaże się raz na sesję.':
       'Pinning stores it encrypted in this browser so it survives a reload. This notice is shown once a session.',
+    'Przeglądarka nie zgodziła się na powiadomienia — trzeba jej pozwolić w ustawieniach strony':
+      'The browser refused notifications — it has to be allowed in this site\'s settings',
+    'Przysłano plik': 'A file arrived',
     'Przypnij': 'Pin',
     'Przypnij — zachowa w tej przeglądarce': 'Pin — keeps it in this browser',
     'Przynajmniej jeden węzeł musi być aktywny.': 'At least one node must be enabled.',
@@ -312,6 +322,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Twój odcisk': 'Your fingerprint',
     'Twój PeerId': 'Your PeerId',
     'Ty': 'You',
+    'Tylko „coś przyszło”': 'Only “something arrived”',
     'Tylko administrator grupy może zmienić jej nazwę': 'Only the group admin can rename it',
     'Tylko administrator może usunąć grupę': 'Only the admin can delete the group',
     'Uczestnicy': 'Members',
@@ -366,6 +377,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Wyślij poprawkę ponownie': 'Send the correction again',
     'Wygasł': 'Expired',
     'wygasł': 'expired',
+    'Wyłączone': 'Off',
     'Wyjdziesz poza aplikację. Strona {host} pozna Twój adres IP i czas wejścia — tego rozmowa nie ujawnia.': 'You are leaving the app. {host} will learn your IP address and the time you arrived — the conversation itself reveals neither.',
     'Wykryto drugie okno zalogowane na tę samą tożsamość.': 'A second window signed in as the same identity was detected.',
     'Wylogować?': 'Sign out?',

@@ -969,6 +969,48 @@ async function main() {
       return !!m && !m.classList.contains('warn') && !m.textContent.includes('wysyłam poprawkę')`, 25_000)
     step('the sender got the acknowledgement for the correction itself')
 
+    // ---- notifications ------------------------------------------------------
+    // The product is synchronous: a window that is not on screen is a
+    // conversation that quietly does not happen. What is asserted here is the
+    // promise, not the platform — a stub stands in for the OS so the test can
+    // say what the app ASKED to be shown: who, and never what.
+    scenario('a hidden window is told that something arrived, and not what')
+    await A.eval(`
+      window.__notes = [];
+      class FakeNote {
+        constructor(title, opts) { window.__notes.push({ title, body: (opts || {}).body, tag: (opts || {}).tag }); }
+        close() {} addEventListener() {}
+        static permission = 'granted';
+        static requestPermission() { return Promise.resolve('granted'); }
+      }
+      window.Notification = FakeNote;
+      document.getElementById('btn-settings').click();
+      document.querySelector('#notify-opts input[value="name"]').click();
+      document.getElementById('btn-close-drawer').click();
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      return 1`)
+    const hiddenTok = `wtle-${Date.now().toString(36)}`
+    await send(B, hiddenTok)
+    await A.waitFor('A was notified while hidden', `return (window.__notes || []).length === 1`, 25_000)
+    const note = await A.eval<any>(`return window.__notes[0]`)
+    if (note.title !== 'sim-b') throw new Error(`the notification says "${note.title}", not who wrote`)
+    if (String(note.body).includes(hiddenTok)) throw new Error('the notification carries the message text — it must never')
+    step('one notification, naming the sender and carrying no text')
+
+    // On screen, the message is already visible (or one click away): a banner
+    // for it is noise, and this is the condition most likely to rot silently.
+    await A.eval(`Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); return 1`)
+    await send(B, `nawierzchu-${Date.now().toString(36)}`)
+    await B.waitFor('B\'s second message went out', `return true`, 5_000)
+    await sleep(3_000)
+    const after = await A.eval<number>(`return window.__notes.length`)
+    if (after !== 1) throw new Error(`a visible window raised ${after - 1} notification(s) it should not have`)
+    step('nothing is raised while the window is on screen')
+    await A.eval(`
+      document.getElementById('btn-settings').click();
+      document.querySelector('#notify-opts input[value="off"]').click();
+      document.getElementById('btn-close-drawer').click(); return 1`)
+
     scenario('transport upgrade to a direct DataChannel')
     // Assert on the CLASS, not the label. The harness runs with ?lang=pl, where
     // this badge reads "Bezpośrednio" — so matching the English word reported

@@ -922,6 +922,18 @@
       <label class="store-opt"><input type="radio" name="tmode" value="relay"> <span data-i18n="⚪ Tylko przez węzeł — rozmówca nie pozna Twojego IP">⚪ Tylko przez węzeł — rozmówca nie pozna Twojego IP</span></label>
     </div>
     <div class="d-note" data-i18n="Bezpośredni kanał jest szybszy i nie przechodzi przez węzeł, ale rozmówca widzi wtedy Twój adres IP. Wybór dotyczy rozmów otwieranych od teraz — trwającej nie przełączamy, bo to zerwałoby kanał w środku zdania. Odznaka w nagłówku pokazuje stan faktyczny każdej rozmowy.">Bezpośredni kanał jest szybszy i nie przechodzi przez węzeł, ale rozmówca widzi wtedy Twój adres IP. Wybór dotyczy rozmów otwieranych od teraz — trwającej nie przełączamy, bo to zerwałoby kanał w środku zdania. Odznaka w nagłówku pokazuje stan faktyczny każdej rozmowy.</div>
+    <!-- Synchronous product, no store-and-forward: "your window is not on screen"
+         is the moment a conversation quietly fails to happen. This is the only
+         fix that does not require inventing a server. The message text is never
+         shown — a notification is the one part of a conversation that leaves the
+         app, onto a lock screen and into a notification centre. -->
+    <div class="d-section" id="notify-section" data-i18n="Powiadomienia">Powiadomienia</div>
+    <div class="store-opts" id="notify-opts" style="padding:0 16px 12px">
+      <label class="store-opt"><input type="radio" name="nmode" value="off" checked> <span data-i18n="Wyłączone">Wyłączone</span></label>
+      <label class="store-opt"><input type="radio" name="nmode" value="name"> <span data-i18n="Kto napisał — bez treści">Kto napisał — bez treści</span></label>
+      <label class="store-opt"><input type="radio" name="nmode" value="quiet"> <span data-i18n="Tylko „coś przyszło”">Tylko „coś przyszło”</span></label>
+    </div>
+    <div class="d-note" id="notify-note" data-i18n="Powiadomienie pojawia się tylko wtedy, gdy okno aplikacji nie jest na wierzchu. Treść wiadomości nie trafia do niego nigdy — powiadomienie widać na ekranie blokady i w historii powiadomień systemu, czyli w miejscach, w których ta aplikacja nic innego nie zostawia.">Powiadomienie pojawia się tylko wtedy, gdy okno aplikacji nie jest na wierzchu. Treść wiadomości nie trafia do niego nigdy — powiadomienie widać na ekranie blokady i w historii powiadomień systemu, czyli w miejscach, w których ta aplikacja nic innego nie zostawia.</div>
     <div class="d-section" data-i18n="Sesja">Sesja</div>
     <div class="kv"><span class="k" data-i18n="Tożsamość">Tożsamość</span><span class="v" id="sess-id" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer">—</span></div>
     <div class="kv"><span class="k" data-i18n="KID (klucz w HSM)">KID (klucz w HSM)</span><span class="v" id="sess-kid">—</span></div>

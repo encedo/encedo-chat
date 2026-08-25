@@ -131,6 +131,13 @@ export async function probeCapabilities(): Promise<CapabilityReport> {
   add('visualViewport', false, typeof (globalThis as any).visualViewport === 'object',
     'Brak visualViewport — na telefonie klawiatura może zasłonić pole wpisywania.')
 
+  // Optional, and worth probing rather than assuming: several webviews expose no
+  // Notification at all (and a packaged app may route them through the host
+  // instead). Without it the setting is hidden — an option that cannot do
+  // anything is worse than a missing one.
+  add('Notification', false, typeof (globalThis as any).Notification === 'function',
+    'Brak powiadomień systemowych — o nowej wiadomości dowiesz się dopiero po wróceniu do aplikacji.')
+
   const missing = caps.filter((c) => c.required && !c.ok)
   const degraded = caps.filter((c) => !c.required && !c.ok)
   return {

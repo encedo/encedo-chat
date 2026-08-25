@@ -25,6 +25,7 @@ import { splitByLinks } from '../../lib/linkify.ts'
 import { splitByMentions, resolveMention, mentionName, closeMentions, mentionsPub, pubHint } from '../../lib/mentions.ts'
 import { makeQuote, type QuoteRef } from '../../lib/quote.ts'
 import { canEdit, acceptEdit, EDIT_WINDOW_MS } from '../../lib/edits.ts'
+import { planNotification, isNotifyMode, type NotifyMode } from '../../lib/notify.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -975,6 +976,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   }
   $('me-avatar').textContent = initials(id.handle)
   $('me-handle').textContent = id.handle
+  loadNotifyMode() // per identity, like every other stored preference
   const fp = await fingerprint(id.pub)
   $('me-fp').textContent = tr('🔑 ') + fp
   $('me-fp').title = kid ? `KID ${kid} · dwuklik = kopiuj klucz publiczny` : 'Dwuklik = kopiuj klucz publiczny'
@@ -1405,7 +1407,7 @@ for (const el of document.querySelectorAll('#tmode input')) {
   })
 }
 
-const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles(); paintTransportSetting() }
+const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles(); paintTransportSetting(); paintNotifySetting() }
 const closeDrawer = () => { $('scrim').classList.remove('open'); $('drawer').classList.remove('open') }
 // ---- invite: my profile as a link, and someone else's arriving as one -------
 /**
@@ -2664,6 +2666,102 @@ function takeReply(): QuoteRef | undefined {
 $('reply-cancel').addEventListener('click', () => { cancelReply(); cancelEdit() })
 
 
+
+// ---- system notifications --------------------------------------------------
+/**
+ * The app is synchronous and has no store-and-forward, so the expensive moment
+ * is not a missed message — it is a conversation that never happened because
+ * the window was behind something. This is the only fix that does not require
+ * inventing a server, and it is deliberately the smallest one: it fires only
+ * while the window is hidden, and it never carries what was written
+ * (`lib/notify.ts` says why).
+ *
+ * Permission is asked when the setting is switched on and never at startup: a
+ * prompt nobody understands yet is a prompt that gets denied for good.
+ */
+const notifyKey = () => 'ec-notify-' + (session?.idKey ?? '')
+const notifySupported = () => typeof Notification === 'function'
+let notifyMode: NotifyMode = 'off'
+/** Live notifications by conversation, so ten messages replace each other
+ *  instead of stacking ten banners for one room. */
+const liveNotes = new Map<string, Notification>()
+
+function loadNotifyMode() {
+  const v = (() => { try { return localStorage.getItem(notifyKey()) } catch { return null } })()
+  notifyMode = isNotifyMode(v) ? v : 'off'
+  paintNotifySetting()
+}
+function paintNotifySetting() {
+  const on = notifySupported()
+  $('notify-section').hidden = !on
+  $('notify-opts').hidden = !on
+  $('notify-note').hidden = !on
+  const pick = document.querySelector(`#notify-opts input[value="${notifyMode}"]`) as HTMLInputElement | null
+  if (pick) pick.checked = true
+}
+for (const el of document.querySelectorAll('#notify-opts input')) {
+  el.addEventListener('change', async () => {
+    const v = (document.querySelector('#notify-opts input:checked') as HTMLInputElement | null)?.value
+    const want: NotifyMode = isNotifyMode(v) ? v : 'off'
+    if (want !== 'off' && notifySupported() && Notification.permission !== 'granted') {
+      // The gesture that asks is the same one that turns it on — browsers want a
+      // user action, and this is the moment the user knows what it is for.
+      let res: NotificationPermission = 'denied'
+      try { res = await Notification.requestPermission() } catch {}
+      if (res !== 'granted') {
+        notifyMode = 'off'; paintNotifySetting()
+        toast(tr('Przeglądarka nie zgodziła się na powiadomienia — trzeba jej pozwolić w ustawieniach strony'))
+        try { localStorage.setItem(notifyKey(), 'off') } catch {}
+        return
+      }
+    }
+    notifyMode = want
+    try { localStorage.setItem(notifyKey(), want) } catch {}
+    paintNotifySetting()
+    toast(want === 'off' ? tr('Powiadomienia wyłączone') : tr('Powiadomienia włączone'))
+  })
+}
+
+/**
+ * Notify about one arriving event. `where` identifies the conversation twice
+ * over: it is the notification tag (so a room replaces its own banner) and what
+ * clicking it opens.
+ */
+function notifyArrival(ev: Ev, where: { pub?: string; gid?: string; name: string }) {
+  if (ev.t !== 'msg' && ev.t !== 'file') return
+  const plan = planNotification({
+    mode: notifyMode,
+    granted: notifySupported() && Notification.permission === 'granted',
+    hidden: document.hidden,
+    mine: ev.kind === 'me',
+    name: where.name,
+  })
+  if (!plan.show) return
+  const tag = where.gid ?? where.pub ?? ''
+  try {
+    const n = new Notification(plan.name ?? 'onchato', { // the product name is not translated
+      body: ev.t === 'file' ? tr('Przysłano plik') : tr('Nowa wiadomość'),
+      tag, // one banner per conversation, replaced rather than stacked
+      silent: false,
+    })
+    liveNotes.get(tag)?.close()
+    liveNotes.set(tag, n)
+    n.addEventListener('click', () => {
+      window.focus()
+      n.close(); liveNotes.delete(tag)
+      if (where.gid) void activateGroup(where.gid)
+      else if (where.pub) void activateRoom(where.pub)
+    })
+  } catch (e: any) { ecLog('notification failed: ' + (e?.message ?? e), 'debug') }
+}
+/** Coming back to the window makes every banner stale — they were about being
+ *  away. */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return
+  for (const n of liveNotes.values()) { try { n.close() } catch {} }
+  liveNotes.clear()
+})
+
 // ---- editing what you already said -----------------------------------------
 /**
  * A correction replaces the text of a message you already sent (`lib/edits.ts`),
@@ -3157,6 +3255,9 @@ const record = (room: Room, ev: Ev) => {
   room.log.push(ev); if (room.log.length > LOG_CAP) room.log.shift()
   if (isViewing(room)) applyEv(ev)
   else if (ev.t === 'msg' && ev.kind === 'peer') { room.unseen++; renderContacts() }
+  // Independent of which room is on screen: what decides a notification is
+  // whether the WINDOW is, and an open room in a hidden window is still missed.
+  if ((ev.t === 'msg' || ev.t === 'file') && ev.kind === 'peer') notifyArrival(ev, { pub: room.contact.pub, name: room.contact.name })
 }
 function applyEv(ev: Ev) {
   if (ev.t === 'msg') appendMsg(ev)
@@ -3772,6 +3873,7 @@ function renderGroups() {
 /** Record a group event: render if the group is on screen, else count it (dot). */
 function recordGroup(gu: GroupUI, ev: Ev) {
   gu.log.push(ev); if (gu.log.length > LOG_CAP) gu.log.shift()
+  if ((ev.t === 'msg' || ev.t === 'file') && ev.kind === 'peer') notifyArrival(ev, { gid: gu.gid, name: gu.name })
   if (activeGid === gu.gid && $('app').classList.contains('chat-open')) applyEv(ev)
   else if (ev.t === 'msg' && ev.kind === 'peer') {
     gu.unseen++
