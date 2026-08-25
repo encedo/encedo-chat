@@ -242,6 +242,9 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Podaj nowe hasło.': 'Enter a new password.',
     'Podaj ten odcisk osobno — głosem albo osobiście. Odbiorca porówna go z tym, co zobaczy po kliknięciu linku; to jedyne, co wykrywa podmianę klucza po drodze.':
       'Give this fingerprint separately — by voice or in person. They will compare it with what the link shows them; it is the only thing that catches a key swapped in transit.',
+    'Puka do Ciebie': 'Is knocking',
+    'Puknij — zwróć uwagę': 'Knock — get their attention',
+    'Puknięcie działa tylko, gdy rozmówca jest w pokoju': 'A knock only works while they are in the room',
     'Poprawić można w ciągu {n} minut od wysłania': 'A message can be corrected within {n} minutes of sending it',
     'Powiadomienia': 'Notifications',
     'Powiadomienia włączone': 'Notifications on',
@@ -447,6 +450,9 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '💻 Zapisz w tym profilu — zostaje na tym urządzeniu': '💻 Save in this profile — stays on this device',
     '🔐 Secure': '🔐 Secure',
     '✓ Ten sam klucz, który masz zapisany jako „{name}”': '✓ The same key you have saved as “{name}”',
+    '👋 Puknięcie wysłane do pokoju — jeśli rozmówca tu jest, usłyszy je teraz':
+      '👋 Knock sent into the room — if they are here, they hear it now',
+    '👋 {name} puka — jest teraz przy klawiaturze': '👋 {name} is knocking — they are at the keyboard now',
     '🔒 E2E interim': '🔒 E2E interim',
     '🔒 W HEM — trwałe, przenośne między urządzeniami': '🔒 In the HEM — durable, portable between devices',
     '📷 Zeskanuj kod QR': '📷 Scan a QR code',

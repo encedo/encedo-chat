@@ -496,6 +496,8 @@ export interface Conversation {
    *  the correction's own id — delivery is tracked under it, so the UI can show
    *  whether the other side actually got it. */
   sendEdit(toId: string, body: string): string
+  /** Ask for attention now. Not queued, not re-sent, not acknowledged. */
+  sendKnock(): void
   /** Hand a group's Sender-Key Distribution to this contact over the ratchet (§8). */
   sendGroupSkd(skd: SkdFields): void
   /** Ask this contact to hand ITS sender key for a group over again (§8 repair) —
@@ -1047,6 +1049,7 @@ async function openRoom(
     onPresence: opts.onPresence,
     onReaction: opts.onReaction,
     onEdit: opts.onEdit,
+    onKnock: opts.onKnock,
     onFile: opts.onFile,
     onSignal: (from, env) => plane?.onSignal(from, env),
     // Group Sender-Key Distribution rides this 1:1 ratchet (it authenticates
@@ -1098,6 +1101,7 @@ async function openRoom(
     resend: (mid) => room.resend(mid),
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),
     sendEdit: (toId, body) => room.sendEdit(toId, body),
+    sendKnock: () => room.sendKnock(),
     sendGroupSkd: (skd) => room.sendGroupSkd(skd),
     sendGroupSkdReq: (gid, epoch) => room.sendGroupSkdReq(gid, epoch),
     sendFile: (f) => room.sendFile(f),

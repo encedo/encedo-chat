@@ -220,6 +220,7 @@ const LOG_CAP = 1000
 
 function paintStatus() {
   const dot = $('peer-dot'), txt = $('peer-status')
+  paintKnockButton() // whether anyone is there to hear it changes with this label
   if (linkState !== 'online') {
     dot.className = 'dot bad'
     txt.textContent = linkState === 'reconnecting' ? tr('wznawiam połączenie…') : tr('brak połączenia z przekaźnikiem')
@@ -1627,6 +1628,94 @@ $('import-add').addEventListener('click', async () => {
 })
 
 
+
+// ---- knocking --------------------------------------------------------------
+/**
+ * "I am here — are you?"
+ *
+ * The hardest problem in a synchronous messenger is not delivery, it is being
+ * in the room at the same time. There is no push here and nothing that holds a
+ * message for later, so a knock is the one thing that can turn "they are online
+ * but looking elsewhere" into a conversation.
+ *
+ * Everything about it follows from what it cannot do:
+ *
+ * - **It is not queued and not re-sent.** A knock that lands ten minutes late is
+ *   worse than one that never landed, so the button refuses when there is no
+ *   live session rather than pretending.
+ * - **It reports "sent into the room", never "delivered".** There is no
+ *   acknowledgement, and there should not be — an ack would make it a message.
+ * - **It is rate-limited on BOTH sides.** Ten seconds locally so it cannot be
+ *   leant on, and five seconds per peer on the way in, because attention is
+ *   exactly what an unwanted contact would try to take.
+ */
+const KNOCK_COOLDOWN_MS = 10_000
+const KNOCK_IGNORE_MS = 5_000
+let knockedAt = 0
+const knockHeard = new Map<string, number>()
+
+/** A short two-tone beep, synthesised — no asset to ship, cache or fail to load.
+ *  Autoplay policy may refuse it before the user has ever clicked; that is fine,
+ *  the notification and the transcript line carry the same news. */
+function knockSound() {
+  try {
+    const Ctx = (window as any).AudioContext ?? (window as any).webkitAudioContext
+    if (!Ctx) return
+    const ctx = new Ctx()
+    const t0 = ctx.currentTime
+    for (const [at, hz] of [[0, 880], [0.14, 660]] as const) {
+      const osc = ctx.createOscillator(); const gain = ctx.createGain()
+      osc.frequency.value = hz; osc.type = 'sine'
+      gain.gain.setValueAtTime(0.0001, t0 + at)
+      gain.gain.exponentialRampToValueAtTime(0.12, t0 + at + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.12)
+      osc.connect(gain); gain.connect(ctx.destination)
+      osc.start(t0 + at); osc.stop(t0 + at + 0.14)
+    }
+    setTimeout(() => { try { void ctx.close() } catch {} }, 600)
+  } catch { /* no audio: the line in the transcript is still there */ }
+}
+
+function paintKnockButton() {
+  const room = activeRoom()
+  const can = !activeGid && !!room?.conv && room.conv.secured().length > 0 && nowMs() - knockedAt > KNOCK_COOLDOWN_MS
+  const btn = $('btn-knock') as HTMLButtonElement
+  btn.hidden = !!activeGid // groups have no knock: it would be a room-wide alarm
+  btn.disabled = !can
+  btn.title = activeGid ? '' : (can ? tr('Puknij — zwróć uwagę') : tr('Puknięcie działa tylko, gdy rozmówca jest w pokoju'))
+}
+$('btn-knock').addEventListener('click', () => {
+  const room = activeRoom()
+  if (!room?.conv || !room.conv.secured().length) { toast(tr('Puknięcie działa tylko, gdy rozmówca jest w pokoju')); return }
+  room.conv.sendKnock()
+  knockedAt = nowMs()
+  paintKnockButton()
+  setTimeout(paintKnockButton, KNOCK_COOLDOWN_MS + 100)
+  // "Into the room", not "delivered": nothing acknowledges a knock.
+  record(room, { t: 'sys', text: tr('👋 Puknięcie wysłane do pokoju — jeśli rozmówca tu jest, usłyszy je teraz') })
+})
+
+/** Somebody knocked at us. */
+function knockReceived(room: Room) {
+  const last = knockHeard.get(room.contact.pub) ?? 0
+  if (nowMs() - last < KNOCK_IGNORE_MS) return // attention is what an abuser would take
+  knockHeard.set(room.contact.pub, nowMs())
+  record(room, { t: 'sys', text: tr('👋 {name} puka — jest teraz przy klawiaturze', { name: room.contact.name }) })
+  knockSound()
+  const plan = planNotification({
+    mode: notifyMode,
+    granted: notifySupported() && Notification.permission === 'granted',
+    hidden: document.hidden,
+    mine: false,
+    name: room.contact.name,
+  })
+  if (!plan.show) return
+  try {
+    const n = new Notification(plan.name ?? 'onchato', { body: tr('Puka do Ciebie'), tag: 'knock:' + room.contact.pub })
+    n.addEventListener('click', () => { window.focus(); n.close(); void activateRoom(room.contact.pub) })
+  } catch { /* the sound and the transcript line already said it */ }
+}
+
 // ---- reading a QR: pairing, and the one honest verification ----------------
 /**
  * The same control does two jobs, because from the outside they are one act —
@@ -2412,7 +2501,7 @@ function refuse(rep: Awaited<ReturnType<typeof probeCapabilities>>) {
 function noteSecurity(room: Room, peer: string, state: 'handshaking' | 'established' | 'failed') {
   if (peer) room.security.set(peer, state)
   else { room.security.clear(); room.security.set('', state) }
-  if (room === activeRoom()) paintSecurity(room)
+  if (room === activeRoom()) { paintSecurity(room); paintKnockButton() }
 }
 function paintSecurity(room: Room) {
   const states = [...room.security.values()]
@@ -3413,7 +3502,7 @@ async function activateRoom(pub: string) {
   await loadPins(pub, room.log)
   $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false); cancelReply(); cancelEdit()
   for (const ev of room.log) applyEv(ev)
-  paintSecurity(room); paintTransport(room); paintStatus()
+  paintSecurity(room); paintTransport(room); paintStatus(); paintKnockButton()
   startRotation(); renderContacts()
   void syncPresence() // foreground changed → light-watch the contact we just left
   void room.conv?.refresh() // re-announce / flush pending — cheap, no teardown
@@ -3471,6 +3560,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
       // A correction for one of THEIR messages. `acceptEdit` is what keeps it to
       // their own words and inside the window; a correction for a message we no
       // longer hold (the usual case after a reload) simply has nothing to change.
+      onKnock: () => knockReceived(room),
       onEdit: (_from, e) => {
         const ev = findMsgEv(room, e.to)
         if (!acceptEdit(ev ? { mine: ev.kind === 'me', ts: ev.ts } : undefined)) {

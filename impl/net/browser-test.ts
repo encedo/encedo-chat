@@ -1067,6 +1067,28 @@ async function main() {
     if (!cameraOff) throw new Error('the viewfinder stayed open (and the camera with it) after a successful scan')
     step('a known key reads as verification, and the camera is released')
 
+    // A knock is the answer to the one problem a synchronous messenger cannot
+    // solve with delivery guarantees: both people have to be here at once.
+    scenario('a knock reaches somebody who is in the room')
+    // The control is disabled whenever nobody is there to hear it, so its state
+    // is part of the promise — and it sat disabled over a live conversation
+    // until the security callback learned to repaint it.
+    const knockReady = await A.eval<boolean>(`
+      const b = document.getElementById('btn-knock');
+      return !b.hidden && !b.disabled`)
+    if (!knockReady) throw new Error('the knock control is disabled while the peer is in the room')
+    await A.eval(`document.getElementById('btn-knock').click(); return 1`)
+    await B.waitFor('B was knocked at', `return document.getElementById('messages').textContent.includes('puka')`, 20_000)
+    await A.waitFor('A is told what it can honestly be told', `
+      return document.getElementById('messages').textContent.includes('Puknięcie wysłane do pokoju')`, 10_000)
+    // It said "sent into the room" and nothing about delivery, because nothing
+    // acknowledges a knock — the absence of a ✓ here is the assertion.
+    const knockClaim = await A.eval<boolean>(`
+      const rows = [...document.querySelectorAll('#messages .sysline')].map((r) => r.textContent);
+      return rows.some((t) => t.includes('Puknięcie wysłane')) && !rows.some((t) => t.includes('dostarczone'))`)
+    if (!knockClaim) throw new Error('the knock claimed delivery it cannot know about')
+    step('the knock arrived, and the sender was told only what it can know')
+
     scenario('transport upgrade to a direct DataChannel')
     // Assert on the CLASS, not the label. The harness runs with ?lang=pl, where
     // this badge reads "Bezpośrednio" — so matching the English word reported

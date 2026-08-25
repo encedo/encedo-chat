@@ -20,7 +20,7 @@ import { startHandshake, isHandshakeFrame, type Eh2Handshake } from '../eh2/esta
 import { T_MSG1 } from '../eh2/wire.ts'
 import {
   encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile, envRtc, envAck, envGroupSkd, envGroupSkdReq,
-  envEdit,
+  envEdit, envKnock,
   type MsgEnv, type ReactionEnv, type EditEnv, type FileEnv, type FileMeta, type TypingState, type PresenceState, type RtcEnv, type AckEnv,
   type GroupSkdEnv, type GroupSkdReqEnv, type SkdFields,
 } from './envelope.ts'
@@ -76,6 +76,8 @@ export interface ChatOpts {
   onReaction?: (from: string, r: ReactionEnv) => void
   /** A correction for a message this peer sent earlier (1:1 only — see `lib/edits.ts`). */
   onEdit?: (from: string, e: EditEnv) => void
+  /** The peer is asking for attention, right now. Never queued, never re-sent. */
+  onKnock?: (from: string) => void
   onFile?: (from: string, f: FileEnv) => void
   onSignal?: (from: string, env: RtcEnv) => void // WebRTC signaling (control plane)
   /** A group Sender-Key Distribution arrived over this 1:1 ratchet (§8) — the
@@ -147,6 +149,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const onPresence = opts.onPresence ?? (() => {})
   const onReaction = opts.onReaction ?? (() => {})
   const onEdit = opts.onEdit ?? (() => {})
+  const onKnock = opts.onKnock ?? (() => {})
   const onFile = opts.onFile ?? (() => {})
   const onSignal = opts.onSignal ?? (() => {})
   const onGroupSkd = opts.onGroupSkd ?? (() => {})
@@ -358,6 +361,9 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         void confirm(env.id)
         if (firstSeq(from, env.seq)) onEdit(from, env as EditEnv)
         break
+      // Not confirmed: there is nothing for an acknowledgement to change. A
+      // knock is either heard now or it was not sent to anybody.
+      case 'knock': touch(from); if (firstSeq(from, env.seq)) onKnock(from); break
       case 'file':
         touch(from)
         void confirm(env.id)
@@ -1022,6 +1028,12 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     sendTyping: (state: TypingState) => emitContent(encodeEnvelope(envTyping(seq++, state))),
     sendPresence: (state: PresenceState) => emitContent(encodeEnvelope(envPresence(seq++, state))),
     sendReaction: (to: string, emoji: string) => emitContent(encodeEnvelope(envReaction(seq++, to, emoji))),
+    /**
+     * Ask for attention. Deliberately fire-and-forget: no delivery tracking, so
+     * nothing is re-sent minutes later at somebody who has walked away, and the
+     * UI reports "sent into the room", never "delivered".
+     */
+    sendKnock: () => emitContent(encodeEnvelope(envKnock(seq++))),
     /**
      * Correct a message already sent. Tracked exactly like the message was, so
      * the UI can say "they still see the old text" instead of assuming — the

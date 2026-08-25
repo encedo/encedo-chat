@@ -101,6 +101,8 @@ async function rooms(opts: {
   retry?: { retryMs?: number[]; giveUpMs?: number; maxInflightMs?: number }
   /** B side: corrections arriving for A's messages (`lib/edits.ts`). */
   onEditB?: (from: string, e: any) => void
+  /** B side: a knock from A. */
+  onKnockB?: (from: string) => void
 }) {
   const net = hub(opts.drop, opts.duplicate, opts.delayMs)
   const ss = new Uint8Array(32).fill(0x5e)
@@ -134,6 +136,7 @@ async function rooms(opts: {
     heartbeatMs: opts.heartbeatMs,
     onMessage: (from, m, meta) => { opts.collect.push(m.body); opts.onMessageB?.(from, m, meta) },
     onEdit: opts.onEditB,
+    onKnock: opts.onKnockB,
   })
   /** A second window for B's identity — same keys, new PeerId (a page reload). */
   const rejoinB = (id: string, collect: string[], logs?: string[]) =>
@@ -183,6 +186,41 @@ test('a correction reaches the peer and is confirmed under its own id', async (t
   // confirms the CORRECTION's own id, not the id of the message it corrects.
   assert.notEqual(eid, mid)
   await until(() => acked.includes(eid))
+})
+
+test('a knock reaches a peer that is there, and is never re-sent at one that is not', async (t) => {
+  const got: string[] = []
+  const knocks: string[] = []
+  const acked: string[] = []
+  const undelivered: string[] = []
+  let deaf = false
+  const { A, B } = await rooms({
+    collect: got,
+    onKnockB: (from) => knocks.push(from),
+    onDeliveredA: (id) => acked.push(id),
+    onUndeliveredA: (id) => undelivered.push(id),
+    drop: (d) => d[0] === 0x10 && deaf,
+    retry: { retryMs: [100, 200], giveUpMs: 300, maxInflightMs: 5_000 },
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().includes('peer-b') && B.secured().includes('peer-a'))
+
+  A.sendKnock()
+  await until(() => knocks.length === 1)
+  assert.deepEqual(knocks, ['peer-a'])
+  assert.equal(got.length, 0, 'a knock is not a message and must not appear as one')
+
+  // The contract that makes it honest: with the peer unreachable, a knock is
+  // simply lost — no retry queue that fires it minutes later at somebody who
+  // walked away, and no ⚠ for the sender to interpret.
+  deaf = true
+  A.sendKnock()
+  // Long enough for the retry schedule above to have fired twice and given up,
+  // which is exactly what must NOT have happened to a knock.
+  await new Promise((r) => setTimeout(r, 900))
+  assert.equal(knocks.length, 1, 'the second knock did not arrive, which is the point')
+  assert.deepEqual(undelivered, [], 'a knock is not tracked for delivery')
+  assert.deepEqual(acked, [], 'and nothing acknowledges it')
 })
 
 test('content typed before the handshake completes is queued, not lost', async (t) => {
