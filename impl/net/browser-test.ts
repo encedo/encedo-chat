@@ -1011,6 +1011,62 @@ async function main() {
       document.querySelector('#notify-opts input[value="off"]').click();
       document.getElementById('btn-close-drawer').click(); return 1`)
 
+    // ---- QR: the same link a camera can read, and the one verification -------
+    scenario('a QR of the invite, and a scan that recognises a key you hold')
+    const qr = await A.eval<any>(`
+      document.getElementById('btn-share').click();
+      return new Promise((r) => setTimeout(() => {
+        const svg = document.querySelector('#share-qr svg');
+        const link = document.getElementById('share-link').value;
+        r({ hasSvg: !!svg, viewBox: svg && svg.getAttribute('viewBox'), path: svg ? svg.querySelector('path').getAttribute('d').length : 0, link });
+      }, 400))`)
+    if (!qr.hasSvg) throw new Error('the share window drew no QR')
+    // 4 modules of quiet zone on each side, or a scanner has nothing to lock onto.
+    const side = Number(String(qr.viewBox).split(' ')[2])
+    if (!Number.isFinite(side) || (side - 8 - 17) % 4 !== 0) throw new Error(`the QR is not a whole version: viewBox ${qr.viewBox}`)
+    if (qr.path < 500) throw new Error('the QR path is too small to be a code')
+    step(`the invite link is drawn as a version-${(side - 8 - 17) / 4} QR, quiet zone included`)
+    await A.eval(`document.getElementById('share-close').click(); return 1`)
+
+    // Desktop Linux has no Shape Detection: the control must be ABSENT rather
+    // than present and unable to do anything.
+    const scanHidden = await A.eval<boolean>(`
+      document.querySelector('#pane-contacts .add-btn').click();
+      const b = document.getElementById('btn-scan');
+      const hidden = b.hidden;
+      document.getElementById('add-cancel').click();
+      return hidden || typeof BarcodeDetector === 'function'`)
+    if (!scanHidden) throw new Error('the scan button is offered on a platform that cannot scan')
+    step('no scan control where the platform cannot read a code')
+
+    // With a reader present, scanning B's own code has to come out as
+    // verification — not as an offer to add a contact already held.
+    const bLink = await B.eval<string>(`
+      document.getElementById('btn-share').click();
+      return new Promise((r) => setTimeout(() => {
+        const v = document.getElementById('share-link').value;
+        document.getElementById('share-close').click(); r(v);
+      }, 300))`)
+    await A.eval(`
+      window.BarcodeDetector = class { constructor() {} async detect() { return [{ rawValue: ${JSON.stringify(bLink)} }] } };
+      navigator.mediaDevices.getUserMedia = async () => ({ getTracks: () => [{ stop() {} }] });
+      HTMLMediaElement.prototype.play = async function () {};
+      // srcObject refuses anything that is not a real MediaStream, and the app
+      // assigns before it can scan — so the stub has to own the property too.
+      Object.defineProperty(HTMLMediaElement.prototype, 'srcObject',
+        { configurable: true, get() { return this.__stub ?? null }, set(v) { this.__stub = v } });
+      document.querySelector('#pane-contacts .add-btn').click();
+      document.getElementById('btn-scan').click();
+      return 1`)
+    await A.waitFor('A recognised the scanned key as one it already holds',
+      `return document.getElementById('toast').textContent.includes('sim-b')
+        && document.getElementById('toast').textContent.includes('Ten sam klucz')`, 15_000)
+    const cameraOff = await A.eval<boolean>(`
+      return document.getElementById('scan-modal').classList.contains('open') === false
+        && document.getElementById('scan-video').srcObject === null`)
+    if (!cameraOff) throw new Error('the viewfinder stayed open (and the camera with it) after a successful scan')
+    step('a known key reads as verification, and the camera is released')
+
     scenario('transport upgrade to a direct DataChannel')
     // Assert on the CLASS, not the label. The harness runs with ?lang=pl, where
     // this badge reads "Bezpośrednio" — so matching the English word reported

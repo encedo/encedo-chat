@@ -456,6 +456,9 @@
   .modal .msub{font-size:12px;color:var(--muted);margin-bottom:8px}
   .store-opts{display:flex;flex-direction:column;gap:6px;margin-top:4px}
   .store-opt{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);cursor:pointer;padding:7px 10px;border:1px solid var(--border);border-radius:8px}
+  .qr-box{display:grid;place-items:center;background:#fff;border-radius:10px;padding:12px;margin:10px 0}
+  .qr-box svg{display:block;max-width:100%;height:auto}
+  #scan-video{width:100%;max-height:46vh;border-radius:10px;background:#000;margin-top:8px;object-fit:cover}
   .group-members{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;margin-top:4px}
   .gmember{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);cursor:pointer;padding:6px 8px;border-radius:6px;margin:0}
   /* Name against the left margin, box against the right: the column then reads
@@ -764,6 +767,7 @@
       <label class="store-opt"><input type="radio" name="store" value="none"> <span data-i18n="⚡ Jednorazowo — nie zapisuj nigdzie (tylko ten czat)">⚡ Jednorazowo — nie zapisuj nigdzie (tylko ten czat)</span></label>
     </div>
     <div class="msg" id="add-msg"></div>
+    <button class="btn" id="btn-scan" hidden style="margin-top:4px;background:var(--accent-soft);color:var(--accent)" data-i18n="📷 Zeskanuj kod QR">📷 Zeskanuj kod QR</button>
     <div class="modal-actions"><button class="btn-send" id="add-save" style="flex:1;border-radius:8px" data-i18n="Zapisz">Zapisz</button><button class="btn-ghost" id="add-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
@@ -811,6 +815,10 @@
   <div class="modal" id="share-modal">
     <h2 id="share-title" data-i18n="Udostępnij swój profil">Udostępnij swój profil</h2>
     <div class="msub" id="share-sub" data-i18n="Wyślij ten link dowolnym kanałem. Nie zawiera niczego tajnego — sam klucz publiczny.">Wyślij ten link dowolnym kanałem. Nie zawiera niczego tajnego — sam klucz publiczny.</div>
+    <!-- The same link, in the form a phone camera reads. Black on white in both
+         themes: a QR drawn in the palette scans worse, and this is the one
+         element whose whole job is to be read by a machine across a table. -->
+    <div class="qr-box" id="share-qr"></div>
     <label data-i18n="Link">Link</label>
     <input id="share-link" type="text" readonly onclick="this.select()">
     <div class="fp-box"><span class="fp-lbl" data-i18n="Twój odcisk">Twój odcisk</span><span class="fp-val" id="share-fp">—</span></div>
@@ -863,6 +871,18 @@
     <div class="msub" data-i18n="Ten HEM trzyma więcej niż jedną tożsamość. Krótki identyfikator obok nazwy rozróżnia je, gdy nazwy się powtarzają.">Ten HEM trzyma więcej niż jedną tożsamość. Krótki identyfikator obok nazwy rozróżnia je, gdy nazwy się powtarzają.</div>
     <div id="identity-list"></div>
     <div class="modal-actions"><button class="btn-ghost" id="identity-cancel" style="flex:1" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
+  <!-- Scanning does double duty: an unknown key is an invite (and goes through
+       the same import window, fingerprint and all), a key already in the contact
+       list is a VERIFICATION — the one moment when "is this really their key"
+       gets a machine-checked answer instead of two people reading hex aloud. -->
+  <div class="modal" id="scan-modal">
+    <h2 data-i18n="Zeskanuj kod QR">Zeskanuj kod QR</h2>
+    <div class="msub" data-i18n="Pokaż aparatowi kod z ekranu drugiej osoby. Nieznany klucz zaproponuję dodać, znany — porównam z tym, który już masz.">Pokaż aparatowi kod z ekranu drugiej osoby. Nieznany klucz zaproponuję dodać, znany — porównam z tym, który już masz.</div>
+    <video id="scan-video" playsinline muted></video>
+    <div class="msg" id="scan-msg"></div>
+    <div class="modal-actions"><button class="btn-ghost" id="scan-cancel" style="flex:1" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
   <div class="modal" id="group-modal">

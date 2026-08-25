@@ -138,6 +138,16 @@ export async function probeCapabilities(): Promise<CapabilityReport> {
   add('Notification', false, typeof (globalThis as any).Notification === 'function',
     'Brak powiadomień systemowych — o nowej wiadomości dowiesz się dopiero po wróceniu do aplikacji.')
 
+  // Reading a QR needs both halves, and they fail apart: Shape Detection is
+  // absent on desktop Linux/Windows Chrome (it ships on Android, macOS and
+  // ChromeOS), while a camera may be missing anywhere. Showing a code always
+  // works — it is scanning that is conditional, and the app says so instead of
+  // opening a viewfinder that can never resolve anything.
+  add('BarcodeDetector', false,
+    typeof (globalThis as any).BarcodeDetector === 'function'
+    && typeof navigator === 'object' && !!(navigator as any).mediaDevices?.getUserMedia,
+    'Ta platforma nie umie czytać kodów QR (brak czytnika albo dostępu do kamery) — kod można pokazać, ale nie zeskanować; zostaje wklejenie linku.')
+
   const missing = caps.filter((c) => c.required && !c.ok)
   const degraded = caps.filter((c) => !c.required && !c.ok)
   return {

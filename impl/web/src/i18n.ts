@@ -86,6 +86,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
       'A direct channel is faster and does not pass through the node, but the other side sees your IP address. This applies to conversations opened from now on — a running one is not switched, which would cut the channel mid-sentence. The badge in the header shows what each conversation is actually doing.',
     'Brak potwierdzenia mimo ponowień — rozmówca prawdopodobnie tego nie dostał': 'No acknowledgement despite retries — they probably did not receive this',
     'brak połączenia z przekaźnikiem': 'no connection to the relay',
+    'Brak dostępu do kamery: ': 'No camera access: ',
     'Brak połączenia z przekaźnikiem — odśwież stronę': 'No connection to the relay — reload the page',
     'Brak profili software na tym urządzeniu.': 'No software profiles on this device.',
     'Brak sesji — zaloguj się.': 'No session — sign in.',
@@ -161,6 +162,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Lokalnie (ta przeglądarka)': 'Locally (this browser)',
     'Masz już kontakt „{name}"': 'You already have a contact called “{name}”',
     'Masz już konto?': 'Already have an account?',
+    'Masz już kontakt „{name}” z INNYM kluczem — potwierdź odcisk osobno, zanim dodasz.':
+      'You already have a contact “{name}” with a DIFFERENT key — confirm the fingerprint separately before adding.',
     'Motyw': 'Theme',
     'Musi zgadzać się co do znaku z tym, co podała Ci ta osoba innym kanałem niż link. Jeśli się nie zgadza — nie dodawaj.':
       'It must match character for character what that person gave you by a channel other than the link. If it does not match, do not add it.',
@@ -245,6 +248,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Powiadomienia wyłączone': 'Notifications off',
     'Powiadomienie pojawia się tylko wtedy, gdy okno aplikacji nie jest na wierzchu. Treść wiadomości nie trafia do niego nigdy — powiadomienie widać na ekranie blokady i w historii powiadomień systemu, czyli w miejscach, w których ta aplikacja nic innego nie zostawia.':
       'A notification appears only while the app window is not in front. The text of a message never goes into one — a notification shows on the lock screen and in the system notification history, places this app leaves nothing else.',
+    'Pokaż aparatowi kod z ekranu drugiej osoby. Nieznany klucz zaproponuję dodać, znany — porównam z tym, który już masz.':
+      'Point the camera at the code on their screen. An unknown key is offered as a new contact; a known one is compared with what you already hold.',
     'Pokaż cytowaną wiadomość': 'Show the quoted message',
     'Pokój otwarty — czekam na {name}…': 'Room open — waiting for {name}…',
     'Potwierdzenie przyszło już po tym, jak przestaliśmy ponawiać — wiadomość jednak dotarła': 'The acknowledgement arrived after we stopped retrying — the message did get through',
@@ -303,6 +308,9 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'To tożsamość, na której jesteś zalogowany. Znikną jej klucze, kontakty i grupy, a aplikacja wróci do ekranu logowania. Nieodwracalne — klucza nie da się odtworzyć.':
       'This is the identity you are signed in with. Its keys, contacts and groups go, and the app returns to the login screen. Irreversible — the key cannot be recovered.',
     'To Ty — ktoś zwrócił się do Ciebie ({hint})': 'That is you — somebody called your name ({hint})',
+    'To nie jest kod zaproszenia — pokaż kod z okna „Udostępnij swój profil”':
+      'That is not an invite code — show the one from the “Share your profile” window',
+    'To Twój własny kod': 'That is your own code',
     'To Twój własny profil.': 'That is your own profile.',
     'Topiki': 'Topics',
     'Tożsamość': 'Identity',
@@ -397,6 +405,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Zacznij od wymiany kluczy': 'Start by exchanging keys',
     'Zaloguj': 'Sign in',
     'Zaloguj się swoim HEM.': 'Sign in with your HEM.',
+    'Zeskanuj kod QR': 'Scan a QR code',
     'Zamknij': 'Close',
     'Zapis': 'Storage',
     'Zapisano': 'Saved',
@@ -437,8 +446,10 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '💻 Tylko lokalnie — ta przeglądarka, nic nie trafia do HEM': '💻 This browser only — nothing reaches the HEM',
     '💻 Zapisz w tym profilu — zostaje na tym urządzeniu': '💻 Save in this profile — stays on this device',
     '🔐 Secure': '🔐 Secure',
+    '✓ Ten sam klucz, który masz zapisany jako „{name}”': '✓ The same key you have saved as “{name}”',
     '🔒 E2E interim': '🔒 E2E interim',
     '🔒 W HEM — trwałe, przenośne między urządzeniami': '🔒 In the HEM — durable, portable between devices',
+    '📷 Zeskanuj kod QR': '📷 Scan a QR code',
     '📌 Przypięte ({n})': '📌 Pinned ({n})',
     '🟢 Automatycznie': '🟢 Automatic',
     '🟢 Automatycznie — bezpośrednio, gdy się da': '🟢 Automatic — direct when it can be',

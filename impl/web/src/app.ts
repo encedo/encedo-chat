@@ -26,6 +26,7 @@ import { splitByMentions, resolveMention, mentionName, closeMentions, mentionsPu
 import { makeQuote, type QuoteRef } from '../../lib/quote.ts'
 import { canEdit, acceptEdit, EDIT_WINDOW_MS } from '../../lib/edits.ts'
 import { planNotification, isNotifyMode, type NotifyMode } from '../../lib/notify.ts'
+import { qrSvg } from '../../lib/qr.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -1337,7 +1338,8 @@ function attachByteBudget(input: HTMLInputElement, max: number, out: HTMLElement
   paint()
 }
 
-const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; paintStoreOptions('add-store'); $('add-pub').focus() }
+const paintScanButton = () => { $('btn-scan').hidden = !scanSupported() }
+const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; paintStoreOptions('add-store'); paintScanButton(); $('add-pub').focus() }
 const closeModal = () => { $('scrim').classList.remove('open'); $('add-modal').classList.remove('open') }
 $('add-cancel').addEventListener('click', closeModal)
 
@@ -1527,6 +1529,18 @@ const openShare = async (returnMode = false) => {
     inAppShell ? CANONICAL_PATH : location.pathname,
     { pub: session.pub, name: session.handle, reply: returnMode })
   $('share-fp').textContent = fpCache.get(session.pub) ?? await fingerprint(session.pub)
+  // The same link as a QR, so the exchange can happen across a table instead of
+  // through a messenger. A phone's own camera opens it — the code holds the URL
+  // itself, not a private format only this app understands.
+  try {
+    $('share-qr').innerHTML = qrSvg(($('share-link') as HTMLInputElement).value, { size: 220 })
+    $('share-qr').hidden = false
+  } catch (e: any) {
+    // A link too long for the encoder: the text field above still works, and a
+    // silent empty box would be the worse outcome.
+    $('share-qr').hidden = true
+    ecLog('QR not drawn: ' + (e?.message ?? e), 'debug')
+  }
 }
 const closeShare = () => { $('scrim').classList.remove('open'); $('share-modal').classList.remove('open') }
 $('btn-share').addEventListener('click', () => void openShare())
@@ -1611,6 +1625,89 @@ $('import-add').addEventListener('click', async () => {
   } catch (e: any) { setMsg('import-msg', contactAddError(e), 'err') }
   finally { btn.disabled = false; btn.textContent = label ?? tr('Dodaj kontakt') }
 })
+
+
+// ---- reading a QR: pairing, and the one honest verification ----------------
+/**
+ * The same control does two jobs, because from the outside they are one act —
+ * "point the camera at what they are showing":
+ *
+ * - **an unknown key is an invite**, and goes through exactly the same import
+ *   window as a pasted link, fingerprint and all. There is no shortcut around
+ *   that window, and scanning does not earn one: a code photographed off a
+ *   screen is no more trustworthy than a link out of a chat.
+ * - **a key already in the contact list is a VERIFICATION.** This is the moment
+ *   the product otherwise handles by two people reading hex to each other: the
+ *   app compares what it holds with what the code says and answers. A key that
+ *   does NOT match a contact of the same name is the interesting case and is
+ *   reported as such, not folded into "new contact".
+ *
+ * Scanning needs Shape Detection and a camera, and desktop Linux has neither —
+ * so the button appears only where the probe says both exist, and pasting the
+ * link stays the way in everywhere else.
+ */
+const scanSupported = () => typeof (globalThis as any).BarcodeDetector === 'function'
+  && !!navigator.mediaDevices?.getUserMedia
+let scanStream: MediaStream | null = null
+let scanTimer: any = null
+
+async function openScan() {
+  if (!scanSupported()) return
+  clr('scan-msg')
+  $('scrim').classList.add('open'); $('scan-modal').classList.add('open')
+  const video = $('scan-video') as HTMLVideoElement
+  try {
+    // The rear camera on a phone; whatever exists on a laptop.
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+    video.srcObject = scanStream
+    await video.play()
+  } catch (e: any) {
+    setMsg('scan-msg', tr('Brak dostępu do kamery: ') + (e?.message ?? e), 'err')
+    return
+  }
+  const detector = new (globalThis as any).BarcodeDetector({ formats: ['qr_code'] })
+  scanTimer = setInterval(async () => {
+    try {
+      const codes = await detector.detect(video)
+      const raw = codes?.[0]?.rawValue
+      if (raw) handleScanned(String(raw))
+    } catch { /* a frame that cannot be read is simply the next frame */ }
+  }, 250)
+}
+
+function closeScan() {
+  clearInterval(scanTimer); scanTimer = null
+  for (const t of scanStream?.getTracks() ?? []) t.stop() // the camera light goes out
+  scanStream = null
+  ;($('scan-video') as HTMLVideoElement).srcObject = null
+  $('scrim').classList.remove('open'); $('scan-modal').classList.remove('open')
+}
+
+function handleScanned(text: string) {
+  const inv = inviteFromPaste(text)
+  // Not an invite: keep looking rather than closing on the first stray barcode.
+  if (!inv) { setMsg('scan-msg', tr('To nie jest kod zaproszenia — pokaż kod z okna „Udostępnij swój profil”'), 'err'); return }
+  closeScan()
+  if (inv.pub === session?.pub) { toast(tr('To Twój własny kod')); return }
+  const known = contactsCache.find((c) => c.pub === inv.pub)
+  if (known) {
+    // Verification: the key on screen is the key we hold. Said as a fact about
+    // the KEY, not about the person — the name is ours, the key is what matched.
+    toast(tr('✓ Ten sam klucz, który masz zapisany jako „{name}”', { name: known.name }))
+    closeModal()
+    return
+  }
+  const sameName = contactsCache.find((c) => c.name === inv.name)
+  void showInvite(inv).then(() => {
+    if (sameName) {
+      // The dangerous shape: a familiar name presenting an unfamiliar key. It
+      // may be a re-registration, and it may be somebody standing in the middle.
+      setMsg('import-msg', tr('Masz już kontakt „{name}” z INNYM kluczem — potwierdź odcisk osobno, zanim dodasz.', { name: inv.name }), 'err')
+    }
+  })
+}
+$('btn-scan').addEventListener('click', () => void openScan())
+$('scan-cancel').addEventListener('click', closeScan)
 
 // ---- software profiles on this device (Settings) ---------------------------
 /**
@@ -1717,7 +1814,7 @@ $('pw-save').addEventListener('click', async () => {
 $('btn-settings').addEventListener('click', openDrawer)
 $('chip-profile').addEventListener('click', openDrawer)
 $('btn-close-drawer').addEventListener('click', closeDrawer)
-$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); closeWelcome(); pendingInvite = null; closeImport() })
+$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); closeWelcome(); pendingInvite = null; closeImport(); closeScan() })
 $('btn-logout').addEventListener('click', () => location.reload())
 // The same act, from the header rather than from inside Settings — but asked
 // first, because this one sits beside a button people press often. Logging out
