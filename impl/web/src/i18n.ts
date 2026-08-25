@@ -452,6 +452,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '✓ Ten sam klucz, który masz zapisany jako „{name}”': '✓ The same key you have saved as “{name}”',
     '👋 Puknięcie wysłane do pokoju — jeśli rozmówca tu jest, usłyszy je teraz':
       '👋 Knock sent into the room — if they are here, they hear it now',
+    '👋 {name} puka': '👋 {name} is knocking',
     '👋 {name} puka — jest teraz przy klawiaturze': '👋 {name} is knocking — they are at the keyboard now',
     '🔒 E2E interim': '🔒 E2E interim',
     '🔒 W HEM — trwałe, przenośne między urządzeniami': '🔒 In the HEM — durable, portable between devices',

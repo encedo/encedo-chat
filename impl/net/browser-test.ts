@@ -1089,6 +1089,22 @@ async function main() {
     if (!knockClaim) throw new Error('the knock claimed delivery it cannot know about')
     step('the knock arrived, and the sender was told only what it can know')
 
+    // The fallback that needs no permission and no speaker. A knock is heard by
+    // somebody who is not interacting with the page, so audio may be refused
+    // outright — the title is the one channel left, and it is the reason the
+    // reported "the sound played once" is not the whole story.
+    await B.eval(`Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); return 1`)
+    await sleep(10_500) // past the SENDER's 10 s cooldown, which is the longer of the two limits
+    await A.eval(`document.getElementById('btn-knock').click(); return 1`)
+    await B.waitFor('B\'s tab title says somebody is knocking',
+      `return document.title.includes('puka')`, 15_000)
+    await B.eval(`
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+      document.dispatchEvent(new Event('visibilitychange')); return 1`)
+    await B.waitFor('and it stops the moment the tab is looked at',
+      `return !document.title.includes('puka')`, 10_000)
+    step('with the tab hidden the title flashes, and coming back clears it')
+
     scenario('transport upgrade to a direct DataChannel')
     // Assert on the CLASS, not the label. The harness runs with ?lang=pl, where
     // this badge reads "Bezpośrednio" — so matching the English word reported

@@ -1654,14 +1654,44 @@ const KNOCK_IGNORE_MS = 5_000
 let knockedAt = 0
 const knockHeard = new Map<string, number>()
 
-/** A short two-tone beep, synthesised — no asset to ship, cache or fail to load.
- *  Autoplay policy may refuse it before the user has ever clicked; that is fine,
- *  the notification and the transcript line carry the same news. */
+/**
+ * The beep, and why it is this complicated.
+ *
+ * A knock is heard by somebody who is, by definition, NOT interacting with the
+ * page — that is the point of knocking. An AudioContext created at that moment
+ * starts `suspended` under every browser's autoplay policy and its scheduled
+ * notes never sound; building one per knock also runs into the per-page limit
+ * on contexts. Together that produced exactly the reported failure: it played
+ * once, and then never again.
+ *
+ * So: ONE context, created on a user gesture (when creating it is allowed),
+ * kept rather than closed, and resumed on every gesture afterwards, because a
+ * tab that has been in the background can have it suspended again. A knock then
+ * only has to schedule notes on a context that is already running.
+ */
+let audioCtx: any = null
+function primeAudio() {
+  const Ctx = (window as any).AudioContext ?? (window as any).webkitAudioContext
+  if (!Ctx) return
+  try {
+    audioCtx ??= new Ctx()
+    if (audioCtx.state === 'suspended') void audioCtx.resume()
+  } catch { /* no audio here; the title flash and the transcript still speak */ }
+}
+// Any gesture will do, and every gesture re-arms it: `resume()` needs the page
+// to have activation, and a page that sat in the background loses it.
+for (const ev of ['pointerdown', 'keydown', 'touchstart']) {
+  document.addEventListener(ev, primeAudio, { passive: true })
+}
+
 function knockSound() {
   try {
-    const Ctx = (window as any).AudioContext ?? (window as any).webkitAudioContext
-    if (!Ctx) return
-    const ctx = new Ctx()
+    primeAudio()
+    const ctx = audioCtx
+    // Suspended means the platform never granted audio here. Say nothing rather
+    // than scheduling notes into a context that will not play them — the title
+    // flash is the fallback that needs no permission.
+    if (!ctx || ctx.state !== 'running') return
     const t0 = ctx.currentTime
     for (const [at, hz] of [[0, 880], [0.14, 660]] as const) {
       const osc = ctx.createOscillator(); const gain = ctx.createGain()
@@ -1672,9 +1702,31 @@ function knockSound() {
       osc.connect(gain); gain.connect(ctx.destination)
       osc.start(t0 + at); osc.stop(t0 + at + 0.14)
     }
-    setTimeout(() => { try { void ctx.close() } catch {} }, 600)
-  } catch { /* no audio: the line in the transcript is still there */ }
+    // The context is NOT closed: it is the one we keep. Closing it is what made
+    // the second knock silent.
+  } catch { /* no audio: the title flash and the transcript line remain */ }
 }
+
+/**
+ * The attention-getter that needs no permission and no speaker: the tab title.
+ * It is the only channel that still works with notifications denied, sound
+ * blocked and the window behind something — which, for a knock, is the whole
+ * situation.
+ */
+let titleFlash: any = null
+const REAL_TITLE = document.title
+function flashTitle(text: string) {
+  clearInterval(titleFlash)
+  if (!document.hidden) return // on screen: the transcript line is right there
+  let on = false
+  titleFlash = setInterval(() => { document.title = (on = !on) ? text : REAL_TITLE }, 900)
+}
+function stopTitleFlash() {
+  clearInterval(titleFlash); titleFlash = null
+  if (document.title !== REAL_TITLE) document.title = REAL_TITLE
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) stopTitleFlash() })
+window.addEventListener('focus', stopTitleFlash)
 
 function paintKnockButton() {
   const room = activeRoom()
@@ -1698,10 +1750,16 @@ $('btn-knock').addEventListener('click', () => {
 /** Somebody knocked at us. */
 function knockReceived(room: Room) {
   const last = knockHeard.get(room.contact.pub) ?? 0
-  if (nowMs() - last < KNOCK_IGNORE_MS) return // attention is what an abuser would take
+  if (nowMs() - last < KNOCK_IGNORE_MS) {
+    // Said out loud in the trace, because from the outside a rate-limited
+    // knock and a lost one look identical — and one of them is a bug report.
+    ecLog(`knock from ${room.contact.name} ignored: another one under ${KNOCK_IGNORE_MS} ms ago`)
+    return
+  }
   knockHeard.set(room.contact.pub, nowMs())
   record(room, { t: 'sys', text: tr('👋 {name} puka — jest teraz przy klawiaturze', { name: room.contact.name }) })
   knockSound()
+  flashTitle(tr('👋 {name} puka', { name: room.contact.name }))
   const plan = planNotification({
     mode: notifyMode,
     granted: notifySupported() && Notification.permission === 'granted',
