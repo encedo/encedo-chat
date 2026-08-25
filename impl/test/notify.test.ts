@@ -13,14 +13,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { planNotification, isNotifyMode, NOTIFY_MODES } from '../lib/notify.ts'
 
-const base = { mode: 'name' as const, granted: true, hidden: true, mine: false, name: 'Ala' }
+const base = { mode: 'name' as const, granted: true, away: true, mine: false, name: 'Ala' }
 
-test('a notification needs all four: a mode, permission, a hidden window, someone else', () => {
+test('a notification needs all four: a mode, permission, an unattended window, someone else', () => {
   assert.deepEqual(planNotification(base), { show: true, name: 'Ala' })
   assert.deepEqual(planNotification({ ...base, mode: 'off' }), { show: false })
   assert.deepEqual(planNotification({ ...base, granted: false }), { show: false })
-  // The window is on screen: whatever arrived is already visible, or one click away.
-  assert.deepEqual(planNotification({ ...base, hidden: false }), { show: false })
+  // The window is the one being used: whatever arrived is on screen already.
+  // `away` is focus, not visibility — a visible tab behind another window is
+  // away, which is the correction that came out of a live report.
+  assert.deepEqual(planNotification({ ...base, away: false }), { show: false })
   assert.deepEqual(planNotification({ ...base, mine: true }), { show: false })
 })
 

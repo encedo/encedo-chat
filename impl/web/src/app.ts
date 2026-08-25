@@ -1717,7 +1717,7 @@ let titleFlash: any = null
 const REAL_TITLE = document.title
 function flashTitle(text: string) {
   clearInterval(titleFlash)
-  if (!document.hidden) return // on screen: the transcript line is right there
+  if (!windowAway()) return // being used: the transcript line is right there
   let on = false
   titleFlash = setInterval(() => { document.title = (on = !on) ? text : REAL_TITLE }, 900)
 }
@@ -1763,7 +1763,7 @@ function knockReceived(room: Room) {
   const plan = planNotification({
     mode: notifyMode,
     granted: notifySupported() && Notification.permission === 'granted',
-    hidden: document.hidden,
+    away: windowAway(),
     mine: false,
     name: room.contact.name,
   })
@@ -2924,6 +2924,12 @@ $('reply-cancel').addEventListener('click', () => { cancelReply(); cancelEdit() 
  * prompt nobody understands yet is a prompt that gets denied for good.
  */
 const notifyKey = () => 'ec-notify-' + (session?.idKey ?? '')
+/**
+ * Not looking at this window. Reported as a bug by somebody who had the chat
+ * open and got nothing: a visible tab behind another window is still a message
+ * nobody sees, and `document.hidden` is false for all of those.
+ */
+const windowAway = () => document.hidden || !document.hasFocus()
 const notifySupported = () => typeof Notification === 'function'
 let notifyMode: NotifyMode = 'off'
 /** Live notifications by conversation, so ten messages replace each other
@@ -2976,7 +2982,7 @@ function notifyArrival(ev: Ev, where: { pub?: string; gid?: string; name: string
   const plan = planNotification({
     mode: notifyMode,
     granted: notifySupported() && Notification.permission === 'granted',
-    hidden: document.hidden,
+    away: windowAway(),
     mine: ev.kind === 'me',
     name: where.name,
   })
@@ -4118,7 +4124,10 @@ function renderGroups() {
 /** Record a group event: render if the group is on screen, else count it (dot). */
 function recordGroup(gu: GroupUI, ev: Ev) {
   gu.log.push(ev); if (gu.log.length > LOG_CAP) gu.log.shift()
-  if ((ev.t === 'msg' || ev.t === 'file') && ev.kind === 'peer') notifyArrival(ev, { gid: gu.gid, name: gu.name })
+  // No system notification for a group, by decision (2026-08-25): five people
+  // in a conversation is not five things a phone should announce, and the ONE
+  // case worth interrupting for — being named — already lights `called` on the
+  // group row. If that changes, this is the line, and `mentionsPub` is the test.
   if (activeGid === gu.gid && $('app').classList.contains('chat-open')) applyEv(ev)
   else if (ev.t === 'msg' && ev.kind === 'peer') {
     gu.unseen++

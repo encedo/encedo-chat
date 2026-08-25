@@ -988,6 +988,7 @@ async function main() {
       document.querySelector('#notify-opts input[value="name"]').click();
       document.getElementById('btn-close-drawer').click();
       Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
+      document.hasFocus = () => false;
       return 1`)
     const hiddenTok = `wtle-${Date.now().toString(36)}`
     await send(B, hiddenTok)
@@ -999,7 +1000,8 @@ async function main() {
 
     // On screen, the message is already visible (or one click away): a banner
     // for it is noise, and this is the condition most likely to rot silently.
-    await A.eval(`Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); return 1`)
+    // Visible AND focused: this is the window being used, and nothing may fire.
+    await A.eval(`Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.hasFocus = () => true; return 1`)
     await send(B, `nawierzchu-${Date.now().toString(36)}`)
     await B.waitFor('B\'s second message went out', `return true`, 5_000)
     await sleep(3_000)
@@ -1093,13 +1095,14 @@ async function main() {
     // somebody who is not interacting with the page, so audio may be refused
     // outright — the title is the one channel left, and it is the reason the
     // reported "the sound played once" is not the whole story.
-    await B.eval(`Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); return 1`)
+    await B.eval(`Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.hasFocus = () => false; return 1`)
     await sleep(10_500) // past the SENDER's 10 s cooldown, which is the longer of the two limits
     await A.eval(`document.getElementById('btn-knock').click(); return 1`)
     await B.waitFor('B\'s tab title says somebody is knocking',
       `return document.title.includes('puka')`, 15_000)
     await B.eval(`
       Object.defineProperty(document, 'hidden', { configurable: true, get: () => false });
+      document.hasFocus = () => true;
       document.dispatchEvent(new Event('visibilitychange')); return 1`)
     await B.waitFor('and it stops the moment the tab is looked at',
       `return !document.title.includes('puka')`, 10_000)

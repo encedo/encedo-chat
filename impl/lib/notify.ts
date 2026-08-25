@@ -24,6 +24,15 @@
  * - `off` is the default. Notifications require a permission prompt, and asking
  *   at startup, before the user has any idea what for, is how an app gets that
  *   permission denied permanently.
+ *
+ * ## "Away" is about focus, not about visibility
+ *
+ * The first version fired only while the tab was HIDDEN, and it was reported as
+ * broken by somebody who had the chat open the whole time. They were right: a
+ * tab can be visible and still be behind another window, or on the other half
+ * of the screen, or on a second monitor — `document.hidden` is false in every
+ * one of those, and every one of them is a message nobody sees. What decides is
+ * whether the window has FOCUS, which is the same rule Slack and Discord use.
  */
 
 /** How much a notification may say. */
@@ -42,13 +51,16 @@ export function planNotification(o: {
   mode: NotifyMode
   /** The platform said yes. Nothing is shown on 'default' or 'denied'. */
   granted: boolean
-  /** The app's own window is not on screen. */
-  hidden: boolean
+  /**
+   * The window is not the one being used: hidden, behind another window, or on
+   * a screen nobody is looking at. `document.hidden || !document.hasFocus()`.
+   */
+  away: boolean
   /** Ours — a notification for something we just sent is pure noise. */
   mine: boolean
   /** Who or what it came from, as this device names them. */
   name?: string
 }): NotifyPlan {
-  if (o.mode === 'off' || !o.granted || !o.hidden || o.mine) return { show: false }
+  if (o.mode === 'off' || !o.granted || !o.away || o.mine) return { show: false }
   return { show: true, name: o.mode === 'name' ? (o.name ?? null) : null }
 }
