@@ -72,23 +72,45 @@ jobs:
 
       # The harness drives a real Chromium over CDP and takes the binary from
       # $CHROME (default /usr/bin/chromium-browser, which runners do not have).
-      # Resolve whatever is actually installed — runners ship Google Chrome —
-      # and only install if nothing is.
       #
-      # The previous version of this step was `which a || which b || apt-get
-      # update && apt-get install`, which in bash parses as `((a||b)||c) && d`:
-      # it installed when a browser was already present and skipped when it was
-      # missing. Exactly backwards, and silent.
+      # ORDER MATTERS, and it is the opposite of the obvious one. On Ubuntu
+      # 24.04 `chromium-browser` is a transitional package for a SNAP, and a
+      # snap-confined browser cannot read the `--user-data-dir` the harness
+      # makes under /tmp: it starts, finds nothing it is allowed to use, and
+      # never prints "DevTools listening" — which is the "Chromium never
+      # announced a CDP endpoint" this job failed with. Google Chrome is a
+      # plain .deb with no confinement and is preinstalled on the runners, so
+      # it goes first, and a path under /snap is refused outright rather than
+      # tried and blamed on the harness.
+      #
+      # (The version before THAT was `which a || which b || apt-get update &&
+      # apt-get install`, which bash parses as `((a||b)||c) && d`: it installed
+      # when a browser was already present and skipped when it was missing.
+      # Exactly backwards, and silent. Two bugs in this step, both silent.)
       - name: Resolve a browser
         run: |
           set -euo pipefail
-          BIN="$(command -v chromium-browser || command -v chromium || command -v google-chrome || true)"
+          pick() {
+            for c in google-chrome-stable google-chrome chromium chromium-browser; do
+              p="$(command -v "$c" || true)"
+              [ -z "$p" ] && continue
+              # `command -v` answers about a name, not about what it runs.
+              real="$(readlink -f "$p")"
+              case "$real" in /snap/*) echo "skipping $p — snap wrapper ($real)" >&2; continue;; esac
+              echo "$p"; return 0
+            done
+            return 1
+          }
+          BIN="$(pick || true)"
           if [ -z "$BIN" ]; then
+            echo "no unconfined browser found — installing Google Chrome (.deb, not the snap)"
+            curl -fsSL -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
             sudo apt-get update
-            sudo apt-get install -y chromium-browser
-            BIN="$(command -v chromium-browser)"
+            sudo apt-get install -y /tmp/chrome.deb
+            BIN="$(command -v google-chrome-stable)"
           fi
           echo "CHROME=$BIN" >> "$GITHUB_ENV"
+          echo "using $BIN -> $(readlink -f "$BIN")"
           "$BIN" --version
 
       # It reaches the REAL relay (bs1.onchato.com) — this is an integration

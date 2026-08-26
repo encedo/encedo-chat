@@ -214,13 +214,37 @@ class Browser extends Page {
   private async discover(): Promise<{ browserWs: string }> {
     return new Promise((resolve, reject) => {
       let buf = ''
-      const timer = setTimeout(() => reject(new Error(`${this.name}: Chromium never announced a CDP endpoint`)), 25_000)
+      /**
+       * Everything the browser said, and what we launched.
+       *
+       * This used to throw the buffer away and report "never announced a CDP
+       * endpoint" — which names the symptom, not one fact about the cause. A
+       * CI run failed exactly that way and the log had nothing in it: the page
+       * console is empty because there is no page, and the process's own
+       * output, the only witness, had been collected and dropped. A silent
+       * launcher makes every launch failure look like the same launch failure.
+       */
+      const evidence = () => {
+        const tail = buf.trim().split('\n').slice(-12).join('\n')
+        return `\n  binary: ${CHROME}\n  stderr: ${tail || '(nic nie powiedział — sprawdź, czy to nie jest opakowanie snapa)'}`
+      }
+      const timer = setTimeout(
+        () => reject(new Error(`${this.name}: Chromium never announced a CDP endpoint${evidence()}`)), 25_000)
       this.proc.stderr?.on('data', (chunk: Buffer) => {
         buf += chunk.toString()
         const m = buf.match(/DevTools listening on (ws:\/\/\S+)/)
         if (m) { clearTimeout(timer); resolve({ browserWs: m[1] }) }
       })
-      this.proc.on('exit', (code) => { clearTimeout(timer); reject(new Error(`${this.name}: Chromium exited (${code})`)) })
+      this.proc.on('error', (e: any) => {
+        // spawn itself failed — ENOENT on a path that `command -v` reported, or
+        // EACCES. Reported as itself rather than as a 25-second silence.
+        clearTimeout(timer)
+        reject(new Error(`${this.name}: could not start Chromium (${e?.code ?? e?.message})${evidence()}`))
+      })
+      this.proc.on('exit', (code) => {
+        clearTimeout(timer)
+        reject(new Error(`${this.name}: Chromium exited (${code})${evidence()}`))
+      })
     })
   }
 
