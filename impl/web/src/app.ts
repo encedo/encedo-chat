@@ -983,6 +983,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   $('me-avatar').textContent = initials(id.handle)
   $('me-handle').textContent = id.handle
   loadNotifyMode() // per identity, like every other stored preference
+  loadImgAuto()
   const fp = await fingerprint(id.pub)
   $('me-fp').textContent = tr('🔑 ') + fp
   $('me-fp').title = kid ? `KID ${kid} · dwuklik = kopiuj klucz publiczny` : 'Dwuklik = kopiuj klucz publiczny'
@@ -1995,23 +1996,97 @@ function showAttach(f: File | null) {
   if (f) cancelEdit() // a correction is text; the chip would take the send from it
   pendingAttach = f
   $('attach-chip').hidden = !f
+  const thumb = $('attach-thumb') as HTMLImageElement
+  // Whatever the chip was showing stops being anybody's business the moment it
+  // is dropped — and the URL would leak for the life of the page otherwise.
+  if (thumb.src.startsWith('blob:')) { URL.revokeObjectURL(thumb.src); thumb.removeAttribute('src') }
+  thumb.hidden = true
   if (!f) return
   $('attach-name').textContent = f.name
   $('attach-name').title = f.name // the chip elides; the tooltip has the whole name
   $('attach-size').textContent = humanSize(f.size)
+  // A pasted screenshot arrives called "image.png". The name is no help at all,
+  // so the chip shows the picture — the one place where paste and the clip
+  // genuinely differ is what the file is CALLED, and this closes it.
+  if (isPreviewable(f.type)) { thumb.src = URL.createObjectURL(f); thumb.hidden = false }
 }
 
-$('btn-attach').addEventListener('click', () => ($('file-input') as HTMLInputElement).click())
-;($('file-input') as HTMLInputElement).addEventListener('change', (e: any) => {
-  const f = e.target.files?.[0]
-  e.target.value = '' // so picking the same file twice still fires
+/**
+ * One door for all three ways a file arrives: the clip, a paste, a drop.
+ *
+ * They must not diverge. What comes after picking — the chip, the caption, the
+ * quote, Send — is the same machinery whichever way the file got here, and the
+ * refusals have to be the same too or two of the three paths quietly accept
+ * something the third does not.
+ */
+function offerFile(f: File | null | undefined, count = 1) {
   if (!f) return
+  // Paste and drop can happen with no conversation on screen, which the clip
+  // cannot — the composer is not there to click.
+  if (!activeGid && !activeRoom()) { toast(tr('Najpierw otwórz rozmowę')); return }
   // Refused at PICK time rather than at Send: the limit is a property of the
   // file alone, and finding out after writing a caption is a worse way to learn.
   if (f.size > MAX_FILE) { toast(tr('Plik jest za duży — limit to {mb} MB', { mb: Math.floor(MAX_FILE / 1024 / 1024) })); return }
   showAttach(f)
+  // The composer holds one file, so say which one was taken rather than
+  // silently dropping the rest of a multi-file drop on the floor.
+  if (count > 1) toast(tr('Jeden plik naraz — wziąłem {name}', { name: f.name }))
+}
+
+$('btn-attach').addEventListener('click', () => ($('file-input') as HTMLInputElement).click())
+;($('file-input') as HTMLInputElement).addEventListener('change', (e: any) => {
+  const files: FileList | undefined = e.target.files
+  const f = files?.[0]
+  e.target.value = '' // so picking the same file twice still fires
+  offerFile(f, files?.length ?? 1)
 })
 $('attach-drop').addEventListener('click', () => showAttach(null))
+
+// ---- the other two ways a file arrives ------------------------------------
+/**
+ * Pasting and dropping, both landing in `offerFile` — so what you get is the
+ * chip you would have got from the clip, with the same caption field and the
+ * same Send. That parity is the feature; a second, shortcut path that sends
+ * immediately would be a different product for the same gesture.
+ *
+ * ⚠️ **The document refuses a dropped file everywhere.** A file dropped on a
+ * page NAVIGATES to it, and here that is not a nuisance — it replaces the
+ * running app, which takes the transport, every ratchet and the whole
+ * ephemeral transcript with it. So the default is cancelled window-wide and
+ * only the conversation pane acts on the drop.
+ */
+document.addEventListener('dragover', (e) => e.preventDefault())
+document.addEventListener('drop', (e) => e.preventDefault())
+
+document.addEventListener('paste', (e: ClipboardEvent) => {
+  const files = e.clipboardData?.files
+  // An ordinary text paste carries no files and must reach the field it was
+  // aimed at untouched — including the key field, where pasting is the way in.
+  if (!files?.length) return
+  e.preventDefault()
+  offerFile(files[0], files.length)
+})
+
+{
+  const pane = document.querySelector('main.chat') as HTMLElement | null
+  if (pane) {
+    // `dragleave` fires when the pointer crosses onto a CHILD element, so a
+    // counter is what tells "left the pane" from "moved inside it". Without it
+    // the outline flickers and eventually sticks.
+    let depth = 0
+    const off = () => { depth = 0; pane.classList.remove('drop-on') }
+    pane.addEventListener('dragenter', (e) => {
+      if (!(e as DragEvent).dataTransfer?.types.includes('Files')) return
+      depth++; pane.classList.add('drop-on')
+    })
+    pane.addEventListener('dragleave', () => { if (--depth <= 0) off() })
+    pane.addEventListener('drop', (e) => {
+      e.preventDefault(); off()
+      const files = (e as DragEvent).dataTransfer?.files
+      if (files?.length) offerFile(files[0], files.length)
+    })
+  }
+}
 
 /**
  * Empty the composer when the screen changes rooms.
@@ -3253,6 +3328,24 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
   wrap.append(ico, info, act)
   bub.appendChild(wrap)
 
+  // An image gets a second, quieter action. Not a replacement for Download:
+  // showing a picture and saving it are different wants, and folding them into
+  // one button means one of the two is unavailable.
+  if (isPreviewable(env.mime) && !pending && !fileGone(env)) {
+    if (previews.has(env)) {
+      paintPreview(env) // a replay after switching rooms — already decrypted
+    } else {
+      const see = document.createElement('button')
+      see.className = 'f-see'; see.textContent = tr('Pokaż')
+      see.addEventListener('click', () => void revealImage(env, see))
+      wrap.insertBefore(see, act)
+      fileEls.get(env)!.see = see
+      // The setting, and the cap that keeps it honest: a fetch nobody asked for
+      // must not be able to pull eighty megabytes because a `mime` said so.
+      if (kind === 'peer' && imgAuto && env.size <= AUTO_IMG_MAX) void revealImage(env, see)
+    }
+  }
+
   // The caption goes through the SAME renderer as a message body — text nodes
   // and link arrows, never markup. A second way of showing user text is how the
   // two drift apart and one of them ends up interpreting something.
@@ -3290,10 +3383,119 @@ const FILE_TTL_MS = 5 * 60_000
  * it takes for the bubble to become the finished one — no id to reconcile, and
  * nothing left behind if the room is switched away and replayed.
  */
-const fileEls = new WeakMap<FileEnv, { act: HTMLButtonElement; sub: HTMLElement }>()
+const fileEls = new WeakMap<FileEnv, { act: HTMLButtonElement; sub: HTMLElement; see?: HTMLButtonElement }>()
 
 const humanSize = (n: number) =>
   n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} kB` : `${n} B`
+
+// ---- images in a conversation ---------------------------------------------
+/**
+ * **Showing an image is downloading it.** There is no cheaper version of this:
+ * a file bubble holds a CID and a key, the bytes sit encrypted in the store,
+ * and drawing the picture means fetching and decrypting exactly what Download
+ * fetches and decrypts. Everything below follows from that one fact.
+ *
+ * - **A file we SENT previews for free.** We encrypted it, so the bytes are
+ *   already in hand — no fetch, nothing to decide. That is also the case that
+ *   matters most, because it is the pasted screenshot: you should see what you
+ *   are about to send.
+ * - **An incoming image waits for a click.** Drawing it by itself would have
+ *   the app reach out to the store for every picture anyone sends, before the
+ *   person has decided they want it — the same shape of thing link previews
+ *   are refused for (see `linkify.ts`). It would also be *us* keeping a file
+ *   alive that the store drops in minutes.
+ * - **…unless the setting says otherwise**, which is off by default and capped:
+ *   an automatic fetch is a fetch nobody asked for, so it must not be able to
+ *   pull eighty megabytes because a `mime` said `image/`.
+ *
+ * ⚠️ **SVG is not an image here.** Everything else in this list is a bitmap the
+ * browser decodes; an SVG is a DOCUMENT, with its own reference machinery, and
+ * `mime` is a string the SENDER chose. It stays an ordinary file — the same
+ * fail-closed rule the link renderer uses for schemes it does not know.
+ */
+const isPreviewable = (mime: string) => mime.startsWith('image/') && mime !== 'image/svg+xml'
+/** What an automatic fetch may cost when nobody asked for it. A manual Show has
+ *  no cap: that one WAS asked for. */
+const AUTO_IMG_MAX = 2 * 1024 * 1024
+
+/**
+ * Envelope → a blob URL for its decrypted bytes.
+ *
+ * Keyed by the envelope OBJECT, like `fileEls`, so a room replayed after a
+ * switch draws the picture again without re-fetching, and nothing survives the
+ * page — which is the same lifetime as the transcript it belongs to. The URLs
+ * are deliberately not revoked while the session lives: a replay needs them,
+ * and revoking on a room switch is how a bubble comes back broken.
+ */
+const previews = new WeakMap<FileEnv, string>()
+
+/** Per identity, like every other stored preference. */
+const imgAutoKey = () => 'ec-autoimg-' + (session?.idKey ?? '')
+let imgAuto = false
+function loadImgAuto() {
+  try { imgAuto = localStorage.getItem(imgAutoKey()) === '1' } catch { imgAuto = false }
+  const box = $('img-auto') as HTMLInputElement | null
+  if (box) box.checked = imgAuto
+}
+$('img-auto')?.addEventListener('change', (e) => {
+  imgAuto = (e.target as HTMLInputElement).checked
+  try { localStorage.setItem(imgAutoKey(), imgAuto ? '1' : '0') } catch {}
+})
+
+/**
+ * Draw the picture into a bubble that has one, and take the Show button away.
+ *
+ * Called both when the bytes arrive and from `appendFile` on a replay, so the
+ * two paths cannot draw it differently.
+ */
+function paintPreview(env: FileEnv) {
+  const url = previews.get(env); if (!url) return
+  const els = fileEls.get(env); if (!els) return
+  const bub = els.act.closest('.bubble') as HTMLElement | null
+  const wrap = els.act.closest('.b-file') as HTMLElement | null
+  if (!bub || !wrap || bub.querySelector('.b-thumb')) return
+  const img = document.createElement('img')
+  img.className = 'b-thumb'
+  img.alt = env.name
+  img.src = url
+  // Above the file row, so the name, the size and Download stay exactly where
+  // they were — the picture is added to the bubble, it does not replace it.
+  bub.insertBefore(img, wrap)
+  els.see?.remove()
+  els.see = undefined
+  refreshJump()
+}
+
+/** Fetch and decrypt one file's bytes. The single place that does it, so
+ *  Download and Show cannot disagree about what a file is. */
+async function fetchPlain(env: FileEnv): Promise<Uint8Array> {
+  const cipher = await getBlob(env.cid)
+  return await decryptBytes(unb64(env.key),
+    { alg: env.alg as any, chunk: env.chunk, chunks: env.chunks, size: env.size }, cipher)
+}
+
+/**
+ * Reveal an incoming image: the same fetch a download does, ending in a picture
+ * rather than a file on disk.
+ */
+async function revealImage(env: FileEnv, btn: HTMLButtonElement) {
+  if (previews.has(env)) { paintPreview(env); return }
+  btn.disabled = true; btn.textContent = tr('Pobieram…')
+  try {
+    const plain = await fetchPlain(env)
+    previews.set(env, URL.createObjectURL(new Blob([plain as any], { type: env.mime })))
+    paintPreview(env)
+  } catch (e: any) {
+    // Past its lifetime ANY failure is expiry — the same reading `downloadFile`
+    // makes, and for the same reason: the store hunts the public network for a
+    // file it swept, so what comes back is a timeout, not a 404.
+    const gone = e?.name === 'ExpiredError' || fileGone(env)
+    btn.disabled = false
+    btn.textContent = gone ? tr('Wygasł') : tr('Pokaż')
+    if (gone) { btn.disabled = true; btn.closest('.b-file')?.classList.add('gone') }
+    else ecLog('image preview failed: ' + (e?.message ?? e))
+  }
+}
 
 /**
  * Encrypt a file, upload the ciphertext, and send the metadata down whichever
@@ -3337,6 +3539,10 @@ async function attachFile(f: File) {
     ...(caption ? { body: caption } : {}),
     ...(re ? { re } : {}),
   } as unknown as FileEnv
+  // A file we are sending previews for FREE: we hold the plaintext, so there is
+  // no fetch to justify and nothing to ask. Registered before the bubble is
+  // recorded, so the picture is there in the same frame the bubble is.
+  if (isPreviewable(pending.mime)) previews.set(pending, URL.createObjectURL(f))
   if (gid) recordGroup(groupsUI.get(gid)!, { t: 'file', kind: 'me', ts: pending.ts, file: pending, au: session?.pub })
   else record(room!, { t: 'file', kind: 'me', ts: pending.ts, file: pending, au: session?.pub })
 
@@ -3436,8 +3642,7 @@ async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
     key: env.key, chunk: env.chunk, chunks: env.chunks, alg: env.alg,
   }), 'debug')
   try {
-    const cipher = await getBlob(env.cid)
-    const plain = await decryptBytes(unb64(env.key), { alg: env.alg as any, chunk: env.chunk, chunks: env.chunks, size: env.size }, cipher)
+    const plain = await fetchPlain(env)
     const url = URL.createObjectURL(new Blob([plain as any], { type: env.mime }))
     const a = document.createElement('a')
     a.href = url; a.download = env.name; a.click()

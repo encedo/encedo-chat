@@ -805,6 +805,41 @@ async function main() {
     if (dangerous !== 0) throw new Error(`javascript: URL produced ${dangerous} anchor(s) — it must produce none`)
     step('a javascript: URL is shown as text and offered no arrow')
 
+    // ---- pasting a file ------------------------------------------------------
+    // Needs no store, so it runs on every pass: what is proved here is that a
+    // paste lands in the SAME composer state the clip produces. A shortcut path
+    // that sent the file immediately would be a different product for the same
+    // gesture, and nothing downstream would notice.
+    scenario('a pasted image fills the composer the clip fills')
+    const imgTok = `obraz-${Date.now().toString(36)}`
+    const pasted = await A.eval<any>(`
+      const c = document.createElement('canvas'); c.width = 60; c.height = 30;
+      const g = c.getContext('2d'); g.fillStyle = '#0a7'; g.fillRect(0, 0, 60, 30);
+      return new Promise((done) => c.toBlob((blob) => {
+        const dt = new DataTransfer();
+        dt.items.add(new File([blob], ${JSON.stringify('%TOK%.png')}, { type: 'image/png' }));
+        document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+        setTimeout(() => done({
+          chip: !document.getElementById('attach-chip').hidden,
+          name: document.getElementById('attach-name').textContent,
+          thumb: !document.getElementById('attach-thumb').hidden,
+          sent: document.querySelectorAll('#messages .b-file').length,
+        }), 50);
+      }, 'image/png'));
+    `.replace(/%TOK%/g, imgTok))
+    if (!pasted.chip) throw new Error('a pasted image did not fill the composer chip')
+    if (!pasted.name.includes(imgTok)) throw new Error(`the chip names the wrong file: ${pasted.name}`)
+    if (!pasted.thumb) throw new Error('the chip shows no thumbnail for a pasted image')
+    step('a pasted image fills the same chip the clip fills, with a thumbnail')
+
+    await A.eval(`document.getElementById('attach-drop').click(); return 1`)
+    const dropped = await A.eval<any>(`
+      return { chip: document.getElementById('attach-chip').hidden,
+               thumb: document.getElementById('attach-thumb').hidden };
+    `)
+    if (!dropped.chip || !dropped.thumb) throw new Error('dropping the chip left the thumbnail behind')
+    step('and dropping it clears the chip and the thumbnail with it')
+
     // ---- files: encrypted here, opaque there, readable only with the key ----
     // Skipped without a node to proxy to, because the point is the round trip:
     // a stub store would prove the UI moves and nothing about what the store
@@ -908,6 +943,66 @@ async function main() {
       `)
       if (leaked) throw new Error('the blob in the store contains plaintext')
       step('the blob in the store carries no plaintext')
+
+      // ---- an image that arrives is not an image that is fetched -----------
+      // Our own image previews for free — we hold the bytes. Somebody else's
+      // must NOT be fetched until it is asked for, because showing an image IS
+      // downloading it, and nobody asked.
+      scenario('an incoming image waits to be asked for')
+      const imgTok2 = `obraz-${Date.now().toString(36)}`
+      await A.eval(`
+        const c = document.createElement('canvas'); c.width = 60; c.height = 30;
+        const g = c.getContext('2d'); g.fillStyle = '#0a7'; g.fillRect(0, 0, 60, 30);
+        return new Promise((done) => c.toBlob((blob) => {
+          const dt = new DataTransfer();
+          dt.items.add(new File([blob], ${JSON.stringify('%TOK%.png')}, { type: 'image/png' }));
+          document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+          setTimeout(() => done(1), 50);
+        }, 'image/png'));
+      `.replace(/%TOK%/g, imgTok2))
+      await A.eval(`document.getElementById('send').click(); return 1`)
+      await A.waitFor('the sender drew its own image', `
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(imgTok2)}));
+        return !!(row && row.querySelector('.b-thumb'));
+      `, 20_000)
+      const senderShot = await A.eval<any>(`
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => r.querySelector('.f-name').textContent.includes(${JSON.stringify(imgTok2)}));
+        return { src: row.querySelector('.b-thumb').src.slice(0, 5), see: !!row.querySelector('.f-see') };
+      `)
+      if (senderShot.src !== 'blob:') throw new Error(`the sender's preview is not a local blob: ${senderShot.src}`)
+      if (senderShot.see) throw new Error('the sender was offered Show for a picture it is already looking at')
+      step('the sender sees it immediately, from the bytes it already holds')
+
+      await B.waitFor('the image bubble arrived', `
+        return [...document.querySelectorAll('#messages .b-file .f-name')]
+          .some((n) => n.textContent.includes(${JSON.stringify(imgTok2)}));
+      `, 40_000)
+      const waiting = await B.eval<any>(`
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(imgTok2)}));
+        return { thumb: !!row.querySelector('.b-thumb'), see: !!row.querySelector('.f-see'),
+                 act: !!row.querySelector('.f-act') };
+      `)
+      if (waiting.thumb) throw new Error('an incoming image was fetched and drawn without being asked for')
+      if (!waiting.see) throw new Error('an incoming image offers no way to show it')
+      if (!waiting.act) throw new Error('Show replaced Download instead of joining it')
+      step('the recipient is offered Show, and nothing was fetched yet')
+
+      await B.eval(`
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(imgTok2)}));
+        row.querySelector('.f-see').click();
+        return 1;
+      `)
+      await B.waitFor('the recipient asked, and got the picture', `
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(imgTok2)}));
+        const img = row.querySelector('.b-thumb');
+        return !!img && img.src.startsWith('blob:') && !row.querySelector('.f-see');
+      `, 40_000)
+      step('one click fetches, decrypts and draws it — and Download stays')
     }
 
     // ---- replying, and correcting -------------------------------------------

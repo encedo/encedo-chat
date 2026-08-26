@@ -355,6 +355,12 @@
      matters more than which file it was. */
   .composer-field .attach-chip .n{min-width:3ch;max-width:14ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .composer-field .attach-chip .s{flex:none;opacity:.8}
+  /* A pasted screenshot has no name worth reading ("image.png"), so the chip
+     shows the picture instead. Same chip, same buttons — pasting and picking a
+     file must not produce two different-looking composers. */
+  .composer-field .attach-chip .t{flex:none;width:22px;height:22px;object-fit:cover;border-radius:4px;
+    border:1px solid var(--border)}
+  .composer-field .attach-chip .t[hidden]{display:none}
   /* The cross gets a finger-sized TARGET without a finger-sized BOX. Padding here
      sets the chip's height, and at 8px it made the chip nearly as tall as the
      field it sits in — which is what pushed the text input out on a portrait
@@ -403,6 +409,18 @@
     border-radius:8px;padding:6px 12px;font-weight:600;font-size:12.5px;cursor:pointer}
   .b-file .f-act[disabled]{opacity:.55;cursor:default}
   .b-file.gone .f-name{text-decoration:line-through;opacity:.7}
+  /* An image that has been revealed. `max-height` rather than a fixed box: a
+     screenshot is wide and a photo is tall, and cropping either one to a square
+     hides the thing somebody sent. It sits ABOVE the file row, which keeps its
+     name, size and Download exactly where they were. */
+  .b-thumb{display:block;max-width:100%;max-height:320px;border-radius:8px;margin-bottom:6px}
+  .b-file .f-see{flex-shrink:0;border:none;background:none;color:var(--accent);font-size:12px;
+    padding:6px 8px;border-radius:8px;cursor:pointer}
+  .b-file .f-see[disabled]{opacity:.55;cursor:default}
+  /* The dragged-file state of the conversation pane. An outline rather than an
+     overlay: an overlay has to be removed on every exit path, and a `dragleave`
+     that fires over a child element is how those get stuck on screen. */
+  .drop-on{outline:2px dashed var(--accent);outline-offset:-6px}
   /* A caption sits under its file, the way Signal reads: the attachment first,
      then what was said about it — with a hairline between, so the two read as
      related rather than as one run-on block. */
@@ -731,6 +749,7 @@
           <div class="composer-field">
             <input id="msg-input" type="text" placeholder="Wiadomość… (Enter = wyślij)" data-i18n-placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off">
             <span class="attach-chip" id="attach-chip" hidden>
+              <img class="t" id="attach-thumb" alt="" hidden>
               <span class="n" id="attach-name"></span>
               <span class="s" id="attach-size"></span>
               <button class="x" id="attach-drop" title="Usuń plik" data-i18n-title="Usuń plik" aria-label="Usuń plik">✕</button>
@@ -961,6 +980,11 @@
       <label class="store-opt"><input type="radio" name="nmode" value="quiet"> <span data-i18n="Tylko „coś przyszło”">Tylko „coś przyszło”</span></label>
     </div>
     <div class="d-note" id="notify-note" data-i18n="Powiadomienie pojawia się tylko wtedy, gdy okno aplikacji nie jest na wierzchu. Treść wiadomości nie trafia do niego nigdy — powiadomienie widać na ekranie blokady i w historii powiadomień systemu, czyli w miejscach, w których ta aplikacja nic innego nie zostawia.">Powiadomienie pojawia się tylko wtedy, gdy okno aplikacji nie jest na wierzchu. Treść wiadomości nie trafia do niego nigdy — powiadomienie widać na ekranie blokady i w historii powiadomień systemu, czyli w miejscach, w których ta aplikacja nic innego nie zostawia.</div>
+    <div class="d-section" data-i18n="Obrazy">Obrazy</div>
+    <div class="store-opts" id="img-opts" style="padding:0 16px 12px">
+      <label class="store-opt"><input type="checkbox" id="img-auto"> <span data-i18n="Pokazuj obrazy od kontaktów automatycznie">Pokazuj obrazy od kontaktów automatycznie</span></label>
+    </div>
+    <div class="d-note" data-i18n="Pokazanie obrazka to jego pobranie — bajty lecą ze schowka plików dopiero wtedy. Dlatego przychodzące obrazy czekają na kliknięcie, a to ustawienie robi z tego automat.">Pokazanie obrazka to jego pobranie — bajty lecą ze schowka plików dopiero wtedy. Dlatego przychodzące obrazy czekają na kliknięcie, a to ustawienie robi z tego automat.</div>
     <div class="d-section" id="desk-section" hidden data-i18n="Aplikacja na komputerze">Aplikacja na komputerze</div>
     <div class="store-opts" id="desk-opts" hidden style="padding:0 16px 12px">
       <label class="store-opt"><input type="checkbox" id="desk-tray"> <span data-i18n="Zamknięcie okna chowa do zasobnika">Zamknięcie okna chowa do zasobnika</span></label>
