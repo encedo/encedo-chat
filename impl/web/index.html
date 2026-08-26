@@ -421,6 +421,15 @@
      overlay: an overlay has to be removed on every exit path, and a `dragleave`
      that fires over a child element is how those get stuck on screen. */
   .drop-on{outline:2px dashed var(--accent);outline-offset:-6px}
+  /* The diagnostic list. Monospace because it is meant to be READ line by line
+     and pasted into a bug report — and because a report that reflows differently
+     for every reader is one nobody can compare against another. */
+  .diag{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;line-height:1.55;
+    padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--card);
+    color:var(--muted);white-space:pre-wrap;word-break:break-word}
+  .diag .ok{color:var(--accent)}
+  .diag .bad{color:var(--err,#c0392b)}
+  .diag .meh{opacity:.75}
   /* A caption sits under its file, the way Signal reads: the attachment first,
      then what was said about it — with a hairline between, so the two read as
      related rather than as one run-on block. */
@@ -991,6 +1000,12 @@
       <label class="store-opt"><input type="checkbox" id="desk-autostart"> <span data-i18n="Uruchamiaj przy starcie systemu">Uruchamiaj przy starcie systemu</span></label>
     </div>
     <div class="d-note" id="desk-note" hidden data-i18n="Ta aplikacja nie przechowuje wiadomości po drodze — żeby ktoś mógł do Ciebie napisać, musi być uruchomiona. Dlatego zamknięcie okna chowa ją do zasobnika; wyjście jest w menu ikony.">Ta aplikacja nie przechowuje wiadomości po drodze — żeby ktoś mógł do Ciebie napisać, musi być uruchomiona. Dlatego zamknięcie okna chowa ją do zasobnika; wyjście jest w menu ikony.</div>
+    <div class="d-section" data-i18n="Diagnostyka">Diagnostyka</div>
+    <div class="diag" id="diag-caps"></div>
+    <button class="btn" id="btn-webrtc-probe" style="margin-top:10px" data-i18n="Sprawdź WebRTC">Sprawdź WebRTC</button>
+    <div class="diag" id="diag-webrtc" hidden></div>
+    <div class="d-note" data-i18n="Sprawdzenie łączy się samo ze sobą wewnątrz tego okna — bez sieci, bez węzła. Dlatego rozstrzyga, czy to ta aplikacja nie umie WebRTC, czy nie pozwala na to sieć. Ostatni wiersz jest o sieci, reszta o aplikacji.">Sprawdzenie łączy się samo ze sobą wewnątrz tego okna — bez sieci, bez węzła. Dlatego rozstrzyga, czy to ta aplikacja nie umie WebRTC, czy nie pozwala na to sieć. Ostatni wiersz jest o sieci, reszta o aplikacji.</div>
+    <button class="btn" id="btn-diag-copy" style="margin-top:2px;background:none;color:var(--accent);border:1px solid var(--accent)" data-i18n="Kopiuj raport">Kopiuj raport</button>
     <div class="d-section" data-i18n="Sesja">Sesja</div>
     <div class="kv"><span class="k" data-i18n="Tożsamość">Tożsamość</span><span class="v" id="sess-id" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer">—</span></div>
     <div class="kv"><span class="k" data-i18n="KID (klucz w HSM)">KID (klucz w HSM)</span><span class="v" id="sess-kid">—</span></div>

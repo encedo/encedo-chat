@@ -21,6 +21,7 @@ import type { GkBackend } from '../../lib/group.ts'
 // which is exactly how it failed once. `tr` cannot collide.
 import { t as tr, setLocale, getLocale, applyDom } from './i18n.ts'
 import { probeCapabilities, formatReport } from '../../lib/capabilities.ts'
+import { probeWebrtc, formatWebrtcProbe, type WebrtcProbeResult, type ProbeStage } from '../../lib/webrtc-probe.ts'
 import { splitByLinks } from '../../lib/linkify.ts'
 import { splitByMentions, resolveMention, mentionName, closeMentions, mentionsPub, pubHint } from '../../lib/mentions.ts'
 import { makeQuote, type QuoteRef } from '../../lib/quote.ts'
@@ -2585,6 +2586,7 @@ let capReport: Awaited<ReturnType<typeof probeCapabilities>> | null = null
 void (async () => {
   const rep = await probeCapabilities()
   capReport = rep
+  paintCaps()
   renderNetwork() // a phone has no console — the Network tab is where this is readable
   ecLog(formatReport(rep))
   for (const d of rep.degraded) ecLog(`capability (degraded): ${d.id} — ${d.note}`)
@@ -3113,6 +3115,74 @@ $('desk-autostart')?.addEventListener('change', async (e) => {
   const got = await setAutostart(want)
   box.checked = got
   if (got !== want) toast(tr('Nie udało się ustawić startu przy uruchomieniu systemu'))
+})
+
+// ---- diagnostics ----------------------------------------------------------
+/**
+ * What this platform can do, in a form that can be READ and PASTED.
+ *
+ * The boot probe has always existed and has always gone to the debug log, which
+ * on a phone or in a packaged app is nowhere. Two separate questions get
+ * answered here, and keeping them apart is the entire value:
+ *
+ * - **Does the app work at all here** — the boot report, drawn as it is.
+ * - **Does WebRTC work here, and if not, whose fault is it** — on demand,
+ *   because the honest test takes seconds and must not be paid for at every
+ *   start. `lib/webrtc-probe.ts` connects this window to ITSELF, so a failure
+ *   is the webview's; the STUN row is the only one about the network, and it
+ *   says so. Until now a grey transport badge could mean either, and there was
+ *   no way to tell.
+ */
+let lastWebrtcProbe: WebrtcProbeResult | null = null
+
+function diagLine(mark: 'ok' | 'bad' | 'meh', text: string) {
+  const cls = mark === 'ok' ? 'ok' : mark === 'bad' ? 'bad' : 'meh'
+  const sign = mark === 'ok' ? '✓' : mark === 'bad' ? '✖' : '·'
+  return `<span class="${cls}">${sign}</span> ${escapeHtml(text)}`
+}
+
+function paintCaps() {
+  const box = $('diag-caps'); if (!box || !capReport) return
+  const rows = capReport.caps.map((c) => diagLine(
+    c.ok ? 'ok' : c.required ? 'bad' : 'meh',
+    c.id + (c.tries ? ` (${c.tries} próby)` : '') + (c.ok ? '' : ` — ${c.note ?? ''}${c.error ? ` [${c.error}]` : ''}`),
+  ))
+  // The user agent is the first thing anyone reading a bug report wants and the
+  // last thing they can get out of a packaged app.
+  box.innerHTML = [escapeHtml(capReport.ua), ...rows].join('<br>')
+}
+
+const stageWord = (s: ProbeStage) => s.about === 'platform' ? tr('aplikacja') : tr('sieć')
+
+$('btn-webrtc-probe')?.addEventListener('click', async () => {
+  const btn = $('btn-webrtc-probe') as HTMLButtonElement
+  const out = $('diag-webrtc')
+  btn.disabled = true; btn.textContent = tr('Sprawdzam…')
+  out.hidden = false; out.innerHTML = ''
+  const rows: string[] = []
+  try {
+    // Drawn stage by stage: the loopback step alone can take seconds, and a box
+    // that sits blank through it reads as a hang.
+    lastWebrtcProbe = await probeWebrtc((st) => {
+      rows.push(diagLine(st.ok ? 'ok' : 'bad',
+        `${st.id} [${stageWord(st)}] ${st.ms} ms${st.detail ? ' — ' + st.detail : ''}${st.error ? ' — ' + st.error : ''}`))
+      out.innerHTML = rows.join('<br>')
+    })
+    ecLog(formatWebrtcProbe(lastWebrtcProbe))
+    ;(window as any).__webrtcProbe = lastWebrtcProbe // read by the browser harness; harmless elsewhere
+  } finally {
+    btn.disabled = false; btn.textContent = tr('Sprawdź WebRTC')
+  }
+})
+
+$('btn-diag-copy')?.addEventListener('click', async () => {
+  const text = [
+    capReport ? formatReport(capReport) : 'platform: (sonda jeszcze nie skończyła)',
+    lastWebrtcProbe ? formatWebrtcProbe(lastWebrtcProbe) : 'webrtc: (nie sprawdzano)',
+    `build: ${$('build-id-settings')?.textContent ?? '?'}`,
+  ].join('\n')
+  try { await navigator.clipboard.writeText(text); toast(tr('Raport skopiowany')) }
+  catch { toast(tr('Nie udało się skopiować — zaznacz i skopiuj ręcznie')) }
 })
 
 /**

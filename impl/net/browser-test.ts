@@ -805,6 +805,42 @@ async function main() {
     if (dangerous !== 0) throw new Error(`javascript: URL produced ${dangerous} anchor(s) — it must produce none`)
     step('a javascript: URL is shown as text and offered no arrow')
 
+    // ---- the WebRTC self-test ------------------------------------------------
+    // The reason this exists: "direct does not work" has two completely
+    // different causes — a webview that cannot do WebRTC at all, and a network
+    // that will not let it out — and one symptom, a grey transport badge. The
+    // probe connects the page to ITSELF, so its verdict is about the platform
+    // and cannot be spoiled by a firewall; only the STUN row is about the
+    // network, and it is labelled that way.
+    scenario('the WebRTC self-test separates the app from the network')
+    await A.eval(`document.getElementById('btn-webrtc-probe').click(); return 1`)
+    await A.waitFor('the self-test finished', `return !!window.__webrtcProbe`, 45_000)
+    const rtc = await A.eval<any>(`
+      const r = window.__webrtcProbe;
+      const by = (id) => r.stages.find((s) => s.id === id);
+      return {
+        ok: r.ok,
+        ids: r.stages.map((s) => s.id),
+        loopback: by('loopback'),
+        stun: by('stun'),
+        rows: document.getElementById('diag-webrtc').textContent.split('\\n').length,
+        caps: document.getElementById('diag-caps').textContent,
+      };
+    `)
+    if (rtc.ids.join(',') !== 'construct,datachannel,sdp,ice,loopback,stun')
+      throw new Error(`the probe skipped a stage: ${rtc.ids.join(',')}`)
+    // Chromium can do WebRTC, so a red loopback here means the PROBE is broken,
+    // not the browser — which is the only way this assertion can be wrong.
+    if (!rtc.loopback.ok) throw new Error(`loopback failed in Chromium: ${rtc.loopback.error}`)
+    if (!rtc.ok) throw new Error('the probe called this platform unfit for WebRTC — in Chromium')
+    if (rtc.loopback.about !== 'platform' || rtc.stun.about !== 'network')
+      throw new Error('a stage is filed under the wrong half — that distinction IS the feature')
+    step('a byte crossed a DataChannel inside the page, with no network at all')
+    // The boot report has always existed and has always gone to a debug log,
+    // which in a packaged app is nowhere at all.
+    if (!/X25519/.test(rtc.caps)) throw new Error('the platform report is not shown in Settings')
+    step('and the platform report is readable in Settings, not just in the log')
+
     // ---- pasting a file ------------------------------------------------------
     // Needs no store, so it runs on every pass: what is proved here is that a
     // paste lands in the SAME composer state the clip produces. A shortcut path
