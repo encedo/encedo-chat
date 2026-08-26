@@ -22,6 +22,7 @@ import type { GkBackend } from '../../lib/group.ts'
 import { t as tr, setLocale, getLocale, applyDom } from './i18n.ts'
 import { probeCapabilities, formatReport } from '../../lib/capabilities.ts'
 import { probeWebrtc, formatWebrtcProbe, type WebrtcProbeResult, type ProbeStage } from '../../lib/webrtc-probe.ts'
+import { voiceSupported, startRecording, type Recording } from './voice.ts'
 import { splitByLinks } from '../../lib/linkify.ts'
 import { splitByMentions, resolveMention, mentionName, closeMentions, mentionsPub, pubHint } from '../../lib/mentions.ts'
 import { makeQuote, type QuoteRef } from '../../lib/quote.ts'
@@ -2009,7 +2010,12 @@ function showAttach(f: File | null) {
   // A pasted screenshot arrives called "image.png". The name is no help at all,
   // so the chip shows the picture — the one place where paste and the clip
   // genuinely differ is what the file is CALLED, and this closes it.
-  if (isPreviewable(f.type)) { thumb.src = URL.createObjectURL(f); thumb.hidden = false }
+  //
+  // Pictures ONLY. `isPreviewable` grew to cover voice notes, and an <img> in
+  // the chip pointed at an audio blob draws a broken-image icon — caught by
+  // rendering the real stylesheet, which is the fourth time that pass has
+  // found something no test would.
+  if (previewKind(f.type) === 'image') { thumb.src = URL.createObjectURL(f); thumb.hidden = false }
 }
 
 /**
@@ -2042,6 +2048,80 @@ $('btn-attach').addEventListener('click', () => ($('file-input') as HTMLInputEle
   offerFile(f, files?.length ?? 1)
 })
 $('attach-drop').addEventListener('click', () => showAttach(null))
+
+// ---- a voice note ---------------------------------------------------------
+/**
+ * Record, and hand the result to the same door every other file goes through.
+ *
+ * A voice note is not a new kind of message here — it is a file with an audio
+ * `mime`, so it inherits the encryption, the expiry, the caption, the reply and
+ * the delivery marker without a line of new wire format. What this code owns is
+ * the microphone and the two seconds around it.
+ *
+ * **Recording does not send.** It fills the composer chip, exactly like a
+ * pasted screenshot, so a note can carry a caption or answer a message — and so
+ * a recording made by accident costs one ✕ rather than an upload and an
+ * apology.
+ *
+ * The button is HIDDEN where the platform cannot record rather than dead. Same
+ * rule as the QR scanner: WebKitGTK is precisely the place where `MediaRecorder`
+ * and `getUserMedia` can come apart, and a switch that does nothing is worse
+ * than one that is not there.
+ */
+const VOICE_MAX_MS = 120_000
+let recording: Recording | null = null
+
+const recTime = (ms: number) => {
+  const t = Math.floor(ms / 1000)
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
+}
+
+function paintRecording(on: boolean) {
+  const chip = $('rec-chip'), btn = $('btn-voice')
+  if (chip) chip.hidden = !on
+  if (btn) {
+    btn.classList.toggle('rec', on)
+    btn.title = tr(on ? 'Zatrzymaj nagrywanie' : 'Nagraj głosówkę')
+  }
+  if (!on) $('rec-time')!.textContent = '0:00'
+}
+
+async function stopRecording() {
+  const r = recording; if (!r) return
+  recording = null; paintRecording(false)
+  try { offerFile(await r.stop()) }
+  catch (e: any) { ecLog('recording failed: ' + (e?.message ?? e)) }
+}
+
+$('btn-voice')?.addEventListener('click', async () => {
+  if (recording) return void stopRecording()
+  if (!activeGid && !activeRoom()) { toast(tr('Najpierw otwórz rozmowę')); return }
+  try {
+    recording = await startRecording({
+      maxMs: VOICE_MAX_MS,
+      onTick: (ms) => { $('rec-time')!.textContent = recTime(ms) },
+      // The cap stops it the way the user would have, and says so — a
+      // recording that simply ends is one you find out about after sending.
+      onLimit: () => { toast(tr('Nagranie ma limit {s} s — zatrzymane', { s: VOICE_MAX_MS / 1000 })); void stopRecording() },
+    })
+    paintRecording(true)
+  } catch (e: any) {
+    // A refused microphone is an ordinary answer, not a fault to hide.
+    recording = null; paintRecording(false)
+    ecLog('microphone refused: ' + (e?.name ?? '') + ' ' + (e?.message ?? e), 'debug')
+    toast(tr('Nie udało się nagrać — mikrofon niedostępny albo odmówiono dostępu'))
+  }
+})
+
+$('rec-cancel')?.addEventListener('click', () => {
+  const r = recording; if (!r) return
+  recording = null; paintRecording(false)
+  r.cancel()
+  toast(tr('Nagranie odrzucone'))
+})
+
+// Hidden, not disabled, where the platform cannot record.
+if (voiceSupported()) $('btn-voice')!.hidden = false
 
 // ---- the other two ways a file arrives ------------------------------------
 /**
@@ -2099,6 +2179,10 @@ document.addEventListener('paste', (e: ClipboardEvent) => {
 function clearComposer() {
   ;($('msg-input') as HTMLInputElement).value = ''
   showAttach(null)
+  // A recording belongs to the conversation it was started in, and the
+  // microphone must not outlive it — leaving it live would keep the platform's
+  // recording indicator on for a room nobody is in.
+  if (recording) { const r = recording; recording = null; paintRecording(false); r.cancel() }
   closeMentionPop() // a picker left open would offer the previous group's members
   mentionPicks.clear() // …and its choices would name people the new group does not have
 }
@@ -3406,13 +3490,19 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
       paintPreview(env) // a replay after switching rooms — already decrypted
     } else {
       const see = document.createElement('button')
-      see.className = 'f-see'; see.textContent = tr('Pokaż')
+      see.className = 'f-see'
+      // "Show" for a picture, "Play" for a voice note — the button says what
+      // pressing it does, and both mean the same fetch underneath.
+      see.textContent = previewKind(env.mime) === 'audio' ? tr('Odtwórz') : tr('Pokaż')
       see.addEventListener('click', () => void revealImage(env, see))
       wrap.insertBefore(see, act)
       fileEls.get(env)!.see = see
       // The setting, and the cap that keeps it honest: a fetch nobody asked for
       // must not be able to pull eighty megabytes because a `mime` said so.
-      if (kind === 'peer' && imgAuto && env.size <= AUTO_IMG_MAX) void revealImage(env, see)
+      // Images only — sound that starts by itself is a different kind of rude.
+      if (kind === 'peer' && imgAuto && previewKind(env.mime) === 'image' && env.size <= AUTO_IMG_MAX) {
+        void revealImage(env, see)
+      }
     }
   }
 
@@ -3483,7 +3573,12 @@ const humanSize = (n: number) =>
  * `mime` is a string the SENDER chose. It stays an ordinary file — the same
  * fail-closed rule the link renderer uses for schemes it does not know.
  */
-const isPreviewable = (mime: string) => mime.startsWith('image/') && mime !== 'image/svg+xml'
+type PreviewKind = 'image' | 'audio' | null
+const previewKind = (mime: string): PreviewKind =>
+  mime.startsWith('image/') && mime !== 'image/svg+xml' ? 'image'
+  : mime.startsWith('audio/') ? 'audio'
+  : null
+const isPreviewable = (mime: string) => previewKind(mime) !== null
 /** What an automatic fetch may cost when nobody asked for it. A manual Show has
  *  no cap: that one WAS asked for. */
 const AUTO_IMG_MAX = 2 * 1024 * 1024
@@ -3518,22 +3613,30 @@ $('img-auto')?.addEventListener('change', (e) => {
  * Called both when the bytes arrive and from `appendFile` on a replay, so the
  * two paths cannot draw it differently.
  */
-function paintPreview(env: FileEnv) {
+function paintPreview(env: FileEnv): HTMLElement | undefined {
   const url = previews.get(env); if (!url) return
   const els = fileEls.get(env); if (!els) return
   const bub = els.act.closest('.bubble') as HTMLElement | null
   const wrap = els.act.closest('.b-file') as HTMLElement | null
-  if (!bub || !wrap || bub.querySelector('.b-thumb')) return
-  const img = document.createElement('img')
-  img.className = 'b-thumb'
-  img.alt = env.name
-  img.src = url
+  if (!bub || !wrap || bub.querySelector('.b-thumb, .b-audio')) return
+  const kind = previewKind(env.mime)
+  let el: HTMLElement
+  if (kind === 'audio') {
+    const a = document.createElement('audio')
+    a.className = 'b-audio'; a.controls = true; a.preload = 'metadata'; a.src = url
+    el = a
+  } else {
+    const img = document.createElement('img')
+    img.className = 'b-thumb'; img.alt = env.name; img.src = url
+    el = img
+  }
   // Above the file row, so the name, the size and Download stay exactly where
-  // they were — the picture is added to the bubble, it does not replace it.
-  bub.insertBefore(img, wrap)
+  // they were — what is added to the bubble does not replace it.
+  bub.insertBefore(el, wrap)
   els.see?.remove()
   els.see = undefined
   refreshJump()
+  return el
 }
 
 /** Fetch and decrypt one file's bytes. The single place that does it, so
@@ -3554,7 +3657,10 @@ async function revealImage(env: FileEnv, btn: HTMLButtonElement) {
   try {
     const plain = await fetchPlain(env)
     previews.set(env, URL.createObjectURL(new Blob([plain as any], { type: env.mime })))
-    paintPreview(env)
+    const el = paintPreview(env)
+    // Pressing Play and then having to press play again is a bug, not caution:
+    // the click WAS the gesture, and it is the gesture browsers ask for.
+    if (el instanceof HTMLAudioElement) void el.play().catch(() => {})
   } catch (e: any) {
     // Past its lifetime ANY failure is expiry — the same reading `downloadFile`
     // makes, and for the same reason: the store hunts the public network for a

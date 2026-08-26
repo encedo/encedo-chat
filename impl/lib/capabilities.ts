@@ -138,6 +138,15 @@ export async function probeCapabilities(): Promise<CapabilityReport> {
   add('Notification', false, typeof (globalThis as any).Notification === 'function',
     'Brak powiadomień systemowych — o nowej wiadomości dowiesz się dopiero po wróceniu do aplikacji.')
 
+  // Recording needs both halves too, and WebKitGTK is exactly the platform
+  // where they can come apart. Without it the microphone button is hidden — the
+  // same rule as the QR scanner: an option that cannot do anything is worse
+  // than a missing one.
+  add('MediaRecorder', false,
+    typeof (globalThis as any).MediaRecorder === 'function'
+    && typeof navigator === 'object' && !!navigator.mediaDevices?.getUserMedia,
+    'Ta platforma nie umie nagrywać dźwięku — głosówek nie da się nagrać, ale przysłane można odsłuchać.')
+
   // Reading a QR needs both halves, and they fail apart: Shape Detection is
   // absent on desktop Linux/Windows Chrome (it ships on Android, macOS and
   // ChromeOS), while a camera may be missing anywhere. Showing a code always

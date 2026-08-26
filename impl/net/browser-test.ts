@@ -172,6 +172,11 @@ class Browser extends Page {
       `--user-data-dir=${this.dir}`,
       '--no-first-run', '--no-default-browser-check', '--disable-gpu',
       '--autoplay-policy=no-user-gesture-required',
+      // A fake microphone that answers instantly and a permission prompt that
+      // answers itself — otherwise the voice-note scenario would sit forever on
+      // a dialog no test can click.
+      '--use-fake-device-for-media-stream',
+      '--use-fake-ui-for-media-stream',
       // CI only, and deliberately not local. Ubuntu 24.04 restricts unprivileged
       // user namespaces, which is what Chromium's sandbox needs, so on a runner
       // it fails to start rather than falling back; and a container's /dev/shm
@@ -840,6 +845,52 @@ async function main() {
     // which in a packaged app is nowhere at all.
     if (!/X25519/.test(rtc.caps)) throw new Error('the platform report is not shown in Settings')
     step('and the platform report is readable in Settings, not just in the log')
+
+    // ---- a voice note --------------------------------------------------------
+    // The property under test is that a recording is OFFERED, not sent: it
+    // lands in the same chip a pasted file lands in, so it can still carry a
+    // caption or a reply. Send-on-stop would look identical until somebody
+    // wanted to say something alongside it.
+    scenario('a recording fills the composer and does not send itself')
+    const recOn = await A.eval<any>(`
+      const b = document.getElementById('btn-voice');
+      if (b.hidden) return { skipped: true };
+      b.click();
+      return new Promise((done) => setTimeout(() => done({
+        chip: !document.getElementById('rec-chip').hidden,
+        armed: b.classList.contains('rec'),
+        time: document.getElementById('rec-time').textContent,
+      }), 1200));
+    `)
+    if (recOn.skipped) {
+      step('no microphone on this platform — the button is hidden, as designed')
+    } else {
+      if (!recOn.chip || !recOn.armed) throw new Error('recording started without saying so')
+      if (recOn.time === '0:00') throw new Error('the elapsed time never moved')
+      step('recording says it is recording, and counts')
+
+      const recOff = await A.eval<any>(`
+        document.getElementById('btn-voice').click();
+        return new Promise((done) => setTimeout(() => done({
+          rec: document.getElementById('rec-chip').hidden,
+          chip: !document.getElementById('attach-chip').hidden,
+          name: document.getElementById('attach-name').textContent,
+          size: document.getElementById('attach-size').textContent,
+          sent: document.querySelectorAll('#messages .b-file').length,
+        }), 900));
+      `)
+      if (!recOff.rec) throw new Error('stopping left the recording chip up')
+      if (!recOff.chip || !/glosowka/.test(recOff.name)) throw new Error(`the recording did not reach the composer: ${recOff.name}`)
+      if (!/\d/.test(recOff.size)) throw new Error('the recorded file has no size — nothing was captured')
+      step('stopping puts the recording in the file chip, named and sized')
+
+      const clean = await A.eval<any>(`
+        document.getElementById('attach-drop').click();
+        return { chip: document.getElementById('attach-chip').hidden };
+      `)
+      if (!clean.chip) throw new Error('the recording could not be dropped')
+      step('and it can be dropped like any other attachment')
+    }
 
     // ---- pasting a file ------------------------------------------------------
     // Needs no store, so it runs on every pass: what is proved here is that a
