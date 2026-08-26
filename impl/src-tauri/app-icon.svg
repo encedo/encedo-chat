@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- onchato — the presence dot, with the tail it grows only where it has to
+       introduce itself.
+
+       One value of green, not the product's two: an app icon sits on a light
+       dock and on a dark taskbar and cannot be tuned for either, so it takes
+       the midpoint between #0f6b57 and #35c99e.
+
+       The mark keeps a margin on every side. A glyph that touches the canvas
+       edge is one the platform crops: macOS rounds the corners, Android masks
+       to whatever shape the launcher uses. -->
+  <g fill="#16a37f">
+    <path d="M128 342 Q112 412 134 444 Q172 424 200 392 Z"
+          stroke="#16a37f" stroke-width="14" stroke-linejoin="round"/>
+    <circle cx="256" cy="234" r="168"/>
+  </g>
+</svg>

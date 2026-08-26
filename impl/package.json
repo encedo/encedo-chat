@@ -1,6 +1,6 @@
 {
   "name": "onchato-spike",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "type": "module",
   "description": "v6 TS spike \u2014 rendezvous spine on the v5 libp2p base. Crypto handshake (EH-2/ratchet) held pending cryptographer review.",

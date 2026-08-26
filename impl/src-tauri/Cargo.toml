@@ -1,6 +1,6 @@
 [package]
 name = "onchato"
-version = "0.3.2"
+version = "0.3.3"
 description = "onchato desktop (Tauri 2) — a native shell over the web bundle"
 edition = "2021"
 rust-version = "1.77"
