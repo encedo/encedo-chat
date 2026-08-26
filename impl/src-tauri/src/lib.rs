@@ -179,6 +179,40 @@ mod desk {
         reveal(&app);
     }
 
+    /**
+     * Turn WebRTC on in WebKitGTK.
+     *
+     * The desktop build has been on the relay since it existed, and the reason
+     * was recorded as "WebKitGTK has no WebRTC". That was wrong, and the probe
+     * shipped in the previous commit is what showed it: in the packaged app
+     * `RTCPeerConnection` **does not exist**, while the installed
+     * `libwebkit2gtk-4.1-0` carries the symbol and GStreamer carries the DTLS
+     * plugins. Nothing was missing — the feature is a WebKitSettings property
+     * that **defaults to off**, and nothing had ever turned it on.
+     *
+     * So it is one line, reached through `with_webview`, which on Linux hands
+     * back the `webkit2gtk::WebView` itself. `enable-media-stream` goes with
+     * it: getUserMedia is a separate switch, and WebRTC without it is a
+     * connection with nothing to put in it.
+     *
+     * Best effort on purpose. A build of WebKitGTK compiled without WebRTC
+     * ignores the property, the probe says so in as many words, and the app
+     * carries on through the relay exactly as it did before — which is the
+     * behaviour this replaces, not a fallback added for it.
+     */
+    #[cfg(target_os = "linux")]
+    fn enable_webrtc(app: &tauri::App) {
+        use webkit2gtk::{SettingsExt, WebViewExt};
+        let Some(win) = app.get_webview_window("main") else { return };
+        let _ = win.with_webview(|wv| {
+            let settings = WebViewExt::settings(&wv.inner());
+            if let Some(s) = settings {
+                s.set_enable_webrtc(true);
+                s.set_enable_media_stream(true);
+            }
+        });
+    }
+
     pub fn wire(b: Builder<Wry>) -> Builder<Wry> {
         b.plugin(tauri_plugin_notification::init())
             .plugin(tauri_plugin_autostart::init(
@@ -230,6 +264,10 @@ mod desk {
                 let shell = app.state::<Shell>();
                 *shell.show_item.lock().unwrap() = Some(show);
                 *shell.quit_item.lock().unwrap() = Some(quit);
+
+                #[cfg(target_os = "linux")]
+                enable_webrtc(app);
+
                 Ok(())
             })
             .on_window_event(|window, event| {

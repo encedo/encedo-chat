@@ -2654,7 +2654,8 @@ ecLog(`origin: ${location.origin}${location.pathname}`
 /**
  * What this platform can actually do, checked before anything needs it.
  *
- * WebKitGTK is why this exists: the desktop webview has X25519 but no WebRTC,
+ * WebKitGTK is why this exists: the desktop webview has X25519, and had no
+ * WebRTC until the shell turned the setting on,
  * and discovering that cost a debugging session instead of a line of output.
  * Every webview is a different subset — Android's Chromium tracks the Play
  * Store rather than the OS version, iOS is whatever WebKit the system shipped —

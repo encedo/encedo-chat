@@ -3,8 +3,12 @@
  * is needed.
  *
  * This exists because of WebKitGTK. The Tauri desktop build runs on a webview
- * that HAS X25519 but has no WebRTC, and finding that out took a debugging
- * session rather than a line of output. Every webview is a different subset:
+ * that has X25519 and, as this file long claimed, "no WebRTC" — a claim this
+ * very probe disproved once it was shipped: `RTCPeerConnection` was absent
+ * because `enable-webrtc` is a WebKitSettings property that defaults to OFF,
+ * and nothing had ever set it (the shell does now). Finding THAT out took a
+ * debugging session; the point of this file is that the next one takes a line
+ * of output. Every webview is a different subset:
  * Android's is Chromium updated through the Play Store (so its age tracks the
  * store, not the OS version), iOS is WKWebView and therefore whatever WebKit
  * the OS shipped, desktop Linux is WebKitGTK. Guessing from version numbers is
@@ -126,7 +130,7 @@ export async function probeCapabilities(): Promise<CapabilityReport> {
 
   // Optional from here down: the app runs without these, with less.
   add('WebRTC', false, typeof RTCPeerConnection === 'function',
-    'Brak WebRTC — treść pójdzie przez węzeł sieci (relay), nie bezpośrednio. Tak działa też build desktopowy.')
+    'Brak WebRTC — treść pójdzie przez węzeł sieci (relay), nie bezpośrednio.')
 
   add('visualViewport', false, typeof (globalThis as any).visualViewport === 'object',
     'Brak visualViewport — na telefonie klawiatura może zasłonić pole wpisywania.')
