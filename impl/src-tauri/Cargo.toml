@@ -1,6 +1,6 @@
 [package]
 name = "onchato"
-version = "0.3.3"
+version = "0.3.4"
 description = "onchato desktop (Tauri 2) — a native shell over the web bundle"
 edition = "2021"
 rust-version = "1.77"
@@ -38,6 +38,11 @@ tauri-plugin-autostart = "2"
 # compile against ours.
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = "=2.0.2"
+# Notifications are sent by hand on Linux — see `xdg_notify` in lib.rs for the
+# reason, which is that the plugin's connection dies before the banner is read.
+# Already in the tree via notify-rust; naming it makes it ours to hold open.
+zbus = "5"
+futures-util = "0.3"
 
 # Smaller, self-contained binary for a test .deb / AppImage.
 [profile.release]

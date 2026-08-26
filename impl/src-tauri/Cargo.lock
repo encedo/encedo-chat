@@ -2307,8 +2307,9 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "onchato"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
+ "futures-util",
  "serde",
  "serde_json",
  "tauri",
@@ -2316,6 +2317,7 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-notification",
  "webkit2gtk",
+ "zbus",
 ]
 
 [[package]]

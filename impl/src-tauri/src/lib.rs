@@ -57,6 +57,10 @@ mod desk {
         quit_item: Mutex<Option<MenuItem<Wry>>>,
         hidden_title: Mutex<String>,
         hidden_body: Mutex<String>,
+        /// The session bus, held open for the life of the process. See
+        /// `xdg_notify` — this field IS the fix.
+        #[cfg(target_os = "linux")]
+        bus: Mutex<Option<zbus::Connection>>,
     }
 
     impl Default for Shell {
@@ -72,6 +76,8 @@ mod desk {
                 quit_item: Mutex::new(None),
                 hidden_title: Mutex::new("onchato".into()),
                 hidden_body: Mutex::new("Still running in the tray.".into()),
+                #[cfg(target_os = "linux")]
+                bus: Mutex::new(None),
             }
         }
     }
@@ -87,6 +93,145 @@ mod desk {
         }
     }
 
+    /// Deliver one banner on Linux, over a connection we keep open.
+    ///
+    /// ## Why this does not use the plugin
+    ///
+    /// Reported as "the notification appears for a tenth of a second and
+    /// vanishes", which is a mechanism and not a mood. The plugin's desktop
+    /// path is:
+    ///
+    /// ```ignore
+    /// tauri::async_runtime::spawn(async move { let _ = notification.show(); });
+    /// ```
+    ///
+    /// `show()` returns a handle that OWNS the zbus connection it sent on, and
+    /// `let _ =` drops it on the spot. The session-bus connection closes a
+    /// moment after the Notify call — and a notification daemon withdraws the
+    /// notifications of a sender that has left the bus, precisely so that a
+    /// crashed app does not leave banners behind. Ours had not crashed; it had
+    /// hung up. The banner is drawn and pulled, every time, for everyone.
+    ///
+    /// So the connection is opened once, kept in `Shell` for the life of the
+    /// process, and every notification goes over it. Nothing else changes:
+    /// `lib/notify.ts` still decides whether a banner happens and how much it
+    /// may say, and it still never carries message text.
+    ///
+    /// Two hints are worth the four lines they cost. `desktop-entry` points at
+    /// the installed `onchato.desktop`, so the banner carries the app's real
+    /// name and icon instead of a generic one; `urgency` normal keeps it out of
+    /// the "critical" class, which on GNOME does not time out at all.
+    #[cfg(target_os = "linux")]
+    async fn deliver(app: AppHandle, title: String, body: String, id: i32) -> Result<(), String> {
+        use std::collections::HashMap;
+        use zbus::zvariant::Value;
+
+        // Taken in its own statement so no lock is held across an await.
+        let held = app.state::<Shell>().bus.lock().unwrap().clone();
+        let conn = match held {
+            Some(c) => c,
+            None => {
+                let c = zbus::Connection::session().await.map_err(|e| e.to_string())?;
+                *app.state::<Shell>().bus.lock().unwrap() = Some(c.clone());
+                c
+            }
+        };
+
+        let hints: HashMap<&str, Value> = HashMap::from([
+            ("desktop-entry", Value::from("onchato")),
+            ("urgency", Value::from(1u8)),
+        ]);
+        let reply = conn.call_method(
+            Some("org.freedesktop.Notifications"),
+            "/org/freedesktop/Notifications",
+            Some("org.freedesktop.Notifications"),
+            "Notify",
+            // app_name, replaces_id, app_icon, summary, body, actions, hints, timeout
+            &(
+                "onchato",
+                id.unsigned_abs(),
+                "onchato",
+                title.as_str(),
+                body.as_str(),
+                Vec::<&str>::new(),
+                hints,
+                -1i32, // the server's own default; we are not the ones to decide
+            ),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+        // What the server did with it, in the app's own log.
+        //
+        // "It appears for a tenth of a second and vanishes" is a report nobody
+        // can act on, because every cause looks the same from the outside: the
+        // banner was never drawn, or it expired, or the desktop dismissed it,
+        // or a person swiped it away. The protocol answers this exactly —
+        // `NotificationClosed` carries a REASON — and until now we threw that
+        // answer away. Now it lands in `journalctl --user -t onchato`, with the
+        // milliseconds it survived.
+        //
+        // Bounded: one watcher per notification, and it gives up after ten
+        // seconds. A banner still on screen after that was not the complaint.
+        let id_sent: u32 = reply.body().deserialize::<u32>().unwrap_or(0);
+        tauri::async_runtime::spawn(async move {
+            let _ = watch_closed(conn, id_sent).await;
+        });
+        Ok(())
+    }
+
+    /// Wait for this notification's obituary and print it.
+    #[cfg(target_os = "linux")]
+    async fn watch_closed(conn: zbus::Connection, id: u32) -> Result<(), String> {
+        use futures_util::StreamExt;
+        let rule = zbus::MatchRule::builder()
+            .msg_type(zbus::message::Type::Signal)
+            .interface("org.freedesktop.Notifications")
+            .map_err(|e| e.to_string())?
+            .member("NotificationClosed")
+            .map_err(|e| e.to_string())?
+            .build();
+        let mut stream = zbus::MessageStream::for_match_rule(rule, &conn, Some(8))
+            .await
+            .map_err(|e| e.to_string())?;
+        let started = std::time::Instant::now();
+        let deadline = std::time::Duration::from_secs(10);
+        while let Some(Ok(msg)) = stream.next().await {
+            let Ok((closed, reason)) = msg.body().deserialize::<(u32, u32)>() else { continue };
+            if closed != id {
+                if started.elapsed() > deadline { break }
+                continue
+            }
+            // 1 expired · 2 dismissed by the person · 3 closed by an app · 4 unspecified
+            let why = match reason {
+                1 => "expired",
+                2 => "dismissed by the user",
+                3 => "closed by a CloseNotification call",
+                _ => "unspecified",
+            };
+            eprintln!(
+                "onchato: notification {id} closed after {} ms — reason {reason} ({why})",
+                started.elapsed().as_millis()
+            );
+            return Ok(());
+        }
+        Ok(())
+    }
+
+    /// Everywhere else the plugin is fine: the fault above is specific to the
+    /// D-Bus notification protocol, where the sender's presence on the bus is
+    /// what keeps a banner alive.
+    #[cfg(not(target_os = "linux"))]
+    async fn deliver(app: AppHandle, title: String, body: String, id: i32) -> Result<(), String> {
+        app.notification()
+            .builder()
+            .id(id)
+            .title(title)
+            .body(body)
+            .show()
+            .map_err(|e| e.to_string())
+    }
+
     /// Show a system notification.
     ///
     /// `title` and `body` are decided by `lib/notify.ts` on the web side and
@@ -98,14 +243,8 @@ mod desk {
     /// uses: the same conversation replaces its own banner instead of stacking
     /// ten of them, which is the `tag` behaviour the browser gives us for free.
     #[tauri::command]
-    fn desk_notify(app: AppHandle, title: String, body: String, id: i32) -> Result<(), String> {
-        app.notification()
-            .builder()
-            .id(id)
-            .title(title)
-            .body(body)
-            .show()
-            .map_err(|e| e.to_string())
+    async fn desk_notify(app: AppHandle, title: String, body: String, id: i32) -> Result<(), String> {
+        deliver(app, title, body, id).await
     }
 
     /// `granted` / `denied` / `default`, in the words the web side already uses.
@@ -290,7 +429,14 @@ mod desk {
                     *told = true;
                     let title = shell.hidden_title.lock().unwrap().clone();
                     let body = shell.hidden_body.lock().unwrap().clone();
-                    let _ = app.notification().builder().title(title).body(body).show();
+                    // The same path every other banner takes — including the
+                    // connection that has to outlive it. This one is the first
+                    // notification most people will see, so it is the worst one
+                    // to deliver through the broken route.
+                    let app2 = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = deliver(app2, title, body, 1).await;
+                    });
                 }
             })
     }
