@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "The packaged desktop shell: system notifications (the webview's own Notification is refused in a packaged app, so the host sends them) and a login item. Desktop only — Android loads the same library and has neither.",
+  "platforms": ["linux", "macOS", "windows"],
+  "windows": ["main"],
+  "permissions": ["notification:default", "autostart:default"]
+}

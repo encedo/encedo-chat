@@ -26,6 +26,10 @@ import { splitByMentions, resolveMention, mentionName, closeMentions, mentionsPu
 import { makeQuote, type QuoteRef } from '../../lib/quote.ts'
 import { canEdit, acceptEdit, EDIT_WINDOW_MS } from '../../lib/edits.ts'
 import { planNotification, isNotifyMode, type NotifyMode } from '../../lib/notify.ts'
+import {
+  isDesktopShell, notifySupported, notifyPermission, notifyRequest, notifyShow, type Banner,
+  closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop,
+} from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob } from '../../net/ipfs.ts'
@@ -1762,16 +1766,20 @@ function knockReceived(room: Room) {
   flashTitle(tr('👋 {name} puka', { name: room.contact.name }))
   const plan = planNotification({
     mode: notifyMode,
-    granted: notifySupported() && Notification.permission === 'granted',
+    granted: notifySupported() && notifyPermission() === 'granted',
     away: windowAway(),
     mine: false,
     name: room.contact.name,
   })
   if (!plan.show) return
-  try {
-    const n = new Notification(plan.name ?? 'onchato', { body: tr('Puka do Ciebie'), tag: 'knock:' + room.contact.pub })
-    n.addEventListener('click', () => { window.focus(); n.close(); void activateRoom(room.contact.pub) })
-  } catch { /* the sound and the transcript line already said it */ }
+  // The sound and the transcript line have already said it, so a banner that
+  // cannot be drawn is not worth reporting.
+  notifyShow({
+    title: plan.name ?? 'onchato',
+    body: tr('Puka do Ciebie'),
+    tag: 'knock:' + room.contact.pub,
+    onClick: () => { void activateRoom(room.contact.pub) },
+  })
 }
 
 // ---- reading a QR: pairing, and the one honest verification ----------------
@@ -2058,11 +2066,13 @@ function clearComposer() {
   const sel = $('lang-select') as HTMLSelectElement
   if (sel) {
     sel.value = getLocale()
-    sel.addEventListener('change', () => { setLocale(sel.value); renderContacts(); renderGroups() })
+    sel.addEventListener('change', () => { setLocale(sel.value); renderContacts(); renderGroups(); initDesktopShell() })
   }
   document.documentElement.lang = getLocale()
   applyDom()
   paintTransportSetting()
+  initDesktopShell()
+  void paintDesktopSettings()
   // The boot screen goes now and not a moment earlier: this is the first point
   // at which the page says what it means in the reader's language. Removed
   // rather than hidden — it has served its whole purpose and must never come
@@ -2930,11 +2940,10 @@ const notifyKey = () => 'ec-notify-' + (session?.idKey ?? '')
  * nobody sees, and `document.hidden` is false for all of those.
  */
 const windowAway = () => document.hidden || !document.hasFocus()
-const notifySupported = () => typeof Notification === 'function'
 let notifyMode: NotifyMode = 'off'
 /** Live notifications by conversation, so ten messages replace each other
  *  instead of stacking ten banners for one room. */
-const liveNotes = new Map<string, Notification>()
+const liveNotes = new Map<string, Banner>()
 
 function loadNotifyMode() {
   const v = (() => { try { return localStorage.getItem(notifyKey()) } catch { return null } })()
@@ -2953,14 +2962,15 @@ for (const el of document.querySelectorAll('#notify-opts input')) {
   el.addEventListener('change', async () => {
     const v = (document.querySelector('#notify-opts input:checked') as HTMLInputElement | null)?.value
     const want: NotifyMode = isNotifyMode(v) ? v : 'off'
-    if (want !== 'off' && notifySupported() && Notification.permission !== 'granted') {
+    if (want !== 'off' && notifySupported() && notifyPermission() !== 'granted') {
       // The gesture that asks is the same one that turns it on — browsers want a
       // user action, and this is the moment the user knows what it is for.
-      let res: NotificationPermission = 'denied'
-      try { res = await Notification.requestPermission() } catch {}
+      const res = await notifyRequest()
       if (res !== 'granted') {
         notifyMode = 'off'; paintNotifySetting()
-        toast(tr('Przeglądarka nie zgodziła się na powiadomienia — trzeba jej pozwolić w ustawieniach strony'))
+        toast(isDesktopShell()
+          ? tr('System nie zgodził się na powiadomienia — trzeba ich pozwolić w ustawieniach systemu')
+          : tr('Przeglądarka nie zgodziła się na powiadomienia — trzeba jej pozwolić w ustawieniach strony'))
         try { localStorage.setItem(notifyKey(), 'off') } catch {}
         return
       }
@@ -2972,6 +2982,64 @@ for (const el of document.querySelectorAll('#notify-opts input')) {
   })
 }
 
+// ---- the packaged desktop shell ------------------------------------------
+/**
+ * Two settings that only exist when the app is a window rather than a tab, and
+ * one of them is here for a product reason rather than a preference: onchato
+ * has no store-and-forward, so a closed window is not "later", it is a
+ * conversation that cannot happen. Closing therefore hides to the tray by
+ * default and the section says so in as many words.
+ *
+ * The section is hidden — not disabled — in a browser. A dead switch is worse
+ * than an absent one: it invites the reader to look for the thing that turns it
+ * on. Same rule as the QR scanner button and the notification modes.
+ */
+async function paintDesktopSettings() {
+  const on = isDesktopShell()
+  const sec = $('desk-section'), opts = $('desk-opts'), note = $('desk-note')
+  if (sec) sec.hidden = !on
+  if (opts) opts.hidden = !on
+  if (note) note.hidden = !on
+  if (!on) return
+  const tray = $('desk-tray') as HTMLInputElement | null
+  if (tray) tray.checked = closeToTray()
+  const auto = $('desk-autostart') as HTMLInputElement | null
+  // Read from the SYSTEM, not from a preference of ours — a desktop can refuse
+  // a login item, and a checkbox showing what we asked for rather than what
+  // happened is a checkbox that lies.
+  if (auto) auto.checked = await autostartEnabled()
+}
+/**
+ * Hand the shell its strings in the app's language. The tray menu is the only
+ * part of onchato drawn outside the webview, so it is the only part that can
+ * end up in a different language than everything around it — which is exactly
+ * the seam that makes a packaged web app feel packaged. Called again on every
+ * language change for the same reason.
+ */
+function initDesktopShell() {
+  void initDesktop({
+    show: tr('Pokaż onchato'),
+    quit: tr('Zakończ'),
+    hiddenTitle: tr('onchato działa dalej'),
+    hiddenBody: tr('Okno zostało schowane do zasobnika — jesteś nadal osiągalny/a. Wyjście jest w menu ikony.'),
+  }).then(() => {
+    // The host answers about the notification permission asynchronously, so the
+    // notification section was painted before the answer arrived.
+    paintNotifySetting()
+    void paintDesktopSettings()
+  })
+}
+$('desk-tray')?.addEventListener('change', (e) => {
+  setCloseToTray((e.target as HTMLInputElement).checked)
+})
+$('desk-autostart')?.addEventListener('change', async (e) => {
+  const box = e.target as HTMLInputElement
+  const want = box.checked
+  const got = await setAutostart(want)
+  box.checked = got
+  if (got !== want) toast(tr('Nie udało się ustawić startu przy uruchomieniu systemu'))
+})
+
 /**
  * Notify about one arriving event. `where` identifies the conversation twice
  * over: it is the notification tag (so a room replaces its own banner) and what
@@ -2981,7 +3049,7 @@ function notifyArrival(ev: Ev, where: { pub?: string; gid?: string; name: string
   if (ev.t !== 'msg' && ev.t !== 'file') return
   const plan = planNotification({
     mode: notifyMode,
-    granted: notifySupported() && Notification.permission === 'granted',
+    granted: notifySupported() && notifyPermission() === 'granted',
     away: windowAway(),
     mine: ev.kind === 'me',
     name: where.name,
@@ -2989,19 +3057,19 @@ function notifyArrival(ev: Ev, where: { pub?: string; gid?: string; name: string
   if (!plan.show) return
   const tag = where.gid ?? where.pub ?? ''
   try {
-    const n = new Notification(plan.name ?? 'onchato', { // the product name is not translated
+    const n = notifyShow({
+      title: plan.name ?? 'onchato', // the product name is not translated
       body: ev.t === 'file' ? tr('Przysłano plik') : tr('Nowa wiadomość'),
       tag, // one banner per conversation, replaced rather than stacked
-      silent: false,
+      onClick: () => {
+        liveNotes.delete(tag)
+        if (where.gid) void activateGroup(where.gid)
+        else if (where.pub) void activateRoom(where.pub)
+      },
     })
+    if (!n) return
     liveNotes.get(tag)?.close()
     liveNotes.set(tag, n)
-    n.addEventListener('click', () => {
-      window.focus()
-      n.close(); liveNotes.delete(tag)
-      if (where.gid) void activateGroup(where.gid)
-      else if (where.pub) void activateRoom(where.pub)
-    })
   } catch (e: any) { ecLog('notification failed: ' + (e?.message ?? e), 'debug') }
 }
 /** Coming back to the window makes every banner stale — they were about being

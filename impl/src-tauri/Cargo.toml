@@ -17,9 +17,20 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `tray-icon` is what makes the shell useful at all: onchato has no
+# store-and-forward, so a closed window is a person nobody can reach. The tray
+# is how the app stays reachable without a window on screen.
+tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Desktop only, and deliberately: Android loads this same library from Java, and
+# a tray or a login item mean nothing there. The webview's own `Notification` is
+# refused in a packaged app (the host has to answer the permission request and
+# nothing here did), which is why the notification path goes through the plugin.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
 
 # Smaller, self-contained binary for a test .deb / AppImage.
 [profile.release]
