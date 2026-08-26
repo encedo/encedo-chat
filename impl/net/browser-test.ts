@@ -194,9 +194,34 @@ class Browser extends Page {
     })
     this.ws.addEventListener('message', (ev: any) => this.onMessage(String(ev.data)))
 
-    const { targetInfos } = await this.send('Target.getTargets')
-    const page = targetInfos.find((t: any) => t.type === 'page')
-    if (!page) throw new Error(`${this.name}: no page target`)
+    // Attach to the page showing OUR url, not to whichever page target happens
+    // to enumerate first.
+    //
+    // Chromium opens exactly one tab and the naive `find(type === 'page')` was
+    // right for years. Google Chrome — which CI now uses, because the Chromium
+    // there is a snap that cannot start — sometimes carries a second page
+    // target (a new-tab page), and attaching to that one produces a session
+    // where every selector is null, no console output and no error: the harness
+    // reported `Cannot read properties of null` from the first thing it looked
+    // for, and the log said nothing about being on the wrong page entirely.
+    //
+    // The URL is polled because a target can exist before it has navigated.
+    const want = new URL(url).origin
+    let page: any = null
+    for (let i = 0; i < 40 && !page; i++) {
+      const { targetInfos } = await this.send('Target.getTargets')
+      const pages = targetInfos.filter((t: any) => t.type === 'page')
+      page = pages.find((t: any) => (t.url ?? '').startsWith(want))
+        // One page and nothing to choose between: keep the old behaviour rather
+        // than stalling on a browser that reports its url late.
+        ?? (pages.length === 1 && i > 20 ? pages[0] : null)
+      if (!page) await new Promise((r) => setTimeout(r, 100))
+    }
+    if (!page) {
+      const { targetInfos } = await this.send('Target.getTargets')
+      const seen = targetInfos.map((t: any) => `${t.type}:${t.url}`).join(', ')
+      throw new Error(`${this.name}: no page target at ${want} — targets were [${seen}]`)
+    }
     const att = await this.send('Target.attachToTarget', { targetId: page.targetId, flatten: true })
     this.sessionId = att.sessionId
     await this.send('Runtime.enable', {}, true)
