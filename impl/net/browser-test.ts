@@ -1287,7 +1287,7 @@ async function main() {
     // Desktop Linux has no Shape Detection: the control must be ABSENT rather
     // than present and unable to do anything.
     const scanHidden = await A.eval<boolean>(`
-      document.querySelector('#pane-contacts .add-btn').click();
+      document.getElementById('btn-add-peer').click();
       const b = document.getElementById('btn-scan');
       const hidden = b.hidden;
       document.getElementById('add-cancel').click();
@@ -1311,7 +1311,7 @@ async function main() {
       // assigns before it can scan — so the stub has to own the property too.
       Object.defineProperty(HTMLMediaElement.prototype, 'srcObject',
         { configurable: true, get() { return this.__stub ?? null }, set(v) { this.__stub = v } });
-      document.querySelector('#pane-contacts .add-btn').click();
+      document.getElementById('btn-add-peer').click();
       document.getElementById('btn-scan').click();
       return 1`)
     await A.waitFor('A recognised the scanned key as one it already holds',
@@ -1641,7 +1641,7 @@ async function main() {
     // A makes a group with sim-b. The Sender-Key Distribution rides the existing
     // A↔B 1:1 ratchet; B joins and hands its own key back; then A's broadcast on
     // the group topic reaches B (§8, all-ECDH, deniable).
-    await A.eval(`document.getElementById('tab-groups').click(); document.querySelector('#pane-groups .add-btn').click(); return 1`)
+    await A.eval(`document.getElementById('tab-groups').click(); document.getElementById('btn-new-group').click(); return 1`)
     await A.waitFor('the new-group modal', `return document.getElementById('group-modal').classList.contains('open')`, 6_000)
     await A.eval(`
       document.getElementById('group-name').value = 'Testowa';
@@ -1800,7 +1800,7 @@ async function main() {
     scenario('a SECOND group also works (not just the first)')
     // Reported: only the first group worked. Make a second group with the same
     // member and prove a broadcast in IT reaches B too.
-    await A.eval(`document.getElementById('tab-groups').click(); document.querySelector('#pane-groups .add-btn').click(); return 1`)
+    await A.eval(`document.getElementById('tab-groups').click(); document.getElementById('btn-new-group').click(); return 1`)
     await A.waitFor('the new-group modal (2nd)', `return document.getElementById('group-modal').classList.contains('open')`, 6_000)
     await A.eval(`
       document.getElementById('group-name').value = 'Testowa2';
@@ -1858,17 +1858,17 @@ async function main() {
       const box = document.getElementById('group-search');
       const rows = () => document.querySelectorAll('#pane-groups .contact').length;
       const all = rows();
-      const contactsBoxHidden = document.getElementById('search-contacts').hidden;
+      const contactsBoxHidden = document.getElementById('head-contacts').hidden;
       box.value = 'zzzz-nie-ma'; box.dispatchEvent(new Event('input'));
       const filtered = rows();
       box.value = ''; box.dispatchEvent(new Event('input'));
       const back = rows();
       document.getElementById('tab-network').click();
-      const hiddenOnNetwork = document.getElementById('search-contacts').hidden
-                           && document.getElementById('search-groups').hidden;
+      const hiddenOnNetwork = document.getElementById('head-contacts').hidden
+                           && document.getElementById('head-groups').hidden;
       document.getElementById('tab-contacts').click();
       return { all, filtered, back, hiddenOnNetwork, contactsBoxHidden,
-               shownAgain: !document.getElementById('search-contacts').hidden };
+               shownAgain: !document.getElementById('head-contacts').hidden };
     `)
     if (!onGroups.contactsBoxHidden) throw new Error("the contacts box followed us onto the Groups tab")
     if (onGroups.all === 0) throw new Error('no groups to filter — the scenario is not testing anything')
@@ -1997,7 +1997,7 @@ async function main() {
     // is how a link arrives out of a messenger, and from an origin that is not
     // this window's, because the sender's app wrote it.
     await B.eval(`
-      document.querySelector('#pane-contacts .add-btn').click();
+      document.getElementById('btn-add-peer').click();
       document.getElementById('add-name').value = 'wklejony';
       document.getElementById('add-pub').value =
         'ktoś Ci przysyła: https://onchato.com/i' + ${JSON.stringify(share.link.slice(share.link.indexOf('#')))} + ' — dodaj mnie';

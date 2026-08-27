@@ -1112,11 +1112,8 @@ async function syncPresence() {
 }
 function renderContacts() {
   const pane = $('pane-contacts'); pane.innerHTML = ''
-  // Add-peer lives INSIDE the contacts pane (like "+ Nowa grupa" in groups), so it
-  // only shows on this tab — and above the empty-state, since that is when you need it.
-  const add = document.createElement('div'); add.className = 'add-row'
-  const addBtn = document.createElement('button'); addBtn.className = 'add-btn'; addBtn.textContent = tr('+ Dodaj peera')
-  addBtn.addEventListener('click', () => openModal()); add.appendChild(addBtn); pane.appendChild(add)
+  // Add-peer and the filter are static markup above this pane — see index.html
+  // for why neither can live inside something that is rebuilt on every keystroke.
   const filter = val('contact-search').toLowerCase()
   const list = contactsCache.filter((c) => !filter || c.name.toLowerCase().includes(filter))
   if (!list.length) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = filter ? tr('(brak dopasowań)') : tr('(brak kontaktów — dodaj peera)'); pane.appendChild(e); return }
@@ -1160,6 +1157,8 @@ function renderContacts() {
 }
 $('contact-search').addEventListener('input', renderContacts)
 $('group-search').addEventListener('input', renderGroups)
+$('btn-add-peer').addEventListener('click', () => openModal())
+$('btn-new-group').addEventListener('click', openGroupModal)
 
 // ---- ask / rename: two promise-shaped modals reused by every destructive or
 // editing action. Deliberately NOT window.confirm/prompt: a mobile webview
@@ -2416,8 +2415,8 @@ for (const [tab, pane] of [['tab-contacts', 'contacts'], ['tab-groups', 'groups'
     for (const p of ['contacts', 'groups', 'network']) $('pane-' + p).hidden = (p !== pane)
     // Each list's box travels with its list. Nothing on the Network tab is a
     // list of names, so neither box follows it there.
-    $('search-contacts').hidden = pane !== 'contacts'
-    $('search-groups').hidden = pane !== 'groups'
+    $('head-contacts').hidden = pane !== 'contacts'
+    $('head-groups').hidden = pane !== 'groups'
     if (pane === 'groups') renderGroups()
     if (pane === 'network') startNetwork(); else stopNetwork()
   })
@@ -4824,14 +4823,6 @@ async function deleteGroup(gid: string) {
 
 function renderGroups() {
   const pane = $('pane-groups'); pane.innerHTML = ''
-  const add = document.createElement('div'); add.className = 'add-row'
-  const btn = document.createElement('button'); btn.className = 'add-btn'; btn.textContent = tr('+ Nowa grupa')
-  btn.addEventListener('click', openGroupModal); add.appendChild(btn); pane.appendChild(add)
-  // The search box sits ABOVE the tabs, so it looks like it filters whatever is
-  // on screen — and until now it filtered contacts only, which made it a dead
-  // control on this tab. It came that way from the mockup skin and nobody had
-  // typed in it here. Either it works on both lists or it belongs inside the
-  // contacts pane; this is the cheaper half of that choice, and the honest one.
   const filter = val('group-search').toLowerCase()
   const shown = [...groupsUI.values()].filter((g) => !filter || groupDisplay(g).toLowerCase().includes(filter))
   if (!shown.length) {

@@ -782,9 +782,19 @@
            pane that renders below it, because both panes are rebuilt on every
            keystroke and an input rebuilt under a typing finger loses the
            caret. -->
-      <div class="search-wrap" id="search-contacts"><input id="contact-search" type="text" placeholder="Szukaj kontaktu…" data-i18n-placeholder="Szukaj kontaktu…" autocomplete="off"></div>
+      <!-- Add first, then the filter, then the list. Both live OUTSIDE the pane
+           below them: the pane is rebuilt on every keystroke, and an input
+           rebuilt under a typing finger loses the caret — which is also why the
+           add button moved out here rather than the search box moving in. -->
+      <div id="head-contacts">
+        <div class="add-row"><button class="add-btn" id="btn-add-peer" data-i18n="+ Dodaj peera">+ Dodaj peera</button></div>
+        <div class="search-wrap"><input id="contact-search" type="text" placeholder="Szukaj kontaktu…" data-i18n-placeholder="Szukaj kontaktu…" autocomplete="off"></div>
+      </div>
       <div class="pane" id="pane-contacts"></div>
-      <div class="search-wrap" id="search-groups" hidden><input id="group-search" type="text" placeholder="Szukaj grupy…" data-i18n-placeholder="Szukaj grupy…" autocomplete="off"></div>
+      <div id="head-groups" hidden>
+        <div class="add-row"><button class="add-btn" id="btn-new-group" data-i18n="+ Nowa grupa">+ Nowa grupa</button></div>
+        <div class="search-wrap"><input id="group-search" type="text" placeholder="Szukaj grupy…" data-i18n-placeholder="Szukaj grupy…" autocomplete="off"></div>
+      </div>
       <div class="pane" id="pane-groups" hidden></div>
       <div class="pane" id="pane-network" hidden><div class="pane-label" data-i18n="Sieć — wkrótce (lista węzłów, latencje)">Sieć — wkrótce (lista węzłów, latencje)</div></div>
       <div class="profile-strip"><span class="lbl" data-i18n="Transport">Transport</span><button class="chip" id="chip-profile" title="Zmień w Ustawieniach" data-i18n-title="Zmień w Ustawieniach">—</button></div>
