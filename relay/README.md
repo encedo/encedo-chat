@@ -83,6 +83,44 @@ out a different cause:
 A missing log line proves the deploy is unverified — not that the code is
 absent. Confirm on disk (`git log`, `grep`) before concluding anything.
 
+## Adding a node (bs3 and up)
+
+**A node's identity is knowable before the machine exists.** `--pass` is the
+Ed25519 seed, the convention is that the pass IS the hostname, so the PeerId —
+and therefore the multiaddr clients will carry — can be derived on a laptop:
+
+```js
+import { generateKeyPairFromSeed } from '@libp2p/crypto/keys'
+import { peerIdFromPrivateKey } from '@libp2p/peer-id'
+import { createHash } from 'node:crypto'
+const key = await generateKeyPairFromSeed('Ed25519', createHash('sha256').update('bs3.onchato.com').digest())
+console.log(peerIdFromPrivateKey(key).toString())
+```
+
+Verified against the two live nodes: it reproduces `12D3KooWP6Sp…cDmp` for bs1
+and `12D3KooWJJJt…1NT1y` for bs2, so the third is not a guess.
+
+**bs3.onchato.com, precomputed:**
+
+```
+/dns4/bs3.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5
+```
+
+Order of work, and the order matters:
+
+1. VM, DNS `bs3.onchato.com`, certificate, nginx from the block below (it is
+   host-agnostic apart from `server_name`).
+2. `--pass bs3.onchato.com`, systemd unit, then check the startup lines the way
+   "Did it actually take?" above says — **the PeerId in the log must equal the
+   one derived here.** If it does not, the pass is wrong and every client that
+   ever caches this address will fail against it.
+3. `--peers` on bs1 and bs2 pointing at bs3 (and bs3 at both), so a pair split
+   across nodes still meets.
+4. **Only then** add it to `infra/nodes.json`. That file is what a fresh client
+   compiles its defaults from, so a node listed before it answers costs every
+   new client a failed dial at startup — the failover survives it, but it is a
+   second of nothing for everybody.
+
 ## nginx (bs1.onchato.com)
 
 Relay listens on `127.0.0.1:9001` (WS); nginx terminates TLS and proxies `/relay` (WSS):

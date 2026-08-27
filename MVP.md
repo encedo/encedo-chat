@@ -66,10 +66,16 @@ rozmówcy mają zapisany stary. Uzgodniony zakres: eksport **całości** profilu
 (tożsamość + kontakty + grupy + ustawienia), import w oknie logowania, kolizja
 nazwy = głośna odmowa, ekran mówi „przenosisz", nie „skopiowano".
 
-### B4. Dwa żywe węzły rendezvous
-`bs2` był dziś niezdrowy (harness padał na EH-2 przez niego). Jeden węzeł to
-jeden punkt awarii dla całego produktu. Przed 0.9: **bs2 sprawny i sprawdzony
-przebiegiem `browser-test` z `RELAY_NODE=bs2`**.
+### B4. Trzeci węzeł rendezvous
+**Sprostowanie:** `bs2` jest zdrowy — przeszedł cały scenariusz grupowy
+`browser-test` puszczony wyłącznie na nim. Wcześniejsze „bs2 leży" było **moim
+błędem obsługi**: `RELAY_NODE` bierze pełny multiaddr, a ja podałem nazwę hosta,
+która wylądowała w liście węzłów jako nieprawidłowy adres.
+
+Zostaje realne ryzyko: **dwa węzły to dwa punkty awarii, a nie zapas**. Przed
+0.9 warto mieć `bs3` — PeerId jest już wyliczony i zapisany w `relay/README.md`,
+więc robota to VM, DNS, nginx i `--pass bs3.onchato.com`. Do `infra/nodes.json`
+dopisujemy go **dopiero gdy odpowiada**.
 
 ### B5. Specyfikacje zgodne z kodem
 `re` (odpowiedzi) i `edit` (poprawki) są na drucie i **nie ma ich w
