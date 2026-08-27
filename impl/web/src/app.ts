@@ -1158,7 +1158,10 @@ function renderContacts() {
     pane.appendChild(b)
   }
 }
-$('contact-search').addEventListener('input', renderContacts)
+$('contact-search').addEventListener('input', () => {
+  renderContacts()
+  if (!$('pane-groups').hidden) renderGroups()
+})
 
 // ---- ask / rename: two promise-shaped modals reused by every destructive or
 // editing action. Deliberately NOT window.confirm/prompt: a mobile webview
@@ -2413,6 +2416,9 @@ for (const [tab, pane] of [['tab-contacts', 'contacts'], ['tab-groups', 'groups'
   $(tab).addEventListener('click', () => {
     for (const t of ['tab-contacts', 'tab-groups', 'tab-network']) $(t).classList.toggle('active', t === tab)
     for (const p of ['contacts', 'groups', 'network']) $('pane-' + p).hidden = (p !== pane)
+    // Nothing on the Network tab is a list of names, so the box goes rather
+    // than sitting there taking input that changes nothing.
+    $('contact-search').parentElement!.hidden = pane === 'network'
     if (pane === 'groups') renderGroups()
     if (pane === 'network') startNetwork(); else stopNetwork()
   })
@@ -4752,8 +4758,19 @@ function renderGroups() {
   const add = document.createElement('div'); add.className = 'add-row'
   const btn = document.createElement('button'); btn.className = 'add-btn'; btn.textContent = tr('+ Nowa grupa')
   btn.addEventListener('click', openGroupModal); add.appendChild(btn); pane.appendChild(add)
-  if (!groupsUI.size) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = tr('(brak grup — utwórz)'); pane.appendChild(e); return }
-  for (const gu of groupsUI.values()) {
+  // The search box sits ABOVE the tabs, so it looks like it filters whatever is
+  // on screen — and until now it filtered contacts only, which made it a dead
+  // control on this tab. It came that way from the mockup skin and nobody had
+  // typed in it here. Either it works on both lists or it belongs inside the
+  // contacts pane; this is the cheaper half of that choice, and the honest one.
+  const filter = val('contact-search').toLowerCase()
+  const shown = [...groupsUI.values()].filter((g) => !filter || groupDisplay(g).toLowerCase().includes(filter))
+  if (!shown.length) {
+    const e = document.createElement('div'); e.className = 'pane-label'
+    e.textContent = groupsUI.size ? tr('(brak dopasowań)') : tr('(brak grup — utwórz)')
+    pane.appendChild(e); return
+  }
+  for (const gu of shown) {
     const b = document.createElement('button'); b.className = 'contact' + (activeGid === gu.gid && chatOnScreen() ? ' active' : '') + (gu.unseen ? ' unread' : '')
     const pill = (gu.called ? `<span class="c-at" title="${tr('Ktoś zwrócił się do Ciebie')}">@</span>` : '')
       + (gu.unseen ? `<span class="c-unread">${gu.unseen > 99 ? '99+' : gu.unseen}</span>` : '')

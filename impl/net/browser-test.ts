@@ -1818,6 +1818,53 @@ async function main() {
     if (!delivered2b) throw new Error('the SECOND group broadcast did not reach the member')
     step('a broadcast in the second group reached the member too')
 
+    // ---- the search box, on both lists ---------------------------------------
+    // It sits above the tabs, so it reads as filtering whatever is on screen —
+    // and it filtered contacts only, which made it a control that took input and
+    // did nothing on the Groups tab. Cheap to regress, invisible when it does.
+    scenario('the search box filters the list that is open')
+    const search = await A.eval<any>(`
+      const box = document.getElementById('contact-search');
+      const names = () => [...document.querySelectorAll('#pane-contacts .contact .c-name')].map((n) => n.textContent);
+      const before = names();
+      box.value = 'sim-b'; box.dispatchEvent(new Event('input'));
+      const narrowed = names();
+      box.value = 'zzzz-nie-ma'; box.dispatchEvent(new Event('input'));
+      const none = names();
+      const empty = (document.querySelector('#pane-contacts .pane-label') || {}).textContent || '';
+      box.value = ''; box.dispatchEvent(new Event('input'));
+      return { before, narrowed, none, empty, restored: names() };
+    `)
+    if (!search.before.length) throw new Error('no contacts to filter')
+    if (search.narrowed.length !== 1) throw new Error(`filtering left ${search.narrowed.length} contacts, expected 1`)
+    if (search.none.length !== 0 || !/dopasowa|match/.test(search.empty)) {
+      throw new Error(`a filter matching nothing did not say so: ${JSON.stringify(search.empty)}`)
+    }
+    if (search.restored.length !== search.before.length) throw new Error('clearing the box did not bring the list back')
+    step('contacts narrow, say so when nothing matches, and come back')
+
+    const onGroups = await A.eval<any>(`
+      document.getElementById('tab-groups').click();
+      const box = document.getElementById('contact-search');
+      const rows = () => document.querySelectorAll('#pane-groups .contact').length;
+      const all = rows();
+      box.value = 'zzzz-nie-ma'; box.dispatchEvent(new Event('input'));
+      const filtered = rows();
+      box.value = ''; box.dispatchEvent(new Event('input'));
+      const back = rows();
+      document.getElementById('tab-network').click();
+      const hiddenOnNetwork = document.getElementById('contact-search').parentElement.hidden;
+      document.getElementById('tab-contacts').click();
+      return { all, filtered, back, hiddenOnNetwork,
+               shownAgain: !document.getElementById('contact-search').parentElement.hidden };
+    `)
+    if (onGroups.all === 0) throw new Error('no groups to filter — the scenario is not testing anything')
+    if (onGroups.filtered !== 0) throw new Error('the box does nothing on the Groups tab')
+    if (onGroups.back !== onGroups.all) throw new Error('clearing the box did not bring the groups back')
+    if (!onGroups.hiddenOnNetwork) throw new Error('the box stays on the Network tab, where it filters nothing')
+    if (!onGroups.shownAgain) throw new Error('the box did not come back on the Contacts tab')
+    step('groups narrow too, and the box leaves the Network tab alone')
+
     scenario('a group survives a reload (persisted crypto state)')
     // The group is in-memory only until persisted; a reload must bring it back
     // from the cache AND keep the chains, so A can still broadcast to B.
