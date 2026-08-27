@@ -26,6 +26,15 @@ export const PERMISSIONS = [
   // Without this the foreground notification is suppressed (the service still
   // runs) and every message notification is silently dropped.
   'android.permission.POST_NOTIFICATIONS',
+  // Voice notes. Declared because the feature ships; whether Android's WebView
+  // then passes getUserMedia through is NOT verified — wry installs the
+  // WebChromeClient, and on Linux the equivalent bridge had to be answered by
+  // hand (see `enable_webrtc` in lib.rs). If recording is refused on a phone,
+  // that bridge is where to look, not here.
+  'android.permission.RECORD_AUDIO',
+  // Deliberately NOT android.permission.CAMERA: the QR scanner has never been
+  // run on Android, and a permission an app declares and never uses is one it
+  // has to justify to Play for nothing.
 ]
 
 export function patchManifest(xml) {
@@ -68,10 +77,11 @@ export function patchActivity(kt) {
     super.onCreate(savedInstanceState)
     // Asked here rather than at the moment a notification is drawn: by then the
     // app is in the background, where a permission dialog cannot be shown.
-    if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
-        != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-      requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
-    }
+    val wanted = arrayOf(
+      android.Manifest.permission.POST_NOTIFICATIONS,
+      android.Manifest.permission.RECORD_AUDIO,
+    ).filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+    if (wanted.isNotEmpty()) requestPermissions(wanted.toTypedArray(), 1001)
     // Reachability starts with the app and ends with it: this is not a
     // background agent that outlives the window, it is the window's own process
     // asking not to be frozen while it is open.

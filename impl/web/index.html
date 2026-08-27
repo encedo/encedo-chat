@@ -470,6 +470,22 @@
   .b-voice .v-fill{position:absolute;inset:0 auto 0 0;width:0;border-radius:2px;background:var(--accent)}
   .b-voice .v-time{flex:none;font-family:var(--mono);font-size:11.5px;color:var(--muted);
     font-variant-numeric:tabular-nums}
+  /* A dropdown that looks the same everywhere.
+     These two carried a custom background, border and padding but not
+     `appearance`, so the engine still drew its own control underneath: Chromium
+     hides most of that, WebKitGTK does not, and the packaged app showed a GTK
+     combo box wearing our colours — reported as "the Theme selector looks
+     odd". Resetting the appearance means we also owe it an arrow, which the
+     wrapper draws so it can take a theme token; a background-image cannot read
+     `currentColor`. */
+  .sel-wrap{position:relative;display:block}
+  .sel-wrap::after{content:'';position:absolute;right:13px;top:50%;width:7px;height:7px;
+    border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);
+    transform:translateY(-70%) rotate(45deg);pointer-events:none}
+  .sel{appearance:none;-webkit-appearance:none;width:100%;
+    padding:10px 34px 10px 12px;border:1px solid var(--border);border-radius:8px;
+    background:var(--bg);color:var(--text);font-size:14px;line-height:1.3}
+  .sel:focus{outline:2px solid var(--accent);outline-offset:-2px}
   /* A caption sits under its file, the way Signal reads: the attachment first,
      then what was said about it — with a hairline between, so the two read as
      related rather than as one run-on block. */
@@ -1112,16 +1128,16 @@
     <div class="kv" id="kv-peerid" hidden><span class="k" data-i18n="PeerId (efemeryczny)">PeerId (efemeryczny)</span><span class="v" id="sess-peerid">—</span></div>
     <div class="kv"><span class="k" data-i18n="Historia">Historia</span><span class="v" data-i18n="brak — sesja efemeryczna">brak — sesja efemeryczna</span></div>
     <label data-i18n="Motyw">Motyw</label>
-    <select id="theme-select" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px">
+    <span class="sel-wrap"><select id="theme-select" class="sel">
       <option value="system" data-i18n="Jak w systemie">Jak w systemie</option>
       <option value="light" data-i18n="Jasny">Jasny</option>
       <option value="dark" data-i18n="Ciemny">Ciemny</option>
-    </select>
+    </select></span>
     <label style="margin-top:12px" data-i18n="Język">Język</label>
-    <select id="lang-select" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px">
+    <span class="sel-wrap"><select id="lang-select" class="sel">
       <option value="pl" data-i18n="Polski">Polski</option>
       <option value="en" data-i18n="English">English</option>
-    </select>
+    </select></span>
     <button class="btn" id="btn-logout" style="margin-top:18px;background:var(--accent-soft);color:var(--accent)" data-i18n="Wyloguj">Wyloguj</button>
     <!-- The profile list lives HERE and not on the login screen: naming who uses
          a device is something only that device's user should see. -->

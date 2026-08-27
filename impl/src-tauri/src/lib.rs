@@ -408,14 +408,40 @@ mod desk {
      */
     #[cfg(target_os = "linux")]
     fn enable_webrtc(app: &tauri::App) {
-        use webkit2gtk::{SettingsExt, WebViewExt};
+        use webkit2gtk::glib::object::Cast;
+        use webkit2gtk::{PermissionRequestExt, SettingsExt, WebViewExt};
         let Some(win) = app.get_webview_window("main") else { return };
         let _ = win.with_webview(|wv| {
-            let settings = WebViewExt::settings(&wv.inner());
-            if let Some(s) = settings {
+            let view = wv.inner();
+            if let Some(s) = WebViewExt::settings(&view) {
                 s.set_enable_webrtc(true);
                 s.set_enable_media_stream(true);
             }
+            // ⚠️ And the half that `enable-media-stream` alone does not buy.
+            //
+            // Reported as "recording does not work in Tauri — no permission",
+            // and it is the same shape as the notification bug: WebKitGTK does
+            // not decide about a microphone, it ASKS the host, and a host that
+            // answers nothing is a host that says no. Tauri installs no handler,
+            // so `getUserMedia` was refused before the person had finished
+            // pressing the button. Voice notes and the QR scanner both die there.
+            //
+            // Granting is safe HERE for a reason that does not generalise: this
+            // webview loads one thing, our own bundle from disk. There is no
+            // third-party page to ask on somebody else's behalf, and the request
+            // only ever arrives because a control in that bundle was pressed.
+            //
+            // Media only. Geolocation, pointer lock and the rest fall through to
+            // the default, which is to refuse — an app that grants whatever it is
+            // asked has stopped being a boundary.
+            view.connect_permission_request(|_, req| {
+                use webkit2gtk::UserMediaPermissionRequest;
+                if req.downcast_ref::<UserMediaPermissionRequest>().is_some() {
+                    req.allow();
+                    return true;
+                }
+                false
+            });
         });
     }
 

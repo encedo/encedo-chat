@@ -54,9 +54,11 @@ test('the activity starts the service and gives it back on the way out', () => {
   assert.ok(out.includes('startForegroundService'))
   assert.ok(out.includes('override fun onDestroy'))
   assert.ok(out.includes('stopService'))
-  // The permission has to be asked while a window is on screen; by the time a
-  // notification is drawn the app is in the background, where no dialog shows.
+  // Both are asked while a window is on screen: by the time a notification is
+  // drawn the app is in the background, where no dialog can be shown, and the
+  // microphone is wanted the moment somebody presses record.
   assert.ok(out.includes('POST_NOTIFICATIONS'))
+  assert.ok(out.includes('RECORD_AUDIO'))
   assert.ok(out.includes('super.onCreate(savedInstanceState)'))
 })
 
