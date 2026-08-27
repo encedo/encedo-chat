@@ -15,6 +15,15 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+# The bundles built fine on the first tag and the job still went red, at the
+# very last step: "Resource not accessible by integration" from the create-a-
+# release call. Nothing was wrong with the build — the workflow token is
+# read-only by default, so it may compile, bundle and upload artifacts but not
+# create the draft release it was asked for. `contents: write` is the whole
+# fix, and it is scoped to this workflow rather than the repository default.
+permissions:
+  contents: write
+
 jobs:
   bundle:
     name: ${{ matrix.label }}
