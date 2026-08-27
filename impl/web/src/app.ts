@@ -14,6 +14,7 @@
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
+import { exportProfile, openBundle, applyBundle, conflictsWith, localKV, FILE_EXT } from '../../lib/migrate.ts'
 import { decodeInvite, inviteLink, type Invite } from '../../lib/invite.ts'
 import type { GkBackend } from '../../lib/group.ts'
 // `t` is taken: this file uses it for text, topics, timers and DOM nodes, and a
@@ -986,6 +987,10 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   $('me-handle').textContent = id.handle
   loadNotifyMode() // per identity, like every other stored preference
   loadImgAuto()
+  // A HEM identity has nothing to move, so the whole section goes rather than
+  // offering a button that can only refuse.
+  const soft = !!localStorage.getItem('ec-soft-id-' + (session?.handle ?? ''))
+  for (const id of ['mig-section', 'mig-hint', 'btn-export']) { const el = $(id); if (el) el.hidden = !soft }
   const fp = await fingerprint(id.pub)
   $('me-fp').textContent = tr('🔑 ') + fp
   $('me-fp').title = kid ? `KID ${kid} · dwuklik = kopiuj klucz publiczny` : 'Dwuklik = kopiuj klucz publiczny'
@@ -3148,6 +3153,102 @@ for (const el of document.querySelectorAll('#notify-opts input')) {
     toast(want === 'off' ? tr('Powiadomienia wyłączone') : tr('Powiadomienia włączone'))
   })
 }
+
+// ---- moving a profile to another browser -----------------------------------
+/**
+ * One window, two directions.
+ *
+ * Export and import are the same act seen from each end, and they share every
+ * way of going wrong: a wrong password, a file that is not ours, a name already
+ * taken here. Two windows would have meant two copies of those messages, and
+ * one of the copies would have drifted.
+ *
+ * The import entry point is on the LOGIN card rather than in Settings, and that
+ * is forced rather than chosen: the browser a profile arrives in is empty by
+ * definition, so there is no Settings to reach yet.
+ *
+ * ⚠️ A HEM identity has nothing to export — its key never leaves the device,
+ * which is the point of the device — so the export appears for software
+ * profiles only, instead of offering a rescue it cannot perform.
+ */
+let migMode: 'export' | 'import' = 'export'
+const MIG_NOTE_EXPORT = 'Zapiszesz plik z całym profilem: tożsamością, kontaktami, grupami i ustawieniami. Otwiera go to samo hasło, którym logujesz się do profilu.'
+const MIG_NOTE_IMPORT = 'Wczytany profil zastąpi ustawienia tej przeglądarki (język, motyw, lista węzłów). To PRZENIESIENIE, nie kopia — nie używaj obu kopii naraz, bo jedna tożsamość może mieć tylko jedną aktywną sesję.'
+
+function openMigrate(mode: 'export' | 'import') {
+  migMode = mode
+  clr('mig-msg')
+  ;($('mig-pass') as HTMLInputElement).value = ''
+  ;($('mig-file') as HTMLInputElement).value = ''
+  $('mig-file-wrap').hidden = mode === 'export'
+  $('mig-title').textContent = tr(mode === 'export' ? 'Przenieś profil' : 'Wczytaj przeniesiony profil')
+  $('mig-note').textContent = tr(mode === 'export' ? MIG_NOTE_EXPORT : MIG_NOTE_IMPORT)
+  $('scrim').classList.add('open'); $('mig-modal').classList.add('open')
+  $(mode === 'export' ? 'mig-pass' : 'mig-file').focus()
+}
+function closeMigrate() { $('mig-modal').classList.remove('open'); $('scrim').classList.remove('open') }
+$('mig-cancel')?.addEventListener('click', closeMigrate)
+$('go-migrate')?.addEventListener('click', () => openMigrate('import'))
+$('btn-export')?.addEventListener('click', () => openMigrate('export'))
+
+async function runExport(password: string) {
+  const name = session?.handle ?? ''
+  // The password is checked against the identity itself before anything is
+  // written. A file sealed under a mistyped password opens for nobody, and its
+  // owner would not find that out until the machine they moved to.
+  const raw = localStorage.getItem('ec-soft-id-' + name)
+  const blob = raw ? JSON.parse(raw) : null
+  if (!isSealedProfile(blob)) throw new Error(tr('To nie jest profil software — tożsamości z HEM nie da się przenieść plikiem'))
+  await unseal(password, blob) // throws BadPassword
+  const file = await exportProfile(localKV(), name, session?.idKey ?? '', password, nowMs())
+  const url = URL.createObjectURL(new Blob([JSON.stringify(file)], { type: 'application/json' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `onchato-${name}-${new Date(nowMs()).toISOString().slice(0, 10)}.${FILE_EXT}`
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 30_000)
+}
+
+async function runImport(password: string): Promise<string> {
+  const f = ($('mig-file') as HTMLInputElement).files?.[0]
+  if (!f) throw new Error(tr('Wskaż plik profilu'))
+  let parsed: any
+  try { parsed = JSON.parse(await f.text()) } catch { throw new Error(tr('To nie jest plik profilu onchato')) }
+  const bundle = await openBundle(parsed, password)
+  const clash = conflictsWith(localKV(), bundle)
+  // Refused, never merged and never overwritten: what would be overwritten is
+  // an identity, and one wrong click would end every conversation it has.
+  if (clash) throw new Error(tr('Profil o nazwie „{name}” już tu jest — nie nadpiszę go', { name: clash }))
+  applyBundle(localKV(), bundle)
+  return bundle.name
+}
+
+$('mig-go')?.addEventListener('click', async () => {
+  const btn = $('mig-go') as HTMLButtonElement
+  const password = ($('mig-pass') as HTMLInputElement).value
+  if (!password) { setMsg('mig-msg', tr('Hasło profilu'), 'err'); return }
+  btn.disabled = true
+  try {
+    if (migMode === 'export') {
+      await runExport(password)
+      closeMigrate()
+      toast(tr('Zapisano plik z profilem — pamiętaj, że to przeniesienie, a nie kopia'))
+    } else {
+      const name = await runImport(password)
+      closeMigrate()
+      // Straight into the login form with the name filled in: the password that
+      // opens this profile has just been typed, and asking someone to go and
+      // find the profile they have only now moved in is a strange end to a
+      // rescue.
+      openSoftModal()
+      ;($('soft-name') as HTMLInputElement).value = name
+      ;($('soft-pass') as HTMLInputElement).focus()
+      toast(tr('Przeniesiono profil „{name}” — zaloguj się nim', { name }))
+    }
+  } catch (e: any) {
+    setMsg('mig-msg', e instanceof BadPassword ? tr('Złe hasło') : (e?.message ?? tr('Nie udało się zapisać pliku')), 'err')
+  } finally { btn.disabled = false }
+})
 
 // ---- the packaged desktop shell ------------------------------------------
 /**

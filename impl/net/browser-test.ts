@@ -2014,6 +2014,80 @@ async function main() {
     if (looped) throw new Error('importing a reply offered another reply — the exchange loops')
     step('A imported the reply and was NOT asked to send its key again')
 
+    // ---- moving a profile out, and refusing to move it back on top of itself ---
+    // A software identity is a RANDOM key sealed with a password, so losing a
+    // browser's storage loses the identity itself — the same name and password
+    // afterwards mint a different key while every contact still holds the old
+    // one. The file is the only way out of that, which makes two things worth
+    // proving on a real page rather than only in unit tests: that the file the
+    // browser actually writes can be opened again, and that a name already in
+    // use is REFUSED rather than overwritten.
+    scenario('a profile can be carried out to a file, and will not overwrite one that is here')
+    const exported = await A.eval<any>(`
+      // Catch the blob instead of letting the browser save it: what is under
+      // test is the bytes, not the download.
+      const real = URL.createObjectURL;
+      let caught = null;
+      URL.createObjectURL = (b) => { caught = b; return real(b); };
+      document.getElementById('btn-export').click();
+      document.getElementById('mig-pass').value = ${JSON.stringify(SOFT_PASS)};
+      document.getElementById('mig-go').click();
+      return new Promise((done) => {
+        const t0 = Date.now();
+        const tick = () => {
+          if (caught) {
+            caught.text().then((txt) => {
+              URL.createObjectURL = real;
+              window.__migFile = txt;
+              done({ ok: true, size: txt.length, namesOwner: txt.includes('sim-a'),
+                     msg: document.getElementById('mig-msg').textContent });
+            });
+            return;
+          }
+          if (Date.now() - t0 > 15000) {
+            URL.createObjectURL = real;
+            done({ ok: false, msg: document.getElementById('mig-msg').textContent });
+            return;
+          }
+          setTimeout(tick, 100);
+        };
+        tick();
+      });
+    `)
+    if (!exported.ok) throw new Error(`the export produced no file — ${exported.msg || 'no message'}`)
+    if (exported.size < 200) throw new Error(`the exported file is suspiciously small: ${exported.size} B`)
+    // The name is inside the seal, not beside it: a file that names its owner
+    // says who it belongs to while it travels.
+    if (exported.namesOwner) throw new Error('the exported file names its profile in the clear')
+    step('the profile came out as one sealed file that does not name its owner')
+
+    // Import lives on the login card, which a signed-in page has left behind —
+    // so the window is driven directly here. What is under test is the RULE,
+    // and a second browser would meet exactly the same one.
+    const conflict = await A.eval<any>(`
+      // The login card is hidden after signing in but still in the document, so
+      // its entry point is the honest way in — the alternative was flipping the
+      // window's fields by hand, which tested the fields and not the flow.
+      document.getElementById('go-migrate').click();
+      const dt = new DataTransfer();
+      dt.items.add(new File([window.__migFile], 'p.ocmig', { type: 'application/json' }));
+      const input = document.getElementById('mig-file');
+      input.files = dt.files;
+      document.getElementById('mig-pass').value = ${JSON.stringify(SOFT_PASS)};
+      document.getElementById('mig-go').click();
+      return new Promise((done) => setTimeout(() => done({
+        msg: document.getElementById('mig-msg').textContent,
+        identity: localStorage.getItem('ec-soft-id-sim-a') ? 'intact' : 'GONE',
+      }), 2500));
+    `)
+    if (conflict.identity !== 'intact') throw new Error('importing over an existing profile destroyed it')
+    if (!/już tu jest|already here/.test(conflict.msg)) {
+      throw new Error(`a name already in use was not refused — the window said: ${JSON.stringify(conflict.msg)}`)
+    }
+    step('and importing it over the profile it came from is refused, with the identity untouched')
+
+    await A.eval(`document.getElementById('mig-cancel').click(); return 1`)
+
     scenario('wipeout clears local state and returns to login')
     // The §10 WIPE: a device reset. It must delete every ec-* key (identity +
     // contacts) and drop back to the login form — nothing local survives.

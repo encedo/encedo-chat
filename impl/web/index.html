@@ -689,7 +689,11 @@
       <div id="reg-handle-wrap" hidden><div class="label-row"><label data-i18n="Handle (widoczny dla kontaktów)">Handle (widoczny dla kontaktów)</label><span class="bytes-left" id="handle-bytes"></span></div><input id="handle" type="text" placeholder="np. alice" data-i18n-placeholder="np. alice" autocomplete="off"></div>
       <button class="btn" id="go" data-i18n="Zaloguj">Zaloguj</button>
       <div class="toggle"><span id="toggle-pre" data-i18n="Nie masz konta?">Nie masz konta?</span> <a id="toggle" data-i18n="Zarejestruj tożsamość">Zarejestruj tożsamość</a></div>
-      <div class="toggle" style="margin-top:6px;font-size:12px;opacity:.85"><span data-i18n="bez HEM:">bez HEM:</span> <a id="go-soft" data-i18n="tożsamość software (sandbox)">tożsamość software (sandbox)</a></div>
+      <div class="toggle" style="margin-top:6px;font-size:12px;opacity:.85"><span data-i18n="bez HEM:">bez HEM:</span> <a id="go-soft" data-i18n="tożsamość software (sandbox)">tożsamość software (sandbox)</a>
+        <!-- The way IN for a profile carried from another browser. It has to be
+             here, on the login card, because the browser it arrives in is empty
+             by definition — there is no Settings to reach yet. -->
+        · <a id="go-migrate" data-i18n="wczytaj przeniesiony profil">wczytaj przeniesiony profil</a></div>
       <div class="nodes-sec">
         <button class="nodes-toggle" id="nodes-toggle" title="Węzły sieci — wybierz/edytuj" data-i18n-title="Węzły sieci — wybierz/edytuj">+</button>
         <div class="nodes-panel" id="nodes-panel" hidden>
@@ -863,6 +867,23 @@
     </div>
     <div class="msg" id="soft-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="soft-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="soft-cancel" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
+  <!-- Moving a profile between browsers. One window for both directions,
+       because they are the same act seen from two sides and the failure modes
+       are shared: a wrong password, a file that is not ours, a name already
+       taken. See lib/migrate.ts for why this is a MOVE and not a backup. -->
+  <div class="modal" id="mig-modal">
+    <h2 id="mig-title" data-i18n="Przenieś profil">Przenieś profil</h2>
+    <div class="msub" id="mig-note"></div>
+    <div id="mig-file-wrap" hidden>
+      <label data-i18n="Plik profilu">Plik profilu</label>
+      <input id="mig-file" type="file" accept=".ocmig,application/json">
+    </div>
+    <label data-i18n="Hasło profilu">Hasło profilu</label>
+    <input id="mig-pass" type="password" autocomplete="current-password">
+    <div class="msg" id="mig-msg"></div>
+    <div class="modal-actions"><button class="btn-send" id="mig-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="mig-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
   <!-- Shown once, to an account with no contacts and no groups: the app is
@@ -1067,6 +1088,9 @@
 
     <div class="d-section" style="margin-top:22px" data-i18n="Reset urządzenia">Reset urządzenia</div>
     <div class="hint" style="margin-bottom:8px" data-i18n="Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.">Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.</div>
+    <div class="d-section" id="mig-section" style="margin-top:22px" data-i18n="Przeniesienie na inne urządzenie">Przeniesienie na inne urządzenie</div>
+    <div class="hint" id="mig-hint" style="margin-bottom:8px" data-i18n="Zapiszesz plik z całym profilem: tożsamością, kontaktami, grupami i ustawieniami. Otwiera go to samo hasło, którym logujesz się do profilu.">Zapiszesz plik z całym profilem: tożsamością, kontaktami, grupami i ustawieniami. Otwiera go to samo hasło, którym logujesz się do profilu.</div>
+    <button class="btn" id="btn-export" style="margin-top:2px;background:none;color:var(--accent);border:1px solid var(--accent)" data-i18n="Zapisz profil do pliku">Zapisz profil do pliku</button>
     <button class="btn" id="btn-wipeout" style="margin-top:2px;background:none;color:var(--err);border:1px solid var(--err)" data-i18n="🧨 Wipeout — wyczyść wszystko">🧨 Wipeout — wyczyść wszystko</button>
     <div class="build-id" id="build-id-settings"></div>
   </aside>
