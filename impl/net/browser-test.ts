@@ -867,6 +867,14 @@ async function main() {
     // and cannot be spoiled by a firewall; only the STUN row is about the
     // network, and it is labelled that way.
     scenario('the WebRTC self-test separates the app from the network')
+    // The harness runs with ?debug=1, which is exactly the condition the button
+    // is now behind — it left the ordinary GUI once it had answered its
+    // question, and this asserts it is still reachable where it belongs.
+    const probeButton = await A.eval<any>(`
+      const b = document.getElementById('btn-webrtc-probe');
+      return { present: !!b, hidden: !b || b.hidden };
+    `)
+    if (!probeButton.present || probeButton.hidden) throw new Error('the self-test is unreachable under ?debug=1')
     await A.eval(`document.getElementById('btn-webrtc-probe').click(); return 1`)
     await A.waitFor('the self-test finished', `return !!window.__webrtcProbe`, 45_000)
     const rtc = await A.eval<any>(`

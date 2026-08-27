@@ -1008,7 +1008,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   $('me-avatar').textContent = initials(id.handle)
   $('me-handle').textContent = id.handle
   loadNotifyMode() // per identity, like every other stored preference
-  loadImgAuto()
+  loadMediaAuto()
   // A HEM identity has nothing to move, so the whole section goes rather than
   // offering a button that can only refuse.
   const soft = !!localStorage.getItem('ec-soft-id-' + (session?.handle ?? ''))
@@ -2484,9 +2484,6 @@ function renderNetwork() {
     ${nodesRow}
     ${relayPeer ? `<div class="net-row"><span class="k">${tr('PeerId węzła')}</span><span class="v mono" title="${escapeHtml(relayPeer)}">${escapeHtml(relayPeer)}</span></div>` : ''}
     <div class="net-row"><span class="k">${tr('Twój PeerId')}</span><span class="v mono" title="${escapeHtml(s.self)}">${escapeHtml(s.self)}</span></div>
-    ${capReport && capReport.degraded.length ? `<div class="net-row wrap"><span class="k">${tr('Platforma')}</span><span class="v chips" title="${escapeHtml(capReport.ua)}">`
-      + capReport.degraded.map((c) => `<span class="net-node">○ ${escapeHtml(c.id)}</span>`).join('')
-      + `</span></div>` : ''}
     ${DEBUG ? `<div class="net-row"><span class="k">${tr('Ekran')}</span><span class="v" title="${escapeHtml(navigator.userAgent)}">`
       + `${window.innerWidth}×${window.innerHeight} · ${window.devicePixelRatio || 1}× · `
       + `${matchMedia('(max-width:900px),(max-height:560px)').matches ? tr('układ telefonu') : tr('układ pulpitu')}</span></div>
@@ -3420,6 +3417,26 @@ function diagLine(mark: 'ok' | 'bad' | 'meh', text: string) {
   return `<span class="${cls}">${sign}</span> ${escapeHtml(text)}`
 }
 
+/**
+ * The WebRTC self-test is a debugging tool that has done its job.
+ *
+ * It was built to settle one question — whether the packaged app could do
+ * WebRTC at all — and it settled it: WebKitGTK does not expose
+ * `RTCPeerConnection`, so the desktop runs on the relay. Keeping the button on
+ * screen after that is keeping a control most people can only misread.
+ *
+ * The probe itself stays, behind `?debug=1`, because the same question is still
+ * open on Windows, macOS and Android, and the day somebody runs one of those it
+ * is a URL parameter rather than a piece of work. The capability report above
+ * it is NOT hidden: that one explains why a feature is missing, which is a
+ * thing an ordinary user is owed.
+ */
+function paintDiagnostics() {
+  for (const id of ['btn-webrtc-probe', 'diag-webrtc', 'diag-webrtc-note']) {
+    const el = $(id); if (el) el.hidden = !DEBUG || (id === 'diag-webrtc' && !lastWebrtcProbe)
+  }
+}
+
 function paintCaps() {
   const box = $('diag-caps'); if (!box || !capReport) return
   const rows = capReport.caps.map((c) => diagLine(
@@ -3429,6 +3446,7 @@ function paintCaps() {
   // The user agent is the first thing anyone reading a bug report wants and the
   // last thing they can get out of a packaged app.
   box.innerHTML = [escapeHtml(capReport.ua), ...rows].join('<br>')
+  paintDiagnostics()
 }
 
 const stageWord = (s: ProbeStage) => s.about === 'platform' ? tr('aplikacja') : tr('sieć')
@@ -3694,9 +3712,13 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
       fileEls.get(env)!.see = see
       // The setting, and the cap that keeps it honest: a fetch nobody asked for
       // must not be able to pull eighty megabytes because a `mime` said so.
-      // Images only — sound that starts by itself is a different kind of rude.
-      if (kind === 'peer' && imgAuto && previewKind(env.mime) === 'image' && env.size <= AUTO_IMG_MAX) {
-        void revealImage(env, see)
+      //
+      // ⚠️ It fetches; it does not PLAY. Having a voice note ready the instant
+      // you press play is a convenience; having somebody's voice come out of
+      // your machine because a message arrived is not, and the difference is
+      // one argument rather than a second setting.
+      if (kind === 'peer' && mediaAuto && env.size <= AUTO_MEDIA_MAX) {
+        void revealImage(env, see, false)
       }
     }
   }
@@ -3776,7 +3798,7 @@ const previewKind = (mime: string): PreviewKind =>
 const isPreviewable = (mime: string) => previewKind(mime) !== null
 /** What an automatic fetch may cost when nobody asked for it. A manual Show has
  *  no cap: that one WAS asked for. */
-const AUTO_IMG_MAX = 2 * 1024 * 1024
+const AUTO_MEDIA_MAX = 2 * 1024 * 1024
 
 /**
  * Envelope → a blob URL for its decrypted bytes.
@@ -3789,17 +3811,19 @@ const AUTO_IMG_MAX = 2 * 1024 * 1024
  */
 const previews = new WeakMap<FileEnv, string>()
 
-/** Per identity, like every other stored preference. */
-const imgAutoKey = () => 'ec-autoimg-' + (session?.idKey ?? '')
-let imgAuto = false
-function loadImgAuto() {
-  try { imgAuto = localStorage.getItem(imgAutoKey()) === '1' } catch { imgAuto = false }
+/** Per identity, like every other stored preference. The key still says `img`
+ *  because it was written before the setting covered sound too, and renaming it
+ *  would silently turn the preference off for everybody who had set it. */
+const mediaAutoKey = () => 'ec-autoimg-' + (session?.idKey ?? '')
+let mediaAuto = false
+function loadMediaAuto() {
+  try { mediaAuto = localStorage.getItem(mediaAutoKey()) === '1' } catch { mediaAuto = false }
   const box = $('img-auto') as HTMLInputElement | null
-  if (box) box.checked = imgAuto
+  if (box) box.checked = mediaAuto
 }
 $('img-auto')?.addEventListener('change', (e) => {
-  imgAuto = (e.target as HTMLInputElement).checked
-  try { localStorage.setItem(imgAutoKey(), imgAuto ? '1' : '0') } catch {}
+  mediaAuto = (e.target as HTMLInputElement).checked
+  try { localStorage.setItem(mediaAutoKey(), mediaAuto ? '1' : '0') } catch {}
 })
 
 /**
@@ -3900,7 +3924,7 @@ async function fetchPlain(env: FileEnv): Promise<Uint8Array> {
  * Reveal an incoming image: the same fetch a download does, ending in a picture
  * rather than a file on disk.
  */
-async function revealImage(env: FileEnv, btn: HTMLButtonElement) {
+async function revealImage(env: FileEnv, btn: HTMLButtonElement, play = true) {
   if (previews.has(env)) { paintPreview(env); return }
   btn.disabled = true; btn.textContent = tr('Pobieram…')
   try {
@@ -3910,7 +3934,7 @@ async function revealImage(env: FileEnv, btn: HTMLButtonElement) {
     // Pressing Play and then having to press play again is a bug, not caution:
     // the click WAS the gesture, and it is the gesture browsers ask for. The
     // player draws its own button, so the way to start it is to press that.
-    ;(el?.querySelector('.v-play') as HTMLButtonElement | null)?.click()
+    if (play) (el?.querySelector('.v-play') as HTMLButtonElement | null)?.click()
   } catch (e: any) {
     // Past its lifetime ANY failure is expiry — the same reading `downloadFile`
     // makes, and for the same reason: the store hunts the public network for a
