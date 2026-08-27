@@ -3,12 +3,16 @@
  * is needed.
  *
  * This exists because of WebKitGTK. The Tauri desktop build runs on a webview
- * that has X25519 and, as this file long claimed, "no WebRTC" — a claim this
- * very probe disproved once it was shipped: `RTCPeerConnection` was absent
- * because `enable-webrtc` is a WebKitSettings property that defaults to OFF,
- * and nothing had ever set it (the shell does now). Finding THAT out took a
- * debugging session; the point of this file is that the next one takes a line
- * of output. Every webview is a different subset:
+ * that has X25519 and no WebRTC at all — `RTCPeerConnection` is not defined,
+ * measured in the packaged app by the probe next door (`webrtc-probe.ts`).
+ *
+ * That was worth chasing rather than assuming, and the chase is the reason this
+ * file exists. The library ships the symbol and GStreamer ships the DTLS
+ * plugins, so it looked like a switch: `enable-webrtc` is a WebKitSettings
+ * property that defaults to off. The shell turns it on now (`src-tauri`), and
+ * **it changed nothing** — this build of WebKitGTK does not expose the API
+ * whatever the setting says. Desktop content goes over the relay, and the app
+ * says so instead of leaving anyone to guess. Every webview is a different subset:
  * Android's is Chromium updated through the Play Store (so its age tracks the
  * store, not the OS version), iOS is WKWebView and therefore whatever WebKit
  * the OS shipped, desktop Linux is WebKitGTK. Guessing from version numbers is

@@ -842,11 +842,11 @@ function bindNodeEditor(listId: string, addId: string, warn: (t: string) => void
     saveNodes(list); redraw(); onChange()
   })
   $(addId).addEventListener('click', () => {
-    const addr = (prompt('Multiaddr węzła (np. /dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3Koo…):') || '').trim()
+    const addr = (prompt(tr('Multiaddr węzła (np. /dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3Koo…):')) || '').trim()
     if (!addr) return
     if (!addr.startsWith('/') || !addr.includes('/p2p/')) { warn(tr('To nie wygląda na multiaddr (…/p2p/<PeerId>).')); return }
     const host = addr.match(/\/dns[46]\/([^/]+)/)?.[1] ?? addr.match(/\/ip[46]\/([^/]+)/)?.[1] ?? tr('węzeł')
-    const name = (prompt('Nazwa węzła:', host) || host).trim()
+    const name = (prompt(tr('Nazwa węzła:'), host) || host).trim()
     const list = loadNodes(); list.push({ name, addr, enabled: true }); saveNodes(list); redraw(); onChange()
   })
   return redraw
@@ -1120,7 +1120,8 @@ function renderContacts() {
         // Deleting a contact tears down the conversation and, on a HEM, removes
         // the imported key — not something to do on a mis-tap next to the name.
         if (!(await ask(tr('Usunąć kontakt?'), tr('„{name}” zniknie z listy, rozmowa zostanie zamknięta', { name: c.name })
-          + `${c.source === 'hem' ? tr(', a klucz kontaktu zostanie usunięty z HEM') : ''}. Historia rozmowy i tak nie jest przechowywana.`, tr('Usuń'))).ok) return
+          + `${c.source === 'hem' ? tr(', a klucz kontaktu zostanie usunięty z HEM') : ''}. `
+          + tr('Historia rozmowy i tak nie jest przechowywana.'), tr('Usuń'))).ok) return
         await closeRoom(c.pub)
         if (session) { try { await session.book.remove(c) } catch (err: any) { toast(tr('Błąd usuwania: ') + (err?.message ?? err)) } }
         await refreshContacts(); return
@@ -2246,7 +2247,11 @@ function clearComposer() {
   setBadge($('e2e-badge'), 'badge e2e', tr('🔒 E2E interim'), tr('Szyfrowane E2E — interim, EH-2 w drodze'))
 }
 $('btn-wipeout').addEventListener('click', async () => {
-  if (!confirm('Wipeout: skasować lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki?\n\nTego nie da się cofnąć — Twój klucz publiczny się zmieni, więc Ty i rozmówcy musicie wymienić się nowymi kluczami. Klucze w HSM (login HEM) zostają nietknięte.')) return
+  // The loudest window in the app, and it was the one that stayed Polish
+  // whatever the UI language was: a warning nobody can read is a warning that
+  // does not exist.
+  if (!confirm(tr('Wipeout: skasować lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki?')
+    + '\n\n' + tr('Tego nie da się cofnąć — Twój klucz publiczny się zmieni, więc Ty i rozmówcy musicie wymienić się nowymi kluczami. Klucze w HSM (login HEM) zostają nietknięte.'))) return
   // §10 WIPE — reset like a new machine. Tear the live session down first (leave
   // rooms so peers see us go, drop the transport), then delete every ec-* key we
   // own, then reload to login. HEM-held keys live in the HSM and are untouched.
@@ -2654,8 +2659,8 @@ ecLog(`origin: ${location.origin}${location.pathname}`
 /**
  * What this platform can actually do, checked before anything needs it.
  *
- * WebKitGTK is why this exists: the desktop webview has X25519, and had no
- * WebRTC until the shell turned the setting on,
+ * WebKitGTK is why this exists: the desktop webview has X25519 and no WebRTC —
+ * not for want of a setting, which the shell turns on to no effect,
  * and discovering that cost a debugging session instead of a line of output.
  * Every webview is a different subset — Android's Chromium tracks the Play
  * Store rather than the OS version, iOS is whatever WebKit the system shipped —
@@ -3239,7 +3244,7 @@ function paintCaps() {
   const box = $('diag-caps'); if (!box || !capReport) return
   const rows = capReport.caps.map((c) => diagLine(
     c.ok ? 'ok' : c.required ? 'bad' : 'meh',
-    c.id + (c.tries ? ` (${c.tries} próby)` : '') + (c.ok ? '' : ` — ${c.note ?? ''}${c.error ? ` [${c.error}]` : ''}`),
+    c.id + (c.tries ? ` (${tr('{n} próby', { n: c.tries })})` : '') + (c.ok ? '' : ` — ${c.note ?? ''}${c.error ? ` [${c.error}]` : ''}`),
   ))
   // The user agent is the first thing anyone reading a bug report wants and the
   // last thing they can get out of a packaged app.
@@ -3271,7 +3276,7 @@ $('btn-webrtc-probe')?.addEventListener('click', async () => {
 
 $('btn-diag-copy')?.addEventListener('click', async () => {
   const text = [
-    capReport ? formatReport(capReport) : 'platform: (sonda jeszcze nie skończyła)',
+    capReport ? formatReport(capReport) : 'platform: ' + tr('(sonda jeszcze nie skończyła)'),
     lastWebrtcProbe ? formatWebrtcProbe(lastWebrtcProbe) : 'webrtc: (nie sprawdzano)',
     `build: ${$('build-id-settings')?.textContent ?? '?'}`,
   ].join('\n')

@@ -383,23 +383,22 @@ mod desk {
     /**
      * Turn WebRTC on in WebKitGTK.
      *
-     * The desktop build has been on the relay since it existed, and the reason
-     * was recorded as "WebKitGTK has no WebRTC". That was wrong, and the probe
-     * shipped in the previous commit is what showed it: in the packaged app
-     * `RTCPeerConnection` **does not exist**, while the installed
-     * `libwebkit2gtk-4.1-0` carries the symbol and GStreamer carries the DTLS
-     * plugins. Nothing was missing — the feature is a WebKitSettings property
-     * that **defaults to off**, and nothing had ever turned it on.
+     * ⚠️ **Measured: this does not help on WebKitGTK 2.5x / Ubuntu aarch64.**
+     * The setting is real — `enable-webrtc` is a WebKitSettings property that
+     * defaults to off, the library ships the `RTCPeerConnection` symbol and
+     * GStreamer ships the DTLS plugins — so it looked like the whole answer.
+     * It is not: with the property on, the packaged app still reports
+     * `RTCPeerConnection nie istnieje w tym webview`. That build simply does
+     * not expose the API to JavaScript, and desktop content stays on the relay.
      *
-     * So it is one line, reached through `with_webview`, which on Linux hands
-     * back the `webkit2gtk::WebView` itself. `enable-media-stream` goes with
-     * it: getUserMedia is a separate switch, and WebRTC without it is a
-     * connection with nothing to put in it.
+     * The call stays, for two reasons. It is correct — a WebKitGTK that CAN do
+     * WebRTC needs exactly this and would otherwise be held back by a default
+     * nobody chose — and it costs one call at startup on a webview we already
+     * hold. `enable-media-stream` goes with it: getUserMedia is a separate
+     * switch, and a connection with nothing to put in it is not worth opening.
      *
-     * Best effort on purpose. A build of WebKitGTK compiled without WebRTC
-     * ignores the property, the probe says so in as many words, and the app
-     * carries on through the relay exactly as it did before — which is the
-     * behaviour this replaces, not a fallback added for it.
+     * Whether it worked is not a matter of belief: Ustawienia → Diagnostyka →
+     * Sprawdź WebRTC answers it on the machine in front of you.
      */
     #[cfg(target_os = "linux")]
     fn enable_webrtc(app: &tauri::App) {
