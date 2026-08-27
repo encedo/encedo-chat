@@ -640,6 +640,28 @@ const LAST_PROFILE = 'ec-last-profile'
  *  rather than asking again. Cleared whenever the name changes. */
 let softCreating = ''
 
+/**
+ * Offer the profile that signed in here last.
+ *
+ * The name is already remembered (`ec-last-profile`) and the modal already
+ * prefills it — this only saves the click that opens the modal, which is the
+ * click people make every single time on a machine that is theirs.
+ *
+ * ⚠️ It moves the name from "visible after a click" to "visible to anyone
+ * glancing at the screen". That is the trade, it is why this shows ONE name and
+ * never the list, and it is why signing out does not clear it — clearing it
+ * would only hide it from the person who owns it.
+ */
+function paintLastProfile() {
+  const btn = $('last-profile') as HTMLButtonElement | null
+  if (!btn) return
+  const last = (() => { try { return localStorage.getItem(LAST_PROFILE) } catch { return null } })()
+  const known = !!last && !!(() => { try { return localStorage.getItem('ec-soft-id-' + last) } catch { return null } })()
+  btn.hidden = !known
+  if (known) btn.textContent = tr('Zaloguj jako {name}', { name: last! })
+}
+$('last-profile')?.addEventListener('click', () => openSoftModal())
+
 function openSoftModal() {
   $('scrim').classList.add('open'); $('soft-modal').classList.add('open')
   clr('soft-msg'); softCreating = ''
@@ -2076,54 +2098,94 @@ $('attach-drop').addEventListener('click', () => showAttach(null))
  */
 const VOICE_MAX_MS = 120_000
 let recording: Recording | null = null
+/** The finished take, held between Stop and Send so it can be listened to and
+ *  thrown away without ever reaching a conversation. */
+let recTake: File | null = null
 
 const recTime = (ms: number) => {
   const t = Math.floor(ms / 1000)
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`
 }
 
-function paintRecording(on: boolean) {
-  const chip = $('rec-chip'), btn = $('btn-voice')
-  if (chip) chip.hidden = !on
-  if (btn) {
-    btn.classList.toggle('rec', on)
-    btn.title = tr(on ? 'Zatrzymaj nagrywanie' : 'Nagraj głosówkę')
-  }
-  if (!on) $('rec-time')!.textContent = '0:00'
+/** Recording is a MODE, so it gets a surface that says so and offers the way
+ *  back. The window has two faces and one clock. */
+function paintRecWindow(state: 'recording' | 'ready' | 'off') {
+  const modal = $('rec-modal')
+  if (state === 'off') { modal.classList.remove('open'); $('scrim').classList.remove('open'); return }
+  modal.classList.add('open'); $('scrim').classList.add('open')
+  const done = state === 'ready'
+  $('rec-dot').classList.toggle('done', done)
+  $('rec-title').textContent = tr(done ? 'Nagranie gotowe' : 'Nagrywam…')
+  $('rec-note').textContent = tr(done ? 'Odsłuchaj, zanim wyślesz.' : 'Limit nagrania to 2 minuty.')
+  $('rec-stop').textContent = tr(done ? 'Wyślij' : 'Zatrzymaj')
+  $('rec-preview').hidden = !done
 }
 
-async function stopRecording() {
-  const r = recording; if (!r) return
-  recording = null; paintRecording(false)
-  try { offerFile(await r.stop()) }
-  catch (e: any) { ecLog('recording failed: ' + (e?.message ?? e)) }
+function endRecording() {
+  const r = recording
+  recording = null
+  recTake = null
+  $('rec-preview').innerHTML = ''
+  paintRecWindow('off')
+  r?.cancel() // releases the microphone on every path out of here
 }
 
 $('btn-voice')?.addEventListener('click', async () => {
-  if (recording) return void stopRecording()
+  if (recording || recTake) return // the window owns the flow once it is up
   if (!activeGid && !activeRoom()) { toast(tr('Najpierw otwórz rozmowę')); return }
   try {
+    $('rec-clock').textContent = '0:00'
     recording = await startRecording({
       maxMs: VOICE_MAX_MS,
-      onTick: (ms) => { $('rec-time')!.textContent = recTime(ms) },
-      // The cap stops it the way the user would have, and says so — a
+      onTick: (ms) => { $('rec-clock').textContent = recTime(ms) },
+      // The cap stops it the way the person would have, and says so — a
       // recording that simply ends is one you find out about after sending.
       onLimit: () => { toast(tr('Nagranie ma limit {s} s — zatrzymane', { s: VOICE_MAX_MS / 1000 })); void stopRecording() },
     })
-    paintRecording(true)
+    paintRecWindow('recording')
   } catch (e: any) {
     // A refused microphone is an ordinary answer, not a fault to hide.
-    recording = null; paintRecording(false)
+    recording = null; paintRecWindow('off')
     ecLog('microphone refused: ' + (e?.name ?? '') + ' ' + (e?.message ?? e), 'debug')
     toast(tr('Nie udało się nagrać — mikrofon niedostępny albo odmówiono dostępu'))
   }
 })
 
+/** Stop, and hold the take for listening. Nothing is sent yet: a voice note is
+ *  the one message people want back the instant it leaves. */
+async function stopRecording() {
+  const r = recording
+  if (!r) return
+  recording = null
+  try {
+    recTake = await r.stop()
+    $('rec-preview').innerHTML = ''
+    $('rec-preview').appendChild(voicePlayer(URL.createObjectURL(recTake)))
+    paintRecWindow('ready')
+  } catch (e: any) {
+    ecLog('recording failed: ' + (e?.message ?? e))
+    endRecording()
+    toast(tr('Nie udało się nagrać — mikrofon niedostępny albo odmówiono dostępu'))
+  }
+}
+
+$('rec-stop')?.addEventListener('click', () => {
+  if (recording) return void stopRecording()
+  const take = recTake
+  if (!take) return
+  recTake = null
+  paintRecWindow('off')
+  $('rec-preview').innerHTML = ''
+  // Straight out through the same door every other file uses, so a voice note
+  // can still carry a caption or answer a message.
+  offerFile(take)
+  void sendComposer()
+})
+
 $('rec-cancel')?.addEventListener('click', () => {
-  const r = recording; if (!r) return
-  recording = null; paintRecording(false)
-  r.cancel()
-  toast(tr('Nagranie odrzucone'))
+  const had = !!(recording || recTake)
+  endRecording()
+  if (had) toast(tr('Nagranie odrzucone'))
 })
 
 // Hidden, not disabled, where the platform cannot record.
@@ -2188,7 +2250,7 @@ function clearComposer() {
   // A recording belongs to the conversation it was started in, and the
   // microphone must not outlive it — leaving it live would keep the platform's
   // recording indicator on for a room nobody is in.
-  if (recording) { const r = recording; recording = null; paintRecording(false); r.cancel() }
+  if (recording || recTake) endRecording()
   closeMentionPop() // a picker left open would offer the previous group's members
   mentionPicks.clear() // …and its choices would name people the new group does not have
 }
@@ -2237,6 +2299,7 @@ function clearComposer() {
   document.documentElement.lang = getLocale()
   applyDom()
   paintTransportSetting()
+  paintLastProfile()
   initDesktopShell()
   void paintDesktopSettings()
   // The boot screen goes now and not a moment earlier: this is the first point
@@ -3724,6 +3787,62 @@ $('img-auto')?.addEventListener('change', (e) => {
 })
 
 /**
+ * A voice note's player.
+ *
+ * Deliberately not `<audio controls>`. The native player is a different size,
+ * shape and colour in every browser, it is the element a conversation shows
+ * most often once people start speaking instead of typing, and half of its
+ * controls (volume, download, playback speed menu) are noise inside a message
+ * bubble. This is the same three things every messenger settles on: play, where
+ * you are, how long it is.
+ *
+ * The `<audio>` element still does the work — it is just not what is on screen.
+ */
+function voicePlayer(url: string): HTMLElement {
+  const wrap = document.createElement('div'); wrap.className = 'b-voice'
+  const audio = new Audio(url)
+  audio.preload = 'metadata'
+  const play = document.createElement('button')
+  play.className = 'v-play'; play.type = 'button'
+  play.title = tr('Odtwórz'); play.setAttribute('aria-label', tr('Odtwórz'))
+  const icon = (playing: boolean) => playing
+    ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>'
+    : '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>'
+  play.innerHTML = icon(false)
+  const bar = document.createElement('div'); bar.className = 'v-bar'
+  const fill = document.createElement('div'); fill.className = 'v-fill'
+  bar.appendChild(fill)
+  const time = document.createElement('span'); time.className = 'v-time'; time.textContent = '0:00'
+  wrap.append(play, bar, time)
+
+  const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
+  // Duration is not known until metadata arrives, and for a stream recorded in
+  // this very page it can arrive as Infinity — so the label falls back to the
+  // position, which is always true.
+  const total = () => (Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0)
+  const paint = () => {
+    const t = total()
+    fill.style.width = t ? `${Math.min(100, (audio.currentTime / t) * 100)}%` : '0'
+    time.textContent = clock(t ? (audio.paused ? t : t - audio.currentTime) : audio.currentTime)
+  }
+  audio.addEventListener('loadedmetadata', paint)
+  audio.addEventListener('timeupdate', paint)
+  audio.addEventListener('ended', () => { play.innerHTML = icon(false); audio.currentTime = 0; paint() })
+  play.addEventListener('click', () => {
+    if (audio.paused) { void audio.play().catch(() => {}); play.innerHTML = icon(true) }
+    else { audio.pause(); play.innerHTML = icon(false) }
+  })
+  bar.addEventListener('click', (e) => {
+    const t = total(); if (!t) return
+    const r = bar.getBoundingClientRect()
+    audio.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * t
+    paint()
+  })
+  paint()
+  return wrap
+}
+
+/**
  * Draw the picture into a bubble that has one, and take the Show button away.
  *
  * Called both when the bytes arrive and from `appendFile` on a replay, so the
@@ -3734,13 +3853,11 @@ function paintPreview(env: FileEnv): HTMLElement | undefined {
   const els = fileEls.get(env); if (!els) return
   const bub = els.act.closest('.bubble') as HTMLElement | null
   const wrap = els.act.closest('.b-file') as HTMLElement | null
-  if (!bub || !wrap || bub.querySelector('.b-thumb, .b-audio')) return
+  if (!bub || !wrap || bub.querySelector('.b-thumb, .b-voice')) return
   const kind = previewKind(env.mime)
   let el: HTMLElement
   if (kind === 'audio') {
-    const a = document.createElement('audio')
-    a.className = 'b-audio'; a.controls = true; a.preload = 'metadata'; a.src = url
-    el = a
+    el = voicePlayer(url)
   } else {
     const img = document.createElement('img')
     img.className = 'b-thumb'; img.alt = env.name; img.src = url
@@ -3775,8 +3892,9 @@ async function revealImage(env: FileEnv, btn: HTMLButtonElement) {
     previews.set(env, URL.createObjectURL(new Blob([plain as any], { type: env.mime })))
     const el = paintPreview(env)
     // Pressing Play and then having to press play again is a bug, not caution:
-    // the click WAS the gesture, and it is the gesture browsers ask for.
-    if (el instanceof HTMLAudioElement) void el.play().catch(() => {})
+    // the click WAS the gesture, and it is the gesture browsers ask for. The
+    // player draws its own button, so the way to start it is to press that.
+    ;(el?.querySelector('.v-play') as HTMLButtonElement | null)?.click()
   } catch (e: any) {
     // Past its lifetime ANY failure is expiry — the same reading `downloadFile`
     // makes, and for the same reason: the store hunts the public network for a

@@ -896,49 +896,54 @@ async function main() {
     step('and the platform report is readable in Settings, not just in the log')
 
     // ---- a voice note --------------------------------------------------------
-    // The property under test is that a recording is OFFERED, not sent: it
-    // lands in the same chip a pasted file lands in, so it can still carry a
-    // caption or a reply. Send-on-stop would look identical until somebody
-    // wanted to say something alongside it.
-    scenario('a recording fills the composer and does not send itself')
+    // Recording is a MODE, and the first version did not say so: the button
+    // armed itself, a chip appeared in the composer, and nothing on screen
+    // explained what state the app was in or how to leave it. What is under
+    // test now is the window — that it appears, that it counts, that stopping
+    // offers the take back before it goes anywhere, and that discarding it
+    // leaves nothing behind.
+    scenario('recording says it is recording, and hands the take back before sending')
     const recOn = await A.eval<any>(`
       const b = document.getElementById('btn-voice');
       if (b.hidden) return { skipped: true };
       b.click();
       return new Promise((done) => setTimeout(() => done({
-        chip: !document.getElementById('rec-chip').hidden,
-        armed: b.classList.contains('rec'),
-        time: document.getElementById('rec-time').textContent,
-      }), 1200));
+        open: document.getElementById('rec-modal').classList.contains('open'),
+        clock: document.getElementById('rec-clock').textContent,
+        stop: document.getElementById('rec-stop').textContent,
+      }), 1300));
     `)
     if (recOn.skipped) {
       step('no microphone on this platform — the button is hidden, as designed')
     } else {
-      if (!recOn.chip || !recOn.armed) throw new Error('recording started without saying so')
-      if (recOn.time === '0:00') throw new Error('the elapsed time never moved')
-      step('recording says it is recording, and counts')
+      if (!recOn.open) throw new Error('recording started without a window to show for it')
+      if (recOn.clock === '0:00') throw new Error('the clock never moved')
+      step(`the window is up and counting (${recOn.clock})`)
 
-      const recOff = await A.eval<any>(`
-        document.getElementById('btn-voice').click();
+      const ready = await A.eval<any>(`
+        document.getElementById('rec-stop').click();
         return new Promise((done) => setTimeout(() => done({
-          rec: document.getElementById('rec-chip').hidden,
-          chip: !document.getElementById('attach-chip').hidden,
-          name: document.getElementById('attach-name').textContent,
-          size: document.getElementById('attach-size').textContent,
+          open: document.getElementById('rec-modal').classList.contains('open'),
+          send: document.getElementById('rec-stop').textContent,
+          player: !!document.querySelector('#rec-preview .b-voice .v-play'),
           sent: document.querySelectorAll('#messages .b-file').length,
-        }), 900));
+        }), 1200));
       `)
-      if (!recOff.rec) throw new Error('stopping left the recording chip up')
-      if (!recOff.chip || !/glosowka/.test(recOff.name)) throw new Error(`the recording did not reach the composer: ${recOff.name}`)
-      if (!/\d/.test(recOff.size)) throw new Error('the recorded file has no size — nothing was captured')
-      step('stopping puts the recording in the file chip, named and sized')
+      if (!ready.open) throw new Error('stopping closed the window instead of offering the take')
+      if (!ready.player) throw new Error('the take cannot be listened to before it is sent')
+      if (ready.sent !== 0) throw new Error('stopping SENT the recording — stop is not send')
+      step('stop offers a player and a Send, and has sent nothing yet')
 
-      const clean = await A.eval<any>(`
-        document.getElementById('attach-drop').click();
-        return { chip: document.getElementById('attach-chip').hidden };
+      const gone = await A.eval<any>(`
+        document.getElementById('rec-cancel').click();
+        return new Promise((done) => setTimeout(() => done({
+          open: document.getElementById('rec-modal').classList.contains('open'),
+          chip: document.getElementById('attach-chip').hidden,
+          sent: document.querySelectorAll('#messages .b-file').length,
+        }), 400));
       `)
-      if (!clean.chip) throw new Error('the recording could not be dropped')
-      step('and it can be dropped like any other attachment')
+      if (gone.open || !gone.chip || gone.sent !== 0) throw new Error('a discarded recording left something behind')
+      step('and discarding it leaves nothing — no window, no attachment, no message')
     }
 
     // ---- pasting a file ------------------------------------------------------

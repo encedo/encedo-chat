@@ -450,6 +450,26 @@
      native player stretches to whatever it is given and a full-width player in
      a narrow bubble pushes the name out. */
   .b-audio{display:block;width:100%;max-width:320px;margin-bottom:6px}
+  /* The recording window's face: one number, big enough to read from a
+     distance, because while it is up that number is the only thing changing. */
+  .rec-face{display:flex;align-items:center;justify-content:center;gap:12px;padding:14px 0 6px}
+  .rec-dot{width:12px;height:12px;border-radius:50%;background:var(--err,#c0392b);
+    animation:recblink 1.1s ease-in-out infinite}
+  .rec-dot.done{background:var(--muted);animation:none}
+  .rec-clock{font-family:var(--mono);font-size:30px;letter-spacing:.02em;color:var(--text);
+    font-variant-numeric:tabular-nums}
+  /* A voice note in the transcript. Deliberately not `<audio controls>`: the
+     native player is a different size, shape and colour in every browser, and
+     it is the one element a conversation shows most often. */
+  .b-voice{display:flex;align-items:center;gap:10px;min-width:0;padding:2px 0 6px}
+  .b-voice .v-play{flex:none;width:34px;height:34px;border-radius:50%;border:none;
+    background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;cursor:pointer}
+  .b-voice .v-play svg{display:block}
+  .b-voice .v-bar{flex:1;height:4px;border-radius:2px;background:var(--border);position:relative;
+    cursor:pointer;min-width:60px}
+  .b-voice .v-fill{position:absolute;inset:0 auto 0 0;width:0;border-radius:2px;background:var(--accent)}
+  .b-voice .v-time{flex:none;font-family:var(--mono);font-size:11.5px;color:var(--muted);
+    font-variant-numeric:tabular-nums}
   /* A caption sits under its file, the way Signal reads: the attachment first,
      then what was said about it — with a hairline between, so the two read as
      related rather than as one run-on block. */
@@ -694,6 +714,12 @@
              here, on the login card, because the browser it arrives in is empty
              by definition — there is no Settings to reach yet. -->
         · <a id="go-migrate" data-i18n="wczytaj przeniesiony profil">wczytaj przeniesiony profil</a></div>
+      <!-- The profile that signed in here last. Offering it is one click fewer
+           for the common case, and the name is one this browser already
+           remembers (`ec-last-profile`) — but it moves from "visible after a
+           click" to "visible to anyone glancing at the screen", which is the
+           trade and the reason this is a single name and never the list. -->
+      <button class="btn" id="last-profile" hidden style="margin-top:10px;background:none;color:var(--accent);border:1px solid var(--accent)"></button>
       <div class="nodes-sec">
         <button class="nodes-toggle" id="nodes-toggle" title="Węzły sieci — wybierz/edytuj" data-i18n-title="Węzły sieci — wybierz/edytuj">+</button>
         <div class="nodes-panel" id="nodes-panel" hidden>
@@ -867,6 +893,25 @@
     </div>
     <div class="msg" id="soft-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="soft-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="soft-cancel" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
+  <!-- Recording, as a window rather than a chip.
+       The first version armed the microphone button and put the result in the
+       file chip: correct, and unreadable — nothing on screen said what state
+       the app was in or how to get out of it. Recording is a mode, and a mode
+       needs a surface that says so and offers the way back. -->
+  <div class="modal" id="rec-modal">
+    <h2 id="rec-title" data-i18n="Nagrywam…">Nagrywam…</h2>
+    <div class="rec-face">
+      <span class="rec-dot" id="rec-dot"></span>
+      <span class="rec-clock" id="rec-clock">0:00</span>
+    </div>
+    <div class="msub" id="rec-note" data-i18n="Limit nagrania to 2 minuty.">Limit nagrania to 2 minuty.</div>
+    <div id="rec-preview" hidden></div>
+    <div class="modal-actions">
+      <button class="btn-send" id="rec-stop" style="flex:1;border-radius:8px" data-i18n="Zatrzymaj">Zatrzymaj</button>
+      <button class="btn-ghost" id="rec-cancel" data-i18n="Anuluj">Anuluj</button>
+    </div>
   </div>
 
   <!-- Moving a profile between browsers. One window for both directions,
