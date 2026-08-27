@@ -31,7 +31,7 @@ import { canEdit, acceptEdit, EDIT_WINDOW_MS } from '../../lib/edits.ts'
 import { planNotification, isNotifyMode, type NotifyMode } from '../../lib/notify.ts'
 import {
   isDesktopShell, notifySupported, notifyPermission, notifyRequest, notifyShow, type Banner,
-  closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable,
+  closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable, isMobileShell,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
@@ -3336,13 +3336,23 @@ async function paintDesktopSettings() {
   // and the note says so, because the option's absence is otherwise a mystery
   // on a desktop that has a tray for other apps tomorrow. Hiding a window into
   // an icon nobody draws is a window you get back by killing the process.
+  // A phone has neither a tray nor a login item, and saying that is better than
+  // showing two switches that cannot do anything. What it has instead is the
+  // foreground service, which is worth explaining once — the permanent
+  // notification it needs looks like a bug to anyone who does not know why.
+  const phone = isMobileShell()
   const trayRow = $('desk-tray')?.closest('label') as HTMLElement | null
+  const autoRow = $('desk-autostart')?.closest('label') as HTMLElement | null
   const hasTray = trayAvailable()
-  if (trayRow) trayRow.hidden = !hasTray
+  if (trayRow) trayRow.hidden = phone || !hasTray
+  if (autoRow) autoRow.hidden = phone
   const trayNote = $('desk-no-tray')
-  if (trayNote) trayNote.hidden = hasTray
+  if (trayNote) trayNote.hidden = phone || hasTray
+  const mobileNote = $('desk-mobile')
+  if (mobileNote) mobileNote.hidden = !phone
   const tray = $('desk-tray') as HTMLInputElement | null
   if (tray) tray.checked = hasTray && closeToTray()
+  if (phone) return
   const auto = $('desk-autostart') as HTMLInputElement | null
   // Read from the SYSTEM, not from a preference of ours — a desktop can refuse
   // a login item, and a checkbox showing what we asked for rather than what

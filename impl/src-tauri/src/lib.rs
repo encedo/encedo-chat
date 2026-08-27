@@ -102,34 +102,6 @@ mod desk {
         }
     }
 
-    /// Deliver one banner on Linux, over a connection we keep open.
-    ///
-    /// ## Why this does not use the plugin
-    ///
-    /// Reported as "the notification appears for a tenth of a second and
-    /// vanishes", which is a mechanism and not a mood. The plugin's desktop
-    /// path is:
-    ///
-    /// ```ignore
-    /// tauri::async_runtime::spawn(async move { let _ = notification.show(); });
-    /// ```
-    ///
-    /// `show()` returns a handle that OWNS the zbus connection it sent on, and
-    /// `let _ =` drops it on the spot. The session-bus connection closes a
-    /// moment after the Notify call — and a notification daemon withdraws the
-    /// notifications of a sender that has left the bus, precisely so that a
-    /// crashed app does not leave banners behind. Ours had not crashed; it had
-    /// hung up. The banner is drawn and pulled, every time, for everyone.
-    ///
-    /// So the connection is opened once, kept in `Shell` for the life of the
-    /// process, and every notification goes over it. Nothing else changes:
-    /// `lib/notify.ts` still decides whether a banner happens and how much it
-    /// may say, and it still never carries message text.
-    ///
-    /// Two hints are worth the four lines they cost. `desktop-entry` points at
-    /// the installed `onchato.desktop`, so the banner carries the app's real
-    /// name and icon instead of a generic one; `urgency` normal keeps it out of
-    /// the "critical" class, which on GNOME does not time out at all.
     /// The session bus, opened once and kept.
     #[cfg(target_os = "linux")]
     async fn bus(app: &AppHandle) -> Result<zbus::Connection, String> {
@@ -181,6 +153,34 @@ mod desk {
         }
     }
 
+    /// Deliver one banner on Linux, over a connection we keep open.
+    ///
+    /// ## Why this does not use the plugin
+    ///
+    /// Reported as "the notification appears for a tenth of a second and
+    /// vanishes", which is a mechanism and not a mood. The plugin's desktop
+    /// path is:
+    ///
+    /// ```ignore
+    /// tauri::async_runtime::spawn(async move { let _ = notification.show(); });
+    /// ```
+    ///
+    /// `show()` returns a handle that OWNS the zbus connection it sent on, and
+    /// `let _ =` drops it on the spot. The session-bus connection closes a
+    /// moment after the Notify call — and a notification daemon withdraws the
+    /// notifications of a sender that has left the bus, precisely so that a
+    /// crashed app does not leave banners behind. Ours had not crashed; it had
+    /// hung up. The banner is drawn and pulled, every time, for everyone.
+    ///
+    /// So the connection is opened once, kept in `Shell` for the life of the
+    /// process, and every notification goes over it. Nothing else changes:
+    /// `lib/notify.ts` still decides whether a banner happens and how much it
+    /// may say, and it still never carries message text.
+    ///
+    /// Two hints are worth the four lines they cost. `desktop-entry` points at
+    /// the installed `onchato.desktop`, so the banner carries the app's real
+    /// name and icon instead of a generic one; `urgency` normal keeps it out of
+    /// the "critical" class, which on GNOME does not time out at all.
     #[cfg(target_os = "linux")]
     async fn deliver(app: AppHandle, title: String, body: String, id: i32) -> Result<(), String> {
         use std::collections::HashMap;
@@ -373,6 +373,12 @@ mod desk {
         { true }
     }
 
+    /// Which half of the seam is answering. The webview shows different settings
+    /// for a window and for a phone, and inferring that from a user agent is how
+    /// it goes wrong quietly.
+    #[tauri::command]
+    fn desk_platform() -> String { "desktop".into() }
+
     /// The webview asking to be brought forward (a notification was clicked in
     /// a build where the platform can tell us, or the app wants attention).
     #[tauri::command]
@@ -446,6 +452,7 @@ mod desk {
                 desk_autostart,
                 desk_strings,
                 desk_tray_ok,
+                desk_platform,
                 desk_show,
             ])
             .setup(|app| {
@@ -535,11 +542,89 @@ mod desk {
     }
 }
 
+/// The mobile half of the same seam.
+///
+/// `web/src/desktop.ts` asks the shell for what a browser tab cannot do, and it
+/// asks by invoking commands. Those commands lived inside `mod desk`, which is
+/// `cfg(desktop)` — so on Android they did not exist, every invoke was rejected
+/// and notifications were dropped in silence. The webview had no way to know:
+/// from its side "the host refused" and "the host has no such command" look
+/// identical.
+///
+/// Mobile answers the same questions honestly: it can notify, and it has no
+/// tray, no login item and no window to hide. Reachability on Android is not an
+/// icon — it is `android/OnchatoService.kt`, which keeps the process from being
+/// frozen while the app is open.
+#[cfg(mobile)]
+mod mobile {
+    use tauri::{AppHandle, Builder, Wry};
+    use tauri_plugin_notification::{NotificationExt, PermissionState};
+
+    fn word(s: PermissionState) -> String {
+        match s {
+            PermissionState::Granted => "granted",
+            PermissionState::Denied => "denied",
+            _ => "default",
+        }
+        .into()
+    }
+
+    #[tauri::command]
+    fn desk_notify(app: AppHandle, title: String, body: String, id: i32) -> Result<(), String> {
+        app.notification().builder().id(id).title(title).body(body).show().map_err(|e| e.to_string())
+    }
+
+    #[tauri::command]
+    fn desk_notify_permission(app: AppHandle) -> String {
+        word(app.notification().permission_state().unwrap_or(PermissionState::Prompt))
+    }
+
+    /// Android asks for real here. The activity also asks at startup, because a
+    /// permission dialog cannot be shown to an app that is already in the
+    /// background — which is exactly when a message notification is wanted.
+    #[tauri::command]
+    fn desk_notify_request(app: AppHandle) -> Result<String, String> {
+        app.notification().request_permission().map(word).map_err(|e| e.to_string())
+    }
+
+    /// Said plainly rather than by failing, so the settings screen can leave
+    /// those switches out instead of showing ones that do nothing.
+    #[tauri::command]
+    fn desk_tray_ok() -> bool { false }
+    #[tauri::command]
+    fn desk_platform() -> String { "mobile".into() }
+    #[tauri::command]
+    fn desk_close_to_tray(_on: bool) {}
+    #[tauri::command]
+    fn desk_autostart(_on: Option<bool>) -> Result<bool, String> { Ok(false) }
+    #[tauri::command]
+    fn desk_strings(_show: String, _quit: String, _hidden_title: String, _hidden_body: String) {}
+    #[tauri::command]
+    fn desk_show() {}
+
+    pub fn wire(b: Builder<Wry>) -> Builder<Wry> {
+        b.plugin(tauri_plugin_notification::init())
+            .invoke_handler(tauri::generate_handler![
+                desk_notify,
+                desk_notify_permission,
+                desk_notify_request,
+                desk_tray_ok,
+                desk_platform,
+                desk_close_to_tray,
+                desk_autostart,
+                desk_strings,
+                desk_show,
+            ])
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(desktop)]
     let builder = desk::wire(builder);
+    #[cfg(mobile)]
+    let builder = mobile::wire(builder);
     builder
         .run(tauri::generate_context!())
         .expect("error while running onchato");

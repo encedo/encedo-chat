@@ -113,6 +113,16 @@ jobs:
           grep -qE 'minSdk *= *34' "$GRADLE" || { echo "::error::minSdk patch did not take"; exit 1; }
           grep -nE 'minSdk|targetSdk' "$GRADLE"
 
+      # The project above is generated from a template on every run, so anything
+      # we need in it has to be applied here — the same place `minSdk` is pinned.
+      # The patcher asserts every anchor and fails loudly if Tauri's template has
+      # moved: a silent no-op would produce an APK that installs, runs, and
+      # quietly fails to be reachable in a pocket, which is the one bug it exists
+      # to prevent. Its transforms are unit-tested in `test/android-patch.test.ts`.
+      - name: Keep the app reachable (foreground service)
+        run: node src-tauri/android/patch.mjs src-tauri/gen/android
+        working-directory: impl
+
       # Through `npm run`, never npx: the Gradle project this generates builds
       # the Rust library by calling `npm run tauri` itself, from inside its own
       # task. With the CLI reachable only through npx there is no such script,

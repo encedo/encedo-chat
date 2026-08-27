@@ -247,6 +247,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Puknięcie działa tylko, gdy rozmówca jest w pokoju': 'A knock only works while they are in the room',
     'Poprawić można w ciągu {n} minut od wysłania': 'A message can be corrected within {n} minutes of sending it',
     'Powiadomienia': 'Notifications',
+    'Na Androidzie aplikacja utrzymuje połączenie tak długo, jak jest uruchomiona — pokazuje wtedy stałe powiadomienie „onchato”. To jedyny sposób, żeby system nie zamroził jej w tle; nie ma tu skrzynki, która przechowa wiadomość na później.': 'On Android the app holds its connection for as long as it is running, and shows a permanent \u201Conchato\u201D notification while it does. That is the only way to stop the system freezing it in the background \u2014 there is no mailbox here to hold a message for later.',
     'Zaloguj jako {name}': 'Sign in as {name}',
     'Nagrywam…': 'Recording…',
     'Nagranie gotowe': 'Recording ready',

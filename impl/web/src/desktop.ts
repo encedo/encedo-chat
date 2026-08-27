@@ -71,6 +71,16 @@ let deskTray = false
 export const trayAvailable = (): boolean => deskTray
 
 /**
+ * Which shell is answering.
+ *
+ * Asked rather than inferred from the user agent: on Android the webview looks
+ * enough like a browser to fool a sniff, and the settings that follow from
+ * getting it wrong are a tray switch on a phone and a missing one on a desktop.
+ */
+let deskKind: 'desktop' | 'mobile' = 'desktop'
+export const isMobileShell = (): boolean => isDesktopShell() && deskKind === 'mobile'
+
+/**
  * A tag is a string on the web and an integer on the host, and it does the same
  * job in both: one banner per conversation, replaced rather than stacked.
  * FNV-1a, kept inside the positive half of an i32 because that is what the
@@ -179,6 +189,7 @@ export async function initDesktop(s: {
   if (!isDesktopShell()) return
   try { deskPerm = await invoke<Perm>('desk_notify_permission') } catch { deskPerm = 'default' }
   try { deskTray = await invoke<boolean>('desk_tray_ok') } catch { deskTray = false }
+  try { deskKind = await invoke<'desktop' | 'mobile'>('desk_platform') } catch { deskKind = 'desktop' }
   try { await invoke('desk_strings', { show: s.show, quit: s.quit, hiddenTitle: s.hiddenTitle, hiddenBody: s.hiddenBody }) } catch {}
   try { await invoke('desk_close_to_tray', { on: closeToTray() }) } catch {}
 }
