@@ -60,6 +60,17 @@ const invoke = <T>(cmd: string, args?: Record<string, unknown>): Promise<T> => {
 let deskPerm: Perm = 'default'
 
 /**
+ * Can this desktop DISPLAY a tray icon?
+ *
+ * GNOME has no built-in tray — an extension draws it — so the icon can be
+ * created successfully and seen by nobody. Assumed false until the shell says
+ * otherwise, because the failure of hiding a window into an invisible tray is
+ * a window you cannot get back.
+ */
+let deskTray = false
+export const trayAvailable = (): boolean => deskTray
+
+/**
  * A tag is a string on the web and an integer on the host, and it does the same
  * job in both: one banner per conversation, replaced rather than stacked.
  * FNV-1a, kept inside the positive half of an i32 because that is what the
@@ -167,6 +178,7 @@ export async function initDesktop(s: {
 }) {
   if (!isDesktopShell()) return
   try { deskPerm = await invoke<Perm>('desk_notify_permission') } catch { deskPerm = 'default' }
+  try { deskTray = await invoke<boolean>('desk_tray_ok') } catch { deskTray = false }
   try { await invoke('desk_strings', { show: s.show, quit: s.quit, hiddenTitle: s.hiddenTitle, hiddenBody: s.hiddenBody }) } catch {}
   try { await invoke('desk_close_to_tray', { on: closeToTray() }) } catch {}
 }

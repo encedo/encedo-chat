@@ -58,9 +58,13 @@ mod desk {
         hidden_title: Mutex<String>,
         hidden_body: Mutex<String>,
         /// The session bus, held open for the life of the process. See
-        /// `xdg_notify` — this field IS the fix.
+        /// `deliver` — this field IS the fix for the vanishing banners.
         #[cfg(target_os = "linux")]
         bus: Mutex<Option<zbus::Connection>>,
+        /// Is there anything on this desktop that can DISPLAY a tray icon?
+        /// Kept current by `watch_tray_host`. See `CloseRequested`.
+        #[cfg(target_os = "linux")]
+        tray_ok: std::sync::atomic::AtomicBool,
     }
 
     impl Default for Shell {
@@ -78,6 +82,11 @@ mod desk {
                 hidden_body: Mutex::new("Still running in the tray.".into()),
                 #[cfg(target_os = "linux")]
                 bus: Mutex::new(None),
+                // Assumed absent until proven present: the failure of hiding a
+                // window into a tray that cannot show it is unrecoverable
+                // without a terminal, and the failure of quitting is a relaunch.
+                #[cfg(target_os = "linux")]
+                tray_ok: std::sync::atomic::AtomicBool::new(false),
             }
         }
     }
@@ -121,21 +130,63 @@ mod desk {
     /// the installed `onchato.desktop`, so the banner carries the app's real
     /// name and icon instead of a generic one; `urgency` normal keeps it out of
     /// the "critical" class, which on GNOME does not time out at all.
+    /// The session bus, opened once and kept.
+    #[cfg(target_os = "linux")]
+    async fn bus(app: &AppHandle) -> Result<zbus::Connection, String> {
+        // Taken in its own statement so no lock is held across an await.
+        let held = app.state::<Shell>().bus.lock().unwrap().clone();
+        if let Some(c) = held { return Ok(c) }
+        let c = zbus::Connection::session().await.map_err(|e| e.to_string())?;
+        *app.state::<Shell>().bus.lock().unwrap() = Some(c.clone());
+        Ok(c)
+    }
+
+    /// The name an app registers its tray icon WITH — and the thing that has to
+    /// exist for the icon to be seen by anyone.
+    #[cfg(target_os = "linux")]
+    const TRAY_WATCHER: &str = "org.kde.StatusNotifierWatcher";
+
+    /// Is there a tray to hide into?
+    ///
+    /// This is not a detail. GNOME has no built-in tray: the icon is drawn by an
+    /// extension, and when that extension is not running, `TrayIconBuilder`
+    /// still succeeds, the icon still "exists", and it is visible to nobody. A
+    /// window hidden into that is a window with no way back — you have to kill
+    /// the process from a terminal to get your messenger open again. Shipped
+    /// exactly that way, and found by the person it happened to.
+    ///
+    /// So the close-to-tray behaviour asks first, and the answer is kept live:
+    /// an extension can come and go while the app runs, and a stale yes is the
+    /// dangerous direction.
+    #[cfg(target_os = "linux")]
+    async fn watch_tray_host(app: AppHandle) {
+        use futures_util::StreamExt;
+        let Ok(conn) = bus(&app).await else { return };
+        let Ok(dbus) = zbus::fdo::DBusProxy::new(&conn).await else { return };
+        let set = |on: bool| {
+            app.state::<Shell>()
+                .tray_ok
+                .store(on, std::sync::atomic::Ordering::Relaxed);
+            eprintln!("onchato: tray host {}", if on { "present" } else { "ABSENT — closing the window will quit" });
+        };
+        if let Ok(name) = TRAY_WATCHER.try_into() {
+            set(dbus.name_has_owner(name).await.unwrap_or(false));
+        }
+        let Ok(mut changes) = dbus.receive_name_owner_changed().await else { return };
+        while let Some(sig) = changes.next().await {
+            let Ok(args) = sig.args() else { continue };
+            if args.name.as_str() == TRAY_WATCHER {
+                set(args.new_owner.is_some());
+            }
+        }
+    }
+
     #[cfg(target_os = "linux")]
     async fn deliver(app: AppHandle, title: String, body: String, id: i32) -> Result<(), String> {
         use std::collections::HashMap;
         use zbus::zvariant::Value;
 
-        // Taken in its own statement so no lock is held across an await.
-        let held = app.state::<Shell>().bus.lock().unwrap().clone();
-        let conn = match held {
-            Some(c) => c,
-            None => {
-                let c = zbus::Connection::session().await.map_err(|e| e.to_string())?;
-                *app.state::<Shell>().bus.lock().unwrap() = Some(c.clone());
-                c
-            }
-        };
+        let conn = bus(&app).await?;
 
         let hints: HashMap<&str, Value> = HashMap::from([
             ("desktop-entry", Value::from("onchato")),
@@ -311,6 +362,17 @@ mod desk {
         *shell.hidden_body.lock().unwrap() = hidden_body;
     }
 
+    /// Can this desktop show a tray icon at all? The web side hides the
+    /// close-to-tray option where the answer is no, rather than offering a
+    /// switch whose only effect would be to lose the window.
+    #[tauri::command]
+    fn desk_tray_ok(_shell: State<Shell>) -> bool {
+        #[cfg(target_os = "linux")]
+        { _shell.tray_ok.load(std::sync::atomic::Ordering::Relaxed) }
+        #[cfg(not(target_os = "linux"))]
+        { true }
+    }
+
     /// The webview asking to be brought forward (a notification was clicked in
     /// a build where the platform can tell us, or the app wants attention).
     #[tauri::command]
@@ -366,6 +428,7 @@ mod desk {
                 desk_close_to_tray,
                 desk_autostart,
                 desk_strings,
+                desk_tray_ok,
                 desk_show,
             ])
             .setup(|app| {
@@ -406,6 +469,11 @@ mod desk {
 
                 #[cfg(target_os = "linux")]
                 enable_webrtc(app);
+                #[cfg(target_os = "linux")]
+                {
+                    let handle = app.handle().clone();
+                    tauri::async_runtime::spawn(watch_tray_host(handle));
+                }
 
                 Ok(())
             })
@@ -416,6 +484,14 @@ mod desk {
                 // Quit from the tray closes the window on its way out. Catching
                 // that one would leave the app with no way to exit at all.
                 if *shell.quitting.lock().unwrap() || !*shell.close_to_tray.lock().unwrap() {
+                    return;
+                }
+                // Nowhere to hide: let the window close rather than making the
+                // app unreachable. GNOME draws tray icons through an extension,
+                // and when it is not running the icon exists and is seen by
+                // nobody.
+                #[cfg(target_os = "linux")]
+                if !shell.tray_ok.load(std::sync::atomic::Ordering::Relaxed) {
                     return;
                 }
                 api.prevent_close();

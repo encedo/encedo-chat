@@ -30,7 +30,7 @@ import { canEdit, acceptEdit, EDIT_WINDOW_MS } from '../../lib/edits.ts'
 import { planNotification, isNotifyMode, type NotifyMode } from '../../lib/notify.ts'
 import {
   isDesktopShell, notifySupported, notifyPermission, notifyRequest, notifyShow, type Banner,
-  closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop,
+  closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
@@ -3163,8 +3163,17 @@ async function paintDesktopSettings() {
   if (opts) opts.hidden = !on
   if (note) note.hidden = !on
   if (!on) return
+  // The close-to-tray row disappears where there is no tray to close INTO —
+  // and the note says so, because the option's absence is otherwise a mystery
+  // on a desktop that has a tray for other apps tomorrow. Hiding a window into
+  // an icon nobody draws is a window you get back by killing the process.
+  const trayRow = $('desk-tray')?.closest('label') as HTMLElement | null
+  const hasTray = trayAvailable()
+  if (trayRow) trayRow.hidden = !hasTray
+  const trayNote = $('desk-no-tray')
+  if (trayNote) trayNote.hidden = hasTray
   const tray = $('desk-tray') as HTMLInputElement | null
-  if (tray) tray.checked = closeToTray()
+  if (tray) tray.checked = hasTray && closeToTray()
   const auto = $('desk-autostart') as HTMLInputElement | null
   // Read from the SYSTEM, not from a preference of ours — a desktop can refuse
   // a login item, and a checkbox showing what we asked for rather than what
@@ -5057,7 +5066,19 @@ window.addEventListener('online', () => {
 // Leaving the page ends the whole session, not just the open room: the §9.1
 // watch has to stop announcing, or the next window sees a rival that is already
 // gone and closes itself for nothing.
-window.addEventListener('beforeunload', () => { void persistGroups(); for (const r of rooms.values()) r.conv?.leave(); client?.close() })
+window.addEventListener('beforeunload', () => {
+  void persistGroups()
+  // ⚠️ In the packaged shell a close REQUEST is not a departure. The shell
+  // vetoes it and hides the window, but the webview has already fired this
+  // event — so tearing the transport down here left a live window attached to
+  // a STOPPED node, and the next room said "Pubsub has not started" with
+  // nothing to explain it. Reported as a race; it was not one, it was this.
+  //
+  // Quitting for real takes the process with it, which takes the node too.
+  if (isDesktopShell()) return
+  for (const r of rooms.values()) r.conv?.leave()
+  client?.close()
+})
 
 // ---- room rotation countdown — the ACTIVE pair's real instant (midnight+offset) ----
 // The topic rotates per pair at `UTC-midnight + rotationOffsetSec` (§5.4), so the
