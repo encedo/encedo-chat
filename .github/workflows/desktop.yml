@@ -23,6 +23,12 @@ on:
 # fix, and it is scoped to this workflow rather than the repository default.
 permissions:
   contents: write
+  # Trusted Signing authenticates through OIDC rather than a stored key: the job
+  # asks GitHub for a short-lived token and exchanges it for an Azure one, so
+  # there is no certificate and no password anywhere in this repository.
+  # Harmless while signing is switched off — a token nobody requests is not
+  # issued.
+  id-token: write
 
 jobs:
   bundle:
@@ -95,12 +101,46 @@ jobs:
           workspaces: impl/src-tauri
           key: ${{ matrix.label }}
 
+      # Signing, and it is off until the Azure side exists.
+      #
+      # Turned on by repository VARIABLES, not secrets, because there is no key
+      # to hold: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID plus
+      # TRUSTED_SIGNING_ENDPOINT, TRUSTED_SIGNING_ACCOUNT and
+      # TRUSTED_SIGNING_PROFILE. Every step here is conditioned on the first of
+      # them, so an unconfigured repository builds exactly as it does today
+      # rather than failing at a step nobody can satisfy yet.
+      #
+      # The signing itself is handed to Tauri rather than run after it. Tauri
+      # produces the .exe and then copies it into the .msi and the NSIS
+      # installer, so signing afterwards would sign the installers and leave the
+      # loose binary beside them unsigned — and two downloads of one program
+      # where only one is signed is worse than neither. `signCommand` is
+      # invoked by Tauri for each artifact at the moment it exists, which is the
+      # only point where "every copy" is achievable.
+      - name: Sign in to Azure
+        if: runner.os == 'Windows' && vars.AZURE_CLIENT_ID != ''
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: The signing tool Tauri will call
+        if: runner.os == 'Windows' && vars.AZURE_CLIENT_ID != ''
+        run: dotnet tool install --global sign --prerelease
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
+          TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
+          TRUSTED_SIGNING_PROFILE: ${{ vars.TRUSTED_SIGNING_PROFILE }}
         with:
           projectPath: impl
-          args: ${{ matrix.args }}
+          # The overlay adds `bundle.windows.signCommand` and nothing else, so
+          # an unsigned build and a signed one differ by one file that is not
+          # read unless it is named here.
+          args: ${{ matrix.args }} ${{ (runner.os == 'Windows' && vars.AZURE_CLIENT_ID != '') && '--config src-tauri/tauri.sign.conf.json' || '' }}
           # A tag build publishes a draft release; a manual run just leaves
           # artifacts, so the button is safe to press for a test bundle.
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}

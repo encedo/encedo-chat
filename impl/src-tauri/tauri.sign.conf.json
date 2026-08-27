@@ -1,0 +1,8 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "windows": {
+      "signCommand": "sign code trusted-signing -tse %TRUSTED_SIGNING_ENDPOINT% -tsa %TRUSTED_SIGNING_ACCOUNT% -tscp %TRUSTED_SIGNING_PROFILE% -d onchato -u https://onchato.com --azure-credential-type azure-cli -v Information %1"
+    }
+  }
+}

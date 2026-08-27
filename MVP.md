@@ -100,8 +100,9 @@ Kolejność jest kolejnością ryzyka: najpierw to, co może wywrócić plan.
 1. **Android etap C** — foreground service, ikona w pasku stanu, wznowienie po
    powrocie na pierwszy plan (połowa już jest: `visibilitychange` → `refresh()`).
 2. **Migracja profilu** (B3).
-4. **Podpisywanie Windows** — Azure Sign Tool w Actions, jak w `encedo-wg-hsm`
-   (§5).
+4. **Podpisywanie Windows** — kod w `desktop.yml` już jest; zostaje strona
+   Azure (walidacja tożsamości organizacji to najdłuższy element) i ustawienie
+   sześciu zmiennych repozytorium (§5).
 5. **Poprawki z B6** + przegląd katalogu i18n pod kątem innych gołych stringów.
 6. **iOS** — dopiero po założeniu Apple ID: `tauri ios init`, budowa, wgranie na
    urządzenie. Ikony i `identifier` (`com.onchato.chat`) są już gotowe.
@@ -115,7 +116,7 @@ Kolejność jest kolejnością ryzyka: najpierw to, co może wywrócić plan.
 
 | cel | jak | stan |
 |---|---|---|
-| **Windows** | **Azure Sign Tool** w Actions, wzorzec z `encedo-wg-hsm`: certyfikat w Azure Key Vault, `AZURE_*` w secrets repo, podpis `.msi`/`.exe` po `tauri build` | do zrobienia |
+| **Windows** | **Azure Trusted Signing przez OIDC**, wzorzec z `encedo-wg-hsm` — **bez sekretów**, sterowane zmiennymi repo (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `TRUSTED_SIGNING_ENDPOINT/ACCOUNT/PROFILE`). Podpis oddany Tauri przez `signCommand`, żeby podpisany był też **luźny `.exe`**, nie tylko instalatory | **przygotowane, nieuruchomione** — włączy się samo, gdy ustawisz zmienne |
 | **macOS** | niepodpisane — instalacja przez „Otwórz mimo to". Podpis = subskrypcja Apple Developer; decyzja przy iOS | świadomie odłożone |
 | **Linux** | `.deb` + `.rpm` + AppImage bez podpisu; dystrybucja z GitHub Releases | działa |
 | **Android** | CI produkuje **niepodpisany** `.aab`/`.apk`; podpis kluczem upload na maszynie, która trzyma keystore, potem Play App Signing | zgodne z zaleceniem Google, do przejścia raz |
