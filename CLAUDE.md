@@ -254,8 +254,10 @@ fills `au` from `contact.pub` in a 1:1 and from `from` in a group — hinting of
 a PeerId would hash the wrong bytes and name nobody. This is the third time this
 pair has been confused (see the sender-key note in §8).
 
-`docs/PROTOCOL.md` does **not** describe `re` — the specs are frozen for the
-external review and adding a wire field to them is the user's call, not mine.
+`docs/PROTOCOL.md` **§7.4 describes `re`** — the field went into the frozen specs
+once the user decided it should (2026-08-27). The rule that put it there stands:
+a wire field the client sends and the spec omits means the audit is of a
+different program, so the decision is the user's and the default is to ask.
 Covered by `test/quote.test.ts` (snippet bounds, hint, refusals, and that a
 broken quote never drops its message) and a `grouproom` scenario where the quote
 reaches a third member who is party to neither side of it. **Not** covered by
@@ -301,9 +303,9 @@ old signature was one `undefined`-through-six-slots away from a bug.
 Covered by `test/edits.test.ts` (window, skew, the who-may-edit-what rule, codec
 refusals, forward-compat) and a `room-eh2` scenario proving the correction
 reaches the peer, is not delivered as a message, and is acked **under its own
-id**. **Not** covered by `browser-test`. `docs/PROTOCOL.md` does not describe
-`edit` either — second wire addition kept out of the frozen specs, see the reply
-note above.
+id**. Covered by `browser-test` since 2026-08-24 (it clicks ✏ and checks the old text
+is gone on the other side). `docs/PROTOCOL.md` **§7.4 describes `edit`**, with
+the window, the skew tolerance and the 1:1-only reasoning.
 
 ### Sessions and rooms — `lib/core.ts`
 

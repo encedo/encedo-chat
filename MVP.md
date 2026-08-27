@@ -77,10 +77,12 @@ Zostaje realne ryzyko: **dwa węzły to dwa punkty awarii, a nie zapas**. Przed
 więc robota to VM, DNS, nginx i `--pass bs3.onchato.com`. Do `infra/nodes.json`
 dopisujemy go **dopiero gdy odpowiada**.
 
-### B5. Specyfikacje zgodne z kodem
-`re` (odpowiedzi) i `edit` (poprawki) są na drucie i **nie ma ich w
-`docs/PROTOCOL.md`**. Zgoda na dopisanie już jest. Audytor musi czytać to, co
-klient wysyła — inaczej audyt dotyczy innego programu.
+### B5. Specyfikacje zgodne z kodem — ✅ ZROBIONE
+`re` i `edit` **były już** opisane w §7.4 (to notatka w `CLAUDE.md` była
+nieaktualna i mnie zmyliła — poprawiona). Porównanie typów kopert z kodem
+znalazło jedną prawdziwą lukę: **`rtc`**, koperta sygnalizacji WebRTC, jeździła
+po drucie i nie było jej w specyfikacji. Dopisana. Lista typów w §7.4 zgadza się
+teraz z `lib/envelope.ts` co do nazwy, `group-skd`/`group-skd-req` włącznie.
 
 ### B6. Kłamstwa w kodzie i w UI
 - Komentarze w `lib/capabilities.ts` i `web/src/app.ts` twierdzą, że skorupka
@@ -98,7 +100,6 @@ Kolejność jest kolejnością ryzyka: najpierw to, co może wywrócić plan.
 1. **Android etap C** — foreground service, ikona w pasku stanu, wznowienie po
    powrocie na pierwszy plan (połowa już jest: `visibilitychange` → `refresh()`).
 2. **Migracja profilu** (B3).
-3. **`docs/PROTOCOL.md`**: `re` i `edit` do §7.4 (B5).
 4. **Podpisywanie Windows** — Azure Sign Tool w Actions, jak w `encedo-wg-hsm`
    (§5).
 5. **Poprawki z B6** + przegląd katalogu i18n pod kątem innych gołych stringów.
