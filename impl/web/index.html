@@ -772,13 +772,19 @@
              cost the conversation. -->
         <button class="icon-btn" id="btn-signout" title="Wyloguj" data-i18n-title="Wyloguj" aria-label="Wyloguj"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3.5v8"/><path d="M7.8 6.6a7 7 0 1 0 8.4 0"/></svg></button>
       </div>
-      <div class="search-wrap"><input id="contact-search" type="text" placeholder="Szukaj kontaktu…" data-i18n-placeholder="Szukaj kontaktu…" autocomplete="off"></div>
       <div class="tabs">
         <button class="tab active" id="tab-contacts" data-i18n="Kontakty">Kontakty</button>
         <button class="tab" id="tab-groups" data-i18n="Grupy">Grupy</button>
         <button class="tab" id="tab-network" title="Status węzła sieci" data-i18n-title="Status węzła sieci" data-i18n="Sieć">Sieć</button>
       </div>
+      <!-- One box per list, each inside the tab it filters. It used to sit above
+           the tabs, where its position claimed more than it did. Kept OUT of the
+           pane that renders below it, because both panes are rebuilt on every
+           keystroke and an input rebuilt under a typing finger loses the
+           caret. -->
+      <div class="search-wrap" id="search-contacts"><input id="contact-search" type="text" placeholder="Szukaj kontaktu…" data-i18n-placeholder="Szukaj kontaktu…" autocomplete="off"></div>
       <div class="pane" id="pane-contacts"></div>
+      <div class="search-wrap" id="search-groups" hidden><input id="group-search" type="text" placeholder="Szukaj grupy…" data-i18n-placeholder="Szukaj grupy…" autocomplete="off"></div>
       <div class="pane" id="pane-groups" hidden></div>
       <div class="pane" id="pane-network" hidden><div class="pane-label" data-i18n="Sieć — wkrótce (lista węzłów, latencje)">Sieć — wkrótce (lista węzłów, latencje)</div></div>
       <div class="profile-strip"><span class="lbl" data-i18n="Transport">Transport</span><button class="chip" id="chip-profile" title="Zmień w Ustawieniach" data-i18n-title="Zmień w Ustawieniach">—</button></div>
@@ -1115,12 +1121,12 @@
     <div class="d-note" id="desk-mobile" hidden data-i18n="Na Androidzie aplikacja utrzymuje połączenie tak długo, jak jest uruchomiona — pokazuje wtedy stałe powiadomienie „onchato”. To jedyny sposób, żeby system nie zamroził jej w tle; nie ma tu skrzynki, która przechowa wiadomość na później.">Na Androidzie aplikacja utrzymuje połączenie tak długo, jak jest uruchomiona — pokazuje wtedy stałe powiadomienie „onchato”. To jedyny sposób, żeby system nie zamroził jej w tle; nie ma tu skrzynki, która przechowa wiadomość na później.</div>
     <div class="d-note" id="desk-no-tray" hidden data-i18n="Ten pulpit nie pokazuje ikon w zasobniku (w GNOME rysuje je rozszerzenie, a ono nie działa), więc zamknięcie okna kończy aplikację — chowanie jej do niewidocznej ikony znaczyłoby, że nie da się do niej wrócić.">Ten pulpit nie pokazuje ikon w zasobniku (w GNOME rysuje je rozszerzenie, a ono nie działa), więc zamknięcie okna kończy aplikację — chowanie jej do niewidocznej ikony znaczyłoby, że nie da się do niej wrócić.</div>
     <div class="d-note" id="desk-note" hidden data-i18n="Ta aplikacja nie przechowuje wiadomości po drodze — żeby ktoś mógł do Ciebie napisać, musi być uruchomiona. Dlatego zamknięcie okna chowa ją do zasobnika; wyjście jest w menu ikony.">Ta aplikacja nie przechowuje wiadomości po drodze — żeby ktoś mógł do Ciebie napisać, musi być uruchomiona. Dlatego zamknięcie okna chowa ją do zasobnika; wyjście jest w menu ikony.</div>
-    <div class="d-section" data-i18n="Diagnostyka">Diagnostyka</div>
-    <div class="diag" id="diag-caps"></div>
+    <div class="d-section" id="diag-section" hidden data-i18n="Diagnostyka">Diagnostyka</div>
+    <div class="diag" id="diag-caps" hidden></div>
     <button class="btn" id="btn-webrtc-probe" style="margin-top:10px" data-i18n="Sprawdź WebRTC">Sprawdź WebRTC</button>
     <div class="diag" id="diag-webrtc" hidden></div>
     <div class="d-note" id="diag-webrtc-note" data-i18n="Sprawdzenie łączy się samo ze sobą wewnątrz tego okna — bez sieci, bez węzła. Dlatego rozstrzyga, czy to ta aplikacja nie umie WebRTC, czy nie pozwala na to sieć. Ostatni wiersz jest o sieci, reszta o aplikacji.">Sprawdzenie łączy się samo ze sobą wewnątrz tego okna — bez sieci, bez węzła. Dlatego rozstrzyga, czy to ta aplikacja nie umie WebRTC, czy nie pozwala na to sieć. Ostatni wiersz jest o sieci, reszta o aplikacji.</div>
-    <button class="btn" id="btn-diag-copy" style="margin-top:2px;background:none;color:var(--accent);border:1px solid var(--accent)" data-i18n="Kopiuj raport">Kopiuj raport</button>
+    <button class="btn" id="btn-diag-copy" hidden style="margin-top:2px;background:none;color:var(--accent);border:1px solid var(--accent)" data-i18n="Kopiuj raport">Kopiuj raport</button>
     <div class="d-section" data-i18n="Sesja">Sesja</div>
     <div class="kv"><span class="k" data-i18n="Tożsamość">Tożsamość</span><span class="v" id="sess-id" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer">—</span></div>
     <div class="kv"><span class="k" data-i18n="KID (klucz w HSM)">KID (klucz w HSM)</span><span class="v" id="sess-kid">—</span></div>

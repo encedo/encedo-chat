@@ -93,7 +93,11 @@ export async function startRecording(o: {
   const limit = setTimeout(() => o.onLimit?.(), o.maxMs)
   const cleanup = () => { clearInterval(tick); clearTimeout(limit); release() }
 
-  rec.start(250) // timeslice, so a long recording is not one allocation at the end
+  // No timeslice. It was there so a long recording would not be one allocation
+  // at the end, which a two-minute cap makes irrelevant — and cutting the stream
+  // into 250 ms clusters is a way to end up with a container some players walk
+  // through unevenly. One take, one blob.
+  rec.start()
 
   return {
     stop: () => new Promise<File>((resolve, reject) => {

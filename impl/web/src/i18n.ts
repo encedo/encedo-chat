@@ -247,6 +247,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Puknięcie działa tylko, gdy rozmówca jest w pokoju': 'A knock only works while they are in the room',
     'Poprawić można w ciągu {n} minut od wysłania': 'A message can be corrected within {n} minutes of sending it',
     'Powiadomienia': 'Notifications',
+    'Szukaj grupy…': 'Search groups…',
     'Obrazy i głosówki': 'Images and voice notes',
     'Pobieraj automatycznie obrazy i głosówki od kontaktów': 'Fetch images and voice notes from contacts automatically',
     'Pokazanie obrazka i odtworzenie głosówki to za każdym razem POBRANIE — bajty lecą ze schowka plików dopiero wtedy. Dlatego przychodzące czekają na kliknięcie. To ustawienie pobiera je z góry, ale głosówki nadal nie odtwarzają się same.': 'Showing an image and playing a voice note are both a DOWNLOAD \u2014 the bytes leave the file store only then. That is why an incoming one waits for a click. This setting fetches them ahead of time; voice notes still do not play by themselves.',

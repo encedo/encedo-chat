@@ -1851,27 +1851,32 @@ async function main() {
     if (search.restored.length !== search.before.length) throw new Error('clearing the box did not bring the list back')
     step('contacts narrow, say so when nothing matches, and come back')
 
+    // Each list has its own box now, inside its own tab — the single box above
+    // the tabs claimed to filter whatever was on screen and filtered one thing.
     const onGroups = await A.eval<any>(`
       document.getElementById('tab-groups').click();
-      const box = document.getElementById('contact-search');
+      const box = document.getElementById('group-search');
       const rows = () => document.querySelectorAll('#pane-groups .contact').length;
       const all = rows();
+      const contactsBoxHidden = document.getElementById('search-contacts').hidden;
       box.value = 'zzzz-nie-ma'; box.dispatchEvent(new Event('input'));
       const filtered = rows();
       box.value = ''; box.dispatchEvent(new Event('input'));
       const back = rows();
       document.getElementById('tab-network').click();
-      const hiddenOnNetwork = document.getElementById('contact-search').parentElement.hidden;
+      const hiddenOnNetwork = document.getElementById('search-contacts').hidden
+                           && document.getElementById('search-groups').hidden;
       document.getElementById('tab-contacts').click();
-      return { all, filtered, back, hiddenOnNetwork,
-               shownAgain: !document.getElementById('contact-search').parentElement.hidden };
+      return { all, filtered, back, hiddenOnNetwork, contactsBoxHidden,
+               shownAgain: !document.getElementById('search-contacts').hidden };
     `)
+    if (!onGroups.contactsBoxHidden) throw new Error("the contacts box followed us onto the Groups tab")
     if (onGroups.all === 0) throw new Error('no groups to filter — the scenario is not testing anything')
-    if (onGroups.filtered !== 0) throw new Error('the box does nothing on the Groups tab')
+    if (onGroups.filtered !== 0) throw new Error('the groups box does not filter groups')
     if (onGroups.back !== onGroups.all) throw new Error('clearing the box did not bring the groups back')
-    if (!onGroups.hiddenOnNetwork) throw new Error('the box stays on the Network tab, where it filters nothing')
+    if (!onGroups.hiddenOnNetwork) throw new Error('a search box stayed on the Network tab, where it filters nothing')
     if (!onGroups.shownAgain) throw new Error('the box did not come back on the Contacts tab')
-    step('groups narrow too, and the box leaves the Network tab alone')
+    step('groups have their own box, and neither follows onto Network')
 
     scenario('a group survives a reload (persisted crypto state)')
     // The group is in-memory only until persisted; a reload must bring it back

@@ -1158,10 +1158,8 @@ function renderContacts() {
     pane.appendChild(b)
   }
 }
-$('contact-search').addEventListener('input', () => {
-  renderContacts()
-  if (!$('pane-groups').hidden) renderGroups()
-})
+$('contact-search').addEventListener('input', renderContacts)
+$('group-search').addEventListener('input', renderGroups)
 
 // ---- ask / rename: two promise-shaped modals reused by every destructive or
 // editing action. Deliberately NOT window.confirm/prompt: a mobile webview
@@ -2416,9 +2414,10 @@ for (const [tab, pane] of [['tab-contacts', 'contacts'], ['tab-groups', 'groups'
   $(tab).addEventListener('click', () => {
     for (const t of ['tab-contacts', 'tab-groups', 'tab-network']) $(t).classList.toggle('active', t === tab)
     for (const p of ['contacts', 'groups', 'network']) $('pane-' + p).hidden = (p !== pane)
-    // Nothing on the Network tab is a list of names, so the box goes rather
-    // than sitting there taking input that changes nothing.
-    $('contact-search').parentElement!.hidden = pane === 'network'
+    // Each list's box travels with its list. Nothing on the Network tab is a
+    // list of names, so neither box follows it there.
+    $('search-contacts').hidden = pane !== 'contacts'
+    $('search-groups').hidden = pane !== 'groups'
     if (pane === 'groups') renderGroups()
     if (pane === 'network') startNetwork(); else stopNetwork()
   })
@@ -3418,23 +3417,29 @@ function diagLine(mark: 'ok' | 'bad' | 'meh', text: string) {
 }
 
 /**
- * The WebRTC self-test is a debugging tool that has done its job.
+ * Diagnostics are for whoever is diagnosing, and nobody else.
  *
- * It was built to settle one question — whether the packaged app could do
- * WebRTC at all — and it settled it: WebKitGTK does not expose
- * `RTCPeerConnection`, so the desktop runs on the relay. Keeping the button on
- * screen after that is keeping a control most people can only misread.
+ * The WebRTC self-test was built to settle one question and settled it:
+ * WebKitGTK does not expose `RTCPeerConnection`, so the desktop runs on the
+ * relay. The capability report beside it is a user agent and a list of ticks.
+ * Neither is something to hand a person who opened Settings to change the
+ * theme, so the whole section lives behind `?debug=1` now.
  *
- * The probe itself stays, behind `?debug=1`, because the same question is still
- * open on Windows, macOS and Android, and the day somebody runs one of those it
- * is a URL parameter rather than a piece of work. The capability report above
- * it is NOT hidden: that one explains why a feature is missing, which is a
- * thing an ordinary user is owed.
+ * The code stays in the build on purpose. The same WebRTC question is open on
+ * Windows, macOS and Android, and the day somebody runs one of those this is a
+ * URL parameter rather than a piece of work — and `Kopiuj raport` is still the
+ * fastest way to turn "it does not work here" into something answerable.
+ *
+ * ⚠️ What it costs: an ordinary user no longer has anywhere to read WHY the QR
+ * button or the microphone is missing on their platform. The controls still
+ * vanish rather than sitting there dead, but the explanation now needs asking
+ * for.
  */
 function paintDiagnostics() {
-  for (const id of ['btn-webrtc-probe', 'diag-webrtc', 'diag-webrtc-note']) {
-    const el = $(id); if (el) el.hidden = !DEBUG || (id === 'diag-webrtc' && !lastWebrtcProbe)
+  for (const id of ['diag-section', 'diag-caps', 'btn-diag-copy', 'btn-webrtc-probe', 'diag-webrtc-note']) {
+    const el = $(id); if (el) el.hidden = !DEBUG
   }
+  const out = $('diag-webrtc'); if (out) out.hidden = !DEBUG || !lastWebrtcProbe
 }
 
 function paintCaps() {
@@ -3841,7 +3846,10 @@ $('img-auto')?.addEventListener('change', (e) => {
 function voicePlayer(url: string): HTMLElement {
   const wrap = document.createElement('div'); wrap.className = 'b-voice'
   const audio = new Audio(url)
-  audio.preload = 'metadata'
+  // The bytes are already local — a blob URL — so there is nothing to save by
+  // loading them lazily, and 'auto' means the whole take is decoded before the
+  // first press rather than while it plays.
+  audio.preload = 'auto'
   const play = document.createElement('button')
   play.className = 'v-play'; play.type = 'button'
   play.title = tr('Odtwórz'); play.setAttribute('aria-label', tr('Odtwórz'))
@@ -3856,21 +3864,58 @@ function voicePlayer(url: string): HTMLElement {
   wrap.append(play, bar, time)
 
   const clock = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
-  // Duration is not known until metadata arrives, and for a stream recorded in
-  // this very page it can arrive as Infinity — so the label falls back to the
-  // position, which is always true.
-  const total = () => (Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0)
-  const paint = () => {
-    const t = total()
-    fill.style.width = t ? `${Math.min(100, (audio.currentTime / t) * 100)}%` : '0'
-    time.textContent = clock(t ? (audio.paused ? t : t - audio.currentTime) : audio.currentTime)
+
+  /**
+   * How long is it?
+   *
+   * ⚠️ A file from `MediaRecorder` usually answers `Infinity`: the container was
+   * written as it was spoken, so nobody stamped a length in it. The cure is old
+   * and ugly and works everywhere — seek past the end, let the engine discover
+   * where the end actually is, then seek back. Without it the bar has nothing
+   * to fill and the number counts up instead of down, which reads as a broken
+   * player rather than an unknown duration.
+   */
+  let length = 0
+  const measure = () => {
+    if (Number.isFinite(audio.duration) && audio.duration > 0) { length = audio.duration; paint(); return }
+    const onSeek = () => {
+      audio.removeEventListener('timeupdate', onSeek)
+      if (Number.isFinite(audio.duration)) length = audio.duration
+      audio.currentTime = 0
+      paint()
+    }
+    audio.addEventListener('timeupdate', onSeek)
+    try { audio.currentTime = 1e101 } catch { /* some engines refuse; the bar then stays put */ }
   }
-  audio.addEventListener('loadedmetadata', paint)
-  audio.addEventListener('timeupdate', paint)
-  audio.addEventListener('ended', () => { play.innerHTML = icon(false); audio.currentTime = 0; paint() })
+
+  /**
+   * Paint on every frame WHILE PLAYING, not on `timeupdate`.
+   *
+   * Reported as "the playback stutters, there is no smoothness" — and it was the
+   * bar, not the sound. `timeupdate` fires about four times a second, so the
+   * fill advanced in visible steps while the audio ran perfectly. A progress
+   * bar is an animation; it belongs on the frame clock.
+   */
+  let raf = 0
+  const paint = () => {
+    fill.style.width = length ? `${Math.min(100, (audio.currentTime / length) * 100)}%` : '0'
+    time.textContent = clock(length ? (audio.paused ? length : length - audio.currentTime) : audio.currentTime)
+  }
+  const follow = () => { paint(); raf = audio.paused ? 0 : requestAnimationFrame(follow) }
+  const stopFollowing = () => { if (raf) cancelAnimationFrame(raf); raf = 0 }
+
+  audio.addEventListener('loadedmetadata', measure)
+  audio.addEventListener('durationchange', () => { if (Number.isFinite(audio.duration) && audio.duration > 0) { length = audio.duration; paint() } })
+  audio.addEventListener('ended', () => {
+    stopFollowing(); play.innerHTML = icon(false); audio.currentTime = 0; paint()
+  })
+  audio.addEventListener('pause', () => { stopFollowing(); paint() })
   play.addEventListener('click', () => {
-    if (audio.paused) { void audio.play().catch(() => {}); play.innerHTML = icon(true) }
-    else { audio.pause(); play.innerHTML = icon(false) }
+    if (audio.paused) {
+      void audio.play().catch(() => {})
+      play.innerHTML = icon(true)
+      follow()
+    } else { audio.pause(); play.innerHTML = icon(false) }
   })
   bar.addEventListener('click', (e) => {
     const t = total(); if (!t) return
@@ -4787,7 +4832,7 @@ function renderGroups() {
   // control on this tab. It came that way from the mockup skin and nobody had
   // typed in it here. Either it works on both lists or it belongs inside the
   // contacts pane; this is the cheaper half of that choice, and the honest one.
-  const filter = val('contact-search').toLowerCase()
+  const filter = val('group-search').toLowerCase()
   const shown = [...groupsUI.values()].filter((g) => !filter || groupDisplay(g).toLowerCase().includes(filter))
   if (!shown.length) {
     const e = document.createElement('div'); e.className = 'pane-label'
