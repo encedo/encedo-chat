@@ -415,7 +415,25 @@ mod desk {
     }
 
     pub fn wire(b: Builder<Wry>) -> Builder<Wry> {
-        b.plugin(tauri_plugin_notification::init())
+        // ONE running copy, and this one has to be registered before anything
+        // else so a second launch is turned away before it builds a window, a
+        // tray icon or a transport.
+        //
+        // It is not tidiness. A second copy of onchato is a second window of the
+        // same IDENTITY, and §9.1's answer to that is deliberate and harsh:
+        // BOTH sessions stand down, because nothing in a client can tell which
+        // window the user meant and letting the newcomer win by arriving second
+        // is the wrong default. So the price of a stray double-click was two
+        // dead sessions and a reload — and it was paid for real today, when a
+        // window hidden into an invisible tray made relaunching the app the
+        // obvious thing to do.
+        //
+        // The second launch now does what the person meant by it: it brings the
+        // running window back and exits.
+        b.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            reveal(app);
+        }))
+        .plugin(tauri_plugin_notification::init())
             .plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 None,

@@ -1,6 +1,6 @@
 [package]
 name = "onchato"
-version = "0.3.5"
+version = "0.3.6"
 description = "onchato desktop (Tauri 2) — a native shell over the web bundle"
 edition = "2021"
 rust-version = "1.77"
@@ -31,6 +31,10 @@ serde_json = "1"
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-notification = "2"
 tauri-plugin-autostart = "2"
+# One running copy per machine. Not a nicety — see `wire()`: a second copy of
+# this app is a second window of the SAME IDENTITY, and the protocol's answer to
+# that is to close both sessions.
+tauri-plugin-single-instance = "2"
 
 # Reaching the WebKitGTK settings behind the webview, to turn WebRTC ON. The
 # version is pinned to the one `wry` already links: two versions of this crate
