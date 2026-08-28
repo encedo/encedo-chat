@@ -2159,6 +2159,12 @@ $('btn-voice')?.addEventListener('click', async () => {
       // The cap stops it the way the person would have, and says so — a
       // recording that simply ends is one you find out about after sending.
       onLimit: () => { toast(tr('Nagranie ma limit {s} s — zatrzymane', { s: VOICE_MAX_MS / 1000 })); void stopRecording() },
+      // The microphone stopped before Stop was pressed, so the take is shorter
+      // than the clock said. Said out loud: a note that plays half of what
+      // somebody said, with nothing on screen about it, is how this was
+      // discovered in the first place — from a file, days later.
+      onShort: (got, wanted) => toast(tr('Mikrofon ucichł — nagrało się {got} s z {wanted} s',
+        { got: got.toFixed(1), wanted: wanted.toFixed(0) })),
     })
     paintRecWindow('recording')
   } catch (e: any) {

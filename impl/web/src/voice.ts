@@ -63,32 +63,34 @@ const extFor = (mime: string) =>
   mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'bin'
 
 /**
- * How long the take really is, in seconds — and never LESS than the clock.
+ * How long the take really is, in seconds.
  *
- * ⚠️ The asymmetry here is the whole function, and getting it wrong shipped a
- * worse bug than the one it fixed. A length written into the container is
- * OBEYED: a player told the file is two seconds long stops after two seconds,
- * whatever else is in there. So
+ * ⚠️ This has now been wrong in both directions, so the reasoning is written
+ * down rather than the conclusion.
  *
- *   too long  → the bar ends a moment early and the player corrects itself the
- *               first time the sound runs past it. Cosmetic.
- *   too short → the recording is CUT. Somebody's ten-second message plays as a
- *               fragment and the rest is unreachable.
+ * 0.3.14 stamped what `decodeAudioData` answered. 0.3.15 overruled it with the
+ * wall clock as a floor, on the theory that a short stamp CUTS playback — which
+ * is true, and which was the wrong fix, because the decode was not wrong. A
+ * recording from the field settled it: the header said 6012 ms (the clock) and
+ * the media held three clusters ending at 2367 ms. The samples were simply not
+ * there, and the floor turned "a short note" into "a note that plays silence
+ * for the rest of its length".
  *
- * `decodeAudioData` is the accurate answer in principle — the sample count IS
- * the length — but it is not reliable enough to be trusted BELOW the clock:
- * measured on Firefox, a 3.19 s take decoded as 1.913 s, and stamping that
- * number is exactly how "I recorded ten seconds and it plays two" happened.
- *
- * So the clock is a floor. It runs a little long (it starts when the recorder
- * is told to start, and a microphone takes about a quarter-second to deliver
- * its first frames), and a little long is the safe direction.
+ * So the SAMPLES decide. The clock is a fallback for a platform that will not
+ * decode its own recording, and nothing more — and when the two disagree the
+ * disagreement is the finding, not a number to smooth over: see `micDied`,
+ * which is what a gap that size actually means.
  */
 export function chooseLength(decoded: number | null, elapsedMs: number): number {
-  const clock = elapsedMs / 1000
-  if (!decoded || !Number.isFinite(decoded) || decoded <= 0) return clock
-  return Math.max(decoded, clock)
+  if (decoded && Number.isFinite(decoded) && decoded > 0) return decoded
+  return elapsedMs / 1000
 }
+
+/** A gap this big between the clock and the samples is not measurement error —
+ *  it is capture that stopped. Half a second covers device start-up and the
+ *  encoder's tail; anything beyond it is missing audio. */
+export const micDied = (decoded: number | null, elapsedMs: number): boolean =>
+  !!decoded && Number.isFinite(decoded) && elapsedMs / 1000 - decoded > 0.5
 
 async function decodedLength(bytes: Uint8Array): Promise<number | null> {
   try {
@@ -121,9 +123,38 @@ export async function startRecording(o: {
   maxMs: number
   onTick?: (ms: number) => void
   onLimit?: () => void
+  /** The microphone stopped delivering before Stop was pressed: the take is
+   *  `got` seconds long where `wanted` seconds were recorded. Told rather than
+   *  hidden — a note that plays half of what somebody said, with nothing on
+   *  screen about it, is the worst version of this. */
+  onShort?: (got: number, wanted: number) => void
 }): Promise<Recording> {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  // ⚠️ `{ audio: true }` takes whatever the device offers, and on the machine
+  // where capture died mid-recording that is the one thing we had not pinned
+  // down. Mono at 48 kHz is what Opus encodes anyway, so asking for it removes a
+  // resampling stage rather than adding one — and echo cancellation is off
+  // because it is the part of the pipeline that belongs to WebRTC's audio
+  // processing, which this app is also running a peer connection through. A
+  // voice note is not a call: there is no far end to echo.
+  //
+  // Every field is a REQUEST, not a demand (no `exact`), so a device that
+  // cannot do one of them still opens rather than failing outright.
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { channelCount: 1, sampleRate: 48_000, echoCancellation: false },
+  })
   const release = () => { for (const t of stream.getTracks()) { try { t.stop() } catch {} } }
+
+  // The track dying is the fault we are chasing, and it announces itself: a
+  // device that goes away fires `ended`, one that is taken over fires `mute`.
+  // Neither stops the recorder, which goes on writing nothing — so they are
+  // caught here, reported, and remembered for the caller to act on.
+  const track = stream.getAudioTracks()[0]
+  let died: string | null = null
+  if (track) {
+    track.addEventListener('ended', () => { died ??= 'ended' })
+    track.addEventListener('mute', () => { died ??= 'mute' })
+    try { ecWarn('mic: ' + JSON.stringify(track.getSettings())) } catch {}
+  }
 
   let rec: MediaRecorder
   try {
@@ -184,17 +215,17 @@ export async function startRecording(o: {
             const raw = new Uint8Array(await new Blob(chunks, { type: mime }).arrayBuffer())
             const decoded = await decodedLength(raw)
             const secs = chooseLength(decoded, elapsed)
+            if (micDied(decoded, elapsed) || died) o.onShort?.(secs, elapsed / 1000)
             // Worth a line when the two disagree: it is the fingerprint of an
             // engine that mis-decodes its own recording, and the reason the
             // clock is a floor rather than a fallback.
-            // The one line that settles where a short recording went. A clock
-            // that ran ten seconds against two seconds of samples is not a
-            // measurement problem, it is missing audio — and the chunk count
-            // says whether the recorder was handing bytes over as it went or
-            // holding them all until the end.
-            if (decoded && Math.abs(decoded - elapsed / 1000) > 0.75) {
-              ecWarn(`decoded ${decoded.toFixed(2)}s vs clock ${(elapsed / 1000).toFixed(2)}s`
-                + ` — stamping ${secs.toFixed(2)}s · ${chunks.length} chunk(s), ${raw.length} B, ${mime}`)
+            // Everything needed to tell a short recording from a short take,
+            // in one line: the samples against the clock, how many pieces the
+            // recorder handed over, and whether the microphone said it was
+            // going away before we asked it to.
+            if (micDied(decoded, elapsed) || died) {
+              ecWarn(`SHORT: ${decoded?.toFixed(2)}s of audio vs ${(elapsed / 1000).toFixed(2)}s recorded`
+                + ` · track ${died ?? 'live'} · ${chunks.length} chunk(s), ${raw.length} B, ${mime}`)
             }
             const out = /webm|matroska/.test(mime) ? stampWebmDuration(raw, secs) : raw
             resolve(new File([out], name, { type: mime }))

@@ -78,6 +78,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Administrator nie odpowiedział. Może być offline — albo nie jesteś już członkiem tej grupy; tego nie da się rozróżnić.': 'The administrator did not answer. They may be offline — or you may no longer be a member; the two cannot be told apart.',
     'Adres HEM': 'HEM address',
     'Jest nowa wersja {v}': 'Version {v} is available',
+    'Mikrofon ucichł — nagrało się {got} s z {wanted} s': 'The microphone went quiet — {got} s recorded out of {wanted} s',
     'Nie udało się zaktualizować — pobierz nową wersję ręcznie': 'Could not update — download the new version by hand',
     'Pobieram aktualizację…': 'Downloading the update…',
     'Później': 'Later',
