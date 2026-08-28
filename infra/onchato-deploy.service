@@ -1,0 +1,16 @@
+# One shot per tick. Type=oneshot so the timer waits for the build to finish
+# rather than starting another one on top of it (the script also takes a lock,
+# because a timer is not the only way this gets run).
+[Unit]
+Description=onchato — build and publish a new release tag
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=REPO=/opt/github/encedo-chat
+Environment=STATE=/var/lib/onchato-deployed-tag
+# A build is minutes, not seconds; killing it half-way would leave dist/ with a
+# fresh index.html pointing at a bundle that was never written.
+TimeoutStartSec=1800
+ExecStart=/opt/github/encedo-chat/infra/deploy-on-tag.sh

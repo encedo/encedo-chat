@@ -1,0 +1,15 @@
+# Every five minutes, and five is not an accident: a release is a deliberate act
+# that somebody is waiting on, and a shorter interval buys seconds at the cost
+# of a git fetch against GitHub all day.
+[Unit]
+Description=onchato — look for a new release tag
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+# The interval is wall-clock, so a host that was off does not fire a backlog.
+Persistent=false
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

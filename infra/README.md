@@ -363,3 +363,62 @@ The app's own check is `impl/net/ipfs-test.ts`: it pushes ciphertext through
 `/f`, reads it back, and verifies the round trip decrypts — which is also the
 first thing that confirms Kubo's `/add` response is shaped the way the client
 parses it.
+
+---
+
+# Auto-deploy: the host builds a release tag by itself
+
+`deploy-on-tag.sh` + a systemd timer on the web host. Every five minutes the
+host fetches, and when the tip of `main` carries a `v*` tag it has not built, it
+builds it. Nothing outside the machine holds a credential to it.
+
+**Why this way round.** The other shape is a GitHub Actions job that ssh's in.
+It is easier to write and it puts a key to production inside a runner — anyone
+who compromises the runner, or a workflow the runner trusts, gets a shell here.
+Pulling costs one timer interval of latency and nothing else.
+
+**What triggers it: a tag on the tip, nothing else.** `main` moves for reasons
+that are not releases. ⚠️ So tag the commit you want live and push both — a tag
+left behind the tip is never seen, because the check is "is HEAD tagged", not
+"is there a newer tag". The tree stays on `main`: checking the tag out would
+leave a detached HEAD, and the next person running the documented `git pull` by
+hand would be told they are not on a branch, by a timer they did not know about.
+
+**What it will not do.** It does not touch the relay. That is a live service
+with connected clients and its own deploy in `CLAUDE.md`; a timer restarting it
+silently would make every release a small outage nobody chose.
+
+**A failed build is not recorded**, so the next tick tries again — the state
+file is written last, and only after the build's output has been checked to
+exist. "It deployed" is a fact in the journal with the bundle hash in it, not an
+impression:
+
+    deployed v0.3.16 — bundle app.2b7a751e….bundle.js -> app.31b9c3d4….bundle.js
+
+Install (once, as root on the web host):
+
+```bash
+cd /opt/github/encedo-chat && git pull            # brings the script itself
+install -m 755 infra/deploy-on-tag.sh /opt/github/encedo-chat/infra/deploy-on-tag.sh
+cp infra/onchato-deploy.service infra/onchato-deploy.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now onchato-deploy.timer
+
+# prove it, without waiting for a tick:
+systemctl start onchato-deploy.service
+journalctl -t onchato-deploy -n 20 --no-pager
+systemctl list-timers onchato-deploy.timer
+```
+
+To pin the deploy to a release you have not cut yet, or to redo one:
+
+```bash
+rm /var/lib/onchato-deployed-tag        # next tick rebuilds the current tag
+systemctl stop onchato-deploy.timer     # and this is the off switch
+```
+
+The paths (`REPO`, `STATE`, `LOCK`) are environment variables with the
+production values as defaults, which is what makes the script testable off the
+host — the whole flow was exercised against a synthetic repository and a stub
+`npm`: a new tag builds, the same tag does nothing, a failed build leaves the
+state alone and retries, and a second instance stands down on the lock.
