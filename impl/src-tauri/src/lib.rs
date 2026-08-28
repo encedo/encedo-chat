@@ -153,6 +153,41 @@ mod desk {
         }
     }
 
+    /// Measure how long the UI thread is unavailable, and say so.
+    ///
+    /// Reported as "the window sometimes ignores close or minimise, then comes
+    /// back" — which is not a swallowed event (it recovers) but a main loop that
+    /// stopped pumping. Under Wayland the titlebar is drawn by the app itself,
+    /// so a stalled main thread IS a frozen set of window buttons.
+    ///
+    /// Reading it needs no reproduction and no debugger: a helper thread asks to
+    /// run a closure on the main thread every half second and times how long
+    /// that takes. On an idle loop it is microseconds; a line here is the number
+    /// of milliseconds the window was unable to answer anybody, with a timestamp
+    /// to line up against whatever the app was doing.
+    ///
+    /// It costs one wake-up per half second and prints nothing while things are
+    /// well, which is why it can ship rather than live behind a flag: the fault
+    /// is intermittent, and an instrument you have to enable first is an
+    /// instrument that is off when it matters.
+    fn watch_main_thread(app: AppHandle) {
+        use std::sync::mpsc;
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let (tx, rx) = mpsc::channel();
+            let asked = std::time::Instant::now();
+            if app.run_on_main_thread(move || { let _ = tx.send(()); }).is_err() { return }
+            // A wait, not a timeout: the point is the size of the stall, and a
+            // closure that is late still arrives. The app is closing if the
+            // channel dies, and then so does this thread.
+            if rx.recv().is_err() { return }
+            let waited = asked.elapsed();
+            if waited > std::time::Duration::from_millis(400) {
+                eprintln!("onchato: UI thread was busy for {} ms", waited.as_millis());
+            }
+        });
+    }
+
     /// Deliver one banner on Linux, over a connection we keep open.
     ///
     /// ## Why this does not use the plugin
@@ -593,6 +628,7 @@ mod desk {
                     let handle = app.handle().clone();
                     tauri::async_runtime::spawn(watch_tray_host(handle));
                 }
+                watch_main_thread(app.handle().clone());
 
                 Ok(())
             })
