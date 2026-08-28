@@ -129,19 +129,25 @@ export async function startRecording(o: {
    *  screen about it, is the worst version of this. */
   onShort?: (got: number, wanted: number) => void
 }): Promise<Recording> {
-  // ⚠️ `{ audio: true }` takes whatever the device offers, and on the machine
-  // where capture died mid-recording that is the one thing we had not pinned
-  // down. Mono at 48 kHz is what Opus encodes anyway, so asking for it removes a
-  // resampling stage rather than adding one — and echo cancellation is off
-  // because it is the part of the pipeline that belongs to WebRTC's audio
-  // processing, which this app is also running a peer connection through. A
-  // voice note is not a call: there is no far end to echo.
+  // ⚠️ `{ audio: true }`, and the constraints that were here in 0.4.3 are gone
+  // because they made it WORSE. Measured on Chromium, same machine, same
+  // microphone, three requests:
   //
-  // Every field is a REQUEST, not a demand (no `exact`), so a device that
-  // cannot do one of them still opens rather than failing outright.
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { channelCount: 1, sampleRate: 48_000, echoCancellation: false },
-  })
+  //     { audio: true }                              -> mono, 48 kHz
+  //     { channelCount: 1, echoCancellation: false } -> STEREO, 44.1 kHz
+  //     { channelCount: { exact: 1 }, … }            -> STEREO, 44.1 kHz
+  //
+  // Two findings in that, both counter-intuitive. Asking for mono does not get
+  // mono — `exact` does not either. And turning echo cancellation OFF is what
+  // changes the channel count and the rate: it unhooks capture from WebRTC's
+  // audio processing and hands over the raw device, which is stereo at 44.1 kHz
+  // and then has to be resampled to 48 kHz and encoded as two channels. The
+  // default path through the processor delivers exactly what Opus wants.
+  //
+  // So the default is not laziness here, it is the measurement. A voice note
+  // has no far end to echo, but the cancellation is not what we were paying
+  // for — the pipeline behind it is.
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
   const release = () => { for (const t of stream.getTracks()) { try { t.stop() } catch {} } }
 
   // The track dying is the fault we are chasing, and it announces itself: a
@@ -178,25 +184,18 @@ export async function startRecording(o: {
   const limit = setTimeout(() => o.onLimit?.(), o.maxMs)
   const cleanup = () => { clearInterval(tick); clearTimeout(limit); release() }
 
-  // ⚠️ A timeslice, again — and the reason is not the one it was removed for.
+  // ⚠️ A timeslice, and 250 ms rather than none — the value it had in 0.3.8,
+  // which is the build reported as the last one where recording was right.
   //
-  // 0.3.11 took it out on the grounds that a two-minute cap makes the allocation
-  // irrelevant and that 250 ms clusters make some players walk through a file
-  // unevenly. Both are still true and both are beside the point: WITHOUT a
-  // timeslice the entire take lives inside the recorder until `stop()`, and
-  // whatever the platform loses there, it loses all of. Reported as ten seconds
-  // recorded and under two seconds of sound in the file — the clock was right,
-  // the length was right, and the audio was not there.
-  //
-  // With a slice the recorder hands us the bytes as it goes, so a take can only
-  // ever lose its last second. A second, not 250 ms: the objection to fine
-  // clusters was real, and one per second is few enough to be nothing while
-  // still bounding the loss.
-  //
-  // This does NOT prove where the audio went — the diagnosis is still open, and
-  // `[voice] decoded … vs clock …` in the console is what settles it. It bounds
-  // the damage while that is answered.
-  rec.start(1000)
+  // 0.3.11 removed it, reasoning that a two-minute cap makes the single
+  // allocation irrelevant and that fine clusters make some players walk
+  // unevenly. Both still true and both beside the point: without a slice the
+  // ENTIRE take lives inside the recorder until `stop()`, so whatever the
+  // platform loses there, it loses all of. With one, a take can lose at most
+  // the last slice — which is why this is 250 ms and not the 1000 ms of 0.4.2.
+  // A quarter second of somebody's sentence is a bounded loss; a second is a
+  // word.
+  rec.start(250)
 
   return {
     stop: () => new Promise<File>((resolve, reject) => {
