@@ -63,25 +63,43 @@ const extFor = (mime: string) =>
   mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'bin'
 
 /**
- * How long the take really is, in seconds.
+ * How long the take really is, in seconds — and never LESS than the clock.
  *
- * The sample count is the only answer that cannot be argued with, so decode and
- * count. The wall clock is the fallback and it runs LONG: it starts when the
- * recorder is told to start, and a microphone takes a moment to deliver its
- * first frames — about a quarter of a second on the machines we measured.
+ * ⚠️ The asymmetry here is the whole function, and getting it wrong shipped a
+ * worse bug than the one it fixed. A length written into the container is
+ * OBEYED: a player told the file is two seconds long stops after two seconds,
+ * whatever else is in there. So
+ *
+ *   too long  → the bar ends a moment early and the player corrects itself the
+ *               first time the sound runs past it. Cosmetic.
+ *   too short → the recording is CUT. Somebody's ten-second message plays as a
+ *               fragment and the rest is unreachable.
+ *
+ * `decodeAudioData` is the accurate answer in principle — the sample count IS
+ * the length — but it is not reliable enough to be trusted BELOW the clock:
+ * measured on Firefox, a 3.19 s take decoded as 1.913 s, and stamping that
+ * number is exactly how "I recorded ten seconds and it plays two" happened.
+ *
+ * So the clock is a floor. It runs a little long (it starts when the recorder
+ * is told to start, and a microphone takes about a quarter-second to deliver
+ * its first frames), and a little long is the safe direction.
  */
-async function trueLength(bytes: Uint8Array, elapsedMs: number): Promise<number> {
+export function chooseLength(decoded: number | null, elapsedMs: number): number {
+  const clock = elapsedMs / 1000
+  if (!decoded || !Number.isFinite(decoded) || decoded <= 0) return clock
+  return Math.max(decoded, clock)
+}
+
+async function decodedLength(bytes: Uint8Array): Promise<number | null> {
   try {
     const Ctx = (globalThis as any).AudioContext ?? (globalThis as any).webkitAudioContext
-    if (Ctx) {
-      const ctx = new Ctx()
-      try {
-        const buf = await ctx.decodeAudioData(bytes.slice().buffer)
-        if (buf.duration > 0) return buf.duration
-      } finally { void ctx.close?.() }
-    }
-  } catch { /* the platform will not decode its own recording; the clock it is */ }
-  return elapsedMs / 1000
+    if (!Ctx) return null
+    const ctx = new Ctx()
+    try {
+      const buf = await ctx.decodeAudioData(bytes.slice().buffer)
+      return buf.duration > 0 ? buf.duration : null
+    } finally { void ctx.close?.() }
+  } catch { return null /* the platform will not decode its own recording */ }
 }
 
 export interface Recording {
@@ -150,7 +168,14 @@ export async function startRecording(o: {
         void (async () => {
           try {
             const raw = new Uint8Array(await new Blob(chunks, { type: mime }).arrayBuffer())
-            const secs = await trueLength(raw, elapsed)
+            const decoded = await decodedLength(raw)
+            const secs = chooseLength(decoded, elapsed)
+            // Worth a line when the two disagree: it is the fingerprint of an
+            // engine that mis-decodes its own recording, and the reason the
+            // clock is a floor rather than a fallback.
+            if (decoded && Math.abs(decoded - elapsed / 1000) > 0.75) {
+              ecWarn(`decoded ${decoded.toFixed(2)}s vs clock ${(elapsed / 1000).toFixed(2)}s — stamping ${secs.toFixed(2)}s`)
+            }
             const out = /webm|matroska/.test(mime) ? stampWebmDuration(raw, secs) : raw
             resolve(new File([out], name, { type: mime }))
           } catch (e) {
