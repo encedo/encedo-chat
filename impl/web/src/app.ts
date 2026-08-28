@@ -3867,24 +3867,46 @@ function voicePlayer(url: string): HTMLElement {
   /**
    * How long is it?
    *
-   * ⚠️ A file from `MediaRecorder` usually answers `Infinity`: the container was
-   * written as it was spoken, so nobody stamped a length in it. The cure is old
-   * and ugly and works everywhere — seek past the end, let the engine discover
-   * where the end actually is, then seek back. Without it the bar has nothing
-   * to fill and the number counts up instead of down, which reads as a broken
-   * player rather than an unknown duration.
+   * ⚠️ Nothing here seeks past the end any more. That trick — set `currentTime`
+   * to 1e101 and read the duration on the first `timeupdate` — is a race, and it
+   * lost. The engine answers while it is still seeking, so a seven-second note
+   * came back as two seconds in one browser and as twenty hours in the desktop's
+   * WebKitGTK, and the bar, the countdown and the seek all inherited the lie.
+   *
+   * Three sources, in the order they can be trusted:
+   *
+   * 1. **The file.** Our own recordings now carry their length in the container
+   *    (`voice.ts` measures at Stop, `webm.ts` writes it), and an ordinary audio
+   *    file someone sends has always had one.
+   * 2. **`decodeAudioData`** — the sample count IS the length. It costs a decode
+   *    of the whole blob, so it only runs when the file answered nothing.
+   * 3. **Playback.** If the sound runs past what we believe, the belief was
+   *    wrong and it is corrected where it is disproved.
+   *
+   * Until one of them answers, the label counts UP and the bar stays empty. An
+   * unknown length shown as unknown is a small ugliness; an invented one makes
+   * every part of the player wrong at once, which is what was reported.
    */
   let length = 0
-  const measure = () => {
-    if (Number.isFinite(audio.duration) && audio.duration > 0) { length = audio.duration; paint(); return }
-    const onSeek = () => {
-      audio.removeEventListener('timeupdate', onSeek)
-      if (Number.isFinite(audio.duration)) length = audio.duration
-      audio.currentTime = 0
-      paint()
-    }
-    audio.addEventListener('timeupdate', onSeek)
-    try { audio.currentTime = 1e101 } catch { /* some engines refuse; the bar then stays put */ }
+  const setLength = (secs: number) => {
+    if (!Number.isFinite(secs) || secs <= 0 || Math.abs(secs - length) < 0.01) return
+    length = secs
+    paint()
+  }
+  let decoding = false
+  const measure = async () => {
+    if (Number.isFinite(audio.duration) && audio.duration > 0) return setLength(audio.duration)
+    if (decoding) return
+    decoding = true
+    try {
+      const Ctx = (globalThis as any).AudioContext ?? (globalThis as any).webkitAudioContext
+      if (!Ctx) return
+      const bytes = await (await fetch(url)).arrayBuffer()
+      const ctx = new Ctx()
+      // Closed straight away: a page holds only a handful of audio contexts, and
+      // a conversation can hold a great many voice notes.
+      try { setLength((await ctx.decodeAudioData(bytes)).duration) } finally { void ctx.close?.() }
+    } catch { /* length stays unknown, and the label says so by counting up */ }
   }
 
   /**
@@ -3900,13 +3922,23 @@ function voicePlayer(url: string): HTMLElement {
     fill.style.width = length ? `${Math.min(100, (audio.currentTime / length) * 100)}%` : '0'
     time.textContent = clock(length ? (audio.paused ? length : length - audio.currentTime) : audio.currentTime)
   }
-  const follow = () => { paint(); raf = audio.paused ? 0 : requestAnimationFrame(follow) }
+  const follow = () => {
+    // Source 3: the sound is past where we thought it ended, so it does not end
+    // there. Correcting here means one wrong-looking second, not a whole note
+    // played against a bar that filled early and stopped.
+    if (length && audio.currentTime > length) setLength(audio.currentTime)
+    paint()
+    raf = audio.paused ? 0 : requestAnimationFrame(follow)
+  }
   const stopFollowing = () => { if (raf) cancelAnimationFrame(raf); raf = 0 }
 
-  audio.addEventListener('loadedmetadata', measure)
-  audio.addEventListener('durationchange', () => { if (Number.isFinite(audio.duration) && audio.duration > 0) { length = audio.duration; paint() } })
+  audio.addEventListener('loadedmetadata', () => void measure())
+  audio.addEventListener('durationchange', () => setLength(audio.duration))
   audio.addEventListener('ended', () => {
-    stopFollowing(); play.innerHTML = icon(false); audio.currentTime = 0; paint()
+    stopFollowing()
+    // Where the sound actually ran out is the last word on how long it was.
+    if (audio.currentTime > 0) setLength(audio.currentTime)
+    play.innerHTML = icon(false); audio.currentTime = 0; paint()
   })
   audio.addEventListener('pause', () => { stopFollowing(); paint() })
   play.addEventListener('click', () => {
@@ -3917,9 +3949,13 @@ function voicePlayer(url: string): HTMLElement {
     } else { audio.pause(); play.innerHTML = icon(false) }
   })
   bar.addEventListener('click', (e) => {
-    const t = total(); if (!t) return
+    // ⚠️ This called `total()`, a function deleted in the same commit that wrote
+    // the line — so since 0.3.11 a click on the bar threw a ReferenceError
+    // instead of seeking. Nothing caught it: the build strips types with Babel
+    // and never typechecks, so an undefined name is a runtime surprise.
+    if (!length) return
     const r = bar.getBoundingClientRect()
-    audio.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * t
+    audio.currentTime = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * length
     paint()
   })
   paint()

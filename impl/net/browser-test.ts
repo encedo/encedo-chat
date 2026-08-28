@@ -934,6 +934,7 @@ async function main() {
           open: document.getElementById('rec-modal').classList.contains('open'),
           send: document.getElementById('rec-stop').textContent,
           player: !!document.querySelector('#rec-preview .b-voice .v-play'),
+          length: (document.querySelector('#rec-preview .b-voice .v-time') || {}).textContent,
           sent: document.querySelectorAll('#messages .b-file').length,
         }), 1200));
       `)
@@ -941,6 +942,19 @@ async function main() {
       if (!ready.player) throw new Error('the take cannot be listened to before it is sent')
       if (ready.sent !== 0) throw new Error('stopping SENT the recording — stop is not send')
       step('stop offers a player and a Send, and has sent nothing yet')
+
+      // How long does it say the take is? This is the check that was missing
+      // when a seven-second note came back as "0:02" on the web and as twenty
+      // hours in the desktop build: the window counted correctly and the player
+      // beside it disagreed, and nothing here compared the two. The recording
+      // above ran about 1.3 s, so anything outside a second or three is the old
+      // guesswork returning.
+      const shown = /^(\d+):(\d\d)$/.exec(String(ready.length ?? ''))
+      const secs = shown ? Number(shown[1]) * 60 + Number(shown[2]) : NaN
+      if (!(secs >= 1 && secs <= 4)) {
+        throw new Error(`the player says the take is "${ready.length}" — the window counted ${recOn.clock}`)
+      }
+      step(`and the player agrees with the clock about how long it is (${ready.length})`)
 
       const gone = await A.eval<any>(`
         document.getElementById('rec-cancel').click();

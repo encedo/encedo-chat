@@ -20,6 +20,13 @@
  *   mid-recording, the automatic stop at the limit — all four. A track left
  *   live keeps the platform's recording indicator on, which is alarming and
  *   correct: the app really would still be listening.
+ * - **The length has to be written into the file BY US.** A container muxed
+ *   while it is spoken carries no length, or carries one the engine invented,
+ *   and every player downstream — ours, the recipient's, whatever opens the
+ *   saved file — then has to guess. Stop measures the take and stamps it in;
+ *   see `webm.ts` for what that costs (nothing) and when it declines (safely).
+ *   A container we cannot stamp — an MP4 out of WebKit — falls back to the
+ *   player measuring the samples for itself.
  * - **The container is whatever the platform will give.** Chromium records
  *   WebM/Opus, WebKit prefers MP4, and a hard-coded string means a recorder
  *   that constructs and then produces nothing. The list is tried in order and
@@ -28,6 +35,13 @@
  *   pasted file lands in, so it can carry a caption, answer a message, or be
  *   dropped — the one door in `offerFile`.
  */
+
+import { stampWebmDuration } from './webm.ts'
+
+/** A failure to MEASURE must never cost the recording, so it is noted and
+ *  stepped over. The app's own logger is not reachable from here — this module
+ *  is deliberately free of the GUI — so the console is the record. */
+const ecWarn = (e: unknown) => { try { console.warn('[voice] ' + ((e as any)?.message ?? e)) } catch {} }
 
 /** The platform can record at all. Both halves fail apart: WebKitGTK may have
  *  one and not the other, which is why the button is hidden rather than dead. */
@@ -47,6 +61,28 @@ const TYPES = [
 
 const extFor = (mime: string) =>
   mime.includes('ogg') ? 'ogg' : mime.includes('mp4') ? 'm4a' : mime.includes('webm') ? 'webm' : 'bin'
+
+/**
+ * How long the take really is, in seconds.
+ *
+ * The sample count is the only answer that cannot be argued with, so decode and
+ * count. The wall clock is the fallback and it runs LONG: it starts when the
+ * recorder is told to start, and a microphone takes a moment to deliver its
+ * first frames — about a quarter of a second on the machines we measured.
+ */
+async function trueLength(bytes: Uint8Array, elapsedMs: number): Promise<number> {
+  try {
+    const Ctx = (globalThis as any).AudioContext ?? (globalThis as any).webkitAudioContext
+    if (Ctx) {
+      const ctx = new Ctx()
+      try {
+        const buf = await ctx.decodeAudioData(bytes.slice().buffer)
+        if (buf.duration > 0) return buf.duration
+      } finally { void ctx.close?.() }
+    }
+  } catch { /* the platform will not decode its own recording; the clock it is */ }
+  return elapsedMs / 1000
+}
 
 export interface Recording {
   /** Stop and hand back the file. Releases the microphone. */
@@ -105,9 +141,25 @@ export async function startRecording(o: {
       rec.onstop = () => {
         cleanup()
         const mime = rec.mimeType || 'audio/webm'
-        const blob = new Blob(chunks, { type: mime })
+        const elapsed = Date.now() - t0
         const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-')
-        resolve(new File([blob], `glosowka-${stamp}.${extFor(mime)}`, { type: mime }))
+        const name = `glosowka-${stamp}.${extFor(mime)}`
+        // Measure, then write the length into the bytes. Everything after this
+        // point — our preview, the recipient's player, the file on a desk
+        // somewhere — reads a length instead of guessing at one.
+        void (async () => {
+          try {
+            const raw = new Uint8Array(await new Blob(chunks, { type: mime }).arrayBuffer())
+            const secs = await trueLength(raw, elapsed)
+            const out = /webm|matroska/.test(mime) ? stampWebmDuration(raw, secs) : raw
+            resolve(new File([out], name, { type: mime }))
+          } catch (e) {
+            // Measuring is a nicety; losing the recording over it is not. Send
+            // the bytes as they came out.
+            ecWarn(e)
+            resolve(new File(chunks, name, { type: mime }))
+          }
+        })()
       }
       rec.onerror = (e: any) => { cleanup(); reject(e?.error ?? new Error('recording failed')) }
       try { rec.stop() } catch (e) { cleanup(); reject(e) }
