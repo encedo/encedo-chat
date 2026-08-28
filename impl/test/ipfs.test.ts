@@ -11,7 +11,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { putBlob, getBlob, isCid, ExpiredError, IPFS_GET } from '../net/ipfs.ts'
+import { putBlob, getBlob, isCid, ExpiredError, IPFS_GET, IPFS_PUT, storeUrl, setStoreOrigin } from '../net/ipfs.ts'
 
 const CID = 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi'
 const ok = (body: string, status = 200) => async () => new Response(body, { status })
@@ -59,4 +59,33 @@ test('a fetched blob comes back as bytes, unchanged', async () => {
 test('the fetch URL stays on our own origin', () => {
   assert.ok(IPFS_GET(CID).startsWith('/f/'), 'same-origin path, never the node')
   assert.ok(!IPFS_GET(CID).includes('ipfs.encedo.com'))
+})
+
+/**
+ * The web must stay same-origin and a packaged build must not.
+ *
+ * `/f/<cid>` is "ask my own origin", which is true in a browser tab and a lie
+ * inside `tauri://localhost`, where it resolves to a missing asset. That is the
+ * whole of "Show does nothing and Download turns into an error" on the desktop:
+ * one URL, three buttons, all dead. The default must not move, though — the
+ * same-origin path is what keeps the store free of CORS and the IPFS node
+ * invisible — so both halves are pinned here.
+ */
+test('the store is same-origin by default and absolute when told', () => {
+  assert.equal(storeUrl(IPFS_PUT), '/f')
+  assert.ok(storeUrl(IPFS_GET(CID)).startsWith('/f/'))
+
+  setStoreOrigin('https://onchato.com')
+  assert.equal(storeUrl(IPFS_PUT), 'https://onchato.com/f')
+  assert.equal(storeUrl(IPFS_GET(CID)), `https://onchato.com/f/${CID}`)
+
+  // A trailing slash is somebody's honest mistake, not a second path segment.
+  setStoreOrigin('https://onchato.com/')
+  assert.equal(storeUrl(IPFS_PUT), 'https://onchato.com/f')
+
+  // Whatever it is set to, the node itself is never the address.
+  assert.ok(!storeUrl(IPFS_GET(CID)).includes('ipfs.encedo.com'))
+
+  setStoreOrigin('') // the default, restored for whatever runs next
+  assert.equal(storeUrl(IPFS_PUT), '/f')
 })

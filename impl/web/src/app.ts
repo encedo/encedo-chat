@@ -35,7 +35,7 @@ import {
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
-import { putBlob, getBlob } from '../../net/ipfs.ts'
+import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
 import type { FileEnv } from '../../lib/envelope.ts'
 import { nowMs, utcHHMM } from '../../lib/time.ts'
@@ -1525,6 +1525,23 @@ $('welcome-share').addEventListener('click', () => { closeWelcome(); void openSh
  */
 const CANONICAL_ORIGIN = 'https://onchato.com'
 const CANONICAL_PATH = '/chat'
+
+/**
+ * A packaged build has no origin that serves the file store, so it is told one.
+ *
+ * The desktop and Android shells load this bundle from `tauri://localhost`,
+ * where the store's `/f/<cid>` is an asset that does not exist — so `Pokaż`,
+ * `Pobierz` and sending a file all died at the fetch, and did so identically,
+ * because they are one URL with three buttons on it. Reported on the desktop as
+ * "Show does nothing and Download turns into an error".
+ *
+ * The web is untouched: there the default same-origin path still holds, which
+ * is what keeps the store free of CORS and the IPFS node invisible to clients.
+ * ⚠️ A packaged build now makes a CROSS-ORIGIN request to onchato.com, so the
+ * `/f` blocks in nginx must answer with `Access-Control-Allow-Origin`. Ship the
+ * two together or the packaged apps stay exactly as broken.
+ */
+if (isDesktopShell()) setStoreOrigin(CANONICAL_ORIGIN)
 // The login card's way back to the landing. The markup carries the same address
 // so the link survives a dead bundle; this makes the constant the one that decides,
 // so a moved domain cannot leave a stale link on the screen people log in from.

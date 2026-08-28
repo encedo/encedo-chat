@@ -30,6 +30,32 @@
 export const IPFS_PUT = '/f'
 export const IPFS_GET = (cid: string) => `/f/${encodeURIComponent(cid)}`
 
+/**
+ * ⚠️ A PACKAGED build is not served by the store, so "our own origin" is a lie
+ * there — and it fails silently in the worst way.
+ *
+ * The desktop and Android shells load the bundle from their own scheme
+ * (`tauri://localhost`), where `/f/<cid>` resolves to an asset that does not
+ * exist. Every file operation then dies at the fetch: reported as "Show does
+ * nothing and Download turns into an error" on the desktop, which was two
+ * buttons sharing one broken URL, and sending a file from a packaged build
+ * could not have worked either.
+ *
+ * So the origin is a setting with a same-origin DEFAULT: the web keeps the
+ * property this module was built for (no CORS, no allow-list, the node
+ * invisible), and a shell that has no origin of its own is told where the store
+ * actually is. `web/src/app.ts` sets it, because deciding what kind of build
+ * this is belongs to the app and not here.
+ */
+let storeOrigin = ''
+
+export function setStoreOrigin(origin: string): void {
+  storeOrigin = origin.replace(/\/+$/, '')
+}
+
+/** The absolute URL for a store path, which on the web is the path itself. */
+export const storeUrl = (path: string) => storeOrigin + path
+
 export interface PutResult { cid: string; size: number }
 
 /** A CID as Kubo returns it — base32 CIDv1 or base58 CIDv0. Checked because it
@@ -62,9 +88,9 @@ export async function putBlob(bytes: Uint8Array | Blob, opts: PutOpts = {}): Pro
   // wants progress we use XHR, which does. Everything else keeps fetch, which
   // is also what makes the tests injectable.
   const text = (opts.onProgress && typeof XMLHttpRequest === 'function')
-    ? await xhrPost(IPFS_PUT, body, opts)
+    ? await xhrPost(storeUrl(IPFS_PUT), body, opts)
     : await (async () => {
-        const res = await (opts.fetchImpl ?? fetch)(IPFS_PUT, { method: 'POST', body, signal: opts.signal })
+        const res = await (opts.fetchImpl ?? fetch)(storeUrl(IPFS_PUT), { method: 'POST', body, signal: opts.signal })
         if (!res.ok) throw new Error(`upload failed: HTTP ${res.status}`)
         return (await res.text()).trim()
       })()
@@ -109,7 +135,7 @@ export class ExpiredError extends Error {
 export async function getBlob(cid: string, opts: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {}): Promise<Uint8Array> {
   if (!isCid(cid)) throw new Error(`not a CID: ${cid}`)
   const f = opts.fetchImpl ?? fetch
-  const res = await f(IPFS_GET(cid), { signal: opts.signal })
+  const res = await f(storeUrl(IPFS_GET(cid)), { signal: opts.signal })
   if (res.status === 404 || res.status === 410) throw new ExpiredError(cid)
   if (!res.ok) throw new Error(`fetch failed: HTTP ${res.status}`)
   return new Uint8Array(await res.arrayBuffer())
