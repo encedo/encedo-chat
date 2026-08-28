@@ -417,6 +417,29 @@ rm /var/lib/onchato-deployed-tag        # next tick rebuilds the current tag
 systemctl stop onchato-deploy.timer     # and this is the off switch
 ```
 
+## Or cron, if that reads better to you
+
+The timer is the default because its log and its state are in the same place as
+everything else on the host. But nothing in the script needs systemd — it takes
+its own lock and writes to the journal through `logger` — so a crontab is an
+equal option, and the choice is whichever you will still understand in six
+months. As root:
+
+```cron
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+*/5 * * * * /opt/github/encedo-chat/infra/deploy-on-tag.sh >/dev/null 2>&1
+```
+
+⚠️ **That `PATH` line is the whole difference between the two.** cron runs with
+a nearly empty environment, the script calls `npm`, and a missing `npm` fails
+the build every five minutes in a log nobody is reading. Check with `which npm`
+on the host and add its directory if node came from nvm rather than a package.
+
+Reading it back is the same either way — `journalctl -t onchato-deploy` — and so
+is turning it off: comment the line out. Run one or the other, not both; they
+would not corrupt anything (the lock sees to that) but you would be reading two
+sources for one answer.
+
 The paths (`REPO`, `STATE`, `LOCK`) are environment variables with the
 production values as defaults, which is what makes the script testable off the
 host — the whole flow was exercised against a synthetic repository and a stub
