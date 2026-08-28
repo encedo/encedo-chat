@@ -1,10 +1,43 @@
-# Android bundles (Tauri 2), built UNSIGNED on purpose.
+# Android bundles (Tauri 2): a .aab for Play, and a .apk a phone will install.
 #
-# The upload key never comes here. CI produces an unsigned .aab/.apk; signing
-# happens on a machine that holds the keystore, and only then does it go to the
-# Play Console, where Play App Signing swaps the upload signature for the real
-# app signing key. That is Google's recommended flow rather than a workaround,
-# and it means a compromised runner cannot ship a build in our name.
+# ⚠️ Those are not one file with two endings, and the difference is why this job
+# was rewritten. Reported as "the APK from Actions does not install" — and it
+# could not: a release APK leaves Gradle UNSIGNED, and Android's package
+# installer refuses an unsigned package before it looks at anything else. The
+# same artifact also held a .aab, which is a Play upload format and not
+# installable at all, so there were two ways to tap the wrong file.
+#
+# So the .apk is signed HERE, at the end of the build, and the .aab is not:
+#
+#   * The .apk is for a phone in a pocket, and it is uploaded on its own — one
+#     file to download and tap, nothing to choose between.
+#   * The .aab is for the Play Console and stays unsigned. The upload key never
+#     comes here: signing happens on a machine that holds the keystore, and Play
+#     App Signing then swaps the upload signature for the real app signing key.
+#     That is Google's recommended flow rather than a workaround, and it means a
+#     compromised runner cannot ship a build in our name.
+#
+# Which key signs the .apk — the developer key, from repository secrets:
+#
+#   ANDROID_KEYSTORE_B64       base64 of the .jks (`base64 -w0 key.jks`)
+#   ANDROID_KEYSTORE_PASSWORD  its password
+#   ANDROID_KEY_ALIAS          the alias inside it
+#   ANDROID_KEY_PASSWORD       only if the key password differs from the store's
+#
+# Missing secrets FAIL the job, with the list above in the error. Two tempting
+# alternatives are both refused on purpose:
+#
+#   * A key generated per run. Every build would then be signed by a stranger:
+#     it installs once and the next build REFUSES TO UPDATE OVER IT, which is
+#     the "does not install" bug wearing a hat.
+#   * A key committed to the repository. Then anyone holding the repository can
+#     sign an update over somebody's installed app, and a test key has a way of
+#     becoming the key everything was installed with.
+#
+# The signing key IS the identity of every sideloaded install: keep a backup of
+# the .jks and its password somewhere that is not a runner, because losing it
+# means no existing installation can ever be updated again — only uninstalled
+# and replaced. It is not the Play upload key and must not become one.
 #
 # This mirrors the recipe already proven on the LAN machine
 # (krzysztof-VOSTRO-15-3510, Ubuntu 24.04 x86_64), which exists because the NDK
@@ -12,16 +45,10 @@
 # so its linker fails with `Exec format error`. GitHub's runners are x86_64.
 # What this adds over that machine is a build per tag that occupies nobody.
 #
-# Signing afterwards, where the keystore lives:
+# Signing the .aab afterwards, on the machine that holds the upload keystore:
 #
-#   # Play (.aab)
 #   jarsigner -keystore upload.jks -signedjar app-release.aab \
 #             app-universal-release-unsigned.aab <alias>
-#
-#   # sideload (.apk) — release APKs come out UNSIGNED and Android will refuse
-#   # to install one, so both steps are required, in this order
-#   zipalign -f -p 4 app-universal-release-unsigned.apk aligned.apk
-#   apksigner sign --ks upload.jks --out encedo-chat.apk aligned.apk
 #
 # The signing key IS the app's identity: changing it later leaves every existing
 # installation with no update path. Play App Signing is what makes that
@@ -141,6 +168,47 @@ jobs:
         if: always()
         run: find impl/src-tauri/gen/android -name '*.aab' -o -name '*.apk' | sort
 
+      # Two commands, both required, in this order. `zipalign` first, because the
+      # installer memory-maps the package and its entries have to sit on 4-byte
+      # boundaries; then `apksigner`, which writes the v2/v3 signature scheme.
+      # jarsigner is NOT a substitute here — it writes v1 only, and Android 11
+      # and later refuse a package that has nothing else.
+      - name: Sign the APK, so that a phone will take it
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # `|| true` on both pipes: `head` closing early makes the writer exit
+          # on SIGPIPE, and `pipefail` would then kill the step over a pipeline
+          # that did exactly what it was asked to.
+          APK=$(find impl/src-tauri/gen/android -name '*unsigned*.apk' | head -1 || true)
+          test -n "$APK" || { echo "::error::the build produced no unsigned APK to sign"; exit 1; }
+
+          # Said plainly and early, because the alternative is twenty minutes of
+          # Rust followed by a base64 error nobody can read.
+          if [ -z "${KS_B64:-}" ] || [ -z "${KS_PASS:-}" ] || [ -z "${KEY_ALIAS:-}" ]; then
+            echo "::error::no signing key. Set ANDROID_KEYSTORE_B64 (base64 -w0 of the .jks), ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_ALIAS in the repository secrets — and ANDROID_KEY_PASSWORD too if the key password differs. An unsigned APK cannot be installed, so there is nothing useful to upload without them."
+            exit 1
+          fi
+          printf '%s' "$KS_B64" | base64 -d > "$RUNNER_TEMP/signing.jks"
+          KS="$RUNNER_TEMP/signing.jks"
+          ALIAS="$KEY_ALIAS"; SPASS="$KS_PASS"; KPASS="${KEY_PASS:-$KS_PASS}"
+
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1 || true)
+          test -x "$BT/apksigner" || { echo "::error::no build-tools with apksigner under $ANDROID_HOME"; exit 1; }
+          OUT="encedo-chat-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA:0:8}.apk"
+          "$BT/zipalign" -f -p 4 "$APK" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$KS" --ks-key-alias "$ALIAS" \
+            --ks-pass "pass:$SPASS" --key-pass "pass:$KPASS" \
+            --out "$OUT" "$RUNNER_TEMP/aligned.apk"
+          # Asked, not assumed. A signature that did not take would otherwise be
+          # discovered by somebody holding a phone.
+          "$BT/apksigner" verify --print-certs "$OUT"
+          echo "APK_OUT=$OUT" >> "$GITHUB_ENV"
+
       # The commit is in the NAME because it is not in the package: Tauri derives
       # versionCode from the version in tauri.conf.json, so every build of 0.1.1
       # is 1001 and two of them are indistinguishable to Android — and the bundle
@@ -149,8 +217,15 @@ jobs:
       # apart; use this.
       - uses: actions/upload-artifact@v5
         with:
-          name: android-unsigned-${{ github.ref_name }}-${{ github.sha }}
-          path: |
-            impl/src-tauri/gen/android/app/build/outputs/**/*.aab
-            impl/src-tauri/gen/android/app/build/outputs/**/*.apk
+          name: android-sideload-${{ github.ref_name }}-${{ github.sha }}
+          path: ${{ env.APK_OUT }}
+          if-no-files-found: error
+
+      # Kept apart from the APK above on purpose: one artifact is a thing to tap
+      # on a phone, the other is a thing to upload to Play, and putting them in
+      # one zip is how an uninstallable file got tapped.
+      - uses: actions/upload-artifact@v5
+        with:
+          name: android-aab-unsigned-${{ github.ref_name }}-${{ github.sha }}
+          path: impl/src-tauri/gen/android/app/build/outputs/**/*.aab
           if-no-files-found: error
