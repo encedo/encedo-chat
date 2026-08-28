@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "onchato",
-  "version": "0.3.16",
+  "version": "0.4.0",
   "identifier": "com.onchato.chat",
   "build": {
     "frontendDist": "../web/dist",
@@ -38,7 +38,7 @@
       }
     },
     "category": "SocialNetworking",
-    "shortDescription": "onchato \u2014 P2P messenger",
+    "shortDescription": "onchato — P2P messenger",
     "longDescription": "Minimal-infrastructure P2P messenger (v6): HEM identity, EH-2 + Double Ratchet, WebRTC direct plane with a relay fallback. This desktop shell wraps the same web bundle in a native window; all crypto and transport run in the webview.",
     "icon": [
       "icons/32x32.png",
@@ -46,6 +46,18 @@
       "icons/128x128@2x.png",
       "icons/icon.png",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFEMDk5RTJFN0JBRTM1MDgKUldRSU5hNTdMcDRKSGN5OHZualJHcHJWRjFpZUd1M3BJaWFRN3hXSE45ejUxQnZDakR4cU1PT3IK",
+      "endpoints": [
+        "https://github.com/encedo/encedo-chat/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

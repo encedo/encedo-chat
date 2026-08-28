@@ -379,6 +379,71 @@ mod desk {
     #[tauri::command]
     fn desk_platform() -> String { "desktop".into() }
 
+    /// How this copy was installed — which decides whether it may update ITSELF.
+    ///
+    /// The updater replaces a self-contained bundle: an AppImage, an installer's
+    /// .exe, an .app. It cannot update a package the system owns. Point it at a
+    /// .deb and it downloads a new version and fails at the end, having asked
+    /// somebody to wait for it — so on a distro package the honest offer is a
+    /// notice and a link, and the webview has to know which of the two it is.
+    ///
+    /// AppImage says so itself: its runtime exports `APPIMAGE`. Nothing here is
+    /// inferred from a user agent or a path, both of which lie.
+    #[tauri::command]
+    fn desk_update_kind() -> String {
+        #[cfg(target_os = "linux")]
+        {
+            if std::env::var_os("APPIMAGE").is_some() { "self".into() } else { "system".into() }
+        }
+        #[cfg(not(target_os = "linux"))]
+        { "self".into() }
+    }
+
+    /// Is there a newer release, and what is it?
+    ///
+    /// The whole update lives on THIS side of the seam on purpose. The plugin's
+    /// JavaScript API would work, and it would mean two npm packages, an event
+    /// channel and a second way for the webview to reach a privileged plugin —
+    /// for a question with a two-field answer. The webview asks the host, which
+    /// is the pattern the rest of this file already is.
+    ///
+    /// `Ok(None)` means "asked, and this is the newest". An `Err` is a failure
+    /// to ask — no network, an unreachable endpoint, a draft release nobody
+    /// published — and the caller says nothing rather than inventing news.
+    #[derive(serde::Serialize)]
+    struct UpdateInfo { version: String, notes: Option<String> }
+
+    #[tauri::command]
+    async fn desk_update_check(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+        use tauri_plugin_updater::UpdaterExt;
+        let found = app.updater().map_err(|e| e.to_string())?
+            .check().await.map_err(|e| e.to_string())?;
+        Ok(found.map(|u| UpdateInfo {
+            version: u.version.clone(),
+            notes: u.body.clone(),
+        }))
+    }
+
+    /// Fetch it, put it in place, and come back up on the new version.
+    ///
+    /// ⚠️ Only ever called after `desk_update_kind` answered `self`. On a distro
+    /// package this downloads a bundle it cannot install and fails at the very
+    /// end, having asked somebody to wait — which is worse than saying plainly
+    /// that the update has to come from the package.
+    ///
+    /// It checks again rather than holding the update from the call before it:
+    /// the handle is not ours to keep across an IPC boundary, and asking twice
+    /// costs one request against a release that has not moved.
+    #[tauri::command]
+    async fn desk_update_install(app: AppHandle) -> Result<(), String> {
+        use tauri_plugin_updater::UpdaterExt;
+        let update = app.updater().map_err(|e| e.to_string())?
+            .check().await.map_err(|e| e.to_string())?
+            .ok_or_else(|| "nothing to install".to_string())?;
+        update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+        app.restart()
+    }
+
     /// The webview asking to be brought forward (a notification was clicked in
     /// a build where the platform can tell us, or the app wants attention).
     #[tauri::command]
@@ -469,6 +534,7 @@ mod desk {
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
                 None,
             ))
+            .plugin(tauri_plugin_updater::Builder::new().build())
             .manage(Shell::default())
             .invoke_handler(tauri::generate_handler![
                 desk_notify,
@@ -480,6 +546,9 @@ mod desk {
                 desk_tray_ok,
                 desk_platform,
                 desk_show,
+                desk_update_kind,
+                desk_update_check,
+                desk_update_install,
             ])
             .setup(|app| {
                 let show = MenuItem::with_id(app, "show", "Show onchato", true, None::<&str>)?;
@@ -619,6 +688,12 @@ mod mobile {
     fn desk_tray_ok() -> bool { false }
     #[tauri::command]
     fn desk_platform() -> String { "mobile".into() }
+
+    /// Android updates by installing an APK, not by replacing a bundle in
+    /// place. Answering keeps the webview on one code path — an unknown command
+    /// throws, and a thrown check reads as "there is no update".
+    #[tauri::command]
+    fn desk_update_kind() -> String { "store".into() }
     #[tauri::command]
     fn desk_close_to_tray(_on: bool) {}
     #[tauri::command]
@@ -640,6 +715,7 @@ mod mobile {
                 desk_autostart,
                 desk_strings,
                 desk_show,
+                desk_update_kind,
             ])
     }
 }

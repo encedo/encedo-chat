@@ -1,6 +1,6 @@
 [package]
 name = "onchato"
-version = "0.3.16"
+version = "0.4.0"
 description = "onchato desktop (Tauri 2) — a native shell over the web bundle"
 edition = "2021"
 rust-version = "1.77"
@@ -36,6 +36,11 @@ tauri-plugin-notification = "2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
+# Updating in place. Desktop only, and not by preference: the plugin replaces a
+# self-contained bundle, which Android does not have and a distro package is
+# not — see `desk_update_kind`, which is what stops the app offering an update
+# it cannot perform.
+tauri-plugin-updater = "2"
 # One running copy per machine. Not a nicety — see `wire()`: a second copy of
 # this app is a second window of the SAME IDENTITY, and the protocol's answer to
 # that is to close both sessions.

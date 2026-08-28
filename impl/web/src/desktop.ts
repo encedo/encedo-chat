@@ -193,3 +193,41 @@ export async function initDesktop(s: {
   try { await invoke('desk_strings', { show: s.show, quit: s.quit, hiddenTitle: s.hiddenTitle, hiddenBody: s.hiddenBody }) } catch {}
   try { await invoke('desk_close_to_tray', { on: closeToTray() }) } catch {}
 }
+
+// ---- updating in place -----------------------------------------------------
+/**
+ * What this copy of the app can do about a newer version.
+ *
+ * ⚠️ Not every install can update itself, and offering it where it cannot is
+ * worse than not offering: the download runs, somebody waits, and it fails at
+ * the last step. The updater replaces a self-contained bundle — an AppImage, an
+ * installer's .exe, an .app — and a `.deb` belongs to the package manager, not
+ * to us.
+ *
+ *   `self`   — replace it and relaunch. AppImage, Windows, macOS.
+ *   `system` — a distro package. Say there is a new version, link to it, stop.
+ *   `store`  — Android. A new APK is installed, not swapped in.
+ *   `web`    — a browser tab, which updates by being reloaded.
+ *
+ * The host answers, because it is the only side that knows: `APPIMAGE` in the
+ * environment is the AppImage runtime saying so, and everything else — a user
+ * agent, a path — is a guess.
+ */
+export type UpdateKind = 'self' | 'system' | 'store' | 'web'
+
+export async function updateKind(): Promise<UpdateKind> {
+  if (!isDesktopShell()) return 'web'
+  // An older shell has no such command, and the safe reading of "no answer" is
+  // the one that offers a link instead of a swap.
+  try { return await invoke<UpdateKind>('desk_update_kind') } catch { return 'system' }
+}
+
+export interface UpdateInfo { version: string; notes?: string | null }
+
+/** `null` means asked, and this IS the newest. A rejection means we could not
+ *  ask — no network, or a release nobody has published yet — and the caller
+ *  must then say nothing rather than invent news. */
+export const updateCheck = () => invoke<UpdateInfo | null>('desk_update_check')
+
+/** Fetch, install, relaunch. Only ever after `updateKind()` said `self`. */
+export const updateInstall = () => invoke<void>('desk_update_install')

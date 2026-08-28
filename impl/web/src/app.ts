@@ -31,6 +31,7 @@ import { canEdit, acceptEdit, EDIT_WINDOW_MS } from '../../lib/edits.ts'
 import { planNotification, isNotifyMode, type NotifyMode } from '../../lib/notify.ts'
 import {
   isDesktopShell, notifySupported, notifyPermission, notifyRequest, notifyShow, type Banner,
+  updateKind, updateCheck, updateInstall,
   closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable, isMobileShell,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
@@ -4218,6 +4219,56 @@ async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
     setTimeout(() => setFileAction(btn, env), 2500)
   }
 }
+
+// ---- a newer version ------------------------------------------------------
+/**
+ * Offer an update ONCE per launch, and only where it can actually be taken.
+ *
+ * Three restraints, each of them a decision:
+ *
+ * - **It waits.** The first seconds of a launch are the handshake and the
+ *   contact list; a dialog over that is a dialog in the way of the thing the
+ *   app is for.
+ * - **A failed check says NOTHING.** No network, or a release still in draft,
+ *   is not news — and "could not check for updates" is a sentence that has
+ *   never helped anybody. It goes to the debug log and no further.
+ * - **A distro package is told, not updated.** `.deb` belongs to the package
+ *   manager; the updater would download a bundle and fail at the last step. So
+ *   that case gets the version, a link, and no promise.
+ */
+const RELEASES_URL = 'https://github.com/encedo/encedo-chat/releases/latest'
+
+async function offerUpdate() {
+  const kind = await updateKind()
+  if (kind === 'web' || kind === 'store') return
+
+  let info
+  try { info = await updateCheck() } catch (e: any) {
+    ecLog('update check failed: ' + (e?.message ?? e), 'debug'); return
+  }
+  if (!info) return
+
+  if (kind === 'system') {
+    await ask(tr('Jest nowa wersja {v}', { v: info.version }),
+      tr('Ta kopia pochodzi z pakietu systemowego, więc nie podmieni się sama. Nową wersję trzeba pobrać.'),
+      tr('Pobierz'), undefined, RELEASES_URL, tr('Później'))
+    return
+  }
+
+  const { ok } = await ask(tr('Jest nowa wersja {v}', { v: info.version }),
+    tr('Zainstalować teraz? Aplikacja uruchomi się ponownie.'),
+    tr('Zainstaluj'), undefined, undefined, tr('Później'))
+  if (!ok) return
+  toast(tr('Pobieram aktualizację…'))
+  try { await updateInstall() } catch (e: any) {
+    // The app is still the old version and still working, so this is a toast
+    // and not a stop.
+    ecLog('update install failed: ' + (e?.message ?? e))
+    toast(tr('Nie udało się zaktualizować — pobierz nową wersję ręcznie'))
+  }
+}
+
+if (isDesktopShell()) setTimeout(() => void offerUpdate(), 15_000)
 
 // ---- links in a message ---------------------------------------------------
 /**

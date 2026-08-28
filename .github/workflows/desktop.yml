@@ -135,6 +135,15 @@ jobs:
           TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
           TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
           TRUSTED_SIGNING_PROFILE: ${{ vars.TRUSTED_SIGNING_PROFILE }}
+          # The UPDATE signature, which is a different thing from the Windows
+          # code signature above: this one is minisign over the bundle, checked
+          # by the installed app against the public key in tauri.conf.json
+          # before it will replace itself. Without these two the build still
+          # produces bundles — it just produces no updater artifacts, so nothing
+          # can update. That is a quiet failure, and the reason the release
+          # checklist says to look for `latest.json` in the draft.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: impl
           # The overlay adds `bundle.windows.signCommand` and nothing else, so
@@ -147,6 +156,12 @@ jobs:
           releaseName: Encedo Chat ${{ github.ref_name }}
           releaseDraft: true
           prerelease: false
+          # `latest.json` is what an installed app reads. It is attached to the
+          # release, and a DRAFT release's assets are not publicly downloadable —
+          # so cutting a tag builds an update and publishing the release is what
+          # ships it. That gate is deliberate: the alternative is that every tag
+          # reaches every machine the moment CI goes green.
+          includeUpdaterJson: true
 
       - uses: actions/upload-artifact@v5
         with:
