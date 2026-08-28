@@ -59,6 +59,24 @@ module.exports = (_env, argv) => {
       ],
     },
     plugins: [
+      // The favicon, into a directory the build empties on every run.
+      //
+      // `output.clean` wipes dist/, and dist/ IS the web root — so a favicon
+      // copied there by hand lives until the next deploy and then 404s, quietly,
+      // for as long as it takes somebody to notice a missing tab icon. Copying
+      // it here makes it part of the build rather than part of somebody's
+      // memory. A hand-written plugin rather than copy-webpack-plugin: this is
+      // one file, and the dependency would be the larger thing.
+      {
+        apply(compiler) {
+          compiler.hooks.afterEmit.tap('copy-favicon', () => {
+            require('fs').copyFileSync(
+              path.resolve(__dirname, 'favicon.ico'),
+              path.resolve(compiler.options.output.path, 'favicon.ico'),
+            )
+          })
+        },
+      },
       new webpack.DefinePlugin({
         __EC_ALLOW_KEYS__: JSON.stringify(allowKeys),
         __EC_VERSION__: JSON.stringify(VERSION),
