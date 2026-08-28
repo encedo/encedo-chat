@@ -147,11 +147,25 @@ export async function startRecording(o: {
   const limit = setTimeout(() => o.onLimit?.(), o.maxMs)
   const cleanup = () => { clearInterval(tick); clearTimeout(limit); release() }
 
-  // No timeslice. It was there so a long recording would not be one allocation
-  // at the end, which a two-minute cap makes irrelevant — and cutting the stream
-  // into 250 ms clusters is a way to end up with a container some players walk
-  // through unevenly. One take, one blob.
-  rec.start()
+  // ⚠️ A timeslice, again — and the reason is not the one it was removed for.
+  //
+  // 0.3.11 took it out on the grounds that a two-minute cap makes the allocation
+  // irrelevant and that 250 ms clusters make some players walk through a file
+  // unevenly. Both are still true and both are beside the point: WITHOUT a
+  // timeslice the entire take lives inside the recorder until `stop()`, and
+  // whatever the platform loses there, it loses all of. Reported as ten seconds
+  // recorded and under two seconds of sound in the file — the clock was right,
+  // the length was right, and the audio was not there.
+  //
+  // With a slice the recorder hands us the bytes as it goes, so a take can only
+  // ever lose its last second. A second, not 250 ms: the objection to fine
+  // clusters was real, and one per second is few enough to be nothing while
+  // still bounding the loss.
+  //
+  // This does NOT prove where the audio went — the diagnosis is still open, and
+  // `[voice] decoded … vs clock …` in the console is what settles it. It bounds
+  // the damage while that is answered.
+  rec.start(1000)
 
   return {
     stop: () => new Promise<File>((resolve, reject) => {
@@ -173,8 +187,14 @@ export async function startRecording(o: {
             // Worth a line when the two disagree: it is the fingerprint of an
             // engine that mis-decodes its own recording, and the reason the
             // clock is a floor rather than a fallback.
+            // The one line that settles where a short recording went. A clock
+            // that ran ten seconds against two seconds of samples is not a
+            // measurement problem, it is missing audio — and the chunk count
+            // says whether the recorder was handing bytes over as it went or
+            // holding them all until the end.
             if (decoded && Math.abs(decoded - elapsed / 1000) > 0.75) {
-              ecWarn(`decoded ${decoded.toFixed(2)}s vs clock ${(elapsed / 1000).toFixed(2)}s — stamping ${secs.toFixed(2)}s`)
+              ecWarn(`decoded ${decoded.toFixed(2)}s vs clock ${(elapsed / 1000).toFixed(2)}s`
+                + ` — stamping ${secs.toFixed(2)}s · ${chunks.length} chunk(s), ${raw.length} B, ${mime}`)
             }
             const out = /webm|matroska/.test(mime) ? stampWebmDuration(raw, secs) : raw
             resolve(new File([out], name, { type: mime }))

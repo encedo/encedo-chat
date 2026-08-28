@@ -210,7 +210,13 @@ test('a peer that answers from a NEW PeerId is followed, not ignored', async (t)
   const ghost = net.node('peer-ghost')
   await ghost.services.pubsub.publish(TOPIC, await buildAnnounce('peer-ghost', macKey))
 
-  await until(() => A.secured().includes('peer-b'), 10_000)
+  // 30 s, and the number is measured rather than plausible. When the handshake
+  // lands first time this takes 0.5–1.7 s (three runs on a two-core box); when
+  // an opening frame is dropped — which GossipSub does routinely to a peer whose
+  // mesh is still grafting — the next attempt is ~15 s behind it. So a 10 s
+  // budget was not "slow CI", it was a budget that fitted one attempt and not a
+  // retry, and it went red on a loaded runner while passing everywhere else.
+  await until(() => A.secured().includes('peer-b'), 30_000)
   assert.deepEqual(A.secured(), ['peer-b'], 'the session belongs to the peer that answered')
 
   A.sendText('po przeprowadzce')
