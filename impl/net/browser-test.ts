@@ -628,15 +628,31 @@ async function softError(b: Page): Promise<string> {
  * identity — so the harness walks it rather than routing around it.
  */
 async function softProfile(b: Page, handle: string) {
-  // `go-soft` is in the static markup, so it exists before the bundle has run
-  // and attached its handler: a single click can land on nothing at all and the
-  // modal never opens. Click from inside the wait instead — `openSoftModal` is
-  // idempotent, and this is the only signal that the page is genuinely wired.
-  await b.waitFor('software modal', `
-    const m = document.getElementById('soft-modal');
-    if (!m.classList.contains('open')) document.getElementById('go-soft').click();
-    return m.classList.contains('open');
-  `, 20_000)
+  // A browser that already holds this profile must OFFER it on the card, and be
+  // driven the way a person would drive it — by clicking the row. That is the
+  // whole point of the login screen, and clicking `go-soft` every time would
+  // have left the list untested while looking perfectly green.
+  const known = await b.eval<boolean>(`return !!localStorage.getItem('ec-soft-id-' + ${JSON.stringify(handle)})`)
+  if (known) {
+    await b.waitFor('the profile row on the login card', `
+      const row = [...document.querySelectorAll('#login-profiles .pick')]
+        .find((r) => r.textContent.includes(${JSON.stringify(handle)}));
+      if (!row) return false;
+      const m = document.getElementById('soft-modal');
+      if (!m.classList.contains('open')) row.click();
+      return m.classList.contains('open');
+    `, 20_000)
+  } else {
+    // `go-soft` is in the static markup, so it exists before the bundle has run
+    // and attached its handler: a single click can land on nothing at all and the
+    // modal never opens. Click from inside the wait instead — `openSoftModal` is
+    // idempotent, and this is the only signal that the page is genuinely wired.
+    await b.waitFor('software modal', `
+      const m = document.getElementById('soft-modal');
+      if (!m.classList.contains('open')) document.getElementById('go-soft').click();
+      return m.classList.contains('open');
+    `, 20_000)
+  }
   await b.eval(`
     document.getElementById('soft-name').value = ${JSON.stringify(handle)};
     document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)};
