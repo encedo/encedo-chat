@@ -38,29 +38,24 @@ jobs:
       fail-fast: false # one platform failing should not hide the others' artifacts
       matrix:
         include:
-          # Linux is built TWICE, on two runner generations, and the split is
-          # the fix for "the .deb works and the AppImage does not".
+          # ONE Linux job per architecture, producing everything that job
+          # can produce — deb, rpm and AppImage in one artifact, as it always
+          # has been.
           #
-          # A .deb links against the host's libraries, so building it on an old
-          # runner buys reach: the resulting package installs on everything from
-          # 22.04 upwards. An AppImage does the opposite — it CARRIES its GTK,
-          # WebKit and glib — so the same old runner produces a 2022 stack that
-          # then has to work beside a modern host's EGL and gio modules. On a
-          # 2026 desktop that mixture fails: the host's gvfs modules cannot load
-          # into the bundled glib (`undefined symbol: g_task_set_static_name`)
-          # and WebKit's web process dies with `Could not create default EGL
-          # display: EGL_BAD_PARAMETER`. No environment variable helps —
-          # DMABUF, compositing mode, software GL and the X11 backend were all
-          # measured and all still abort.
+          # ⚠️ The AppImage does not run on a VMware guest with no 3D: WebKit's
+          # web process dies with `Could not create default EGL display:
+          # EGL_BAD_PARAMETER`, and the host's gio modules cannot load into the
+          # older glib the bundle carries. Building it on ubuntu-24.04 instead
+          # was tried and MEASURED: same abort, with the missing symbol merely
+          # moving from glib 2.76's to 2.84's. So the newer runner buys nothing
+          # here and the split it needed is gone again.
           #
-          # So the AppImage is built on the newest runner instead, where its
-          # bundled stack is close to what modern hosts run. The cost is
-          # honest: that AppImage will NOT run on distributions older than the
-          # runner, which is what the .deb and .rpm below are for.
-          - { os: ubuntu-22.04,     label: linux-amd64, args: '--bundles deb,rpm' }
-          - { os: ubuntu-22.04-arm, label: linux-arm64, args: '--bundles deb,rpm' }
-          - { os: ubuntu-24.04,     label: linux-amd64-appimage, args: '--bundles appimage' }
-          - { os: ubuntu-24.04-arm, label: linux-arm64-appimage, args: '--bundles appimage' }
+          # The .deb is the supported Linux path — it links against the host's
+          # own WebKitGTK, which is why it works where the AppImage does not —
+          # and the updater already knows: `desk_update_kind` answers `system`
+          # for a distro package and offers a link rather than a swap.
+          - { os: ubuntu-22.04,     label: linux-amd64 }
+          - { os: ubuntu-22.04-arm, label: linux-arm64 }
           - { os: macos-latest,     label: macos }
           - { os: windows-latest,   label: windows }
           # Windows on ARM is cross-compiled from the x64 runner — its image

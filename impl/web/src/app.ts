@@ -646,31 +646,65 @@ const LAST_PROFILE = 'ec-last-profile'
 let softCreating = ''
 
 /**
- * Offer the profile that signed in here last.
+ * The profiles this device holds, on the card, as the first thing offered.
  *
- * The name is already remembered (`ec-last-profile`) and the modal already
- * prefills it — this only saves the click that opens the modal, which is the
- * click people make every single time on a machine that is theirs.
+ * The old card led with the HEM address and hid everything else under links —
+ * which is backwards twice over: coming back is the common case, and a HEM is
+ * the path that needs hardware nobody has on their first evening. So the list
+ * leads, a click on a row goes straight to that profile's password, and HEM
+ * keeps a place of its own on the line below.
  *
- * ⚠️ It moves the name from "visible after a click" to "visible to anyone
- * glancing at the screen". That is the trade, it is why this shows ONE name and
- * never the list, and it is why signing out does not clear it — clearing it
- * would only hide it from the person who owns it.
+ * ⚠️ The names are on screen before anyone signs in, which the single
+ * remembered name this replaces was careful about. It is a deliberate trade and
+ * a small one: local profile names are a caption on this device, the identity
+ * behind them stays sealed by its password, and hiding them bought nothing
+ * except a click for the person who owns the machine.
+ *
+ * There is no KID beside a name because there CANNOT be one: the public key
+ * lives inside the sealed blob, so nothing here can read it before the password
+ * does. Names are unique per device anyway — the storage key IS the name — so
+ * there is nothing to disambiguate.
  */
-function paintLastProfile() {
-  const btn = $('last-profile') as HTMLButtonElement | null
-  if (!btn) return
-  const last = (() => { try { return localStorage.getItem(LAST_PROFILE) } catch { return null } })()
-  const known = !!last && !!(() => { try { return localStorage.getItem('ec-soft-id-' + last) } catch { return null } })()
-  btn.hidden = !known
-  if (known) btn.textContent = tr('Zaloguj jako {name}', { name: last! })
+function renderLoginProfiles() {
+  const box = $('login-profiles'); if (!box) return
+  const names = listSoftProfiles()
+  box.textContent = ''
+  for (const n of names) {
+    const b = document.createElement('button')
+    b.type = 'button'; b.className = 'pick'
+    const av = document.createElement('span'); av.className = 'av'
+    av.textContent = n.slice(0, 2).toUpperCase()
+    const who = document.createElement('span'); who.className = 'who'; who.textContent = n; who.title = n
+    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = tr('software')
+    b.append(av, who, tag)
+    b.addEventListener('click', () => openSoftModal(n))
+    box.appendChild(b)
+  }
+  const has = names.length > 0
+  $('login-profiles-sec').hidden = !has
+  $('login-empty-sec').hidden = has
+  // The HEM form is a choice on this card now, not the card itself. It opens on
+  // request — or by itself when this device has no profile to offer and the
+  // person may well have come with hardware in hand.
+  $('hem-sec').hidden = true
 }
-$('last-profile')?.addEventListener('click', () => openSoftModal())
 
-function openSoftModal() {
+/** Show the HEM form, and stand the profile list down while it is up. */
+function showHemForm() {
+  $('hem-sec').hidden = false
+  $('login-profiles-sec').hidden = true
+  $('login-empty-sec').hidden = true
+  $('hsm').focus()
+}
+$('go-hem')?.addEventListener('click', showHemForm)
+$('go-create')?.addEventListener('click', () => openSoftModal())
+
+function openSoftModal(name?: string) {
   $('scrim').classList.add('open'); $('soft-modal').classList.add('open')
   clr('soft-msg'); softCreating = ''
-  const last = localStorage.getItem(LAST_PROFILE) ?? ''
+  // A row on the card names the profile; the bare link (a new one) starts from
+  // whatever signed in here last, which is still the best guess when creating.
+  const last = name ?? localStorage.getItem(LAST_PROFILE) ?? ''
   ;($('soft-name') as HTMLInputElement).value = last; ($('soft-pass') as HTMLInputElement).value = ''
   softMode(false)
   // Focus lands where there is still something to type — on the password when
@@ -2397,7 +2431,7 @@ function clearComposer() {
   document.documentElement.lang = getLocale()
   applyDom()
   paintTransportSetting()
-  paintLastProfile()
+  renderLoginProfiles()
   initDesktopShell()
   void paintDesktopSettings()
   // The boot screen goes now and not a moment earlier: this is the first point
