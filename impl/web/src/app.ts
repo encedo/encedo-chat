@@ -12,10 +12,11 @@
  */
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
-import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact } from '../../lib/core.ts'
+import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import { exportProfile, openBundle, applyBundle, conflictsWith, localKV, FILE_EXT } from '../../lib/migrate.ts'
 import { decodeInvite, inviteLink, type Invite } from '../../lib/invite.ts'
+import { checkBook, signBook, pack, type Verdict } from '../../lib/bookmac.ts'
 import type { GkBackend } from '../../lib/group.ts'
 // `t` is taken: this file uses it for text, topics, timers and DOM nodes, and a
 // local shadowing the translator fails at runtime with "t is not a function" —
@@ -473,9 +474,12 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   // The same broad read the contact book uses; the narrow `use:<kid>` token is
   // still taken later, by the ECDH that genuinely needs it.
   const pubkey = await pubKeyReader(hem)(id.kid)
+  const hemId = hemIdentityFrom(hem, id.kid, id.handle, pubkey)
+  const local = await makeLocalBook(await identityKey(pubkey, id.kid), localStorage, hemId)
+  if (local.verdict === 'tampered') warnTampered()
   await enterApp(
-    hemIdentityFrom(hem, id.kid, id.handle, pubkey),
-    mergedContactBook(hemContactBook(hem, id.kid), makeLocalBook(await identityKey(pubkey, id.kid), localStorage)),
+    hemId,
+    mergedContactBook(hemContactBook(hem, id.kid), local.verdict === 'tampered' ? taintedBook() : local.book),
     'HEM', id.kid, hemGkBackend(hem, id.kid),
   )
 }
@@ -759,7 +763,9 @@ async function softLogin() {
     closeSoftModal()
     activeSoftProfile = name
     localStorage.setItem(LAST_PROFILE, name)
-    await enterApp(id, localOnlyManager(makeLocalBook(await identityKey(id.pub), localStorage)), 'Software')
+    const local = await makeLocalBook(await identityKey(id.pub), localStorage, id)
+    if (local.verdict === 'tampered') warnTampered()
+    await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
     else setMsg('soft-msg', tr('Błąd tożsamości software: ') + (e?.message ?? e), 'err')
@@ -884,12 +890,80 @@ $('nodes-toggle').addEventListener('click', () => {
   if (open) renderNodes()
 })
 
-function makeLocalBook(idKey: string, storage: Storage) {
+/**
+ * The local contact book, with a signature over it.
+ *
+ * ⚠️ The book is the TRUST ANCHOR and it was the one piece of state with nothing
+ * guarding it. Reading the file tells somebody who you talk to; WRITING it is
+ * the attack — swap a contact's `pub` and the app derives the rendezvous with
+ * the attacker, handshakes with the attacker and encrypts to the attacker,
+ * while every layer underneath works perfectly on the key it was handed. No
+ * badge turns red, because nothing failed.
+ *
+ * So it is signed (`lib/bookmac.ts`), and the shape here follows from where the
+ * crypto can afford to be: **verify once at sign-in, hold the verified list in
+ * memory, re-sign on every write.** The UI reads contacts synchronously on the
+ * render path, and that stays true.
+ *
+ * Three outcomes, and the middle one is the reason this can ship at all:
+ *
+ *   ok        — signed by this identity, and the signature matches.
+ *   unsigned  — a book from before this existed. ACCEPTED, and signed on the
+ *               next write. Locking somebody out of their own contacts to
+ *               introduce a security feature is worse than the risk it closes.
+ *   tampered  — signed, and the signature does not match. The list is NOT used
+ *               and writes are refused, so the file is left exactly as found:
+ *               it is evidence, and overwriting it with an empty signed book
+ *               would destroy both the evidence and the contacts.
+ */
+async function makeLocalBook(idKey: string, storage: Storage, id: Identity): Promise<{ book: ContactBook; verdict: Verdict }> {
   const lsKey = 'ec-local-contacts-' + idKey
-  return localContactBook(
-    () => { try { return JSON.parse(storage.getItem(lsKey) || '[]') } catch { return [] } },
-    (l) => storage.setItem(lsKey, JSON.stringify(l)),
-  )
+  const readRaw = () => { try { return JSON.parse(storage.getItem(lsKey) || '[]') } catch { return [] } }
+
+  // The §10 secret, which the group cache will want later anyway — computing it
+  // here means one ECDH per session, not two (on a HEM that is a device round
+  // trip, so it is worth the small refactor).
+  const base = await cacheBaseFor(id, idKey)
+  if (!base) {
+    // The identity will not do ECDH (an HSM that refuses, a platform without
+    // it). Signing is impossible, so the book works as it always did rather
+    // than the app becoming unusable — said out loud in the log, not silently.
+    ecLog('contact book: no ECDH base, running unsigned', 'debug')
+    return { book: localContactBook(readRaw, (l) => storage.setItem(lsKey, JSON.stringify(l))), verdict: 'unsigned' }
+  }
+
+  const { verdict, body } = await checkBook(base, idKey, storage.getItem(lsKey))
+  let list: Array<{ name: string; pub: string }> = []
+  if (verdict !== 'tampered') { try { list = JSON.parse(body) } catch { list = [] } }
+
+  const save = (l: Array<{ name: string; pub: string }>) => {
+    if (verdict === 'tampered') throw new Error('contact book failed its signature — refusing to write over it')
+    list = l
+    const text = JSON.stringify(l)
+    // Fire-and-forget is deliberate: `localContactBook`'s save is synchronous,
+    // and the in-memory list is already correct. A failure to SIGN must not lose
+    // the write, so the text goes down first and the signature follows.
+    storage.setItem(lsKey, text)
+    void signBook(base, idKey, text)
+      .then((mac) => storage.setItem(lsKey, pack(text, mac)))
+      .catch((e) => ecLog('contact book: signing failed — ' + (e?.message ?? e), 'debug'))
+  }
+  return { book: localContactBook(() => list, save), verdict }
+}
+
+/**
+ * A book whose signature did not check out: empty, and it refuses to be edited.
+ * Not merely a precaution — every write would overwrite the evidence.
+ */
+function taintedBook(): ContactBook {
+  const no = async () => { throw new Error(tr('Książka kontaktów nie przeszła weryfikacji')) }
+  return { async list() { return [] }, add: no, remove: no, rename: no }
+}
+
+/** Tell the user, once, in a way that cannot be mistaken for a network hiccup. */
+function warnTampered() {
+  toast(tr('⚠️ Książka kontaktów została zmieniona poza aplikacją — nie została wczytana'))
+  ecLog('contact book FAILED its MAC — refusing to load or overwrite it')
 }
 
 /** Short form of an HSM key id — the full one is long and adds no meaning here. */
@@ -5041,9 +5115,23 @@ let persistTimer: any
 async function ensureCacheBase(): Promise<Uint8Array | null> {
   if (cacheBase) return cacheBase
   if (!session) return null
-  let empPub = localStorage.getItem(empKey())
-  if (!empPub) { empPub = b64((await generateX25519()).pub); localStorage.setItem(empKey(), empPub) }
-  try { cacheBase = await session.id.ecdh(empPub) } catch (e: any) { ecLog('group cache: ecdh(base) failed — ' + (e?.message ?? e), 'debug'); return null }
+  return cacheBaseFor(session.id, session.idKey)
+}
+
+/**
+ * The same secret, derivable before a session exists — because the contact book
+ * is verified at sign-in, which is earlier than everything else here.
+ *
+ * It caches into `cacheBase`, so the group cache does not pay for it twice: on a
+ * HEM one ECDH is a device round trip of a second or two, and this is the same
+ * `emp_pub` either way.
+ */
+async function cacheBaseFor(id: Identity, idKey: string): Promise<Uint8Array | null> {
+  if (cacheBase) return cacheBase
+  const key = 'ec-gcache-emp-' + idKey
+  let empPub = localStorage.getItem(key)
+  if (!empPub) { empPub = b64((await generateX25519()).pub); localStorage.setItem(key, empPub) }
+  try { cacheBase = await id.ecdh(empPub) } catch (e: any) { ecLog('cache base: ecdh failed — ' + (e?.message ?? e), 'debug'); return null }
   return cacheBase
 }
 
