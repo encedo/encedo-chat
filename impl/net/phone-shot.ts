@@ -19,6 +19,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join, extname } from 'node:path'
+import { hemKid } from '../lib/descr.ts'
 
 const OUT = process.argv[2] ?? '/tmp/phone-shots'
 const DIST = join(import.meta.dirname, '..', 'web', 'dist')
@@ -223,9 +224,20 @@ try {
     await softProfile(c, 'ala')
     await c.waitFor('app shell', `return document.getElementById('app') && !document.getElementById('app').hidden`)
     // A contact to look at (never answers — this is about layout, not networking).
+    //
+    // ⚠️ Seeded under the identity's KID, which is what the app reads. This tool
+    // went on writing `ec-local-contacts-ala` after per-identity state moved off
+    // the handle, so every run since died on "timed out waiting for contact
+    // list" — the contact was in a key nothing looks at. `browser-test` was
+    // fixed for exactly this and this one was left behind, which is the whole
+    // argument for deriving the id here instead of spelling it out.
+    const myPub = await c.eval<string>(`return window.__pub || ''`)
+    if (!myPub) throw new Error('the app did not expose __pub — the seeding key cannot be derived')
+    const idKey = await hemKid(new Uint8Array(Buffer.from(myPub, 'base64')))
+    const peerPub = Buffer.from(Array.from({ length: 32 }, (_, i) => (i * 7 + 13) & 255)).toString('base64')
     await c.eval(`
-      const pub = btoa(String.fromCharCode(...Array.from({length:32},(_,i)=>(i*7+13)&255)));
-      localStorage.setItem('ec-local-contacts-ala', JSON.stringify([{name:'Bartek Nowak', pub}]));
+      localStorage.setItem('ec-local-contacts-' + ${JSON.stringify(idKey)},
+        ${JSON.stringify(JSON.stringify([{ name: 'Bartek Nowak', pub: peerPub }]))});
       return 1;
     `)
     await c.send('Page.navigate', { url }, true)

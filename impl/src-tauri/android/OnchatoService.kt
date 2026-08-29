@@ -70,7 +70,21 @@ class OnchatoService : Service() {
         )
         val notification = Notification.Builder(this, CHANNEL)
             .setContentTitle("onchato")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            // Reported from a phone: "there is an icon in the status bar all the
+            // time, as if a notification were hanging there, and it is empty."
+            // Both halves were true.
+            //
+            // A status-bar icon is a SILHOUETTE — Android throws the colours away
+            // and tints what is left. Handing it the colour launcher icon
+            // produces the blob that was on screen; `ic_launcher_monochrome` is
+            // the asset that exists for this and it is already in the build.
+            .setSmallIcon(R.mipmap.ic_launcher_monochrome)
+            // And a notification with a title and nothing else reads as empty,
+            // because it is. This one is not an event, it is an explanation of
+            // why the app is running at all — so it says that. Localised by the
+            // SYSTEM's language through the usual resource lookup; `patch.mjs`
+            // writes both files into the generated project.
+            .setContentText(getString(R.string.onchato_running))
             .setContentIntent(open)
             .setOngoing(true)
             .build()

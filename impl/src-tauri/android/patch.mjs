@@ -125,6 +125,26 @@ export function patchIconBackground(xml, colour) {
 
 const ICON_BACKGROUND = '#FFFFFF'
 
+/**
+ * The one string the foreground-service notification shows, in both languages.
+ *
+ * It is a RESOURCE rather than a literal in the Kotlin because Android picks
+ * the file by the phone's language for free, and because a notification that
+ * says only "onchato" reads as an empty notification hanging in the shade —
+ * which is exactly how it was reported. What it needs to say is why the app is
+ * running when nobody opened it.
+ */
+export const RUNNING_STRING = {
+  'values': 'Receiving messages in the background',
+  'values-pl': 'Odbiera wiadomości w tle',
+}
+
+export function stringsXml(text) {
+  return '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n'
+    + `    <string name="onchato_running">${text.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</string>\n`
+    + '</resources>\n'
+}
+
 function installIcons(from, res) {
   if (!existsSync(from)) throw new Error(`android icons: ${from} is not there — has \`tauri icon\` been run?`)
   const dirs = readdirSync(from).filter((d) => d.startsWith('mipmap'))
@@ -156,7 +176,12 @@ function installIcons(from, res) {
     writeFileSync(join(res, 'values', 'ic_launcher_background.xml'),
       `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">${ICON_BACKGROUND}</color>\n</resources>\n`)
   }
-  console.log(`android: ${copied} icon file(s) installed, background ${ICON_BACKGROUND}`)
+
+  for (const [dir, text] of Object.entries(RUNNING_STRING)) {
+    mkdirSync(join(res, dir), { recursive: true })
+    writeFileSync(join(res, dir, 'onchato_strings.xml'), stringsXml(text))
+  }
+  console.log(`android: ${copied} icon file(s) installed, background ${ICON_BACKGROUND}, service strings in ${Object.keys(RUNNING_STRING).length} language(s)`)
 }
 
 // ---- file side -------------------------------------------------------------

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { patchManifest, patchActivity, PERMISSIONS, patchIconBackground } from '../src-tauri/android/patch.mjs'
+import { patchManifest, patchActivity, PERMISSIONS, patchIconBackground, RUNNING_STRING, stringsXml } from '../src-tauri/android/patch.mjs'
 
 /**
  * The real templates, copied from tauri-cli 2.11.4 with its placeholders
@@ -112,4 +112,28 @@ test('the launcher background is rewritten where the template defines it', () =>
 test('a file that defines no such colour is left alone, so nothing is duplicated', () => {
   const other = '<resources>\n    <color name="something_else">#123456</color>\n</resources>'
   assert.equal(patchIconBackground(other, '#FFFFFF'), null)
+})
+
+/**
+ * "There is an icon in the status bar all the time, as if a notification were
+ * hanging there, and it is empty." Both halves were true, and the empty half is
+ * fixed here: a foreground service MUST show a notification — that is Android's
+ * rule, not our choice — so the only question is whether it says anything. One
+ * with a title and no body reads as a fault. This one explains why the app is
+ * running when nobody opened it, in the phone's own language.
+ */
+test('the service notification has a line to show, in both languages', () => {
+  assert.deepEqual(Object.keys(RUNNING_STRING).sort(), ['values', 'values-pl'])
+  for (const [dir, text] of Object.entries(RUNNING_STRING)) {
+    assert.ok(text.length > 10, `${dir}: "${text}" is not a sentence`)
+    const xml = stringsXml(text)
+    assert.ok(xml.includes('name="onchato_running"'), `${dir}: the name the Kotlin looks up is missing`)
+    assert.ok(xml.startsWith('<?xml'), `${dir}: not a resource file`)
+  }
+})
+
+test('a string with XML in it is escaped, not injected', () => {
+  const xml = stringsXml('tło & <b>pilne</b>')
+  assert.ok(xml.includes('tło &amp; &lt;b>pilne&lt;/b>'))
+  assert.ok(!xml.includes('<b>'), 'raw markup would break the resource compiler')
 })
