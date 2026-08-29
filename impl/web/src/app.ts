@@ -482,6 +482,7 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   // The same broad read the contact book uses; the narrow `use:<kid>` token is
   // still taken later, by the ECDH that genuinely needs it.
   const pubkey = await pubKeyReader(hem)(id.kid)
+  rememberMethod('hem')
   const hemId = hemIdentityFrom(hem, id.kid, id.handle, pubkey)
   const local = await makeLocalBook(await identityKey(pubkey, id.kid), localStorage, hemId)
   if (local.verdict === 'tampered') warnTampered()
@@ -687,7 +688,20 @@ let softCreating = ''
  */
 const LAST_HEM = 'ec-last-hem'
 
-function renderLoginProfiles() {
+/**
+ * Which way this browser signed in last, so the daily return costs no clicks:
+ * a software user meets the list, a HEM user meets the HEM form.
+ *
+ * ⚠️ This is the SAME class of fact as the HEM row that was removed, in its
+ * smallest possible form — it says a HEM was used here, and nothing about which
+ * one, whose, or where. That trade is the user's call and it was made
+ * deliberately; the address and the handle stay unremembered.
+ */
+const LAST_METHOD = 'ec-last-method'
+const rememberMethod = (m: 'soft' | 'hem') => { try { localStorage.setItem(LAST_METHOD, m) } catch {} }
+const lastMethod = (): string => { try { return localStorage.getItem(LAST_METHOD) ?? '' } catch { return '' } }
+
+function renderLoginProfiles(boot = false) {
   // Written by a build that offered a HEM row. Removed on sight rather than
   // left to sit: it is the address and the handle, and nothing reads it now.
   try { localStorage.removeItem(LAST_HEM) } catch {}
@@ -710,10 +724,17 @@ function renderLoginProfiles() {
   $('login-links').hidden = false
   $('login-profiles-sec').hidden = !has
   $('login-empty-sec').hidden = has
-  // The HEM form is a choice on this card now, not the card itself. It opens on
-  // request — or by itself when this device has no profile to offer and the
-  // person may well have come with hardware in hand.
+  // The HEM form is a choice on this card, not the card itself.
   $('hem-sec').hidden = true
+  // ⚠️ …unless this browser last came in that way — and this must be the LAST
+  // line, after the hiding above. Put before it, `showHemForm` unhid the section
+  // and the very next statement hid it again: every part of the card off, an
+  // empty box on screen. Caught by rendering it, which is why the screens get
+  // looked at rather than assumed.
+  //
+  // Only at boot: after that, this function is how somebody gets BACK to the
+  // profiles, and sending them straight out again would make that link dead.
+  if (boot && lastMethod() === 'hem') showHemForm()
 }
 
 /** Show the HEM form, and stand the profile list down while it is up. */
@@ -854,6 +875,7 @@ async function softLogin() {
     }
     closeSoftModal()
     activeSoftProfile = name
+    rememberMethod('soft')
     localStorage.setItem(LAST_PROFILE, name)
     const local = await makeLocalBook(await identityKey(id.pub), localStorage, id)
     if (local.verdict === 'tampered') warnTampered()
@@ -2489,7 +2511,7 @@ function clearComposer() {
   document.documentElement.lang = getLocale()
   applyDom()
   paintTransportSetting()
-  renderLoginProfiles()
+  renderLoginProfiles(true)
   initDesktopShell()
   void paintDesktopSettings()
   // The boot screen goes now and not a moment earlier: this is the first point
