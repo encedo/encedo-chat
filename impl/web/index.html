@@ -190,11 +190,14 @@
   .field-dot input{border:none;background:none;border-radius:8px}
   .field-dot input:focus-visible{outline:none}
   .field-dot:focus-within{outline:2px solid var(--accent);outline-offset:2px}
-  /* Room between them, and no separators to squint at: the dots were doing the
-     work that spacing should do. */
-  .login-links{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 22px;
-    margin-top:14px;font-size:12px;opacity:.9}
-  .login-links a{cursor:pointer;color:var(--accent)}
+  /* One row, spread across the width of the list above it — the ends line up
+     with the profile rows rather than floating in the middle. `nowrap` and
+     `space-between` are what make that true in English too: the Polish strings
+     fit at 12px and the English ones did not, so they wrapped to a second line
+     on the desktop while looking right on a phone. */
+  .login-links{display:flex;flex-wrap:nowrap;justify-content:space-between;gap:10px;
+    margin-top:14px;font-size:11.5px;opacity:.9}
+  .login-links a{cursor:pointer;color:var(--accent);white-space:nowrap}
   .search-wrap{padding:12px 16px 4px}
   .tabs{display:flex;gap:6px;padding:12px 16px}
   .tab{flex:1;padding:8px 0;text-align:center;background:none;border:none;border-radius:5px;color:var(--muted);font-weight:500}

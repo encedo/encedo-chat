@@ -472,9 +472,12 @@ $('toggle').addEventListener('click', () => {
   mode = mode === 'login' ? 'register' : 'login'
   const reg = mode === 'register'
   $('reg-handle-wrap').hidden = !reg
-  $('go').textContent = reg ? 'Zarejestruj' : 'Zaloguj'
-  $('toggle-pre').textContent = reg ? tr('Masz już konto?') : 'Nie masz konta?'
-  $('toggle').textContent = reg ? 'Zaloguj' : tr('Zarejestruj tożsamość')
+  // ⚠️ All four through `tr`. Three of them were bare Polish sitting next to
+  // translated siblings in the same expression — which is how an English UI ends
+  // up half in Polish and why the mix is invisible to whoever wrote it.
+  $('go').textContent = reg ? tr('Zarejestruj') : tr('Zaloguj')
+  $('toggle-pre').textContent = reg ? tr('Masz już konto?') : tr('Nie masz konta?')
+  $('toggle').textContent = reg ? tr('Zaloguj') : tr('Zarejestruj tożsamość')
   clr('msg')
 })
 
@@ -615,7 +618,7 @@ $('go').addEventListener('click', async () => {
   } catch (e: any) { closeIdentityModal(); setMsg('msg', tr('Błąd: ') + (e?.message ?? e), 'err') }
   finally {
     const b = $('go') as HTMLButtonElement
-    b.textContent = mode === 'register' ? 'Zarejestruj' : 'Zaloguj'
+    b.textContent = mode === 'register' ? tr('Zarejestruj') : tr('Zaloguj')
     // Re-probe rather than simply re-enabling: an attempt that failed because the
     // device went away must not leave a live-looking button behind it.
     startHemPoll() // re-probe: an attempt that failed because the device went away
@@ -4725,7 +4728,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
         // announces lag (a backgrounded tab throttles them), so a stale away/quiet
         // label sat over a live conversation — clear it on any inbound message.
         if (room.lastPresence !== 'active' && room.lastPresence !== 'join') {
-          room.lastPresence = 'active'; room.inRoom = true; room.peerLabel = 'w pokoju'
+          room.lastPresence = 'active'; room.inRoom = true; room.peerLabel = tr('w pokoju')
           if (room === activeRoom()) paintStatus()
           renderContacts()
         }
@@ -4763,14 +4766,14 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
       },
       onPresence: (_peer, ev) => {
         room.inRoom = ev !== 'leave'
-        const label = ev === 'join' ? 'w pokoju' : ev === 'active' ? tr('wrócił/a') : ev === 'away' ? 'nieobecny/a'
+        const label = ev === 'join' ? tr('w pokoju') : ev === 'active' ? tr('wrócił/a') : ev === 'away' ? tr('nieobecny/a')
           : ev === 'quiet' ? tr('brak sygnału') : tr('wyszedł/wyszła')
         // Presence belongs in the header, not in the transcript. Every tab switch
         // flips away→active; only entering and leaving are worth a line, and only
         // when the state really changed.
         if ((ev === 'join' || ev === 'leave') && room.lastPresence !== ev) notePresenceLine(room, label)
         room.lastPresence = ev
-        room.peerLabel = ev === 'leave' ? 'poza pokojem' : label
+        room.peerLabel = ev === 'leave' ? tr('poza pokojem') : label
         if (room === activeRoom()) { paintStatus(); if (ev === 'leave') { peerTyping = false; setTyping(false) } }
         renderContacts()
       },
@@ -5202,7 +5205,7 @@ function renderGroups() {
       const d = e.target?.dataset ?? {}
       if (d.ren) {
         e.stopPropagation()
-        const name = await promptName(tr('Zmień nazwę grupy'), tr('Nazwa zmieni się u wszystkich członków — klucze zostają bez zmian.'), gu.name, 'Nazwa grupy')
+        const name = await promptName(tr('Zmień nazwę grupy'), tr('Nazwa zmieni się u wszystkich członków — klucze zostają bez zmian.'), gu.name, tr('Nazwa grupy'))
         if (name) await renameGroup(gu.gid, name)
         return
       }
@@ -5323,7 +5326,7 @@ async function addRestoredGroup(snap: any, name: string): Promise<string | null>
     const [gidHex] = await client.groups.restore([snap])
     if (!groupsUI.has(gidHex)) {
       const members = (snap.roster as { pub: string }[]).map((m) => ({ pub: m.pub }))
-      const gu: GroupUI = { gid: gidHex, name: name || 'Grupa', epoch: snap.epoch, members, log: [], unseen: 0, room: null }
+      const gu: GroupUI = { gid: gidHex, name: name || tr('Grupa'), epoch: snap.epoch, members, log: [], unseen: 0, room: null }
       groupsUI.set(gidHex, gu)
       gu.room = await client.openGroup(gidHex, groupHandlers(gidHex))
     }
@@ -5599,7 +5602,7 @@ async function onGroupInvite(from: string, skd: GroupSkdEnv) {
   const members = skd.roster.map((pub) => ({ pub, name: memberName(pub) }))
   let gu = groupsUI.get(gid)
   if (!gu) {
-    gu = { gid, name: skd.name || 'Grupa', epoch: skd.epoch, members, log: [], unseen: 0, room: null }
+    gu = { gid, name: skd.name || tr('Grupa'), epoch: skd.epoch, members, log: [], unseen: 0, room: null }
     groupsUI.set(gid, gu)
     gu.room = await client.openGroup(gid, groupHandlers(gid))
     toast(tr('Dołączono do grupy „{name}”', { name: groupDisplay(gu) }))
