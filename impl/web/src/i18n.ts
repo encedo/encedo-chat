@@ -295,6 +295,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Wipeout: skasować lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki?': 'Wipeout: erase the local software identity, every contact and all state in this browser?',
     'Tego nie da się cofnąć — Twój klucz publiczny się zmieni, więc Ty i rozmówcy musicie wymienić się nowymi kluczami. Klucze w HSM (login HEM) zostają nietknięte.': 'This cannot be undone \u2014 your public key changes, so you and your contacts have to exchange new keys. Keys in an HSM (HEM sign-in) are left untouched.',
     'zaloguj przez HEM': 'sign in with HEM',
+    '{name} — połączenie się rwie: wchodzi i wychodzi ({n}×)': '{name} — the connection keeps dropping: in and out ({n}×)',
     '{n} próby': '{n} attempts',
     '(sonda jeszcze nie skończyła)': '(the probe has not finished yet)',
     'Ten pulpit nie pokazuje ikon w zasobniku (w GNOME rysuje je rozszerzenie, a ono nie działa), więc zamknięcie okna kończy aplikację — chowanie jej do niewidocznej ikony znaczyłoby, że nie da się do niej wrócić.': 'This desktop does not show tray icons (in GNOME an extension draws them, and it is not running), so closing the window quits — hiding it into an icon nobody can see would mean no way back to it.',

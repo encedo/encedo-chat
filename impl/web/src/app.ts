@@ -189,7 +189,12 @@ type Ev =
       au?: string }
   | { t: 'react'; id: string; emoji: string }
   | { t: 'delivery'; id: string; state: 'ok' | 'lost' | 'late'; ms?: number }
-  | { t: 'sys'; text: string }
+  | {
+      t: 'sys'; text: string
+      /** Set on lines that may need REWRITING rather than repeating — presence
+       *  is the one that does. See the flap collapse in `onPresence`. */
+      sid?: string
+    }
   // The count line above a restored pin block. It carries no text: the count
   // it shows is whatever the room holds NOW, so unpinning cannot leave a line
   // claiming a number that is no longer true.
@@ -214,6 +219,9 @@ interface Room {
   transport: string
   peerLabel: string
   lastPresence: string | null
+  /** The presence line on screen, so a burst rewrites it instead of repeating
+   *  itself. Null until the first join or leave. */
+  presenceLine?: { ev: { t: 'sys'; text: string; sid?: string }; at: number; flaps: number } | null
 }
 const rooms = new Map<string, Room>() // key = contact.pub
 let activePub: string | null = null
@@ -2745,11 +2753,22 @@ function insertByTime(box: HTMLElement, row: HTMLElement, ts: number) {
 }
 
 /** A line the app says to itself in the transcript — not somebody's message. */
-function appendSys(text: string) {
+function appendSys(text: string, sid?: string) {
   const box = $('messages')
   const stick = atBottom()
-  const s = document.createElement('div'); s.className = 'sysline'; s.textContent = text; box.appendChild(s)
+  const s = document.createElement('div'); s.className = 'sysline'; s.textContent = text
+  if (sid) s.dataset.sys = sid
+  box.appendChild(s)
   if (stick) box.scrollTop = box.scrollHeight
+}
+
+/** Rewrite a system line that is already on screen. Silent when the line belongs
+ *  to a room that is not the one being shown — the log carries the new text and
+ *  the replay will draw it. */
+function repaintSys(ev: { text: string; sid?: string }) {
+  if (!ev.sid) return
+  const el = $('messages').querySelector(`[data-sys="${ev.sid}"]`)
+  if (el) el.textContent = ev.text
 }
 
 /**
@@ -4507,7 +4526,7 @@ function applyEv(ev: Ev) {
       $('messages').appendChild(s)
     }
   }
-  else appendSys(ev.text)
+  else appendSys(ev.text, ev.sid)
 }
 
 /**
@@ -4555,6 +4574,41 @@ async function activateRoom(pub: string) {
   startRotation(); renderContacts()
   void syncPresence() // foreground changed → light-watch the contact we just left
   void room.conv?.refresh() // re-announce / flush pending — cheap, no teardown
+}
+
+/**
+ * One line for a peer that keeps coming and going, not one line per bounce.
+ *
+ * Reported from a desktop while a phone was being tested in the background:
+ *
+ *     antek1 left / antek1 w pokoju / antek1 left / antek1 w pokoju / …
+ *
+ * and that was only a fragment. Nothing was malfunctioning — a phone that the
+ * system puts to sleep really does stop announcing and really does come back,
+ * so each transition was true. But a transcript is a record of a conversation,
+ * and forty true lines about the same radio drown it.
+ *
+ * So the FIRST change still gets its own line, exactly as before. A second
+ * change soon after rewrites that line into what is actually going on, and
+ * counts. Once things settle for a few minutes the next change starts a fresh
+ * line again — the collapse is about a burst, not about hiding presence.
+ */
+const FLAP_WINDOW_MS = 5 * 60_000
+
+function notePresenceLine(room: Room, label: string) {
+  const now = nowMs()
+  const last = room.presenceLine
+  if (last && now - last.at < FLAP_WINDOW_MS) {
+    last.at = now
+    last.flaps++
+    last.ev.text = tr('{name} — połączenie się rwie: wchodzi i wychodzi ({n}×)',
+      { name: room.contact.name, n: last.flaps + 1 })
+    if (isViewing(room)) repaintSys(last.ev)
+    return
+  }
+  const line: Ev = { t: 'sys', text: `${room.contact.name} ${label}`, sid: 'p' + now.toString(36) }
+  record(room, line)
+  room.presenceLine = { ev: line as { t: 'sys'; text: string; sid?: string }, at: now, flaps: 0 }
 }
 
 /**
@@ -4637,7 +4691,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
         // Presence belongs in the header, not in the transcript. Every tab switch
         // flips away→active; only entering and leaving are worth a line, and only
         // when the state really changed.
-        if ((ev === 'join' || ev === 'leave') && room.lastPresence !== ev) record(room, { t: 'sys', text: `${contact.name} ${label}` })
+        if ((ev === 'join' || ev === 'leave') && room.lastPresence !== ev) notePresenceLine(room, label)
         room.lastPresence = ev
         room.peerLabel = ev === 'leave' ? 'poza pokojem' : label
         if (room === activeRoom()) { paintStatus(); if (ev === 'leave') { peerTyping = false; setTyping(false) } }
