@@ -182,6 +182,14 @@
   #me-avatar{cursor:pointer}
   #me-avatar:hover,#me-avatar:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   .btn-alt{margin-top:8px;background:none;color:var(--accent);border:1px solid var(--accent)}
+  /* A field with a state inside it. The border moves from the input to this
+     wrapper, exactly as `.composer-field` does it, so the box keeps its shape
+     and the input keeps the full width of it. */
+  .field-dot{display:flex;align-items:center;gap:8px;padding:0 12px 0 0;
+    border:1px solid var(--border);border-radius:8px;background:var(--bg)}
+  .field-dot input{border:none;background:none;border-radius:8px}
+  .field-dot input:focus-visible{outline:none}
+  .field-dot:focus-within{outline:2px solid var(--accent);outline-offset:2px}
   /* Room between them, and no separators to squint at: the dots were doing the
      work that spacing should do. */
   .login-links{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 22px;
@@ -744,12 +752,16 @@
 
       <div id="hem-sec" hidden>
       <p class="sub" data-i18n="Zaloguj się swoim HEM.">Zaloguj się swoim HEM.</p>
-      <!-- The dot sits ABOVE the field, on the label's line. Beside the input it
-           stole 17px from it, so the URL box was narrower than the password box
-           under it and neither the field nor the answer below lined up with
-           anything. -->
-      <div class="label-row"><label data-i18n="Adres HEM">Adres HEM</label><span class="dot" id="status-dot" title="status HEM" data-i18n-title="status HEM"></span></div>
-      <input id="hsm" type="text" value="https://my.ence.do" autocomplete="off">
+      <label data-i18n="Adres HEM">Adres HEM</label>
+      <!-- The dot lives INSIDE the field, at its right edge — the same place and
+           the same idea as the composer's clip and microphone. Beside the box it
+           stole 17px, so the URL field ended up narrower than the password field
+           below it; inside, both boxes are the same width and the state belongs
+           visibly to the address it is about. -->
+      <div class="field-dot">
+        <input id="hsm" type="text" value="https://my.ence.do" autocomplete="off">
+        <span class="dot" id="status-dot" title="status HEM" data-i18n-title="status HEM"></span>
+      </div>
       <!-- Aligned with the END of the FIELD, not the end of the row: the row is
            the input plus the dot (9px) and its gap (8px), so the padding takes
            those back and the word lands under the input's own right edge, which
