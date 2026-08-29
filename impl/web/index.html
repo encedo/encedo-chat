@@ -82,7 +82,7 @@
 
   /* login */
   .login-wrap{min-height:100vh;display:grid;place-items:center;padding:16px}
-  .login-card{width:380px;max-width:92vw;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(18,38,63,.06);padding:28px}
+  .login-card{width:min(380px,100%);background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(18,38,63,.06);padding:28px}
   .login-card h1{margin:0 0 4px;font-size:20px;color:var(--text)}
   .login-card .sub{margin:0 0 20px;color:var(--muted);font-size:13px}
   label{display:block;font-size:12px;color:var(--muted);margin:14px 0 6px}
@@ -676,10 +676,26 @@
     .messages{padding:12px}
     .composer{padding:10px 12px calc(10px + env(safe-area-inset-bottom))}
     .reply-bar{padding:8px 12px 0}
-    .profile-strip,.add-row{padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+    /* ⚠️ ONLY the bottom strip. `.add-row` was in this rule too — the button
+       under the tabs, at the TOP of the sidebar, carrying the phone's BOTTOM
+       safe-area inset as padding. In a browser tab that inset is 0 and nothing
+       showed; in the packaged APK the webview is full-screen, so it resolved to
+       the gesture bar's height and opened a gap between "+ Dodaj peera" and the
+       search box. Reported as "the APK looks different from the browser on the
+       same phone", and invisible to `phone-shot` because headless Chromium has
+       no insets at all. */
+    .profile-strip{padding-bottom:calc(10px + env(safe-area-inset-bottom))}
     .to-bottom{right:14px;bottom:calc(72px + env(safe-area-inset-bottom))}
     #btn-back{display:grid}
-    .login-card{margin:12px;padding:18px}
+    /* No margin of its own: `.login-wrap` already pads, and a margin on a
+       grid-centred item plus a vw-relative width is how a card ends up with a
+       gap on the left and its right edge off the screen. */
+    .login-card{margin:0;padding:18px}
+    /* Nothing on this card may be wider than the card. Three links that refuse
+       to wrap are wider than a narrow phone, and a child that cannot shrink
+       makes the GRID wider than the viewport — which is what moved the card
+       off-centre rather than any centring rule being wrong. */
+    .login-links{flex-wrap:wrap;justify-content:center;gap:8px 16px}
   }
   /* A short screen has no room for a wrapped header: keep it on one line. */
   @media (max-height:560px){
