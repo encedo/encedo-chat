@@ -83,6 +83,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Nie ma tu jeszcze profilu.': 'No profile on this device yet.',
     'Nie ma tu jeszcze profilu. Załóż go teraz albo zaloguj się swoim HEM.': 'No profile here yet. Create one now, or sign in with your HEM.',
     'Nie udało się zaktualizować — pobierz nową wersję ręcznie': 'Could not update — download the new version by hand',
+    'Offline': 'Offline',
+    'Online': 'Online',
     'Pobieram aktualizację…': 'Downloading the update…',
     'Profil o tej nazwie już tu jest — wybierz inną nazwę albo wejdź w niego z listy.': 'A profile with that name is already here — pick another name, or open it from the list.',
     'Później': 'Later',

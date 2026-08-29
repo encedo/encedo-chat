@@ -412,7 +412,7 @@ async function refreshStatus(opts: { quiet?: boolean } = {}) {
   // A background check leaves the last answer standing until it has a new one:
   // blanking these on a timer makes a healthy device flicker and keeps erasing
   // the explanation of why an unreachable one is unreachable.
-  if (!opts.quiet) { dot.className = 'dot'; hint.textContent = ''; setHemReady(false) }
+  if (!opts.quiet) { dot.className = 'dot'; hint.textContent = ''; hint.title = ''; setHemReady(false) }
   if (!url) { setHemReady(false); return false }
   if (probing) return false
   probing = true
@@ -420,12 +420,17 @@ async function refreshStatus(opts: { quiet?: boolean } = {}) {
     const v: any = await probeVersion(url)
     dot.className = 'dot ok'
     setHemReady(true)
-    hint.textContent = `HEM ok${v?.fwv ? ` — fw ${v.fwv}` : ''}`
+    // One word, at the end of the field it belongs to. The device's firmware and
+    // the reason for an unreachable one are still here — in the tooltip, where
+    // somebody who needs them will look and nobody else has to read them.
+    hint.textContent = tr('Online')
+    hint.title = v?.fwv ? `fw ${v.fwv}` : ''
     return true
   } catch (e: any) {
     dot.className = 'dot bad'
     setHemReady(false)
-    hint.textContent = isTimeout(e) ? tr('HEM nie odpowiada (timeout)') : tr('HEM nieosiągalny (adres / CORS)')
+    hint.textContent = tr('Offline')
+    hint.title = isTimeout(e) ? tr('HEM nie odpowiada (timeout)') : tr('HEM nieosiągalny (adres / CORS)')
     return false
   } finally { probing = false }
 }

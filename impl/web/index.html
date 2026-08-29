@@ -744,9 +744,18 @@
 
       <div id="hem-sec" hidden>
       <p class="sub" data-i18n="Zaloguj się swoim HEM.">Zaloguj się swoim HEM.</p>
-      <label data-i18n="Adres HEM">Adres HEM</label>
-      <div class="row"><input id="hsm" type="text" value="https://my.ence.do" autocomplete="off"><span class="dot" id="status-dot" title="status HEM" data-i18n-title="status HEM"></span></div>
-      <div class="hint" id="status-hint"></div>
+      <!-- The dot sits ABOVE the field, on the label's line. Beside the input it
+           stole 17px from it, so the URL box was narrower than the password box
+           under it and neither the field nor the answer below lined up with
+           anything. -->
+      <div class="label-row"><label data-i18n="Adres HEM">Adres HEM</label><span class="dot" id="status-dot" title="status HEM" data-i18n-title="status HEM"></span></div>
+      <input id="hsm" type="text" value="https://my.ence.do" autocomplete="off">
+      <!-- Aligned with the END of the FIELD, not the end of the row: the row is
+           the input plus the dot (9px) and its gap (8px), so the padding takes
+           those back and the word lands under the input's own right edge, which
+           is where the eye leaves it. -->
+      <!-- The answer about the field, at the end of the field. -->
+      <div class="hint" id="status-hint" style="text-align:right"></div>
       <label data-i18n="Hasło">Hasło</label>
       <input id="pass" type="password" autocomplete="off">
       <div id="reg-handle-wrap" hidden><div class="label-row"><label data-i18n="Handle (widoczny dla kontaktów)">Handle (widoczny dla kontaktów)</label><span class="bytes-left" id="handle-bytes"></span></div><input id="handle" type="text" placeholder="np. alice" data-i18n-placeholder="np. alice" autocomplete="off"></div>
