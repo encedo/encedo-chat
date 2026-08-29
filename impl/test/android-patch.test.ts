@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { patchManifest, patchActivity, PERMISSIONS } from '../src-tauri/android/patch.mjs'
+import { patchManifest, patchActivity, PERMISSIONS, patchIconBackground } from '../src-tauri/android/patch.mjs'
 
 /**
  * The real templates, copied from tauri-cli 2.11.4 with its placeholders
@@ -78,4 +78,38 @@ test('a template that has moved on breaks here, loudly', () => {
     () => patchManifest(MANIFEST.replace('    </application>', '</application>')),
     /no <\/application>/,
   )
+})
+
+/**
+ * The icon on a phone at 0.4.5 was **Tauri's logo**. Not a missing asset —
+ * `src-tauri/icons/android` has every density, adaptive and monochrome — but a
+ * generated project that does not take them, so the template's default survives
+ * into the APK. Nothing fails and nothing is logged; the only place it shows is
+ * a home screen, which is why the patcher copies them now and why the colour
+ * behind them is checked here.
+ *
+ * The adaptive icon draws our foreground over `@color/ic_launcher_background`,
+ * and that colour is the template's — left alone, our mark sits on somebody
+ * else's backdrop. It is rewritten in place because two definitions of one
+ * Android resource is a build error, not a preference.
+ */
+test('the launcher background is rewritten where the template defines it', () => {
+  const xml = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<resources>',
+    '    <color name="ic_launcher_background">#2F2F2F</color>',
+    '</resources>',
+  ].join('\n')
+
+  const out = patchIconBackground(xml, '#FFFFFF')
+  assert.ok(out, 'the colour was there and should have been replaced')
+  assert.ok(out!.includes('<color name="ic_launcher_background">#FFFFFF</color>'))
+  assert.ok(!out!.includes('#2F2F2F'), 'the template colour should be gone, not duplicated')
+  // Exactly one definition, still.
+  assert.equal(out!.match(/ic_launcher_background/g)?.length, 1)
+})
+
+test('a file that defines no such colour is left alone, so nothing is duplicated', () => {
+  const other = '<resources>\n    <color name="something_else">#123456</color>\n</resources>'
+  assert.equal(patchIconBackground(other, '#FFFFFF'), null)
 })

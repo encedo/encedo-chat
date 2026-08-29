@@ -15,7 +15,7 @@
  * against the real template text without an Android toolchain.
  */
 
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -95,6 +95,70 @@ export function patchActivity(kt) {
   return kt.replace(anchor, body)
 }
 
+/**
+ * The launcher icon, copied in — because `android init` does not.
+ *
+ * Reported from a phone at 0.4.5: the app on the home screen wears **Tauri's
+ * logo**. The assets are not missing and never were — `src-tauri/icons/android`
+ * holds the right ones, every density, adaptive and monochrome included. The
+ * generated project simply does not take them, and the template's own default
+ * survives into the APK. Nothing fails, nothing is logged, and the only place it
+ * shows is a home screen.
+ *
+ * So this copies them where the build looks, next to everything else this file
+ * puts into a tree that is regenerated on every run. It ASSERTS, like the rest
+ * of the patcher: a missing source or an empty copy stops the build rather than
+ * shipping somebody else's brand again.
+ *
+ * ⚠️ The colour is ours too. The adaptive icon draws `ic_launcher_foreground`
+ * over `@color/ic_launcher_background`, and that colour belongs to whatever
+ * icon the template shipped — leaving it makes our mark sit on Tauri's
+ * backdrop. It is rewritten where the template defines it, and created only
+ * when it defines it nowhere, because two definitions of one resource is a
+ * build error rather than a preference.
+ */
+export function patchIconBackground(xml, colour) {
+  const found = /(<color name="ic_launcher_background">)([^<]*)(<\/color>)/.exec(xml)
+  if (!found) return null
+  return xml.replace(found[0], found[1] + colour + found[3])
+}
+
+const ICON_BACKGROUND = '#FFFFFF'
+
+function installIcons(from, res) {
+  if (!existsSync(from)) throw new Error(`android icons: ${from} is not there — has \`tauri icon\` been run?`)
+  const dirs = readdirSync(from).filter((d) => d.startsWith('mipmap'))
+  if (!dirs.length) throw new Error('android icons: no mipmap-* directories to copy')
+
+  let copied = 0
+  for (const dir of dirs) {
+    mkdirSync(join(res, dir), { recursive: true })
+    for (const file of readdirSync(join(from, dir))) {
+      copyFileSync(join(from, dir, file), join(res, dir, file))
+      copied++
+    }
+  }
+  if (!copied) throw new Error('android icons: the mipmap directories are empty')
+
+  // Wherever the template keeps its colours, that is where ours goes.
+  const values = readdirSync(res).filter((d) => d.startsWith('values'))
+  let placed = false
+  for (const dir of values) {
+    for (const file of readdirSync(join(res, dir))) {
+      if (!file.endsWith('.xml')) continue
+      const path = join(res, dir, file)
+      const next = patchIconBackground(readFileSync(path, 'utf8'), ICON_BACKGROUND)
+      if (next) { writeFileSync(path, next); placed = true }
+    }
+  }
+  if (!placed) {
+    mkdirSync(join(res, 'values'), { recursive: true })
+    writeFileSync(join(res, 'values', 'ic_launcher_background.xml'),
+      `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">${ICON_BACKGROUND}</color>\n</resources>\n`)
+  }
+  console.log(`android: ${copied} icon file(s) installed, background ${ICON_BACKGROUND}`)
+}
+
 // ---- file side -------------------------------------------------------------
 if (process.argv[1] && process.argv[1].endsWith('patch.mjs')) {
   const gen = process.argv[2]
@@ -111,6 +175,8 @@ if (process.argv[1] && process.argv[1].endsWith('patch.mjs')) {
 
   const activity = join(pkgDir, 'MainActivity.kt')
   writeFileSync(activity, patchActivity(readFileSync(activity, 'utf8')))
+
+  installIcons(join(here, '..', 'icons', 'android'), join(src, 'res'))
 
   console.log('android: foreground service installed into the generated project')
 }
