@@ -38,8 +38,29 @@ jobs:
       fail-fast: false # one platform failing should not hide the others' artifacts
       matrix:
         include:
-          - { os: ubuntu-22.04,     label: linux-amd64 }
-          - { os: ubuntu-22.04-arm, label: linux-arm64 }
+          # Linux is built TWICE, on two runner generations, and the split is
+          # the fix for "the .deb works and the AppImage does not".
+          #
+          # A .deb links against the host's libraries, so building it on an old
+          # runner buys reach: the resulting package installs on everything from
+          # 22.04 upwards. An AppImage does the opposite — it CARRIES its GTK,
+          # WebKit and glib — so the same old runner produces a 2022 stack that
+          # then has to work beside a modern host's EGL and gio modules. On a
+          # 2026 desktop that mixture fails: the host's gvfs modules cannot load
+          # into the bundled glib (`undefined symbol: g_task_set_static_name`)
+          # and WebKit's web process dies with `Could not create default EGL
+          # display: EGL_BAD_PARAMETER`. No environment variable helps —
+          # DMABUF, compositing mode, software GL and the X11 backend were all
+          # measured and all still abort.
+          #
+          # So the AppImage is built on the newest runner instead, where its
+          # bundled stack is close to what modern hosts run. The cost is
+          # honest: that AppImage will NOT run on distributions older than the
+          # runner, which is what the .deb and .rpm below are for.
+          - { os: ubuntu-22.04,     label: linux-amd64, args: '--bundles deb,rpm' }
+          - { os: ubuntu-22.04-arm, label: linux-arm64, args: '--bundles deb,rpm' }
+          - { os: ubuntu-24.04,     label: linux-amd64-appimage, args: '--bundles appimage' }
+          - { os: ubuntu-24.04-arm, label: linux-arm64-appimage, args: '--bundles appimage' }
           - { os: macos-latest,     label: macos }
           - { os: windows-latest,   label: windows }
           # Windows on ARM is cross-compiled from the x64 runner — its image
