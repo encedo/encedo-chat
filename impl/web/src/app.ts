@@ -482,6 +482,9 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   // The same broad read the contact book uses; the narrow `use:<kid>` token is
   // still taken later, by the ECDH that genuinely needs it.
   const pubkey = await pubKeyReader(hem)(id.kid)
+  // Remembered here rather than at the click, so a failed sign-in never leaves a
+  // row that cannot be signed into.
+  try { localStorage.setItem(LAST_HEM, JSON.stringify({ url: val('hsm'), handle: id.handle })) } catch {}
   const hemId = hemIdentityFrom(hem, id.kid, id.handle, pubkey)
   const local = await makeLocalBook(await identityKey(pubkey, id.kid), localStorage, hemId)
   if (local.verdict === 'tampered') warnTampered()
@@ -673,10 +676,41 @@ let softCreating = ''
  * does. Names are unique per device anyway — the storage key IS the name — so
  * there is nothing to disambiguate.
  */
+const LAST_HEM = 'ec-last-hem'
+
+/** What was signed into last on a HEM, so that path gets the same one click the
+ *  software profiles get. The address is already prefilled by default and the
+ *  handle is a caption on this device — the same trade the profile names make,
+ *  and the identity behind it still lives in the device. */
+function lastHem(): { url: string; handle: string } | null {
+  try {
+    const raw = localStorage.getItem(LAST_HEM)
+    const o = raw ? JSON.parse(raw) : null
+    return o && typeof o.url === 'string' && typeof o.handle === 'string' ? o : null
+  } catch { return null }
+}
+
 function renderLoginProfiles() {
   const box = $('login-profiles'); if (!box) return
   const names = listSoftProfiles()
   box.textContent = ''
+
+  // A HEM user's daily return, which the first version of this card left out
+  // entirely: they had no row, so every sign-in meant finding the link again.
+  const hem = lastHem()
+  if (hem) {
+    const b = document.createElement('button')
+    b.type = 'button'; b.className = 'pick'
+    const av = document.createElement('span'); av.className = 'av'
+    av.textContent = hem.handle.slice(0, 2).toUpperCase()
+    const who = document.createElement('span'); who.className = 'who'
+    who.textContent = `${hem.handle} @ ${hem.url.replace(/^https?:\/\//, '')}`
+    who.title = who.textContent
+    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = 'HEM'
+    b.append(av, who, tag)
+    b.addEventListener('click', () => { ;($('hsm') as HTMLInputElement).value = hem.url; showHemForm(); $('pass').focus() })
+    box.appendChild(b)
+  }
   for (const n of names) {
     const b = document.createElement('button')
     b.type = 'button'; b.className = 'pick'
@@ -688,7 +722,7 @@ function renderLoginProfiles() {
     b.addEventListener('click', () => openSoftModal(n))
     box.appendChild(b)
   }
-  const has = names.length > 0
+  const has = names.length > 0 || !!hem
   $('login-profiles-sec').hidden = !has
   $('login-empty-sec').hidden = has
   // The HEM form is a choice on this card now, not the card itself. It opens on
@@ -705,7 +739,11 @@ function showHemForm() {
   $('hsm').focus()
 }
 $('go-hem')?.addEventListener('click', showHemForm)
+$('go-hem-empty')?.addEventListener('click', showHemForm)
 $('go-create')?.addEventListener('click', () => openSoftModal())
+// Back to the card. `renderLoginProfiles` decides what belongs on it, so this
+// restores the right thing whether this device holds profiles or nothing.
+$('hem-back')?.addEventListener('click', () => renderLoginProfiles())
 
 function openSoftModal(name?: string) {
   $('scrim').classList.add('open'); $('soft-modal').classList.add('open')
@@ -740,7 +778,11 @@ function softMode(creating: boolean) {
 }
 
 const closeSoftModal = () => { $('scrim').classList.remove('open'); $('soft-modal').classList.remove('open') }
-$('go-soft').addEventListener('click', openSoftModal)
+// ⚠️ An arrow, not a reference. `openSoftModal` grew a `name` parameter when the
+// login card learned to open a NAMED profile, and a listener passed by reference
+// hands it the PointerEvent — which landed in the name field as
+// "[object PointerEvent]" the moment anybody tried to create a profile.
+$('go-soft').addEventListener('click', () => openSoftModal())
 $('soft-cancel').addEventListener('click', closeSoftModal)
 // Typing a different name drops creation mode — otherwise the next press would
 // create a profile under a name nobody was asked about.

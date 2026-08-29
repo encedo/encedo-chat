@@ -678,8 +678,33 @@ async function softProfile(b: Page, handle: string) {
 /** Log in with the software identity already in this profile's localStorage. */
 async function login(b: Page, handle: string) {
   await b.waitFor('login form', `return !!document.getElementById('go-soft')`)
+  await hemFormGoesBack(b)
   await softProfile(b, handle)
   await b.waitFor('contact list', `return !!document.querySelector('#pane-contacts .contact')`, 30_000)
+}
+
+/**
+ * Opening the HEM form must not be a one-way door.
+ *
+ * Reported after the card was rebuilt: choosing HEM hid the profile list and
+ * left no way back — the only exit was reloading the page, which is not a
+ * control, it is a workaround. Checked on every login because it costs two
+ * clicks and it is exactly the kind of thing a layout change breaks silently.
+ */
+async function hemFormGoesBack(b: Page) {
+  const shown = await b.eval<boolean>(`
+    document.getElementById('go-hem').click();
+    return !document.getElementById('hem-sec').hidden;
+  `)
+  if (!shown) throw new Error(`${b.name}: the HEM form did not open`)
+  const back = await b.eval<boolean>(`
+    document.getElementById('hem-back').click();
+    const sec = document.getElementById('hem-sec');
+    const list = document.getElementById('login-profiles-sec');
+    const empty = document.getElementById('login-empty-sec');
+    return sec.hidden && (!list.hidden || !empty.hidden);
+  `)
+  if (!back) throw new Error(`${b.name}: no way back from the HEM form to the card`)
 }
 
 /** Click a contact by its visible name. */
