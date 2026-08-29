@@ -621,11 +621,17 @@ async function softError(b: Page): Promise<string> {
 /**
  * Open the software-profile modal and get through it.
  *
- * A profile that does not exist is created in TWO steps, on two surfaces: the
- * confirm dialog the rest of the app uses for decisions, then the form again in
- * creation mode, which asks for the password a second time. That is the point
- * of the design — a typo in an existing name must not silently mint a new
- * identity — so the harness walks it rather than routing around it.
+ * Two ways in, and they are different on purpose:
+ *
+ * - **"+ new profile"** says create, so the window opens in creation mode with
+ *   an empty name and both password fields, and does NOT ask again whether to
+ *   create — the click was the answer.
+ * - **A name typed into the SIGN-IN window that does not exist** still gets the
+ *   confirm dialog, because there it is far more likely to be a typo in an
+ *   existing profile's name than a decision, and minting an identity silently
+ *   presents as "my contacts are gone".
+ *
+ * The harness walks whichever surface appears rather than assuming one.
  */
 async function softProfile(b: Page, handle: string) {
   // A browser that already holds this profile must OFFER it on the card, and be
@@ -653,9 +659,14 @@ async function softProfile(b: Page, handle: string) {
       return m.classList.contains('open');
     `, 20_000)
   }
+  // "+ new profile" opens straight into creation mode, so the repeat field is
+  // already there and is filled with the rest. When it is NOT there we are in
+  // the sign-in window, and the confirm dialog below is the path.
   await b.eval(`
     document.getElementById('soft-name').value = ${JSON.stringify(handle)};
     document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)};
+    const p2 = document.getElementById('soft-pass2');
+    if (!document.getElementById('soft-pass2-wrap').hidden) p2.value = ${JSON.stringify(SOFT_PASS)};
     return 1;
   `)
 
@@ -663,6 +674,7 @@ async function softProfile(b: Page, handle: string) {
   if (first === 'done') return
   if (first === 'form') throw new Error(`${b.name}: the profile form refused the name — ${await softError(b)}`)
 
+  // Only the sign-in path reaches here: a name that does not exist, asked about.
   await b.eval(`document.getElementById('ask-yes').click(); return 1`)
   // Creation mode confirms the password, and the second field only exists once
   // that mode is on — filling it before the switch writes into a hidden input.

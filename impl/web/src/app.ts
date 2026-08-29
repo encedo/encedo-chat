@@ -482,9 +482,6 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   // The same broad read the contact book uses; the narrow `use:<kid>` token is
   // still taken later, by the ECDH that genuinely needs it.
   const pubkey = await pubKeyReader(hem)(id.kid)
-  // Remembered here rather than at the click, so a failed sign-in never leaves a
-  // row that cannot be signed into.
-  try { localStorage.setItem(LAST_HEM, JSON.stringify({ url: val('hsm'), handle: id.handle })) } catch {}
   const hemId = hemIdentityFrom(hem, id.kid, id.handle, pubkey)
   const local = await makeLocalBook(await identityKey(pubkey, id.kid), localStorage, hemId)
   if (local.verdict === 'tampered') warnTampered()
@@ -676,41 +673,28 @@ let softCreating = ''
  * does. Names are unique per device anyway — the storage key IS the name — so
  * there is nothing to disambiguate.
  */
+/**
+ * ⚠️ A HEM sign-in is NOT remembered here, and that is the point.
+ *
+ * A row for it was tried and taken out on sight: it put a handle and a HEM
+ * address on the sign-in screen, which tells anyone glancing at the machine
+ * that this browser has something in a HEM and where. The profiles below are
+ * captions for keys that live in THIS browser; a HEM identity lives in the
+ * device and the browser has no business advertising it.
+ *
+ * The cost is a click for the HEM user, every time. That is the trade and it is
+ * the right way round.
+ */
 const LAST_HEM = 'ec-last-hem'
 
-/** What was signed into last on a HEM, so that path gets the same one click the
- *  software profiles get. The address is already prefilled by default and the
- *  handle is a caption on this device — the same trade the profile names make,
- *  and the identity behind it still lives in the device. */
-function lastHem(): { url: string; handle: string } | null {
-  try {
-    const raw = localStorage.getItem(LAST_HEM)
-    const o = raw ? JSON.parse(raw) : null
-    return o && typeof o.url === 'string' && typeof o.handle === 'string' ? o : null
-  } catch { return null }
-}
-
 function renderLoginProfiles() {
+  // Written by a build that offered a HEM row. Removed on sight rather than
+  // left to sit: it is the address and the handle, and nothing reads it now.
+  try { localStorage.removeItem(LAST_HEM) } catch {}
   const box = $('login-profiles'); if (!box) return
   const names = listSoftProfiles()
   box.textContent = ''
 
-  // A HEM user's daily return, which the first version of this card left out
-  // entirely: they had no row, so every sign-in meant finding the link again.
-  const hem = lastHem()
-  if (hem) {
-    const b = document.createElement('button')
-    b.type = 'button'; b.className = 'pick'
-    const av = document.createElement('span'); av.className = 'av'
-    av.textContent = hem.handle.slice(0, 2).toUpperCase()
-    const who = document.createElement('span'); who.className = 'who'
-    who.textContent = `${hem.handle} @ ${hem.url.replace(/^https?:\/\//, '')}`
-    who.title = who.textContent
-    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = 'HEM'
-    b.append(av, who, tag)
-    b.addEventListener('click', () => { ;($('hsm') as HTMLInputElement).value = hem.url; showHemForm(); $('pass').focus() })
-    box.appendChild(b)
-  }
   for (const n of names) {
     const b = document.createElement('button')
     b.type = 'button'; b.className = 'pick'
@@ -722,7 +706,8 @@ function renderLoginProfiles() {
     b.addEventListener('click', () => openSoftModal(n))
     box.appendChild(b)
   }
-  const has = names.length > 0 || !!hem
+  const has = names.length > 0
+  $('login-links').hidden = false
   $('login-profiles-sec').hidden = !has
   $('login-empty-sec').hidden = has
   // The HEM form is a choice on this card now, not the card itself. It opens on
@@ -736,26 +721,40 @@ function showHemForm() {
   $('hem-sec').hidden = false
   $('login-profiles-sec').hidden = true
   $('login-empty-sec').hidden = true
+  // The line of other ways in goes with them — one of those ways is this form,
+  // and offering it while it is open is noise on a screen that should read as
+  // one thing to do.
+  $('login-links').hidden = true
   $('hsm').focus()
 }
 $('go-hem')?.addEventListener('click', showHemForm)
 $('go-hem-empty')?.addEventListener('click', showHemForm)
-$('go-create')?.addEventListener('click', () => openSoftModal())
+$('go-create')?.addEventListener('click', () => openSoftModal(undefined, true))
 // Back to the card. `renderLoginProfiles` decides what belongs on it, so this
 // restores the right thing whether this device holds profiles or nothing.
 $('hem-back')?.addEventListener('click', () => renderLoginProfiles())
 
-function openSoftModal(name?: string) {
+/**
+ * The user came here to CREATE, not to sign in. Set by "+ new profile" and by
+ * the empty device's button, and it is what stops the flow asking a second time
+ * whether a profile that does not exist should be made — they just said so.
+ */
+let softIntendsNew = false
+
+function openSoftModal(name?: string, creating = false) {
   $('scrim').classList.add('open'); $('soft-modal').classList.add('open')
   clr('soft-msg'); softCreating = ''
-  // A row on the card names the profile; the bare link (a new one) starts from
-  // whatever signed in here last, which is still the best guess when creating.
-  const last = name ?? localStorage.getItem(LAST_PROFILE) ?? ''
-  ;($('soft-name') as HTMLInputElement).value = last; ($('soft-pass') as HTMLInputElement).value = ''
-  softMode(false)
+  softIntendsNew = creating
+  // ⚠️ A NEW profile starts EMPTY. Prefilling the last name here was the sign-in
+  // behaviour leaking into creation: "+ new profile" opened with somebody else's
+  // name in the field and only one password box, which reads as the wrong
+  // window — and one careless press away from a confusing error.
+  const start = creating ? '' : (name ?? localStorage.getItem(LAST_PROFILE) ?? '')
+  ;($('soft-name') as HTMLInputElement).value = start; ($('soft-pass') as HTMLInputElement).value = ''
+  softMode(creating)
   // Focus lands where there is still something to type — on the password when
   // the name came back by itself, which is the common case after the first run.
-  $(last ? 'soft-pass' : 'soft-name').focus()
+  $(!creating && start ? 'soft-pass' : 'soft-name').focus()
 }
 
 /**
@@ -777,17 +776,19 @@ function softMode(creating: boolean) {
   ;($('soft-go') as HTMLButtonElement).textContent = creating ? tr('Utwórz profil') : tr('Dalej')
 }
 
-const closeSoftModal = () => { $('scrim').classList.remove('open'); $('soft-modal').classList.remove('open') }
+const closeSoftModal = () => { softIntendsNew = false; $('scrim').classList.remove('open'); $('soft-modal').classList.remove('open') }
 // ⚠️ An arrow, not a reference. `openSoftModal` grew a `name` parameter when the
 // login card learned to open a NAMED profile, and a listener passed by reference
 // hands it the PointerEvent — which landed in the name field as
 // "[object PointerEvent]" the moment anybody tried to create a profile.
-$('go-soft').addEventListener('click', () => openSoftModal())
+// "+ new profile" means new. Anything else here would be the sign-in window
+// wearing a different label, which is exactly how it was reported.
+$('go-soft').addEventListener('click', () => openSoftModal(undefined, true))
 $('soft-cancel').addEventListener('click', closeSoftModal)
 // Typing a different name drops creation mode — otherwise the next press would
 // create a profile under a name nobody was asked about.
 ;($('soft-name') as HTMLInputElement).addEventListener('input', () => {
-  if (softCreating && softCreating !== val('soft-name')) { clr('soft-msg'); softMode(false) }
+  if (!softIntendsNew && softCreating && softCreating !== val('soft-name')) { clr('soft-msg'); softMode(false) }
 })
 
 async function softLogin() {
@@ -806,7 +807,7 @@ async function softLogin() {
   try {
     const raw = localStorage.getItem(softKey(name))
 
-    if (!raw && softCreating !== name) {
+    if (!raw && !softIntendsNew && softCreating !== name) {
       // A name that does not exist: ASK, on a surface of its own, and do not
       // create. Creating silently would turn a typo in an existing profile's
       // name into a brand new identity — which presents as "my contacts are
@@ -821,6 +822,13 @@ async function softLogin() {
       // click-outside-to-close it relies on stops working.
       $('scrim').classList.add('open')
       if (ok) { softMode(true); $('soft-pass2').focus() }
+      return
+    }
+
+    // Asked to CREATE, and the name is already taken. Signing in instead would
+    // work and would be a surprise; the honest answer names the two ways out.
+    if (raw && softIntendsNew) {
+      setMsg('soft-msg', tr('Profil o tej nazwie już tu jest — wybierz inną nazwę albo wejdź w niego z listy.'), 'err')
       return
     }
 
