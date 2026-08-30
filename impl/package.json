@@ -1,6 +1,6 @@
 {
   "name": "onchato-spike",
-  "version": "0.5.12",
+  "version": "0.5.13",
   "private": true,
   "type": "module",
   "description": "v6 TS spike \u2014 rendezvous spine on the v5 libp2p base. Crypto handshake (EH-2/ratchet) held pending cryptographer review.",
@@ -27,6 +27,7 @@
     "room-sim": "node net/room-sim.ts",
     "browser-test": "node net/browser-test.ts",
     "browser-test:ff": "BROWSERS=chromium,firefox node net/browser-test.ts",
+    "crypto-bench": "node net/crypto-bench.ts",
     "relay-load": "node net/relay-load.ts",
     "relay-saturate": "node net/relay-saturate.ts",
     "relay-flood": "node net/relay-flood.ts",

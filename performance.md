@@ -27,18 +27,19 @@ relay-load / relay-saturate / relay-flood / relay-hsrate / relay-chatload`).
 
 ## Crypto (engine cost, no network)
 
-Dev box (aarch64), EH-2 = X25519 triad + ML-KEM-768 + transcript. ⚠️ Measured
-with an ad-hoc script that was not checked in — the numbers are not reproducible
-from the repo; re-measuring means writing a small bench over
-`eh2/establish.ts` + `eh2/ratchet.ts` first:
+Dev box (aarch64), EH-2 = X25519 triad + ML-KEM-768 + transcript. Reproducible:
+**`npm run crypto-bench`** (`net/crypto-bench.ts` — in-process, offline, both
+sides of every handshake; re-run of 2026-08-30 confirmed the 2026-07-31 ad-hoc
+numbers within noise):
 
 | operation | cost |
 |---|---|
-| 20 full EH-2 handshakes, **both sides** | 66 ms → **3.3 ms each** |
-| 1000 message seal+open round trips (one ratchet) | 417 ms → **0.42 ms/msg** |
+| 20 full EH-2 handshakes, **both sides** | 52 ms → **2.6 ms each** |
+| 1000 message seal+open round trips (one ratchet) | 418 ms → **0.42 ms/msg** |
 
-→ Crypto is never the bottleneck. 20 contacts' handshakes = 66 ms; no worker
-thread needed.
+→ Crypto is never the bottleneck. 20 contacts' handshakes ≈ 50–70 ms; no worker
+thread needed. A HEM identity adds one device round-trip per side per handshake
+on top (nothing per message — `hem_usage.md`).
 
 ---
 

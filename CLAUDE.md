@@ -430,6 +430,7 @@ session (`startSession({transport:'mqtt', broker})`, web `?mqtt=1`, CLI
 | `npm run browser-test:ff` | the same scenarios with **Chromium + Firefox** |
 | `npm run mqtt-meet` | the whole engine over an MQTT broker instead of libp2p |
 | `npm run phone-shot` | screenshots at real device metrics (layout truth — computed-style asserts miss clipping) |
+| `npm run crypto-bench` | the engine-cost numbers `performance.md` cites, reproducibly (EH-2 + ratchet, offline) |
 | `npm run relay-load` / `-saturate` / `-flood` / `-hsrate` / `-chatload` | the load/DoS toolkit (`performance.md`, `relay/README.md`) |
 
 `browser-test` env switches worth knowing: `GROUP_ONLY=1` (just the group
