@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { patchManifest, patchActivity, PERMISSIONS, patchIconBackground, RUNNING_STRING, stringsXml } from '../src-tauri/android/patch.mjs'
 
 /**
@@ -136,4 +137,37 @@ test('a string with XML in it is escaped, not injected', () => {
   const xml = stringsXml('tło & <b>pilne</b>')
   assert.ok(xml.includes('tło &amp; &lt;b>pilne&lt;/b>'))
   assert.ok(!xml.includes('<b>'), 'raw markup would break the resource compiler')
+})
+
+/**
+ * The status-bar icon was tiny next to every other one (reported at 0.5.9),
+ * because the service reused `ic_launcher_monochrome`: that layer keeps the
+ * adaptive-icon safe zone (glyph ≈44% of the canvas, the launcher mask crops
+ * 66/108 dp), and the status bar draws a resource full-bleed. The fix is a
+ * dedicated `ic_stat_onchato` drawable, and THREE files must agree on it: the
+ * PNGs checked into `icons/android/drawable-*`, the Kotlin's `setSmallIcon`,
+ * and the message plugin's icon in `tauri.android.conf.json`. Any one of them
+ * regressing alone fails silently on a phone — the plugin falls back to the
+ * system's ℹ dialog icon, the Kotlin to a build error only if the PNGs are
+ * gone too. So this pins all three, and the PNG dimensions (a regenerated
+ * icon set that forgets the drawables is the likely way to lose them).
+ */
+test('the status-bar icon exists at every density and both notification paths name it', () => {
+  const root = new URL('../src-tauri/', import.meta.url)
+  const densities: Record<string, number> = { mdpi: 24, hdpi: 36, xhdpi: 48, xxhdpi: 72, xxxhdpi: 96 }
+  for (const [dpi, px] of Object.entries(densities)) {
+    const file = new URL(`icons/android/drawable-${dpi}/ic_stat_onchato.png`, root)
+    const bytes = readFileSync(file)
+    // PNG IHDR: width and height are big-endian u32 at offsets 16 and 20.
+    assert.equal(bytes.readUInt32BE(16), px, `${dpi}: width should be ${px}`)
+    assert.equal(bytes.readUInt32BE(20), px, `${dpi}: height should be ${px}`)
+  }
+
+  const kt = readFileSync(new URL('android/OnchatoService.kt', root), 'utf8')
+  assert.ok(kt.includes('R.drawable.ic_stat_onchato'), 'the service should draw the status-bar icon')
+  assert.ok(!kt.includes('setSmallIcon(R.mipmap'), 'a mipmap in the status bar is the bug this fixed')
+
+  const conf = JSON.parse(readFileSync(new URL('tauri.android.conf.json', root), 'utf8'))
+  assert.equal(conf.plugins?.notification?.icon, 'ic_stat_onchato',
+    'message notifications should carry the same icon, not the system ℹ fallback')
 })

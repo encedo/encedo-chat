@@ -70,15 +70,17 @@ class OnchatoService : Service() {
         )
         val notification = Notification.Builder(this, CHANNEL)
             .setContentTitle("onchato")
-            // Reported from a phone: "there is an icon in the status bar all the
-            // time, as if a notification were hanging there, and it is empty."
-            // Both halves were true.
-            //
             // A status-bar icon is a SILHOUETTE — Android throws the colours away
-            // and tints what is left. Handing it the colour launcher icon
-            // produces the blob that was on screen; `ic_launcher_monochrome` is
-            // the asset that exists for this and it is already in the build.
-            .setSmallIcon(R.mipmap.ic_launcher_monochrome)
+            // and tints what is left. But it must be a silhouette drawn for the
+            // status bar's geometry: the bar renders the resource full-bleed,
+            // while `ic_launcher_monochrome` keeps the adaptive-icon safe zone
+            // (the glyph is ~44% of the canvas, because a launcher mask crops
+            // 66/108 dp). Reported from a phone at 0.5.9: our mark sat visibly
+            // smaller than every other icon in the bar. `ic_stat_onchato` is the
+            // same mark rescaled to status-bar padding (~2 dp of 24); the
+            // message-notification plugin is pointed at it too, in
+            // `tauri.android.conf.json`.
+            .setSmallIcon(R.drawable.ic_stat_onchato)
             // And a notification with a title and nothing else reads as empty,
             // because it is. This one is not an event, it is an explanation of
             // why the app is running at all — so it says that. Localised by the

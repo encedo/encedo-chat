@@ -147,8 +147,14 @@ export function stringsXml(text) {
 
 function installIcons(from, res) {
   if (!existsSync(from)) throw new Error(`android icons: ${from} is not there — has \`tauri icon\` been run?`)
-  const dirs = readdirSync(from).filter((d) => d.startsWith('mipmap'))
-  if (!dirs.length) throw new Error('android icons: no mipmap-* directories to copy')
+  // mipmap-*: the launcher set `tauri icon` generates. drawable-*: ours —
+  // `ic_stat_onchato`, the status-bar silhouette. The launcher's monochrome
+  // layer keeps the adaptive-icon safe zone (glyph ≈44% of the canvas), and the
+  // status bar draws a resource full-bleed, so reusing it there shipped an icon
+  // visibly smaller than every other one in the bar (reported at 0.5.9). The
+  // drawables carry the same mark cropped and rescaled to status-bar padding.
+  const dirs = readdirSync(from).filter((d) => d.startsWith('mipmap') || d.startsWith('drawable'))
+  if (!dirs.length) throw new Error('android icons: no mipmap-*/drawable-* directories to copy')
 
   let copied = 0
   for (const dir of dirs) {
@@ -159,6 +165,11 @@ function installIcons(from, res) {
     }
   }
   if (!copied) throw new Error('android icons: the mipmap directories are empty')
+  // Both notification paths name this resource — the service in Kotlin and the
+  // message plugin via `tauri.android.conf.json` — and a missing drawable is a
+  // BUILD error there and a silent system fallback here. Fail loudly instead.
+  if (!existsSync(join(res, 'drawable-xxxhdpi', 'ic_stat_onchato.png')))
+    throw new Error('android icons: ic_stat_onchato.png did not land in res/drawable-xxxhdpi')
 
   // Wherever the template keeps its colours, that is where ours goes.
   const values = readdirSync(res).filter((d) => d.startsWith('values'))
