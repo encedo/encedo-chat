@@ -1,6 +1,14 @@
 limit_conn_zone $binary_remote_addr zone=mqtt_conn:10m;
 limit_req_zone  $binary_remote_addr zone=mqtt_req:10m rate=30r/s;
 
+# Relay: TE limity są jedyną ochroną przeciwzalewową. GossipSub ma scoring po IP
+# wyłączony (IPColocationFactorWeight: 0 w relay/relay.mjs — za proxy każdy klient
+# przychodzi ze 127.0.0.1, więc kara liczyła wszystkich jako jeden adres), czyli
+# obrona MUSI stać tu, na brzegu, gdzie realny adres jeszcze istnieje.
+# Limit dotyczy handshake'u HTTP — ustanowiony WebSocket żyje poza limit_req.
+limit_conn_zone $binary_remote_addr zone=relay_conn:10m;
+limit_req_zone  $binary_remote_addr zone=relay_req:10m rate=10r/s;
+
 
 # --- HTTP redirect: onchato.com + chat.encedo.com ---
 server {
@@ -192,6 +200,8 @@ server {
         proxy_set_header   Host       $host;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+        limit_conn relay_conn 20;                    # per realne IP
+        limit_req  zone=relay_req burst=30 nodelay;
     }
 
 location /mqtt {
