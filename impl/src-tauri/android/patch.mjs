@@ -32,9 +32,14 @@ export const PERMISSIONS = [
   // hand (see `enable_webrtc` in lib.rs). If recording is refused on a phone,
   // that bridge is where to look, not here.
   'android.permission.RECORD_AUDIO',
-  // Deliberately NOT android.permission.CAMERA: the QR scanner has never been
-  // run on Android, and a permission an app declares and never uses is one it
-  // has to justify to Play for nothing.
+  // The QR scanner. This was DELIBERATELY absent while the scanner had never
+  // been run on Android — and then somebody ran it (0.5.16, live): the modal
+  // opened, the video stayed a grey placeholder, and the app said "Permission
+  // denied" while the system's permission screen listed no camera row at all,
+  // because a permission the manifest does not declare cannot even be asked
+  // for. A phone is the scanner's natural home, so the old justification is
+  // now backwards: this is a permission the app declares and visibly uses.
+  'android.permission.CAMERA',
 ]
 
 export function patchManifest(xml) {
@@ -80,6 +85,7 @@ export function patchActivity(kt) {
     val wanted = arrayOf(
       android.Manifest.permission.POST_NOTIFICATIONS,
       android.Manifest.permission.RECORD_AUDIO,
+      android.Manifest.permission.CAMERA,
     ).filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
     if (wanted.isNotEmpty()) requestPermissions(wanted.toTypedArray(), 1001)
     // Reachability starts with the app and ends with it: this is not a
