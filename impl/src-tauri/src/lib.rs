@@ -851,11 +851,20 @@ pub fn run() {
     let builder = desk::wire(builder);
     #[cfg(mobile)]
     let builder = mobile::wire(builder);
+    // Two run shapes ON PURPOSE. Desktop needs the event callback (macOS
+    // Reopen — the Dock click that brings a hidden window back). Mobile goes
+    // through the exact `.run(context)` path that every working APK up to
+    // 0.5.16 shipped with: the 0.5.17 switch to build()+run(callback) is the
+    // one mobile-visible change of that release, and the 0.5.17 APK died on
+    // launch with the service notification still standing — so mobile does not
+    // get to pay for a desktop feature it cannot use.
+    #[cfg(desktop)]
     builder
         .build(tauri::generate_context!())
         .expect("error while building onchato")
-        .run(|_app, _event| {
-            #[cfg(desktop)]
-            desk::on_run_event(_app, &_event);
-        });
+        .run(|app, event| desk::on_run_event(app, &event));
+    #[cfg(mobile)]
+    builder
+        .run(tauri::generate_context!())
+        .expect("error while running onchato");
 }
