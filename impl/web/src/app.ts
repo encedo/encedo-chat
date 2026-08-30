@@ -1,13 +1,14 @@
 /**
  * app.ts — onchato web GUI (mockup skin). Login (HEM) → dashboard.
  *
- * Identity in the HEM (hem-sdk-js). Rendezvous/messages via the SAME engine as
- * the CLI (../../lib, WebCrypto). Browser libp2p peer dials the onchato relay.
- * Message crypto is INTERIM (lib/session.ts) — EH-2 replaces it. Content rides
- * GossipSub (interim); the §13 relay-blind data plane is pending the libp2p v3
- * ecosystem (gossipsub not yet migrated). Timestamps shown in UTC.
+ * Identity in the HEM (hem-sdk-js) or a password-sealed software profile.
+ * Rendezvous/messages via the SAME engine as the CLI (../../lib, WebCrypto).
+ * Content crypto is EH-2 + Double Ratchet, the only scheme; content prefers a
+ * direct WebRTC DataChannel with GossipSub through the relay as the fallback
+ * (docs/PROTOCOL.md §7.3/§13). The §13 relay-blind plane is pending the libp2p
+ * v3 ecosystem (gossipsub not yet migrated). Timestamps shown in UTC.
  *
- * Unbacked mockup elements (Groups/Network tabs, P1–P3 profiles, direct/relay
+ * Unbacked mockup elements (P1–P3 profiles, direct/relay
  * modes) are kept as visual placeholders until the engine backs them.
  */
 
@@ -32,7 +33,7 @@ import { canEdit, acceptEdit, EDIT_WINDOW_MS } from '../../lib/edits.ts'
 import { planNotification, isNotifyMode, type NotifyMode } from '../../lib/notify.ts'
 import {
   isDesktopShell, notifySupported, notifyPermission, notifyRequest, notifyShow, type Banner,
-  updateKind, updateCheck, updateInstall,
+  updateKind, updateCheck, updateDownload, updateProgress, updateApply,
   closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable, isMobileShell,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
@@ -4557,13 +4558,50 @@ async function offerUpdate() {
   }
 
   const { ok } = await ask(tr('Jest nowa wersja {v}', { v: info.version }),
-    tr('Zainstalować teraz? Aplikacja uruchomi się ponownie.'),
-    tr('Zainstaluj'), undefined, undefined, tr('Później'))
+    tr('Pobrać ją teraz? Instalacja i restart przyjdą osobno, kiedy powiesz.'),
+    tr('Pobierz'), undefined, undefined, tr('Później'))
   if (!ok) return
-  toast(tr('Pobieram aktualizację…'))
-  try { await updateInstall() } catch (e: any) {
+
+  // The bar exists because its absence was the reported bug: between the click
+  // and the restart 0.5.16 showed NOTHING, and a person watching nothing
+  // assumes a dead button. Progress is polled off the host (two atomics on the
+  // other side) — no event channel, same two-sided ask as every other command.
+  const bar = $('upd-bar'), txt = $('upd-txt'), fill = $('upd-fill')
+  bar.hidden = false
+  fill.style.width = '0%'
+  txt.textContent = tr('Pobieram aktualizację…')
+  const poll = setInterval(() => {
+    void updateProgress().then(({ got, total }) => {
+      if (total) {
+        const pct = Math.min(100, Math.round((got / total) * 100))
+        fill.style.width = pct + '%'
+        txt.textContent = tr('Pobieram aktualizację…') + ' ' + pct + '%'
+      } else if (got) {
+        txt.textContent = tr('Pobieram aktualizację…') + ' ' + (got / 1048576).toFixed(1) + ' MB'
+      }
+    }).catch(() => {})
+  }, 200)
+
+  try { await updateDownload() } catch (e: any) {
     // The app is still the old version and still working, so this is a toast
     // and not a stop.
+    clearInterval(poll)
+    bar.hidden = true
+    ecLog('update download failed: ' + (e?.message ?? e))
+    toast(tr('Nie udało się zaktualizować — pobierz nową wersję ręcznie'))
+    return
+  }
+  clearInterval(poll)
+  fill.style.width = '100%'
+  txt.textContent = tr('Pobrane.')
+  setTimeout(() => { bar.hidden = true }, 600)
+
+  // The restart is the person's call, not the download's side effect.
+  const go = await ask(tr('Aktualizacja {v} pobrana', { v: info.version }),
+    tr('Zainstalować i uruchomić ponownie teraz?'),
+    tr('Uruchom ponownie'), undefined, undefined, tr('Później'))
+  if (!go.ok) { toast(tr('Dobrze — zaproponuję znów po następnym uruchomieniu.')); return }
+  try { await updateApply() } catch (e: any) {
     ecLog('update install failed: ' + (e?.message ?? e))
     toast(tr('Nie udało się zaktualizować — pobierz nową wersję ręcznie'))
   }

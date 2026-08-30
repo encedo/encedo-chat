@@ -550,6 +550,15 @@
   .scrim.open{display:block}
   .modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;max-width:92vw;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.2);padding:22px;z-index:32;display:none}
   .modal.open{display:block}
+  /* Update download bar — the fix for "nic się nie działo i nagle restart":
+     a small fixed card while the bundle downloads, percent when the server
+     says a length, megabytes when it does not. */
+  #upd-bar{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:60;
+    background:var(--card);border:1px solid var(--border);border-radius:10px;
+    padding:10px 14px;min-width:240px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+  #upd-txt{font-size:12.5px;color:var(--text)}
+  .upd-track{margin-top:8px;height:4px;border-radius:2px;background:var(--accent-soft);overflow:hidden}
+  #upd-fill{height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width .2s ease}
   .modal h2{margin:0 0 4px;font-size:16px;color:var(--text)}
   .modal .msub{font-size:12px;color:var(--muted);margin-bottom:8px}
   .store-opts{display:flex;flex-direction:column;gap:6px;margin-top:4px}
@@ -937,6 +946,8 @@
   <div class="mention-pop" id="mention-pop" hidden></div>
   <div class="scrim" id="scrim"></div>
   <div class="toast" id="toast"></div>
+
+  <div id="upd-bar" hidden><span id="upd-txt"></span><div class="upd-track"><div id="upd-fill"></div></div></div>
 
   <div class="modal" id="add-modal">
     <h2 data-i18n="Dodaj peera">Dodaj peera</h2>

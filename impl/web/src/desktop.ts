@@ -229,5 +229,14 @@ export interface UpdateInfo { version: string; notes?: string | null }
  *  must then say nothing rather than invent news. */
 export const updateCheck = () => invoke<UpdateInfo | null>('desk_update_check')
 
-/** Fetch, install, relaunch. Only ever after `updateKind()` said `self`. */
-export const updateInstall = () => invoke<void>('desk_update_install')
+/**
+ * The download and the restart are SEPARATE calls, because they deserve
+ * separate consents: the download is the slow part (a person watches a bar,
+ * fed by polling `updateProgress`), the restart is the disruptive one (a
+ * person picks the moment). 0.5.16 did both behind one click, and the first
+ * live test named the cost precisely: nothing visibly happened, then a sudden
+ * restart. Only ever after `updateKind()` said `self`.
+ */
+export const updateDownload = () => invoke<void>('desk_update_download')
+export const updateProgress = () => invoke<{ got: number; total: number | null }>('desk_update_progress')
+export const updateApply = () => invoke<void>('desk_update_apply')

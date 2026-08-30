@@ -55,6 +55,15 @@ mod desk {
         /// language. English until the webview reports in.
         show_item: Mutex<Option<MenuItem<Wry>>>,
         quit_item: Mutex<Option<MenuItem<Wry>>>,
+        /// Update download progress, read by the webview on a short poll while
+        /// the bar is up. Atomics because the download's chunk callback writes
+        /// from the updater's task; `upd_total` 0 = length unknown.
+        upd_got: std::sync::atomic::AtomicU64,
+        upd_total: std::sync::atomic::AtomicU64,
+        /// The downloaded-but-not-installed bundle. Held so the person gets to
+        /// say WHEN the restart happens — the download is the slow part, the
+        /// install is the disruptive one, and they deserve different consents.
+        pending_update: Mutex<Option<Vec<u8>>>,
         hidden_title: Mutex<String>,
         hidden_body: Mutex<String>,
         /// The session bus, held open for the life of the process. See
@@ -78,6 +87,9 @@ mod desk {
                 quitting: Mutex::new(false),
                 show_item: Mutex::new(None),
                 quit_item: Mutex::new(None),
+                upd_got: std::sync::atomic::AtomicU64::new(0),
+                upd_total: std::sync::atomic::AtomicU64::new(0),
+                pending_update: Mutex::new(None),
                 hidden_title: Mutex::new("onchato".into()),
                 hidden_body: Mutex::new("Still running in the tray.".into()),
                 #[cfg(target_os = "linux")]
@@ -459,23 +471,76 @@ mod desk {
         }))
     }
 
-    /// Fetch it, put it in place, and come back up on the new version.
+    /// Fetch the update — and ONLY fetch it. Install-and-restart is a separate
+    /// command, because the two deserve different consents: the download is the
+    /// slow part (a person watches a bar), the restart is the disruptive part
+    /// (a person picks the moment). 0.5.16's single command did both, and the
+    /// report from the first live test was exact: "od kliknięcia nic się nie
+    /// działo i nagle restart".
     ///
     /// ⚠️ Only ever called after `desk_update_kind` answered `self`. On a distro
-    /// package this downloads a bundle it cannot install and fails at the very
-    /// end, having asked somebody to wait — which is worse than saying plainly
-    /// that the update has to come from the package.
+    /// package this downloads a bundle it cannot install (§ the kind command).
     ///
     /// It checks again rather than holding the update from the call before it:
     /// the handle is not ours to keep across an IPC boundary, and asking twice
-    /// costs one request against a release that has not moved.
+    /// costs one request against a release that has not moved. Progress goes
+    /// into two atomics the webview POLLS (`desk_update_progress`) — no event
+    /// plugin, no npm package, the same two-sided ask the rest of this file is.
     #[tauri::command]
-    async fn desk_update_install(app: AppHandle) -> Result<(), String> {
+    async fn desk_update_download(app: AppHandle) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
         use tauri_plugin_updater::UpdaterExt;
         let update = app.updater().map_err(|e| e.to_string())?
             .check().await.map_err(|e| e.to_string())?
-            .ok_or_else(|| "nothing to install".to_string())?;
-        update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+            .ok_or_else(|| "nothing to download".to_string())?;
+        {
+            let shell = app.state::<Shell>();
+            shell.upd_got.store(0, Ordering::Relaxed);
+            shell.upd_total.store(0, Ordering::Relaxed);
+        }
+        let progress_app = app.clone();
+        let bytes = update.download(
+            move |chunk, total| {
+                let shell = progress_app.state::<Shell>();
+                shell.upd_got.fetch_add(chunk as u64, Ordering::Relaxed);
+                if let Some(t) = total { shell.upd_total.store(t, Ordering::Relaxed); }
+            },
+            || {},
+        ).await.map_err(|e| e.to_string())?;
+        *app.state::<Shell>().pending_update.lock().unwrap() = Some(bytes);
+        Ok(())
+    }
+
+    #[derive(serde::Serialize)]
+    struct UpdateProgress { got: u64, total: Option<u64> }
+
+    /// Where the download stands. Polled by the webview while its bar is up;
+    /// `total: None` means the server did not say (the bar shows bytes then).
+    #[tauri::command]
+    fn desk_update_progress(app: AppHandle) -> UpdateProgress {
+        use std::sync::atomic::Ordering;
+        let shell = app.state::<Shell>();
+        let total = shell.upd_total.load(Ordering::Relaxed);
+        UpdateProgress {
+            got: shell.upd_got.load(Ordering::Relaxed),
+            total: if total == 0 { None } else { Some(total) },
+        }
+    }
+
+    /// Put the downloaded bundle in place and come back up on the new version.
+    /// The person said "now" — this is the restart they agreed to. The bytes
+    /// were signature-checked against the release's minisign signature by the
+    /// plugin during install; a release that MOVED between download and this
+    /// call fails that check and the app stays on the old version, working.
+    #[tauri::command]
+    async fn desk_update_apply(app: AppHandle) -> Result<(), String> {
+        use tauri_plugin_updater::UpdaterExt;
+        let bytes = app.state::<Shell>().pending_update.lock().unwrap().take()
+            .ok_or_else(|| "nothing downloaded".to_string())?;
+        let update = app.updater().map_err(|e| e.to_string())?
+            .check().await.map_err(|e| e.to_string())?
+            .ok_or_else(|| "release moved since the download".to_string())?;
+        update.install(bytes).map_err(|e| e.to_string())?;
         app.restart()
     }
 
@@ -484,6 +549,20 @@ mod desk {
     #[tauri::command]
     fn desk_show(app: AppHandle) {
         reveal(&app);
+    }
+
+    /// macOS sends `Reopen` when the Dock icon of an app with no visible
+    /// windows is clicked — and bringing the window back is what a Mac user
+    /// means by that click. Without this, close-to-tray left the Dock icon
+    /// dead: the window hid, the Dock click did nothing, and the only ways
+    /// back were the menu bar icon or a terminal. The macOS twin of the GNOME
+    /// no-watcher trap, and handled the same way: reveal, don't guess.
+    pub fn on_run_event(app: &AppHandle, event: &tauri::RunEvent) {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = event {
+            reveal(app);
+        }
+        let _ = (app, event);
     }
 
     /**
@@ -583,17 +662,26 @@ mod desk {
                 desk_show,
                 desk_update_kind,
                 desk_update_check,
-                desk_update_install,
+                desk_update_download,
+                desk_update_progress,
+                desk_update_apply,
             ])
             .setup(|app| {
                 let show = MenuItem::with_id(app, "show", "Show onchato", true, None::<&str>)?;
                 let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
                 let menu = Menu::with_items(app, &[&show, &quit])?;
 
-                TrayIconBuilder::new()
+                let tray = TrayIconBuilder::new()
                     .icon(app.default_window_icon().unwrap().clone())
                     .tooltip("onchato")
-                    .menu(&menu)
+                    .menu(&menu);
+                // The macOS menu bar tints template icons itself for the light
+                // and dark bar; a colour icon is passed through as-is and can
+                // sink into some bar tints. Template uses the alpha channel as
+                // the silhouette — which our dot has.
+                #[cfg(target_os = "macos")]
+                let tray = tray.icon_as_template(true);
+                tray
                     // The left click belongs to "show me the app", which is what
                     // people expect of it; the menu is the right click.
                     .show_menu_on_left_click(false)
@@ -764,6 +852,10 @@ pub fn run() {
     #[cfg(mobile)]
     let builder = mobile::wire(builder);
     builder
-        .run(tauri::generate_context!())
-        .expect("error while running onchato");
+        .build(tauri::generate_context!())
+        .expect("error while building onchato")
+        .run(|_app, _event| {
+            #[cfg(desktop)]
+            desk::on_run_event(_app, &_event);
+        });
 }
