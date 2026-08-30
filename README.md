@@ -7,48 +7,62 @@ long-term keys held in an Encedo HEM (hardware security module).
 - **Instant-only** — both parties online during a conversation; no offline
   messages, no server-side history, no mailbox. Rooms are deterministic and
   crypto-derived ("meet in the park"). The transcript lives in RAM: a reload
-  takes it, and the device remembers nothing — **except what you pin**. A
-  pinned message is sealed into that one browser under your own identity key,
-  never leaves it, and is never announced to the other side; the app says so
-  before it keeps the first one. That is the whole of what persists, chosen by
-  hand, one message at a time.
-- **Minimal infra** — a small set of operator-run libp2p discovery nodes;
-  anyone can run their own network. Messages travel WebRTC-direct, or through a
-  blind relay when direct is impossible.
+  takes it — **except what you pin**. A pinned message is sealed into that one
+  browser under your own identity key, never leaves it, and is never announced
+  to the other side; the app says so before it keeps the first one. Contacts,
+  groups and settings do persist (the contact book MAC'd against key swaps, the
+  group state encrypted) — what never persists unasked is a message.
+- **Minimal infra** — operator-run libp2p discovery nodes (two today: bs1 and
+  bs2; the list ships compiled in and can be refreshed by IPFS CID); anyone can
+  run their own network. Content travels WebRTC-direct where the platform can,
+  and through the relay as ciphertext where it cannot.
 - **PQ-hybrid confidentiality from day one** — X25519 + ML-KEM-768.
 - **Dual-use** — one core, two channels: enterprise (Encedo) and the open
   network (onchato).
 
-> **Status: design phase.** The protocol and architecture are complete and
-> under external cryptographic audit (see `docs/`). Implementation is just
-> beginning — `impl/` is a spike, not yet a runnable app.
+> **Status: shipping 0.5.x** — web ([onchato.com](https://onchato.com)),
+> desktop (Linux/Windows/macOS, Tauri 2) and Android (signed APK from Actions)
+> from one engine. `docs/` is the protocol of record, kept 1:1 with the code;
+> `CLAUDE.md` records the implementation notes and the operational lessons.
+
+## What it does today
+
+1:1 conversations (EH-2 handshake + Double Ratchet, PQ-hybrid), groups (Sender
+Keys, deniable ECDH-HMAC auth), encrypted file sharing over a TTL'd IPFS store,
+voice notes, replies / edits / reactions / mentions, per-pair daily topic
+rotation, presence without a handshake, pinned messages, profile
+export/import, QR invites, a Polish/English UI, desktop tray + updater, an
+Android foreground service so a phone in a pocket stays reachable.
 
 ## Documentation
 
-The design is the source of truth and lives in [`docs/`](docs/):
-
 - [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — protocol & cryptography (identity,
   rendezvous, EH-2 handshake, ratchet, groups, session management, PQ roadmap,
-  implementation guide, flow diagrams).
+  implementation guide, flow diagrams). **Describes what ships.**
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — product & infrastructure.
 - [`docs/THREAT-MODELS.md`](docs/THREAT-MODELS.md) — deployment profiles P1–P3.
 
-`CLAUDE.md` holds implementation notes (HEM/SDK reality, spike plan) for agents
-and developers. UI mockups (replaceable skins) are in [`skin/`](skin/).
+`CLAUDE.md` holds the implementation notes (HEM/SDK reality, engine internals,
+deploy lessons) for agents and developers.
 
 ## Layout
 
 ```
-docs/         design specs (audit target)
-skin/         UI mockups — open ui-mockup.html in a browser
-impl/         TS spike (rendezvous spine first; crypto held pending audit)
+docs/         the specs (protocol of record)
+impl/         the app: engine (lib/, eh2/, net/), web UI (web/), CLI (cli/),
+              Tauri desktop + Android shell (src-tauri/), tests (test/)
+relay/        the rendezvous/transport node (bs1/bs2 run this)
+infra/        node list, tag-driven deploy units, nginx config, IPFS TTL sweeper
+skin/         the original UI mockups (the shipped UI is impl/web/, long diverged)
 hem-sdk-js/   Encedo HEM SDK (git submodule)
+.github/      CI + release workflows (desktop, Android, tests)
 ```
 
 ## Local development
 
-Requires **Node.js ≥ 22** (Node 24 runs the TypeScript spike directly via
-native type-stripping — no build step for the current slice).
+Requires **Node.js ≥ 22** (developed on 24; tests and CLI run the TypeScript
+directly via native type-stripping). The web bundle and both Tauri shells are
+built with webpack (`npm run web:build`).
 
 ```bash
 # clone with the HEM SDK submodule
@@ -57,11 +71,10 @@ git clone --recurse-submodules git@github.com:encedo/encedo-chat.git
 git submodule update --init --recursive
 
 cd encedo-chat/impl
-npm test            # once the HEM slice lands
+npm test                 # ~380 unit + offline integration tests, ~30 s
+npm run web:dev          # the app on a local dev server
+npm run browser-test     # two headless browsers, the real bundle, the real relay
 ```
-
-The UI mockups are static — open `skin/ui-mockup.html` (or the terminal-styled
-`skin/ui-mockup-hacker.html`) directly in a browser to preview the interface.
 
 ## Transports: libp2p (default) and MQTT (fall-back)
 
@@ -224,11 +237,12 @@ journalctl -u mosquitto -n 20             # no 'persistence' warnings, no per-cl
 cd impl && npm run mqtt-meet ws://127.0.0.1:9101  # the WebSocket path, end to end
 ```
 
-The state of this on the dev machine: the **TCP path is verified**
-(`npm run mqtt-meet` against the packaged broker — discovery 127 ms, EH-2 202 ms,
-messages both ways). The **WebSocket listener and the ACL are not** — AppArmor
-confines mosquitto to `/etc/mosquitto`, so they need the install above and a root
-shell. Run the block, and the last line proves the browser's transport path.
+The state of this on the dev machine (2026-07-31, unchanged since): the **TCP
+path is verified** (`npm run mqtt-meet` against the packaged broker — discovery
+127 ms, EH-2 202 ms, messages both ways). The **WebSocket listener and the ACL
+are not** — AppArmor confines mosquitto to `/etc/mosquitto`, so they need the
+install above and a root shell. Run the block, and the last line proves the
+browser's transport path.
 
 ## Checking the file encryption yourself
 
@@ -257,6 +271,9 @@ node net/file-decrypt.ts '{"cid":"Qm…","size":…,"chunk":…,"chunks":…,"al
 
 # through a public gateway instead of the app's proxy — same CID, same bytes
 node net/file-decrypt.ts '{…}' --gateway https://ipfs.encedo.com
+
+# against a different deployment's proxy (default: https://onchato.com)
+node net/file-decrypt.ts '{…}' --origin https://chat.example.com
 ```
 
 The run prints the ciphertext length and its first bytes, then either recovers
@@ -265,9 +282,12 @@ given a wrong key — refuses. A wrong key, a tampered blob, a reordered chunk a
 a truncated file all land in that same refusal, by design: none of them may
 yield partial plaintext.
 
-`--out <path>` chooses where the plaintext goes; without it the name from the
-manifest is used. **A 404 means the file expired** — uploads live minutes, and
-nothing here can bring one back, which is the other half of the claim.
+`--out <path>` chooses where the plaintext goes; without it the file lands in a
+**fresh temporary directory** under the manifest's name — deliberately never the
+working directory, where a decrypted private file would sit one `git add -A`
+away from being published. **A 404 means the file expired** — uploads live
+minutes, and nothing here can bring one back, which is the other half of the
+claim.
 
 The evidence line is a complete capability to that one file. It is behind
 `?debug=1` for that reason, and bounded anyway by the same expiry.

@@ -23,10 +23,11 @@ one of them is a straight conflict with what this chat is.
   and no `window.` (the single grep hit in `room.ts` is the word "window" in a
   comment). The two exceptions are `net/browser-test.ts` and
   `net/phone-shot.ts`, which are harnesses, not shipped code.
-- **Storage is injected, not reached for.** The only `localStorage` in the core
-  is the capability probe in `lib/capabilities.ts`, which is feature detection
-  and correct. Everything else takes storage as a parameter —
-  `localContactBook(load, save)`, the group cache, the sealed profile.
+- **Storage is injected, not reached for.** Two direct `localStorage` uses in
+  the core: the capability probe in `lib/capabilities.ts` (feature detection,
+  correct) and `lib/migrate.ts`'s `localKV` (the profile-export path). Everything
+  else takes storage as a parameter — `localContactBook(load, save)`, the group
+  cache, the sealed profile.
 - **There is one named facade already**: `startSession`, `session.open`,
   `openConversation`, `Identity`, `ContactManager` (`lib/core.ts`). The CLI, the
   web GUI and the test harnesses are three consumers of it today, which is the
@@ -38,14 +39,16 @@ architectural work at all.**
 
 ## What is not a component yet
 
-The UI. `web/src/app.ts` is 2748 lines that assume they *are* the page:
+The UI. `web/src/app.ts` is ~5800 lines (re-measured 2026-08-30; it was 2748
+when this plan was priced — **the file doubled**, so every estimate keyed to it
+is a lower bound now) that assume they *are* the page:
 
-| what | count | why it blocks embedding |
+| what | count (2026-08-30) | why it blocks embedding |
 |---|---:|---|
-| `document.*` | 69 | queries the whole document, not a subtree it owns |
-| listeners bound at module scope | 37 | **importing the module runs the app**, and requires the ids to already exist |
-| direct `localStorage` | 33 | `ec-*` keys are global to the origin: no namespace, collides with a second instance |
-| module-level singletons | ~10 (`session`, `rooms`, `activePub`, …) | one instance per page, by construction |
+| `document.*` | ~129 | queries the whole document, not a subtree it owns |
+| listeners bound at module scope | ~80 | **importing the module runs the app**, and requires the ids to already exist |
+| direct `localStorage` | ~57 | `ec-*` keys are global to the origin: no namespace, collides with a second instance |
+| module-level singletons | well past 10 (`session`, `rooms`, `activePub`, …) | one instance per page, by construction |
 | CSS | in `index.html` `<style>` | would leak both ways between us and the host page |
 
 There is also no teardown: nothing closes the libp2p node when the surrounding
@@ -99,8 +102,8 @@ cannot accept the host reading the keys.
    so two instances and the host cannot tread on each other's keys.
 4. **Locale from the host.** `i18n.ts` already supports the switch; what is
    missing is the entry point.
-5. **Lazy loading.** The bundle is 1.22 MiB minified. In someone else's
-   application it must load when the chat is opened, not when the page is.
+5. **Lazy loading.** The bundle is ~1.32 MiB minified (2026-08-30). In someone
+   else's application it must load when the chat is opened, not when the page is.
 6. **Teardown on unmount**, including the libp2p node and every open room.
 
 A sketch of the surface, to be argued with rather than accepted:
@@ -207,7 +210,7 @@ it.
 | 0 | **Decision gate**: does instant-only fit their users? | — | 0 | Not our work. Blocks 3 onward. |
 | 1 | **`@encedo/chat-core`** — publish `lib/` + `net/` as a package: manifest, entry points, types, README. No code changes; the core is already DOM-free. | Low | 2–3 | The `hem-sdk-js` submodule becoming a real dependency, and whatever the first external consumer finds |
 | 2 | **`mount()` spike** on one screen — prove the untangling on the login card alone | Medium | 2–3 | Nothing much. This is the cheap measurement. |
-| 3 | **Componentise `app.ts`** — instance state, Shadow DOM, injected storage, teardown, locale in | **High** | 8–15 | 2748 lines, 37 module-scope listeners, 69 `document.*`, ~10 singletons. **The widest range here, deliberately** — stage 2 narrows it |
+| 3 | **Componentise `app.ts`** — instance state, Shadow DOM, injected storage, teardown, locale in | **High** | 8–15 | ~5800 lines, ~80 module-scope listeners, ~129 `document.*` (2026-08-30 — double the file this was priced against, so treat 8–15 as a floor). **The widest range here, deliberately** — stage 2 narrows it |
 | 4 | **Packaging** — `<encedo-chat>` element, iframe mode from the same package, a demo host page | Medium | 3–4 | Bundle splitting and lazy loading |
 | 5 | **Open Mercato module** — widget injection, key-directory contract, CSP/CORS on their side | Medium | 3–5 | Their framework, and how much of it lands on us |
 | 6 | **Hardening + docs** — host-readable-identity threat statement, integration guide, harness scenarios for mount/unmount and two instances on one page | Medium | 3–4 | How much of (b) we decide to enforce rather than document |

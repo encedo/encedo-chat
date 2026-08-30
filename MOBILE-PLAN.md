@@ -1,9 +1,13 @@
 # Mobile — plan (Android + iOS)
 
-Working notes, not a spec. `docs/` stays the audit target; this file is
-implementation reality, like `CLAUDE.md` and `GROUPS-DESIGN.md`.
+Working notes, not a spec. This file is implementation reality, like `CLAUDE.md`
+and `GROUPS-DESIGN.md`.
 
-Written 2026-08-04, after establishing what is already proven and what is not.
+Written 2026-08-04; brought up to reality 2026-08-30. **Android is no longer a
+plan** — a signed APK ships from CI on every tag, the foreground service keeps
+it reachable in a pocket (confirmed on a device), and the decisions the 2026-08
+draft framed as open are recorded below as decisions. iOS remains the plan it
+was.
 
 ---
 
@@ -61,48 +65,66 @@ it means `cargo tauri ios init` is worth the Mac's time.
 
 ---
 
-## Android
+## Android — built. This section records what shipped and why.
 
-### Cheap part — a day, mostly downloading
+### Toolchain — the known-good set (what CI installs, `.github/workflows/android.yml`)
 
-Prerequisites (~6–8 GB): Android SDK command-line tools, platform **34**
-(Android 14) and 35, build-tools, **NDK** (~2.5 GB), Rust targets
-(`aarch64-linux-android` first; `armv7`, `x86_64` for emulators), JDK 17+.
+`platforms;android-34`, `build-tools;34.0.0`, `ndk;27.1.12297006`, JDK
+**temurin 21**, and **only** the `aarch64-linux-android` Rust target — minSdk 34
+means every supported phone is 64-bit ARM, and without `--target` the build
+compiles four architectures (487 MB of artifacts against 7.9 MB).
 
 ```bash
-cargo tauri android init          # writes src-tauri/gen/android
-cargo tauri android dev           # device or emulator, hot frontend
-cargo tauri android build --apk   # debug APK to sideload
+npm run tauri -- android init
+node src-tauri/android/patch.mjs src-tauri/gen/android   # see below — REQUIRED
+npm run tauri -- android build --aab --apk --target aarch64
 ```
 
-Sideload the debug APK; a release AAB needs a keystore, which is only worth
-creating when there is somewhere to publish.
+Always through `npm run`, never `npx`: the generated Gradle project calls
+`npm run tauri` from its own task, and under npx that dies on
+`Missing script: "tauri"` buried inside an `Io(Env(…))` error.
 
-**Target API 34 (Android 14) as the floor**, per the product decision. Nothing
-in the engine needs anything newer.
+**The APK is signed in CI** — zipalign + apksigner (v2/v3; jarsigner is v1-only
+and was rejected) + `apksigner verify`, keystore exclusively from repository
+secrets (`ANDROID_KEYSTORE_B64` + passwords/alias); missing secrets fail the job
+immediately, by name. The `.aab` is deliberately unsigned — Play App Signing
+takes it as-is. Two separate artifacts so nobody sideloads the uninstallable one.
 
-### The real work, in order of risk
+**`minSdk = 34`** (not "target API" — targetSdk stays the template's), patched
+after `android init` and verified with two `grep`s, because a `sed` that misses
+would silently leave the template's value. The typed `startForeground` call in
+the service *requires* 34+.
 
-1. **Confirm the probe on the packaged app, not the browser.** The browser test
-   is done and positive; the packaged one exercises the different origin. Read
-   the "Platforma" row, expect WebRTC to be present (Chromium) unlike desktop.
-2. **Background lifecycle — a PRODUCT decision, not an engineering one.**
-   Android dozes and kills background apps, and the product is instant-only: no
-   store-and-forward, no offline messages, by design. A messenger that only
-   receives while foregrounded is a poor phone messenger. The two honest
-   options are a **foreground service** (a permanent visible notification, real
-   battery cost) or **accepting "receives while open"** and saying so in the UI.
-   Everything else on this list is downstream of that choice.
-3. **Notifications.** Real push means FCM, which means Google infrastructure and
-   metadata about who is messaged and when — directly against the minimal-infra
-   stance and the §12 metadata goals. The alternative that keeps the design
-   honest is a foreground service plus local notifications, which only works if
-   (2) went that way.
-4. **Identity.** No HEM on the phone: either the software identity (already
-   built, `browserSoftwareIdentity`) or the HEM over the network — the SDK is
-   plain HTTP, so a remote HEM works unchanged.
-5. **Battery and mesh.** GossipSub keepalives plus one presence watch per
-   contact on a radio that wants to sleep is untested. Measure before tuning.
+### `patch.mjs` — the mechanism everything Android rides on
+
+`src-tauri/gen/android` is generated and gitignored on every build, so nothing
+can be edited there by hand. `src-tauri/android/patch.mjs` runs after
+`android init` and injects everything ours: the manifest permissions and service
+declaration, `MainActivity` hooks (permission request + service start/stop),
+`OnchatoService.kt`, the launcher + status-bar icons (`android init` does NOT
+take `icons/android` — the template's Tauri logo shipped once, at 0.4.5), the
+launcher background colour, and the localized service string (`values/` +
+`values-pl/`). Every transform **asserts its anchor and fails the build** when
+the Tauri template changes; the transforms are unit-tested against real
+template text in `test/android-patch.test.ts`.
+
+### The decisions the 2026-08-04 draft left open — all taken
+
+1. **Background lifecycle → foreground service**, `OnchatoService.kt`. Type
+   `specialUse`, NOT `dataSync` — dataSync is capped at ~6 h/day on Android 15
+   and would end a conversation silently in the evening. The notification is the
+   honest price and says why the app runs, in the phone's language. `START_STICKY`.
+   Confirmed on a device: a message arrives with the screen off.
+2. **Notifications → foreground service + local notifications** (`lib/notify.ts`;
+   no message text in any mode). FCM rejected as designed — no Google server
+   between two people. `POST_NOTIFICATIONS` is requested in `onCreate`, before
+   the app can be backgrounded.
+3. **Identity → the software profile ships** (password-sealed, `lib/profile.ts`);
+   a HEM is reachable over the network unchanged. The sign-in card deliberately
+   lists nothing about HEM identities (the handle+address row was cut as a leak).
+4. **Battery and mesh — still unmeasured.** GossipSub keepalives plus one
+   presence watch per contact on a radio that wants to sleep: measure before
+   tuning. The only item of the original list that is still open.
 
 ---
 
@@ -121,9 +143,9 @@ assumed earlier.
 | Export compliance | E2E encryption requires the declaration at publication. |
 
 ```bash
-cargo tauri ios init
-cargo tauri ios dev                # device or simulator
-cargo tauri ios build
+npm run tauri -- ios init          # npm run, not npx — the Android trap applies
+npm run tauri -- ios dev           # device or simulator
+npm run tauri -- ios build
 ```
 
 **Sequencing:** open onchato.com in mobile Safari first. It is the same WebKit
@@ -134,13 +156,12 @@ red one saves the whole exercise.
 
 ## Sequence
 
-1. Deploy the web build with the probe. *(prerequisite for 2 and 3)*
+1. ~~Deploy the web build with the probe~~ — **done.**
 2. ~~**iPhone, mobile Safari**~~ — **done 2026-08-04, green.**
-3. **Android toolchain** → debug APK → probe on the packaged app.
-4. **Decide the background model** (foreground service vs. foreground-only).
-   Nothing beyond a demo APK is worth building before this.
-5. iOS packaging on the Mac, if step 2 was green.
-6. macOS bundle — free side effect of having the Mac, and arm64 natively.
+3. ~~**Android toolchain** → APK~~ — **done: signed APK from CI on every tag.**
+4. ~~**Decide the background model**~~ — **decided and built: foreground service.**
+5. **iOS packaging on the Mac** — the one remaining step; step 2 was green.
+6. ~~macOS bundle~~ — **done: `desktop.yml` builds macOS alongside Linux/Windows.**
 
 ## What is NOT in scope here
 

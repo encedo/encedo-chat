@@ -6,8 +6,11 @@ what the user is doing** (signing in, adding a contact, sending a message).
 
 Numbers are measured, from `?debug=1` traces of a real device over the local
 network, 2026-08-10 (Firefox, `my.ence.do` at 192.168.7.1, HTTPS with connection
-reuse), with `keymgmt:get` accepted by the firmware. Reproduce by signing in with
-`?debug=1` and filtering:
+reuse), with `keymgmt:get` accepted by the firmware. Steps added since that
+measurement — group recovery from HEM markers (delayed 20 s after sign-in), the
+contact-book MAC check, member `GK_pub` markers — cost no extra device calls on
+the message path, but the sign-in formula further down predates them. Reproduce
+by signing in with `?debug=1` and filtering:
 
 ```bash
 grep -E '^\[(HEM|§|ec )' log.txt
@@ -121,6 +124,16 @@ k_gid = HKDF(base, "encedo-chat-group-cache-v1", gid)  ← client-side, per grou
 blob  = iv ‖ AES-256-GCM(k_gid, iv, group state)
 ```
 
+That one `base` now feeds **three** independent client-side derivations, each
+with its own salt — the point being that the NEXT consumer reuses it too,
+instead of adding a fourth device call:
+
+| salt | module | protects |
+|---|---|---|
+| `encedo-chat-group-cache-v1` | `lib/gcache.ts` | group state (AES-GCM) |
+| `encedo-chat-pin-cache-v1` | `lib/pincache.ts` | pinned messages (AES-GCM, `info = roomId`) |
+| `encedo-chat-contact-book-v1` | `lib/bookmac.ts` | the contact book (HMAC over the stored text, `info = idKey`) |
+
 `emp_pub` is a random X25519 public key sitting in plain sight in
 `localStorage`. The private half of IK never leaves the device, so **only the IK
 holder can derive `base`** — a stolen laptop yields ciphertext and a public key.
@@ -192,6 +205,8 @@ competing with the room the user is waiting for.
 | reacts, types, goes away, comes back | **none** |
 | sends a file | **none** — the content key is random and the bytes are encrypted locally |
 | crosses the daily topic rotation | **none** |
+| pins or unpins a message | **none** — the pin key comes off the memoised `base` |
+| has the contact book MAC-verified at sign-in | **none** — same `base` |
 | opens a conversation with a contact | one `ecdh` for the EH-2 handshake |
 | is re-handshaked by §7.3 (every 4–8 h) | one `ecdh`, plus a token if the last one expired |
 | adds a contact | broad `key_search` (the collision precheck) + `imp` token + `importPublicKey`, then the book reloads |

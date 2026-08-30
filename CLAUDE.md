@@ -1,23 +1,27 @@
 # CLAUDE.md — v6 implementation notes
 
-Working notes for building v6. **The design docs are authoritative for the
-protocol; this file is authoritative for implementation reality.** When they
-disagree, it means the current hardware/SDK does not yet match the target
-design — record the gap here, do **not** edit the specs to match today's
-firmware.
+Working notes for building v6. **Since 2026-08-30 (the user's decision) the
+docs describe the SHIPPED implementation — `docs/PROTOCOL.md` is kept 1:1 with
+the code.** A wire behaviour the client has and the spec omits, or the reverse,
+is a defect in one of them: fix the spec in the same change, or flag it to the
+user if the divergence is a decision. This file remains authoritative for
+operational reality — lessons, deploy rituals, platform traps.
 
-- `docs/PROTOCOL.md` — protocol & crypto (audit target). Describes the **intended**
-  design, including in-HSM HKDF.
-- `docs/ARCHITECTURE.md` — product & infrastructure.
-- `docs/THREAT-MODELS.md` — deployment profiles P1–P3.
-- These three go to an external cryptographer for audit — **do not modify
-  without explicit instruction.**
+- `docs/PROTOCOL.md` — protocol & crypto, **normative for what is on the wire**.
+  (Known intended-future items are marked in place: in-HSM HKDF §4.3/S13, the
+  hardened Rust-core tier §3.2, the relay-blind plane §13.)
+- `docs/ARCHITECTURE.md` — product & infrastructure, shipped state + roadmap rows.
+- `docs/THREAT-MODELS.md` — deployment profiles P1–P3, controls vs intentions marked.
+- These three go to the external cryptographer — protocol-meaningful changes
+  still need the user's explicit GO; editorial truth-keeping does not.
 
 ## Repo layout (this repo — `encedo/encedo-chat`)
 
-- `docs/` — the three audit specs (PROTOCOL, ARCHITECTURE, THREAT-MODELS).
-- `skin/` — UI mockups (replaceable skins; `ui-mockup.html`, `ui-mockup-hacker.html`).
-- `impl/` — the TS spike (grows toward the §17 monorepo).
+- `docs/` — the three specs (PROTOCOL, ARCHITECTURE, THREAT-MODELS), kept 1:1 with the code.
+- `skin/` — UI mockups (`ui-mockup.html`, `ui-mockup-hacker.html`); the shipped UI is `impl/web/` and has long diverged.
+- `impl/` — the app: engine (`lib/`, `eh2/`, `net/`), web UI (`web/`), CLI (`cli/`), Tauri desktop + Android shell (`src-tauri/`), tests (`test/`).
+- `infra/` — `nodes.json` (the compiled-in node list), `deploy-on-tag.sh` + systemd units (tag-driven web deploy), `nginx/onchato.com` (the versioned nginx config — scp to sites-enabled), IPFS TTL sweeper.
+- `MVP.md`, `MOBILE-PLAN.md`, `EMBED-PLAN.md`, `GROUPS-DESIGN.md`, `performance.md`, `hem_usage.md` — plans and measured records at root.
 - `relay/` — the onchato **bs1 relay** (libp2p GossipSub + circuit-relay-v2),
   self-contained + deployable (pull → `npm ci` → systemd `onchato-relay`).
   Transport-only; v5 + v6 share it. `--pass bs1.onchato.com` seeds the fixed
@@ -144,7 +148,7 @@ Working end-to-end, verified live:
 - **Interactive CLI chat** — `lib/room.ts` (joinChat), `cli/repl.ts` +
   `cli/chat-session.ts` (IRC-style, /who /me /react /quit). `bob join` /
   `alice join` open a live encrypted chat with typing / away / graceful-leave
-  presence. `net/chat-test.ts` PASS.
+  presence. Live proof: `npm run eh2-test` (`net/eh2-chat-test.ts`).
 
 ### Message envelope (codec layer) — `lib/envelope.ts`
 
@@ -152,10 +156,12 @@ The plaintext inside the interim seal is a **versioned JSON envelope**, not a
 raw string. One shape: `{ v, t, id, ts, seq, …payload }` — `t` is the type
 discriminator, `id` a short per-message id (reactions/replies), `ts` Unix epoch
 **ms (UTC)**, `seq` per-sender monotonic (dedup/order, **UX only, not
-security**). Types: `msg` (text, `format:'plain'` — **never raw HTML**; `md`
-safe-subset reserved), `typing`, `presence` (`active|away|leave`), `reaction`
-(live), `file` (**reserved** — content encrypted BEFORE IPFS upload, envelope
-carries CID + content key; own mini-design, TBD, cryptographer-relevant).
+security**). Types — exactly the eleven of `PROTOCOL.md` §7.4: `msg` (text,
+`format:'plain'` — **never raw HTML**; `md` safe-subset reserved), `typing`,
+`presence` (`active|away|leave`), `reaction`, `edit`, `knock`, `file`
+(**shipped end-to-end**: chunked AES-GCM before IPFS upload, CID + content key
+in the envelope — §7.5; voice notes are `file` with an audio MIME), `ack`
+(delivery contract), `rtc` (WebRTC signalling), `group-skd`, `group-skd-req`.
 Unknown `t` decodes to `UnknownEnv` and is ignored → **forward-compat**.
 
 Strict layering: `msgcrypto` seals/opens **opaque bytes** (type-agnostic),
@@ -259,9 +265,9 @@ once the user decided it should (2026-08-27). The rule that put it there stands:
 a wire field the client sends and the spec omits means the audit is of a
 different program, so the decision is the user's and the default is to ask.
 Covered by `test/quote.test.ts` (snippet bounds, hint, refusals, and that a
-broken quote never drops its message) and a `grouproom` scenario where the quote
-reaches a third member who is party to neither side of it. **Not** covered by
-`browser-test` — no scenario clicks ↩ yet.
+broken quote never drops its message), a `grouproom` scenario where the quote
+reaches a third member who is party to neither side of it, and the
+`browser-test` scenario "a reply carries the message it answers".
 
 ### Correcting a message — `lib/edits.ts` + the `edit` envelope
 
@@ -419,10 +425,18 @@ session (`startSession({transport:'mqtt', broker})`, web `?mqtt=1`, CLI
 | `npm test` | unit + offline integration over a mock pubsub (`test/*.test.ts`) |
 | `npm run room-sim` | seeded synthetic network: loss, duplication, reorder, staggered joins, a throttled tab |
 | `npm run gui-sim` | the `core.ts` facade the GUI buttons drive, printing a timeline |
-| `npm run eh2-test` / `chat-test` / `meet` | live against the **real onchato relay** |
-| `npm run browser-test` | two headless **Chromium**, the real bundle, the real relay, driven through the DOM |
+| `npm run eh2-test` / `meet` / `presence-test` / `group-test` / `hem-gk-test` / `ipfs-test` | live against the **real onchato relay** (and, for the last two, a real HEM / the IPFS store) |
+| `npm run browser-test` | two headless **Chromium**, the real bundle, the real relay, driven through the DOM — 35 scenarios |
 | `npm run browser-test:ff` | the same scenarios with **Chromium + Firefox** |
 | `npm run mqtt-meet` | the whole engine over an MQTT broker instead of libp2p |
+| `npm run phone-shot` | screenshots at real device metrics (layout truth — computed-style asserts miss clipping) |
+| `npm run relay-load` / `-saturate` / `-flood` / `-hsrate` / `-chatload` | the load/DoS toolkit (`performance.md`, `relay/README.md`) |
+
+`browser-test` env switches worth knowing: `GROUP_ONLY=1` (just the group
+scenarios), `FAILOVER=1`, `RELAY_NODE=<full multiaddr>` (⚠️ a bare hostname
+lands in the node list as an invalid address and looks like a dead relay),
+`RELAY_A`/`RELAY_B` (split the two browsers across nodes), `IPFS_RPC`,
+`APP_URL`, `HEADFUL`, `SHOT`/`SHOT_DIR`.
 
 The browser harness is the only thing that covers the **WebRTC data plane** —
 Node has no `RTCPeerConnection`. It speaks two protocols because the browsers do
@@ -537,7 +551,9 @@ How it holds together:
   unread pill on `sim-b`, the view does **not** move and the message is **not** in
   the foreground transcript; opening `sim-b` replays the buffered message and
   clears the pill. **Deferred:** typing/presence for background rooms (transient,
-  ignored), a WebRTC-for-foreground-only optimisation, desktop notifications.
+  ignored), a WebRTC-for-foreground-only optimisation. (Notifications are built —
+  `lib/notify.ts`, three modes, no message body in any of them; the harness
+  scenario is "a hidden window is told that something arrived, and not what".)
 
 ### Compact layout (phones, and phones on their side)
 
@@ -705,10 +721,11 @@ gives each peer its own handshake + ratchet when `keys.eh2` is set; handshake
 frames ride the control plane unsealed (told apart by their type byte), the lower
 peer id initiates, and content typed before the handshake completes is queued.
 `openConversation({eh2, onSecurity})` is the switch and **`core.ts` stays a
-mechanism — it does not default it**; the front-ends set the policy: web is EH-2
-unless `?eh2=0` (the E2E badge goes 🤝 → 🔐), CLI unless `ec chat <name>
---no-eh2`. Two peers on different settings cannot read each other, so the escape
-hatch is a decision for both ends. **Verified live** on the onchato relay:
+mechanism — it does not default it**; both front-ends set it unconditionally:
+**EH-2 is the only content scheme, no opt-out on either side** (the `?eh2=0` /
+`--no-eh2` escape hatches died with the interim box — see "Content crypto"
+below; the badge goes 🤝 → 🔐 as the handshake completes). **Verified live** on
+the onchato relay:
 `npm run eh2-test` (`net/eh2-chat-test.ts`), and `npm run gui-sim` drives the
 same facade the GUI buttons use, printing a timeline.
 
@@ -748,7 +765,7 @@ What settles it:
 - **The retry escalation slows down, it never stops.** A link losing a third of
   its frames needs many attempts before the first handshake lands (`room-sim`'s
   35%-loss profile fails outright if this ever gives up), so all the backoff buys
-  is quiet: one attempt per 15 s instead of one per second.
+  is quiet: eventually one attempt per ~10 s instead of one per second.
 - **Two live windows both keep their sessions.** `retireOtherPeers` only retires
   a PeerId that has stopped announcing (a reload goes silent instantly; a second
   tab does not). Retiring on every new establishment handed the whole
@@ -786,11 +803,11 @@ Details that are load-bearing:
   `since` field would fix it — §5.5 is frozen for the audit, so the decision is
   made from local knowledge instead. **If the spec is ever reopened, adding
   `since` to the Announce is the change to make.**
-- Wired in `openConversation` (it owns the libp2p node) and **best effort**: if
-  the self-topic cannot be derived — a HEM that refuses an ECDH against its own
-  public key, say — the conversation runs on without the rule rather than
-  failing. When the app grows to several conversations at once this belongs in an
-  app-level session manager, one watch per identity rather than per room.
+- Wired in `startSession` (the session owns the libp2p node; `deriveSelfRoom`
+  lives in `lib/core.ts`, the watch itself in `lib/selfsession.ts`) and **best
+  effort**: if the self-topic cannot be derived — a HEM that refuses an ECDH
+  against its own public key, say — the session runs on without the rule rather
+  than failing.
 - Both front-ends honour it: the web clears the transcript and says what to do,
   the CLI prints and exits.
 - **Capacity note:** every client now holds **two** relay topics (pair + self).
@@ -876,12 +893,12 @@ on the one transport, **not** twenty handshakes.
     (the default). Behaviour is identical either way — only *when* the hop happens
     changes.
 
-  `test/presence-rotation.test.ts` (9) pins the shifted-clock schedule, `rendezvousDay`,
+  `test/presence-rotation.test.ts` pins the shifted-clock schedule, `rendezvousDay`,
   the offset derivation (range/determinism/date-independence/network scope), the
-  two-day online aggregation and the handshake-day surfacing. **Note:** the per-pair
-  offset is written into `docs/PROTOCOL.md` §5.4 as a Proposal (non-normative until the
-  spec is amended); both ends must run the same scheme, so a mixed old/new deployment
-  would mismatch — the whole build cuts over together.
+  two-day online aggregation and the handshake-day surfacing. The per-pair
+  offset is **normative** in `docs/PROTOCOL.md` §5.4 (promoted 2026-08-30); both
+  ends must run the same scheme, so a mixed old/new deployment would mismatch —
+  the whole build cut over together.
 - **Duplicate-tab caveat, documented:** a second tab of our OWN identity derives
   the same pair topic and its Announce verifies (same pair secret), so it could
   briefly light the dot until §9.1 resolves the duplicate. The clean fix is an
@@ -994,26 +1011,27 @@ normative there).
 ### The HEM marker DESCR — `lib/gmarker.ts`
 
 One DESCR field per group, written on the `GK_pub` key, found by
-`key_search`. **This must stay 1:1 with the implementation note at the end of
-`docs/PROTOCOL.md` §8** — the spec describes the design, this describes the code,
-and a reader comparing them should find no difference.
+`key_search`. **This must stay 1:1 with `docs/PROTOCOL.md` §8.6** — the spec is
+normative for the format, this describes the code, and a reader comparing them
+should find no difference.
 
 ```
-ETSEIC:chan1:<admin_KID[0:4] base64url>:<name>:<compact roster base64url>
+ETSEIC:chan1:<ownerHint>:<adminHint>:<name>:<compact roster base64url>   ← admin
+ETSEIC:chan1:<ownerHint>:<adminHint>:<name>:                             ← member (no roster)
 ```
 
 - **Version in the prefix.** `MARKER_SEARCH = 'ETSEIC:chan'` finds every
-  generation; `MARKER_PREFIX = 'ETSEIC:chan1:'` is what this build writes. The
-  unversioned `ETSEIC:chan,` (full hex admin KID, comma-separated) is still
-  **read** and never written — a marker is already sitting in somebody's HEM the
-  moment a format changes, and a device that cannot read its own past presents
-  as a device with no groups.
+  generation; `MARKER_PREFIX = 'ETSEIC:chan1:'` is the only form this build
+  writes **or reads** — `parseMarker` returns `null` for anything else, and
+  `test/gmarker.test.ts` pins that the unversioned comma form is gone. The
+  generation digit is kept unspent so the NEXT change can leave old records
+  inert rather than misread.
 - **`ETSEIC:` not `CHAT:`** as the spec's own text has it: the HEM matches
   `allow_keysearch` on the **first six bytes**, and `CHAT` is four.
 - **No `group_id`.** The marker is the DESCR *of* the `GK_pub` entry and
   `group_id = SHA-256(GK_pub)[0:16]`, so it is derivable from the record
   carrying it. Costs one `getPubKey` per group until firmware returns public
-  keys from `key_search` (expected 2026-08-10); nothing after that.
+  keys from `key_search`; nothing after that.
 - **The admin is a 4-byte hint**, like every roster member, in the same
   base64url. `MarkerFields.adminKid` is therefore 8 hex characters in this
   format and the full KID in a legacy one. It **selects a candidate** among keys
@@ -1032,36 +1050,60 @@ members the roster allows. Firmware before 2026-08-10 accepted only 63; the
 format was designed against that number and still carries a name plus three
 members there, which is why the version prefix exists at all.
 
-## Deploy (onchato.com) — two parts, one host
+## Deploy (onchato.com)
 
-The host builds; nothing is uploaded. Clone lives at **`/opt/github/encedo-chat`**.
-The two halves are independent — deploy either alone.
+Pieces: the **relay** (bs1 on the main host, **bs2** on its own VM — the list
+clients compile in is `infra/nodes.json`, refreshable by CID; bs3's PeerId is
+precomputed in `relay/README.md`), the **web app**, the **IPFS file store**
+(separate hosts — `infra/README.md`), and the **tag-driven auto-deploy**. The
+model is PULL: the host builds, nothing is uploaded, no production credential
+sits in any CI runner. Clone lives at **`/opt/github/encedo-chat`**.
 
-**Relay (`bs1.onchato.com`) — a service, so it MUST be restarted:**
+**The normal release ritual** (this replaced the by-hand web deploy):
 
 ```bash
-cd /opt/github/encedo-chat && git pull
-cd relay && npm ci
+# locally: bump the version (package.json, package-lock.json, tauri.conf.json,
+# Cargo.toml, Cargo.lock — one commit per change carries it), then
+git push && git tag v0.X.Y && git push --tags
+```
+
+The tag triggers `desktop.yml` (five desktop targets → **draft** release — the
+draft is the updater's publish gate) and `android.yml` (signed APK), and the
+host's systemd timer (`infra/onchato-deploy.timer` → `deploy-on-tag.sh`) pulls,
+sees the new `v*` tag on the tip and rebuilds the web by itself — ⚠️ a tag left
+BEHIND the tip is never seen; tag the commit you want live. Logs:
+`journalctl -t onchato-deploy`. **The relay is deliberately NOT restarted by
+the timer** — restart it by hand when relay code actually changed:
+
+```bash
+cd /opt/github/encedo-chat && git pull && cd relay && npm ci
 sudo systemctl restart onchato-relay
 journalctl -u onchato-relay -n 12 --no-pager
 ```
 
-Three startup lines say it worked: the PeerId (**must** stay
-`12D3KooWP6Sp…cDmp` — clients have it hardcoded), the port, and the topic
-budget (`📦 Tematy: limit … eviction …`). If the log looks like the previous
-build, check in this order: `git log --oneline -1` (did the pull land, and in
-*this* clone?), `grep -c "max-topics" relay/relay.mjs` (is the code on disk?),
+Four startup lines say it worked: the PeerId (**must** stay
+`12D3KooWP6Sp…cDmp` — it is compiled into every shipped node list; changing it
+invalidates every build), the port, the connection limit (`🔌 Połączenia:` —
+proves `--max-connections` took), and the topic budget (`📦 Tematy: limit …
+eviction …`). If the log looks like the previous build, check in this order:
+`git log --oneline -1` (did the pull land, and in *this* clone?),
+`grep -c "max-topics" relay/relay.mjs` (is the code on disk?),
 `systemctl show onchato-relay -p ExecMainStartTimestamp` (did it actually
 restart?), `systemctl cat onchato-relay | grep -E 'WorkingDirectory|ExecStart'`
 (is systemd running this directory at all?).
 
-**Web — static files, so there is NO service to restart:**
+**Web by hand** (the override when you cannot wait for the timer):
 
 ```bash
 cd /opt/github/encedo-chat && git pull
 git submodule update --init --recursive     # hem-sdk-js: the build imports it directly
 cd impl && npm run web:deploy               # → impl/web/dist (what nginx serves)
 ```
+
+nginx config is versioned at `infra/nginx/onchato.com` — edit locally, `scp` to
+`sites-enabled`, `nginx -t`, reload. It carries the `/relay` and `/mqtt` per-IP
+limits (the DDoS protection — libp2p's own is off) and the CORS on both `/f`
+blocks that the packaged apps need.
 
 **Key material in the console is a BUILD decision, not a URL one.** `?debug=1`
 narrates the protocol with values elided; `?keys=1` prints the secret bytes
@@ -1079,7 +1121,7 @@ unaffected — it prints no secrets and stays useful for support.
 
 `web:deploy` is `npm ci` **only when `package-lock.json` actually changed**
 (compared against a stamp inside `node_modules`), then the build. Reinstalling
-598 packages to deploy a one-line UI change cost ~31 s of every deploy, and
+~300 packages to deploy a one-line UI change cost ~31 s of every deploy, and
 `npm ci` wipes `node_modules` to do it. Run `npm ci && npm run web:build` by
 hand if you ever need to force the install.
 
@@ -1093,7 +1135,8 @@ automatically (`buildDependencies`).
 `curl -s https://onchato.com/ | grep -o 'app\.[a-z0-9]*\.bundle\.js'` — the
 content hash must change; if it did not, the build did not land where nginx
 serves from. Bundle names are hashed but `index.html` is not, so keep its
-cache short (users otherwise keep requesting the previous hash).
+cache short (users otherwise keep requesting the previous hash). The build now
+emits two entries plus `landing.html` (`app` and `webrtc-test`).
 
 **Deploy lessons paid for once (2026-07-29):** a stale relay silently refused
 every new topic and looked exactly like a broken client — always check the
@@ -1117,12 +1160,13 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
 
 - **CLI as a full-product client** (a terminal alternative to the web GUI over
   the same protocol) — noted, **parallel, last step**; do not focus here now.
-- **Web GUI (mockup skin)** — `web/index.html` is the dashboard skin from
-  `skin/ui-mockup.html` (sidebar + chat panel + settings drawer, light/dark),
-  wired to the engine: HEM login, contacts (localStorage) + **peer import**
-  (add-peer modal: name + pubkey), envelope chat (typing/away/leave/reactions),
-  UTC times, live room-rotation countdown. Unbacked mockup bits (Groups/Network
-  tabs, P1–P3 profiles, direct/relay modes) are visual placeholders.
+- **Web GUI** — `web/index.html` began as the dashboard skin from
+  `skin/ui-mockup.html` and is now the full product: sign-in card (software
+  profiles + HEM), contacts with presence + QR/invite import, 1:1 and **groups
+  (fully wired)**, files/images/voice notes, pins, migration, i18n pl/en,
+  settings, and a **Network tab that drives the real node list**. The remaining
+  placeholders are the P1–P3 profile presets and a direct/relay mode switch
+  (`web/src/app.ts` header note) — those wait on the relay-blind plane.
 - **Data plane §13 — parked, blocked on the libp2p ecosystem.** Investigation
   (`net/circuit-probe.ts`, `net/circuit-two.ts`): the onchato relay **does**
   support circuit-relay-v2 (reservations + HOP CONNECT verified live). But on the
@@ -1138,9 +1182,10 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
   DataChannel, GossipSub is the fallback — that covers the direct profile (peers
   see IPs). What stays parked is specifically the **relay-blind / anonymous**
   plane (no IP exposure).
-- **Several identities in one HEM — designed, NOT built** (2026-08-09). Written up as
-  a Proposal at the end of `docs/PROTOCOL.md` §4; this note is the implementation
-  side of it and the two must not drift.
+- **Several identities in one HEM — BUILT** (Track A: identity records, scoped
+  contacts, KID-keyed local state, sign-in picker; normative in
+  `docs/PROTOCOL.md` §4.2). This note is the implementation side and the two
+  must not drift.
 
   Today a HEM holds one chat identity by construction: sign-in does
   `searchKeys('ETSEIC:self,')` and takes **`keys[0]`**, and contacts are a flat
@@ -1193,8 +1238,8 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
     are being erased. The field goes in BEFORE `adminHint`, so a surviving old marker would
     not fail to parse, it would parse as a different group under the wrong identity with the
     wrong admin. The digit stays in the format, unspent, for the first change after MVP.
-  - Header grows 20 → 27 bytes: an admin marker with 10 members and a 16-char name is
-    119 of 128; a member's is ~60.
+  - Header grows 20 → 27 bytes: measured, an admin marker with 10 members and a
+    16-char ASCII name is ~103 of 128; a member's is ~44.
   - **`GK` survives a rekey** (epoch/secret/topic change, `GK` does not), so a member's
     entry is written once at join, rewritten only on rename, deleted on leave.
   - **Recovery reuses `group-skd-req`** — the entry yields `GK_pub` → `gid`, but never
@@ -1220,14 +1265,23 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
 
 ## Status
 
-- Specs (`docs/`) still the audit target — **do not edit them here**. The
-  cryptographer cleared implementation of §6–7 as written; if the review lands
-  changes, they go into `docs/` by the user and into `impl/eh2/` as fixes.
-- **EH-2 + Double Ratchet is the default content crypto** since the two-browser
-  validation passed (Chromium + Firefox, handshake in ~2 s), and the interim
-  box has since been removed — EH-2 is the only content scheme.
-- **WebRTC direct data plane (P1) done + verified live** (two browsers,
-  DataChannel both ways, badge ⚪ Relay → 🟢 WebRTC Direct). Ready to deploy.
-- Known follow-ups in the EH-2 area: bounded session lifetime / re-handshake
-  (§7.3, "stage 7"), skipped-key persistence across restarts, and §9 takeover.
-- Commits ahead of origin; the user pushes (SSH passphrase).
+- Specs (`docs/`) describe the shipped implementation (aligned 2026-08-30) and
+  go to the external cryptographer. Protocol-meaningful changes need the user's
+  GO; if the review lands changes, they go into `docs/` and `impl/` together.
+- **EH-2 + Double Ratchet is the only content crypto** (the interim box is
+  removed, no opt-out); session lifetime / forced re-handshake is built (§7.3).
+- **WebRTC direct data plane (P1) works in browsers**; ⚠️ the packaged Linux
+  desktop (WebKitGTK) has **no `RTCPeerConnection`** — measured, `enable-webrtc`
+  changed nothing — so **desktop = relay-only** until a newer WebKitGTK.
+  `lib/webrtc-probe.ts` (six stages, `loopback` decides) is the user-facing
+  diagnosis separating a dead webview from a blocked network.
+- Shipped since these notes' earlier eras, with their stories in `git log` and
+  the protocol truth in `docs/PROTOCOL.md`: files over IPFS + voice notes
+  (§7.5), notifications (`lib/notify.ts`), contact-book MAC (`lib/bookmac.ts`,
+  §4.4), profile export/import (`lib/migrate.ts`, §10), software profiles
+  (`lib/profile.ts`, §4.5), group keepalive + repair (§8), the Tauri desktop +
+  Android shell with updater and foreground service (`src-tauri/`,
+  `MOBILE-PLAN.md`).
+- Known follow-ups: skipped-key persistence across restarts; the live 4–5-user
+  group test; Windows/macOS first runs (`MVP.md`).
+- The tree is normally clean at a tag; the release ritual is in Deploy above.

@@ -27,7 +27,10 @@ relay-load / relay-saturate / relay-flood / relay-hsrate / relay-chatload`).
 
 ## Crypto (engine cost, no network)
 
-Dev box (aarch64), `impl/net/` bench, EH-2 = X25519 triad + ML-KEM-768 + transcript:
+Dev box (aarch64), EH-2 = X25519 triad + ML-KEM-768 + transcript. ⚠️ Measured
+with an ad-hoc script that was not checked in — the numbers are not reproducible
+from the repo; re-measuring means writing a small bench over
+`eh2/establish.ts` + `eh2/ratchet.ts` first:
 
 | operation | cost |
 |---|---|
@@ -142,8 +145,8 @@ rate but not held count). Two config walls found and removed:
 
 | stage | result | wall |
 |---|---|---|
-| pre-fix | capped at **517**, none dropped | relay `maxConnections: 520` |
-| raised `maxConnections` → 50000 | sailed past 517, **hard cap ~1010** | nginx `worker_connections` default (~1024) — sharp plateau, refusals climb steeply |
+| pre-fix | capped at **517**, none dropped | relay connection cap 520 (today the `--max-connections` flag) |
+| raised the cap → 50000 | sailed past 517, **hard cap ~1010** | nginx `worker_connections` default (~1024) — sharp plateau, refusals climb steeply |
 | raised nginx `worker_connections` | passed 1010, reached **1658 held**, **none dropped** | none hit on onchato — refusals crept in **gradually** (1.7 %, from ~1100) = the **home path** saturating, not the server |
 
 Client at 1658 had huge headroom (1032 fd of 1 048 576, conntrack 1103/262144,
@@ -186,6 +189,14 @@ Derived from the laws above (⚠ estimates past 1658 — the measured point):
 - The **relay-vCPU law's absolute per-core rate** on a production-class core.
 
 Plan: Hetzner VM (datacenter path, no home router) → `relay-flood` / `relay-saturate`
-against onchato with the DDoS-protection limits temporarily raised (`--max-topics`,
-`maxConnections`, nginx `worker_connections` + relaxed per-IP `limit_conn`/`limit_req`).
-**Revert those after — they are the DDoS protection.**
+against onchato with the DDoS-protection limits temporarily raised
+(`--max-topics`, `--max-connections` on the relay; nginx `worker_connections`
+plus the per-IP `limit_conn relay_conn` / `limit_req relay_req` pair on
+`/relay`). **Revert to the versioned `infra/nginx/onchato.com` after — those
+limits are the DDoS protection** (libp2p's own is deliberately off, see
+`relay/README.md`).
+
+⚠️ All numbers here predate the group keepalive (`lib/grouproom.ts`: a 1-byte
+frame per member per ~20 s ± 8 s on every group topic). Variant B gains a
+constant term proportional to open groups that the `U × R × (1−w) × ~3 KB`
+formula does not carry.

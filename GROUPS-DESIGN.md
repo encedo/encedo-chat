@@ -1,8 +1,10 @@
-# Groups v1 — working design (draft for the §8/§5.3 Proposal)
+# Groups v1 — design record
 
-**Status:** working draft, not the audited spec. Feeds a `docs/PROTOCOL.md`
-§8/§5.3 **Proposal** (append-only, for the cryptographer). Decisions reached in
-design discussion 2026-08-01. See memory `group-design-decisions`.
+**Status:** the design record behind `docs/PROTOCOL.md` §8/§5.3 — decisions
+reached 2026-08-01, built through 2026-08, brought up to the shipped state
+2026-08-30. **`docs/PROTOCOL.md` is normative for what is on the wire**; this
+file keeps the reasoning, the rejected alternatives, and the marker layout
+detail. Where the two disagree, PROTOCOL.md wins.
 
 **One line:** Sender Keys (messages, like Signal/WhatsApp) + decentralized
 membership (like Threema, no group server) + identity in HEM. Groups are a
@@ -27,7 +29,7 @@ is the UX compromise, never security.
 | **sender chain_key** | symmetric 32B | **client** (encrypted cache) | per member; hash-ratchets forward per message (FS); fresh per epoch |
 | **MK** | AES-256-GCM | client RAM | per message, from chain_key; discarded (FS) |
 | `rk_i`, `mk_ij` | derived HMAC keys | **not stored** | roster + message auth (below); derived from ECDH on use |
-| cache key | AES-GCM | via HEM (§10) | protects the local cache (`ECDH(IK, device_salt)`) |
+| cache key | AES-GCM | via HEM (§10) | protects the local cache (from `base = ECDH(IK, emp_pub)`, salt `encedo-chat-group-cache-v1`) |
 
 ### Topic
 
@@ -38,7 +40,10 @@ topic = base32(HKDF-SHA256(
           info = network_id ‖ 0x00 ‖ date_UTC,
           L    = 32))[0:52]
 ```
-Rotates per-epoch (group_secret changes on membership change) + daily (date_UTC).
+Rotates per-epoch (group_secret changes on membership change). ⚠️ The daily
+component is **not live**: `date_UTC` is frozen at session start, with no
+overlap window — recorded as a known defect in `PROTOCOL.md` §5.3 (two members
+whose sessions started on different UTC days sit on different topics).
 A removed member has the old group_secret only → cannot derive the new topic.
 
 ### Message (send)
@@ -68,10 +73,36 @@ with `ECDH(IK_i, GK_pub)`). Deniable (i could have made the MAC).
 
 ### Distribution
 
-`SenderKeyDistribution { gid, GK_pub, epoch, group_secret, chain_key_sender, roster, MAC_i }`
-sent **pairwise over the existing 1:1 EH-2/ratchet**. To be in a group you must
-have a 1:1 channel with every member ⇒ **v1: all members are mutual contacts**
-(introduction/TOFU deferred).
+`SenderKeyDistribution { gid, GK_pub, epoch, group_secret, chain_key_sender,
+ctr, roster, MAC_i }` sent **pairwise over the existing 1:1 EH-2/ratchet**. To
+be in a group you must have a 1:1 channel with every member ⇒ **v1: all members
+are mutual contacts** (introduction/TOFU deferred). What the code actually
+enforces is one-sided: the creation modal offers only entries from the contact
+book, and mutuality follows from the fact that the SKD cannot arrive until the
+1:1 opens — there is no explicit mutuality check.
+
+Two parts of distribution exist because "sent once" fails in practice:
+
+- **`ctr` — the counter the chain key is at.** A sending chain ratchets per
+  message, so a key handed over mid-conversation is `chain@k`; a receiver seeded
+  at 0 can never open anything. Absent ⇒ 0, so old SKDs stay valid.
+- **The repair path (§8 in PROTOCOL.md).** A lost SKD makes one member deaf to
+  exactly one sender with no error anywhere. The receiver notices at the one
+  safe point — MAC verified, no chain — and asks over the 1:1 (`group-skd-req`,
+  rate-limited to one ask per member per 30 s); the responder re-checks the
+  roster before answering, because a removed member still holds the contact and
+  the old gid.
+
+### Topic liveness — the keepalive (a wire behaviour, not an implementation detail)
+
+A group is passive for hours and GossipSub prunes idle mesh links; after relay
+churn a silent topic quietly stops delivering. So every member publishes a
+**1-byte keepalive frame** (`0x21`, distinct from the `0x20` message frame) on
+the group topic every 20–28 s (20 s + 0–8 s of jitter), with early beacons at [1 s, 3 s,
+7 s] after join and a burst at [0, 800 ms, 2 s] after a reconnect. Receivers
+ignore the byte; the point is that the mesh sees traffic. The frame is plain
+and unauthenticated — it carries nothing and authenticates nothing. Announces
+are **not** sent on group topics at all.
 
 ### Group marker (the HEM object that says "you belong to G")
 
@@ -89,46 +120,56 @@ additionally holds `GK_priv`. Small, portable, non-secret.
 The line above is the design; this is what the code writes, and it diverges in
 two places on purpose.
 
-**Layout** — positional comma format, matching the rest of the impl's DESCRs
-(`ETSEIC:self,…` / `ETSEIC:peer,…`) rather than the spec's `CHAT:channel:` colon
-form. Reason on record: the HEM's `allow_keysearch` matches the **first 6 bytes**,
-so `CHAT` (4) cannot be a search prefix while `ETSEIC` (6) can — the same
-correction already applied to every other DESCR. `gid` is **not** stored: it is
-`SHA-256(GK_pub)[0:16]`, and `GK_pub` comes back with the key.
+**Layout — generation 1, colon-separated after a versioned prefix.**
+`MARKER_SEARCH = 'ETSEIC:chan'` finds every generation (the HEM's
+`allow_keysearch` matches the **first 6 bytes**, so `CHAT` (4) cannot be a
+search prefix while `ETSEIC` (6) can — the same correction applied to every
+other DESCR); `MARKER_PREFIX = 'ETSEIC:chan1:'` is the only form this build
+writes **or reads** — the earlier comma-separated form is not parsed (pinned by
+test); the generation digit exists so the NEXT change can leave old records
+inert rather than misread. `gid` is **not** stored: it is `SHA-256(GK_pub)[0:16]`, and `GK_pub`
+comes back with the key.
 
 ```
-ETSEIC:chan,<admin_KID>,<name ≤16 chars>,<roster blob base64url>
+ETSEIC:chan1:<owner hint>:<admin hint>:<name ≤16 chars>:<roster blob base64url>
 ```
 
-Four shape decisions (user review, 2026-08-04), each of which bought room:
+Shape decisions, each of which bought room or scope:
 
 - **No `iat`.** The HSM already timestamps its own key records; spending ten of
   128 bytes to repeat what the key entry answers is not a trade worth making.
-- **`admin_KID` is taken from the HEM**, and derived as `SHA1(pub)[0:16]` only
-  when we hold a public key but no imported entry — the two agree by
-  construction, which is exactly what makes a hint written by the admin resolve
-  on someone else's device. It is SHA-**1**; `SHA-256(pub)` is the app
-  fingerprint (§4.4), a different identifier for a different job.
+- **`ownerHint` (4 bytes of the owning identity's KID)** exists only because
+  **members** write markers too: on an admin's marker the admin IS the owner,
+  but a multi-identity device needs to know which of its identities a member
+  marker belongs to. It went in BEFORE `adminHint`, redefining generation 1 in
+  place (sound only because the test HEMs were being erased; the digit stays
+  in the format, unspent, for the first change after MVP).
+- **The admin is a 4-byte hint** (8 hex chars), like every roster member —
+  the full KID appears only in the legacy format. Four bytes are grindable
+  (~2^32), so a hint only **selects a candidate** among keys the device already
+  holds; the admin's `rk_i` MAC is what decides, never this field. KIDs are
+  `SHA1(pub)[0:16]` per the HEM (verified on a real device 2026-08-07);
+  `SHA-256(pub)` is the app fingerprint (§4.4), a different identifier for a
+  different job.
 - **Name capped at 16 characters.** It is a label, held client-side anyway.
 - **Roster blob LAST**, so the one optional, variable-length, occasionally
   absent field disturbs nothing before it.
 
-Measured with a 16-char name: 2 members 80 B, 5 → 96 B, 8 → 112 B, **10 → 123 B**.
-The roster now always fits at the maximum; before these four changes it hit the
-ceiling and the name was being eaten.
-
 **Budget — 128 BYTES, not characters.** The DESCR is a fixed 128-byte record, so
 an over-long marker does not error: it **truncates**, and a truncated roster blob
 decodes to a *different* roster. Names are user text, so the check must be in
-UTF-8 bytes — "Zespół" is 6 characters and 8 bytes, and measuring in
-`String.length` overran the field by exactly the count of non-ASCII characters.
-Measured: 2 members ≈ 95 B, 5 ≈ 111 B, 10 = the ceiling.
+UTF-8 bytes — "Zespół" is 6 characters and 8 bytes. With the owner hint the
+header is 27 bytes: measured with the real builder, an **admin marker with 10
+members and a 16-char ASCII name is ~103 of 128**; a member's is ~44.
+`test/gmarker.test.ts` pins `byteLen ≤ 128`
+at the maxima rather than a per-size table, because the table is what rotted
+twice.
 
 **Fields yield in priority order**, so nothing load-bearing disappears silently:
 
 | field | when the field is tight |
 |---|---|
-| `iat`, `admin_KID` | always present — identity and whom to re-sync from |
+| `owner hint`, `admin hint` | always present — whose group, and whom to re-sync from |
 | roster blob | dropped **whole**, never partial (a partial roster is worse than none); omitted above 10 members |
 | `name` | truncated first, on a character boundary; cosmetic, and held client-side anyway |
 
@@ -142,13 +183,19 @@ Measured: 2 members ≈ 95 B, 5 ≈ 111 B, 10 = the ceiling.
    constantly and none of them appear here.
 
 A **member's** copy is an `importPublicKey(GK_pub)` entry carrying the same
-marker, so `key_search` yields the group on their devices too.
+header and **no roster blob** (`writeMemberMarker`), so `key_search` yields the
+group on their devices too. It returns `false` rather than throwing when the
+import is refused — a second identity on the same device that is in the same
+group cannot hold `GK_pub` twice, and the group then runs from the local cache
+with no portable record. `GK` survives a rekey, so the entry is written once at
+join, rewritten on rename, deleted on leave. Recovery (`deviceGroups(ownerKid)`
+→ ask over the 1:1) yields `GK_pub` and the gid, never the topic or keys.
 
 **What the CRC is not.** It catches a 4-byte hint that resolved to the wrong key
 and refuses (returns nothing rather than guessing). It does **not** make a roster
 trustworthy: anyone who can write this DESCR can write a matching CRC.
 Authenticity is the admin's `rk_i` MAC, always.
-- **Enables:** `key_search("CHAT:channel:")` → portable group list; `GK_pub` → stable id + roster-MAC verify; `admin_KID` → whom to re-sync from; roster → local offline reconstruction of the member set.
+- **Enables:** `key_search("ETSEIC:chan")` → portable group list; `GK_pub` → stable id + roster-MAC verify; `admin hint` → whom to re-sync from; roster → local offline reconstruction of the member set.
 - **Does NOT hold:** `group_secret` (topic), sender keys (content). **Leak profile:** `GK_pub` leak is harmless (group existence only); **with the roster blob, one HEM dump reveals the whole membership graph** (KID hints + your contacts, both in HEM) — the trade-off for a portable roster.
 - **All-wipe with roster-in-marker:** the full roster is known to everyone from their own marker → the admin can rebuild the **same** group with the complete set (no zombie), instead of founding a new one.
 
@@ -156,13 +203,21 @@ Two identifiers, different jobs: **HEM KID = `SHA1(pub)[0:16]`** (key index, ros
 
 ### Lifecycle scenarios (summary)
 
-- **1:1 → group:** promote — new gid, new epoch, fresh keys over the ratchets;
-  old 1:1 messages stay in the 1:1 transcript, group starts fresh.
+- **1:1 → group: NOT built.** The only creation path is the new-group modal over
+  the contact list; there is no entry point from an open 1:1 conversation. The
+  design (new gid, new epoch, fresh keys, 1:1 transcript stays behind) remains
+  valid if it is ever wanted.
+- **Dissolving a group** (built, not in the original draft): a rekey to a
+  one-member roster — new `group_secret`, new topic, distributed to nobody —
+  then `GK` is destroyed. It is not a delete-for-others: their clients notice
+  only the silence.
 - **New member:** no history by default (FS) + optional explicit 1:1 backfill (a
   member re-encrypts chosen plaintext to the newcomer — a re-share, not key-sharing).
 - **Add/remove:** epoch++, everyone regenerates chain_key + new group_secret,
   redistribute (add: incl. newcomer; remove: excl. removed → removed loses topic + keys).
-- **Reload (same device):** nothing — state from the encrypted cache.
+- **Reload (same device):** nothing — state from the encrypted cache
+  (`lib/gcache.ts`, §10 schedule with salt `encedo-chat-group-cache-v1`;
+  `test/group-persist.test.ts`).
 - **Single device change:** re-sync group_secret + chain_keys + roster from a
   member over re-established 1:1. History gone (FS).
 - **All-wipe:** see §4.
@@ -203,9 +258,9 @@ catch up POSITION, never recover CONTENT.
 
 ---
 
-## 2. Diff vs current spec
+## 2. Diff vs the pre-2026-08 spec (historical — every change below is now IN `docs/PROTOCOL.md`)
 
-| Spec | Now | Change | Why |
+| Spec (then) | Now | Change | Why |
 |---|---|---|---|
 | §8 Sender Keys | mechanism | **kept** | Signal/WhatsApp-standard, right at this scale |
 | §8 **Ed25519 per-epoch signatures** | sign each msg; verify with pubkey | **REPLACED by ECDH-HMAC** (`mk_ij`) | restores deniability → **removes the S3 exception**; all-ECDH (no `exdsa_sign`) |
@@ -279,29 +334,29 @@ change (the common case) re-syncs the roster from members who still have it.
 
 ---
 
-## 5. Open items for the cryptographer
+## 5. Items put to the cryptographer — all four RESOLVED
 
-1. Bless §8 with **ECDH-HMAC** instead of Ed25519 (deniability restored; is the
-   per-recipient MAC set — O(N-1) — acceptable at N≤10?).
-2. Bless §5.3 topic = `HKDF(group_secret)` client-side, admin-random, per-epoch
-   rotation; confirm the domain-separation salt.
-3. `mk_ij` derived from the **long-term** `ECDH(IK_i, IK_j)` + epoch — auth key, not
-   confidentiality; content FS is via chain_key. Confirm the FS reasoning (compromise
-   → forge, not decrypt) is acceptable, or require an ephemeral auth key.
-4. All-wipe = new group; is dropping old-roster recovery acceptable (it is, given FS)?
+Approved and now normative in `docs/PROTOCOL.md` §8/§5.3:
+
+1. §8 with **ECDH-HMAC** instead of Ed25519 — approved; the per-recipient MAC
+   set (O(N−1)) stands at N≤10.
+2. §5.3 topic = `HKDF(group_secret)` client-side, admin-random, per-epoch
+   rotation, salt `encedo-chat-group-rendezvous-v1` — approved.
+3. `mk_ij` from the long-term `ECDH(IK_i, IK_j)` + epoch (compromise → forge,
+   not decrypt) — accepted.
+4. All-wipe = new group, no old-roster recovery — accepted.
 
 ---
 
-## 6. Implementation plan (mirrors EH-2 staging)
+## 6. Implementation plan — done through stage 6
 
-1. `lib/senderkey.ts` — chain_key hash-ratchet, MK, per-recipient ECDH-HMAC. KATs.
-2. `lib/group.ts` — state (members, epoch, per-sender chains), `GK`, group_secret,
-   topic derivation, roster + `rk_i`.
-3. Distribution — `group-skd` envelope over the 1:1 ratchet; receive/store.
-4. Send/receive group-msg on the group topic; MAC verify (negative-forge test).
-5. Epoch rotation on add/remove (removed loses topic + keys — test).
-6. Web GUI — groups in the contact/room list (fits the multi-room model).
-7. **Live 4–5 user test** (equal configs); scale test at 8.
-
-Stages 1–5 autonomous (module + test + commit), stop before 6/7 for live validation
-— the EH-2 pattern.
+1. ✅ `lib/senderkey.ts` — chain_key hash-ratchet, MK, per-recipient ECDH-HMAC. KATs.
+2. ✅ `lib/group.ts` — state, `GK`, group_secret, topic derivation, roster + `rk_i`.
+3. ✅ Distribution — `group-skd` over the 1:1 ratchet, plus the repair path
+   (`ctr`, `group-skd-req`) that live use on 2026-08-09 proved necessary.
+4. ✅ Send/receive on the group topic; MAC verify (negative-forge test).
+5. ✅ Epoch rotation on add/remove (removed loses topic + keys — tested).
+6. ✅ Web GUI — groups in the contact/room list, covered by `browser-test`
+   scenarios (create, invite, broadcast, mentions, reload persistence).
+7. **Live 4–5 user test — still owed** (equal configs; scale test at 8 exists
+   only as a unit scenario in `grouproom`).

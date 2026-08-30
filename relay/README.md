@@ -1,9 +1,11 @@
 # onchato relay
 
-The single rendezvous/transport node behind **bs1.onchato.com** — libp2p GossipSub
-(message fan-out) + circuit-relay-v2 (reservations). **Transport-only:** it forwards
-encrypted frames and grants reservations; it never sees plaintext or keys. Both v5
-and v6 clients use it unchanged.
+The rendezvous/transport node — libp2p GossipSub (message fan-out) +
+circuit-relay-v2 (reservations). **Transport-only:** it forwards encrypted
+frames and grants reservations; it never sees plaintext or keys. The production
+network is **bs1 + bs2**; the list clients compile in is `infra/nodes.json`,
+and the client fails over down that list (`impl/lib/nodelist.ts`,
+`test/failover.test.ts`).
 
 Lives in `encedo-chat/relay/` so the whole system is one repo (web client + relay).
 
@@ -19,6 +21,14 @@ Flags:
 - `--port` — WS listen port (nginx proxies WSS → this).
 - `--host` — prints the production WSS multiaddr for clients.
 - `--peers <ma>…` — other relays to dial on startup (mesh).
+- `--max-topics` (default **250**) / `--idle-ttl` (default **120** s) — the topic
+  budget; see Tunables.
+- `--max-connections` (default **520**) — the connection ceiling. A flag so load
+  tests raise it from `ExecStart` instead of editing the file (a local edit
+  conflicts on every `git pull`).
+- `--v6-port` / `--v6-host` — a second, direct IPv6 WS listener for the
+  inter-relay mesh (public IPv4 between the nodes is blocked; peers dial the raw
+  port, nginx is not on that path).
 
 ## ⚠️ The pass IS the identity
 
@@ -61,11 +71,12 @@ by it (`sudo chgrp -R www-data /opt/github/encedo-chat && sudo chmod -R g+rX` if
 ### Did it actually take? (check, don't assume)
 
 `git pull` changes nothing until the service restarts — the code is in the
-running process's memory. Startup prints exactly three things worth reading:
+running process's memory. Startup prints exactly four things worth reading:
 
 ```
 🔑 Pass: "bs1.onchato.com" → PeerId: 12D3KooWP6Sp…cDmp   ← unchanged, or every client breaks
 ✅ Relay uruchomiony na porcie 9001
+🔌 Połączenia: limit 520                                  ← proves --max-connections took
 📦 Tematy: limit 250 równoczesnych, eviction po 120s ciszy (sweep 30s)
 ```
 
@@ -123,30 +134,16 @@ Order of work, and the order matters:
 
 ## nginx (bs1.onchato.com)
 
-Relay listens on `127.0.0.1:9001` (WS); nginx terminates TLS and proxies `/relay` (WSS):
+The relay listens on `0.0.0.0:9001` (plain WS — public access is cut by the
+firewall and nginx, the socket itself is not bound to loopback); nginx
+terminates TLS and proxies `/relay` (WSS).
 
-```nginx
-server {
-    listen 443 ssl;
-    server_name bs1.onchato.com;
-
-    ssl_certificate     /etc/letsencrypt/live/bs1.onchato.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/bs1.onchato.com/privkey.pem;
-    include /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
-
-    location /relay {
-        proxy_pass         http://127.0.0.1:9001;
-        proxy_http_version 1.1;
-        proxy_set_header   Upgrade    $http_upgrade;
-        proxy_set_header   Connection "upgrade";
-        proxy_set_header   Host       $host;
-        proxy_read_timeout 3600s;
-        proxy_send_timeout 3600s;
-    }
-    location /health { return 200 "bs1 ok\n"; add_header Content-Type text/plain; }
-}
-```
+**The versioned config is `infra/nginx/onchato.com` — that file is the source of
+truth**, this section only says what to look for in it: the `Upgrade`/
+`Connection` headers, the hour-long read/send timeouts a long-lived WebSocket
+needs, and the `limit_conn`/`limit_req` pair on `/relay` (see the inbound-limits
+section below for why those limits are load-bearing, not optional). Deploy is
+`scp` to `sites-enabled` + `nginx -t` + reload.
 
 ## Peer scoring — why IP colocation is OFF
 
@@ -203,18 +200,11 @@ morning) walks straight into it.
 So `inboundConnectionThreshold: 500` and `maxIncomingPendingConnections: 128`.
 That deliberately removes libp2p's flood protection, which was ineffective here
 anyway — **it has to be replaced at the edge**, where the real client address is
-known. In the `/relay` location:
-
-```nginx
-# http{} once:
-#   limit_conn_zone $binary_remote_addr zone=relay_conn:10m;
-#   limit_req_zone  $binary_remote_addr zone=relay_req:10m rate=10r/s;
-location /relay {
-    # …existing proxy_pass / Upgrade headers…
-    limit_conn relay_conn 20;                  # per real IP
-    limit_req  zone=relay_req burst=30 nodelay;
-}
-```
+known. The replacement is **deployed in `infra/nginx/onchato.com`**: zones
+`relay_conn`/`relay_req` in `http{}`, and in the `/relay` location
+`limit_conn relay_conn 20` (per real IP) + `limit_req zone=relay_req burst=30
+nodelay`. The `limit_req` bites the HTTP handshake only — an established
+WebSocket lives outside it.
 
 Measure it with `node net/relay-load.ts` (from `impl/`): waves of pairs, each
 doing a real EH-2 handshake and a message both ways, reporting dial / discovery
@@ -357,13 +347,18 @@ trivial few-hundred-socket DoS into a real bandwidth problem.
 
 ## Tunables (relay.mjs)
 
-- `maxConnections: 520`, `maxReservations: 256`, `maxMessageSize: 65536` (64 KB).
-- GossipSub mesh `D:8, Dlo:6, Dhi:12` (tuned for ~25 clients/topic).
+- `--max-connections` (default **520**), `maxReservations: 256`,
+  `maxMessageSize: 65536` (64 KB).
+- GossipSub mesh `D:8, Dlo:6, Dhi:12, Dout:0` (tuned for ~25 clients/topic),
+  `floodPublish: true`, `allowPublishToZeroTopicPeers: true`,
+  `historyLength: 2` / `historyGossip: 1` (a smaller message cache than the
+  default 5 windows).
 - `--max-topics` (default **250**) — cap on **concurrent live** topics. It is soft
   in time: a topic with no activity for `--idle-ttl` (default **120 s**) is
-  evicted, so the slot returns. Clients heartbeat an Announce every ~15 s, so a
-  room anyone is actually in is refreshed continuously and never evicted — keep
-  `--idle-ttl` well above 15 s.
+  evicted, so the slot returns; the sweep runs every
+  `max(2 s, min(30 s, idle-ttl/2))`. Clients heartbeat an Announce every ~15 s,
+  so a room anyone is actually in is refreshed continuously and never evicted —
+  keep `--idle-ttl` well above 15 s.
   **When the cap does bite, the client sees nothing** — no error, just an empty
   room, which looks like a broken app. The relay logs
   `[!topic] LIMIT … REFUSING` for exactly that case; watch for it.

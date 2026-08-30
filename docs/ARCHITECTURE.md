@@ -1,15 +1,14 @@
-# v6 — Architecture (high-level concept)
+# v6 — Architecture
 
-Status: **concept phase — no code yet.** v5 remains the working testbed (see `../v5/`).
-This document captures the agreed design; sections marked **TBD** are open.
+Status: **design of record for a shipping product** (onchato 0.5.x: web, desktop, Android — one engine in `impl/`). Sections marked **TBD** or **roadmap** are not built; everything else describes what runs. Earlier concept-phase drafts are in git.
 
 ## Document map
 
 | Document | Role |
 |---|---|
-| `PROTOCOL.md` | **The single source of truth for the protocol and all cryptography** — identity, rendezvous, EH-2, ratchet, groups, session management, transport mapping, security analysis (weakness register S1–S10), metadata analysis, PQ roadmap, implementation guide (§17), archived HEM platform notes (§19), and **flow diagrams** (§20, Mermaid — rendered natively by GitHub). Absorbed the former `encedo-chat` spec and `onchato` notes, which have been removed. |
+| `PROTOCOL.md` | **The single source of truth for the protocol and all cryptography** — identity, rendezvous, EH-2, ratchet, groups, session management, transport mapping, security analysis (weakness register S1–S13), metadata analysis, PQ roadmap, implementation map (§17), archived HEM platform notes (§19), and **flow diagrams** (§20, Mermaid — rendered natively by GitHub). Absorbed the former `encedo-chat` spec and `onchato` notes, which have been removed. |
 | this file | Product & infrastructure layer: goals, network roles, node operations, transport modes, distribution, modularity/UI, threat-profile presets |
-| `THREAT-MODELS.md` | Deployment profiles P1–P3 mapped onto the protocol's threat model (`PROTOCOL.md` §2.2, §11.3 S1–S10) |
+| `THREAT-MODELS.md` | Deployment profiles P1–P3 mapped onto the protocol's threat model (`PROTOCOL.md` §2.2, §11.3 S1–S13) |
 
 ## Product definition
 
@@ -31,78 +30,76 @@ Positioning: dual-use secure messenger (private, commercial, military / critical
 
 ## Network roles
 
-### Discovery nodes (operator-run, 3–5)
+### Discovery nodes (operator-run; two in production, bs1 + bs2)
 
-- Plain libp2p nodes: GossipSub + circuit-relay-v2 behind nginx (WSS on 443). One per country/region; interconnected in a GossipSub mesh (ring / partial mesh is sufficient — as in v5).
-- **Role: discovery + signaling + blind relay fallback only.** They never carry chat messages in GossipSub (change vs v5 — see Transport).
-- Stateless beyond their identity key → trivial to package as a **Docker image**; spinning up an independent network takes minutes.
-- Node identity: **production** — random key generated once, persisted on disk (`--key-file`); **development** — deterministic from `--pass` (stable PeerId across restarts, faster iteration). Production PeerIds are pinned in the signed node list.
-- Topic management: v5's `MAX_TOPICS = 50` cap is replaced by a large limit + **TTL eviction** (unsubscribe topics with no subscribers after N minutes) — per-pair daily rooms mean many short-lived topics.
+- Plain libp2p nodes: GossipSub + circuit-relay-v2 reservations behind nginx (WSS on 443), interconnected over a direct IPv6 mesh (public IPv4 between the nodes is blocked). A third node's PeerId is precomputed; `relay/README.md` is the operational manual.
+- **Role: discovery + signaling + the ciphertext fallback content path.** GossipSub carries rendezvous, handshake frames, and — where WebRTC cannot be established, for groups always, and for the Linux desktop always — sealed content as opaque bytes (`PROTOCOL.md` §13). The node never sees plaintext or keys.
+- Stateless beyond their identity key. A Docker image for one-command self-hosting is **roadmap**; today the recipe is `relay/README.md` (clone → `npm ci` → systemd).
+- Node identity: deterministic from the `--pass` seed — the pass is the hostname by convention, so a node's PeerId (and the multiaddr clients will carry) is derivable on a laptop before the machine exists.
+- Topic management: a large limit + **TTL eviction** (a topic with no traffic for `--idle-ttl` is dropped; heartbeats keep live rooms perpetually fresh) — per-pair daily rooms mean many short-lived topics.
+- Two operational lessons that are now configuration, not choice (`relay/README.md`): GossipSub's IP-colocation scoring is **off** (behind the proxy every client arrives from loopback — the penalty graylisted the whole user base), and libp2p's per-host inbound limits are raised, replaced by per-real-IP `limit_conn`/`limit_req` at nginx.
 
 ### Third-party nodes and networks
 
 - **Independent network**: first-class, supported from day one. A `--network <id>` parameter is mixed into all topic names and rendezvous derivation — two networks never collide even if their nodes accidentally connect.
-- **Federating into the operator mesh**: gated by an allowlist (node list signed by the operator key). Open federation reconsidered later — a foreign mesh node sees rendezvous metadata (PeerIds, IPs, topics), so this is a policy decision, not blocked technically.
+- **Federating into the operator mesh**: gated by the published node list. Open federation reconsidered later — a foreign mesh node sees rendezvous metadata (PeerIds, IPs, topics), so this is a policy decision, not blocked technically.
 
 ### Clients
 
-- Browser (web entry channel) and installed app (desktop/mobile — the channel with the resilience guarantees).
-- Client libp2p **PeerId is ephemeral**: freshly generated on every app start / page reload (already v5 behaviour — key never persisted). For sessions running across midnight UTC, PeerId rotates **together with room rotation** — correlation breaks exactly when the room identifier breaks; mid-day rotation adds nothing.
-- Node selection ("per location"): the app dials 2–3 candidates from the signed bootstrap list in parallel and keeps the fastest; the rest remain as spares. No GeoDNS.
+- Browser (web entry channel) and installed app (desktop/Android — the channel with the resilience guarantees).
+- Client libp2p **PeerId is ephemeral**: freshly generated on every app start / page reload (key never persisted). An established room keeps its PeerId and its topic across the daily rotation (`PROTOCOL.md` §5.4) — the rotation bounds *discovery* correlation.
+- Node selection: the client compiles in the node list (`infra/nodes.json`), dials it in order and fails over down it; the user can reorder or override locally, and the list can be refreshed by its compiled-in IPFS CID. No GeoDNS.
 
 ## Identity model
 
 | Layer | Identity | Lifetime |
 |---|---|---|
-| Application | **IK — one native X25519 key, purpose=`ecdh`, in Encedo HEM (HSM)** + contact pubkeys with fingerprints in DESCR (the "mini database") | permanent |
-| libp2p transport | Ephemeral PeerId | one session / one room-rotation window |
-| Discovery node | Stable keypair on disk, PeerId pinned in signed node list | permanent |
+| Application | **IK — one native X25519 key, purpose=`ecdh`** — in an Encedo HEM (HSM), or as a **software profile** (password-sealed on device, `PROTOCOL.md` §4.5 — the zero-hardware onboarding path, and the packaged clients' default) + contact pubkeys | permanent |
+| libp2p transport | Ephemeral PeerId | one session |
+| Discovery node | Keypair derived from the node's `--pass` seed, PeerId pinned in the compiled-in node list | permanent |
 
 Key properties (`PROTOCOL.md` §4):
 
-- **IK never signs anything** — mutual authentication is MAC-based on the handshake transcript (deniability). No dual-use, no curve conversion; the purpose flag is enforced by HEM hardware. (The HEM `x25519` dual key type ships in firmware as a platform capability, but Chat's IK does not use it.)
-- Chat's HSM crypto surface is **one call** — `ecdh` in two modes: raw (handshake only) or with **in-HSM HKDF** (topics, announce MACs, cache key — raw pair secrets never reach client memory); plus key management (`key_generate`, `key_delete`, `key_search`). Zero firmware changes needed for Phase 1 (`PROTOCOL.md` §4.3).
-- Contacts are imported **out-of-band** (QR / fingerprint verification); integrity protected by fingerprint-in-DESCR checks.
-- **Single active session per identity** with self-topic takeover and dead man's switch (`PROTOCOL.md` §9): a new login gracefully shuts down the previous device; a stolen device without HSM access is inert.
+- **IK never signs anything** — mutual authentication is MAC-based on the handshake transcript (deniability); groups too (ECDH-HMAC, §8). No dual-use, no curve conversion; on a HEM the purpose flag is enforced by hardware. (The HEM `x25519` dual key type ships in firmware as a platform capability, but Chat's IK does not use it.)
+- Chat's HSM crypto surface is **one call** — raw `ecdh` — plus key management. Current firmware has no in-HSM HKDF, so IK-derived derivations run client-side over the raw output; the exposure and its closure are recorded in `PROTOCOL.md` §4.3/S13. Zero firmware changes needed for Phase 1.
+- Contacts are imported **out-of-band** (QR / invite link + fingerprint verification); the stored book is MAC'd against key swaps (`PROTOCOL.md` §4.4).
+- **Single active session per identity** (`PROTOCOL.md` §9): a duplicate is detected on the self-topic and **both copies stand down** — the user re-enters one deliberately; a stolen device without the HSM dies at the next forced re-handshake.
 - Identity is proven inside the session layer (EH-2 MACs), never at the transport layer. The transport knows only throwaway PeerIds.
 
 ## Rendezvous — deterministic rotating rooms
 
-`PROTOCOL.md` §5 is authoritative; summary with our one extension (`network_id`):
+`PROTOCOL.md` §5 is authoritative; summary:
 
 ```
 topic = base32( HKDF-SHA256(
-  ikm  = ECDH(IK_a_priv, IK_b_pub),          // in HSM — same value both sides
+  ikm  = ECDH(IK_a_priv, IK_b_pub),          // identity backend call — same value both sides
   salt = "encedo-chat-rendezvous-v1",
-  info = network_id || 0x00 || date_UTC       // network_id + domain separator: the v6 extension
+  info = network_id || 0x00 || date_UTC       // date on the pair's shifted clock (§5.4)
 ) )[0:52]
 ```
 
 - **1:1**: both sides compute the same topic offline, with zero discovery chatter. "I am X and want to talk to Y" resolves from keys + date; no directory service. Topics are indistinguishable from random without the shared secret (circular knowledge requirement for observers).
-- **Groups**: Sender Keys (`PROTOCOL.md` §8), scale assumption 3–5 members (max 8–10); MLS deferred, not rejected.
-- **Rotation boundary** (`PROTOCOL.md` §5.4): within ±5 min of midnight UTC subscribe to `[yesterday, today, tomorrow]`; publish always on sender's `today`; accept on timestamp ±5 min + any of the three topics.
-- **Presence — resolved** (`PROTOCOL.md` §5.5): `Announce` messages on active topics (ephemeral PeerId + nonce + timestamp + HMAC keyed from the pair's shared secret), heartbeat every 60 s, replay/duplicate protection. Only holders of the shared secret can produce or verify announces.
-- **Self-topic** (`PROTOCOL.md` §5.2): derived from own IK_pub, carries MAC'd announces for session-takeover detection. Publicly computable by anyone knowing IK_pub — a deliberate, documented presence-leak tradeoff (S2).
-- `network_id` keeps independent networks disjoint at the rendezvous layer (see `--network` under Network roles) — to be folded into the normative key schedule at the next revision.
+- **Groups**: Sender Keys over a client-side `group_secret` topic (`PROTOCOL.md` §5.3/§8), scale assumption 3–5 members (max 8–10); MLS deferred, not rejected.
+- **Rotation** (`PROTOCOL.md` §5.4): each pair rolls over at its **own secret instant** derived from the pair secret — rotations spread across 24 h (no midnight re-subscribe spike) and both members cross together; a ±30 min guard double-subscribes the adjacent day.
+- **Presence** (`PROTOCOL.md` §5.5): `Announce` messages on active topics (ephemeral PeerId + nonce + timestamp + HMAC keyed from the pair's shared secret), heartbeat every 15 s with early join beacons, replay/duplicate protection. Only holders of the shared secret can produce or verify announces. A light per-contact watch gives presence dots without handshakes and hands the topic over warm when a conversation opens.
+- **Self-topic** (`PROTOCOL.md` §5.2): derived from a self-DH (`ECDH(IK, IK_pub)`), computable **only by the identity holder**; carries MAC'd announces for duplicate-session detection.
+- `network_id` keeps independent networks disjoint at the rendezvous layer (see `--network` under Network roles); it is part of the normative key schedule.
 
 ## Transport
 
-Two planes with strictly separated roles:
+Two planes (`PROTOCOL.md` §13):
 
 | Plane | Mechanism | Carries |
 |---|---|---|
-| Control | GossipSub over the discovery mesh | rendezvous topics, Announce/presence, self-topic, WebRTC signaling |
-| Data | 1) WebRTC DataChannel / direct stream → 2) circuit-relay-v2 stream (fallback) | EH-2 handshake + ratchet messages (the "direct streams") |
+| Control | GossipSub over the discovery node | rendezvous topics, Announce/presence, self-topic, EH-2 frames, WebRTC signaling, group keepalive |
+| Data | **WebRTC DataChannel** (1:1, browsers, opportunistic) with **GossipSub through the node as the ciphertext fallback** — and as the only path for groups and for the Linux desktop | ratchet / sender-key content |
 
-The session layer (EH-2, ratchet) rides entirely on the data plane and is transport-agnostic; our two transport modes below sit **under** it and are invisible to the protocol. The rule "GossipSub carries rendezvous only, never message content" is stated identically in `PROTOCOL.md` §13.
+The session layer (EH-2, ratchet) is transport-agnostic; everything the node carries is ciphertext + metadata to it.
 
-- **Change vs v5**: chat messages are never flooded over GossipSub. The fallback for peers that cannot establish WebRTC (symmetric NAT) is a **circuit-relay-v2 stream** through one discovery node. The endpoints run their own NOISE handshake through the tunnel — the relay forwards opaque bytes (blind relay). This narrows metadata exposure from "entire mesh sees the encrypted blob" to "one node sees flow metadata".
-- Relay data-path limits: circuit-relay-v2 defaults (~2 min / ~128 KB, designed for signaling only) are raised on our nodes for the data path.
-- **No TURN.** Rationale: a TURN server sees the same metadata as a blind relay (IPs, timing, volume) so there is no security gain; it adds a separate service, credential management, and a protocol that is easy to fingerprint and block — whereas the libp2p node behind nginx on 443/WSS is indistinguishable from ordinary TLS web traffic. Voice/video is out of scope for this product (separate service — see Non-goals), so the one scenario that would justify TURN never arises.
-- **Two transport modes** (user-selectable, bound to threat profiles):
-  - **Direct mode** — WebRTC preferred; best resilience/least infra, but peers see each other's IPs.
-  - **Relay-only mode ("anonymous")** — never dial direct; IP hidden from the peer; TCP-only path is Tor/VPN-compatible (WebRTC/UDP is not).
-- WebRTC signaling: v5's manual `_signal/<peerId>` GossipSub topics are kept for the first iteration (proven working); migration to the `@libp2p/webrtc` transport (native SDP exchange over circuit relay) is a candidate refactor afterwards.
+- **WebRTC signaling** rides the pair topic as ratchet-sealed `rtc` envelopes (`PROTOCOL.md` §7.4) — the node learns that a pair is negotiating, never the addresses. ICE consults a **public STUN server** (Google's by default, configurable) for reflexive addresses — a third party that sees client IPs and negotiation timing (`PROTOCOL.md` §13). The offering side (lower PeerId) re-offers on loss; a channel is trusted only after a two-way ping proves it, and one stall demotes the conversation to the relay for its remaining life.
+- **The relay-blind data plane (circuit-relay-v2 streams) is parked**, blocked upstream: on the pinned libp2p 2.2.x generation the destination-side STOP handling is broken, and the v3 upgrade waits for a GossipSub release compatible with libp2p v3. When it lands, it narrows the fallback's exposure from "the node sees GossipSub frames" to "one node sees flow metadata of an opaque NOISE tunnel", and a user-selectable **relay-only mode** ships with it. Until then there is **no user-facing transport-mode switch** — the badge reports what the pair actually got (⚪ relay / 🟢 direct). The Linux desktop is relay-only today by platform limitation (WebKitGTK has no `RTCPeerConnection` — measured; `PROTOCOL.md` §3.2).
+- **No TURN.** Rationale: a TURN server sees the same metadata as a blind relay (IPs, timing, volume) so there is no security gain; it adds a separate service, credential management, and a protocol that is easy to fingerprint and block — whereas the libp2p node behind nginx on 443/WSS is indistinguishable from ordinary TLS web traffic. Voice/video calls are out of scope, so the one scenario that would justify TURN never arises. Hard-NAT pairs fall back to the relay.
+- **MQTT** is a second, fully working transport (per-session choice, `?mqtt=1` / `--mqtt`): the engine unchanged over a broker, for operators who cannot run libp2p — at a documented metadata cost (a connected client can observe every room's activity; README).
 
 ## E2E encryption — **resolved; full detail in `PROTOCOL.md` §6–§8, §11, §15**
 
@@ -110,89 +107,92 @@ The session layer (EH-2, ratchet) rides entirely on the data plane and is transp
 
 - **EH-2 handshake** (`PROTOCOL.md` §6): interactive Noise-XX-style, 1.5 RTT, three X25519 DHs + ephemeral **ML-KEM-768** encapsulation combined in HKDF → post-quantum **hybrid confidentiality from day 1** ("harvest now, decrypt later" defeated). MAC-based mutual auth → **deniability** (no signatures anywhere in the 1:1 path). KCI-resistant, replay-protected.
 - **No prekeys, no prekey server** — the instant-only/synchronous model eliminates them (prekeys exist to reach *offline* recipients). This was the decisive argument for EH-2 over the earlier X3DH direction; the X3DH design is shelved as the blueprint for a hypothetical future offline-delivery extension (`PROTOCOL.md` §19).
-- **Double Ratchet** (`PROTOCOL.md` §7) client-side (Rust core in the Tauri variant) with **bounded session lifetime** (forced re-handshake every 4–8 h → hard upper bound on classical-PCS exposure, weakness S10).
-- **Groups** (`PROTOCOL.md` §8): Sender Keys with pairwise distribution over EH-2 sessions; ephemeral per-epoch Ed25519 signing keys prevent insider forgery (accepted deniability reduction in groups).
+- **Double Ratchet** (`PROTOCOL.md` §7) client-side, with **bounded session lifetime** (forced re-handshake every 4–8 h → hard upper bound on classical-PCS exposure, weakness S10).
+- **Groups** (`PROTOCOL.md` §8): Sender Keys with pairwise distribution over EH-2 sessions; **per-recipient ECDH-HMACs** give insider-unforgeability with deniability intact — no signature anywhere in the protocol.
 - **PQ roadmap** (`PROTOCOL.md` §15): Phase 1 hybrid confidentiality now → Phase 2 PQ identity distributed in-band over the classically-authenticated channel → Phase 3 full PQ handshake by 2030 (recommended construction: long-term ML-KEM in HSM — de-risked by the confirmed fact that HEM already has ML-KEM in firmware). External positioning stays honest: "PQ confidentiality now, PQ authentication by 2030", never "fully post-quantum from day 1".
 
 The v5 scheme (shared passphrase, PBKDF2 → AES-GCM) is testbed-only and is fully superseded.
 
-## History & local cache (per profile)
+## History & local persistence
 
-The network stores **nothing**, ever — no store-and-forward, no server-side history (unchanged). Local, device-only cache is a per-profile default (`PROTOCOL.md` §10 modes bound to our profiles):
+The network stores nothing for the text path (shared files: ciphertext for minutes on an operator IPFS store — `PROTOCOL.md` §7.5). Locally, what ships (`PROTOCOL.md` §10):
 
-| Profile | Default | Notes |
-|---|---|---|
-| P1 | **Encrypted cache** — key derived via HSM ECDH, unlockable only with the user's HEM | stolen disk without HSM = unreadable; user may switch to ephemeral |
-| P2 | **Ephemeral** (RAM only) | user may opt into encrypted cache |
-| P3 | **Ephemeral, enforced by policy** | no persistence option exposed |
+| Store | Behaviour |
+|---|---|
+| Transcript | **RAM only, always** — a reload takes it; there is no history setting |
+| Pinned messages | opt-in per message, encrypted per room, capped at 32 |
+| Group state | always cached, encrypted (a group must survive a reload) |
+| Contact book | persistent, MAC'd against key swaps |
 
-History is per-device by construction (ratchet state is not portable across devices — `PROTOCOL.md` §9.4); a device switch starts empty.
+All keyed off one identity-gated base (`ECDH(IK, emp_pub)`); a stolen disk without the identity is ciphertext plus a public value. A per-profile ephemeral-enforced mode (the P3 posture) is **roadmap** — today there is no policy switch that disables pinning or the group cache. History is per-device by construction (ratchet state is not portable — `PROTOCOL.md` §9.4); a device switch starts empty, with the sealed **profile export** (§10) moving identity/contacts/groups — never a transcript.
 
 ## Distribution & trust
 
-Everything public — security from cryptography, not obscurity. The operator of the main network is **fully transparent**: public code (app + infra), public node list, public deployment recipes.
+Everything public — security from cryptography, not obscurity. The operator of the main network is **fully transparent**: public code (app + infra, one repo), public node list, public deployment recipes.
 
-- Code on GitHub; frontend served from the domain **and** IPFS; installed apps via signed releases.
-- **IPFS CID as non-repudiation**: content addressing makes every published artifact immutable and independently verifiable — a CID proves *what* the code is. It complements, not replaces, the signature, which proves *who* published it. The full trust chain for P3-grade credibility: signed source tag → source CID on IPFS → **reproducible build** → signed release binary. Without the reproducible-build link, a CID of the source says nothing about the binary.
-- **Operator root key (offline)** signs exactly two artifacts: application releases and the **node list** (bootstrap PeerIds + multiaddrs, small JSON). Signing model details **TBD**.
-- The node list is published over multiple independent channels (GitHub, IPFS, domain, DESCR artifacts in HEM keys); the app accepts it from *any* channel because it verifies the signature, not the origin. This — plus the installed app — is the direct answer to domain seizure.
+What ships today:
+
+- Code on GitHub; the web app served from the domain; installed apps from GitHub Releases (a tag builds desktop for five targets and a **signed Android APK**; the web host self-deploys on the same tag).
+- **The node list is pinned by content addressing, not signed**: `infra/nodes.json` is compiled into every client, and a runtime refresh fetches a **compiled-in IPFS CID** — the CID is the whole of the list's integrity, at the cost that publishing a new list means shipping a build. A domain seizure does not remove the nodes an installed app already carries.
+- Release signing is **three CI-held keys**, none of them an offline root: minisign for the desktop updater (the draft release is the publish gate), the Android keystore (repository secrets), and Windows Azure Trusted Signing (wired, not yet enabled). The desktop `.deb`/`.rpm` never self-update — they are told, not replaced.
+- **Roadmap, deliberately not claimed as built:** an offline operator root key over releases + node list; the web app additionally on IPFS; **reproducible builds** (the P3-grade chain: signed source tag → source CID → reproducible build → signed binary — without that link a CID of the source says nothing about the binary).
 - Web app remains the low-friction entry channel; resilience guarantees are claimed for the installed app only.
 
 ### Self-hosting as a promoted path
 
-Running your own network is not merely tolerated — it is **encouraged and productized**. Deliverable: Docker image + manual + ready-made recipes ("a $5 VPS behind your domain, full network up in 15 minutes"). This is simultaneously a resilience property (exit from the operator is always available), the P3 deployment story, and a distribution channel.
+Running your own network is not merely tolerated — it is **encouraged**. Today's recipe is `relay/README.md` (VPS + nginx + systemd, node identity derivable in advance); the productized form — Docker image + "a $5 VPS behind your domain, full network up in 15 minutes" — is roadmap. This is simultaneously a resilience property (exit from the operator is always available), the P3 deployment story, and a distribution channel.
 
-## Desktop / mobile: Tauri 2 — two client tiers (`PROTOCOL.md` §3.2, §17.1)
+## Desktop / mobile: Tauri 2 (`PROTOCOL.md` §3.2)
 
-- **Tauri 2 = hardened tier** (desktop Win/macOS/Linux + mobile iOS/Android): **Rust core** runs rust-libp2p, all ephemeral crypto, ratchet state, and the HEM client **outside the webview**; the webview receives only plaintext-to-render and UI events over IPC. Webview compromise (XSS, npm supply chain in the UI layer) does not reach keys or ratchet state. Binary single-digit MB; built-in updater with signed updates.
-- **PWA = convenience tier** (zero-install onboarding in the browser): js-libp2p + WebCrypto/`@noble` in the JS context. Same protocol, weaker isolation — honest tiering, not a bug.
-- **One `core-rs`, two targets** (`PROTOCOL.md` §3.2 / §17.1): the Rust core compiles natively for Tauri and to WASM for the PWA; `core-ts` degrades to thin glue (transport adapter, bindings). One handshake, one ratchet, one set of test vectors, one audit. Transport lives behind a trait — rust-libp2p (Tauri) and js-libp2p (PWA) are injected adapters.
-- **The old "WebRTC in WebKitGTK" spike is dissolved for desktop** — networking is in the Rust process, not the webview. What replaces it: an **interop test** rust-libp2p ↔ browser js-libp2p over WebRTC (Tauri↔PWA conversations), and WebRTC in real browsers for the PWA tier (unproblematic).
+**What ships:** the Tauri 2 shells (Linux/Windows/macOS `.deb`/`.rpm`/AppImage/installers + an Android APK) wrap the **same web bundle** in a native window — all crypto and transport run in the webview on every platform. The shell's value is platform reach, and it is real product surface:
+
+- Desktop: tray + close-to-tray (probed against the actual desktop — no tray host means close quits, honestly), autostart, native notifications (own D-Bus path on Linux), single-instance, **self-updater** (minisign; `.deb`/`.rpm` get a notification + link, never a silent replace).
+- Android: a **foreground service** (`specialUse`) keeps the process alive so a phone in a pocket stays reachable — the honest price of no store-and-forward, paid as a permanent notification; local notifications, no FCM (no Google server between two people).
+- Linux desktop caveat, measured: WebKitGTK exposes no `RTCPeerConnection`, so the desktop build is **relay-only** (`PROTOCOL.md` §3.2/§13).
+
+**Roadmap — the hardened tier:** a Rust `core-rs` (native for Tauri, WASM for the web) holding keys, ratchet state and the HEM client outside the webview, with transport behind a trait. That is the isolation story earlier drafts described; it is not the build, and claims about webview-compromise resistance must not be made until it is.
 
 ### Build & release pipeline
 
-- **GitHub Actions matrix build for all 3 desktop platforms, set up at MVP stage** (`tauri-action` covers this off the shelf). The pipeline is proven early — "przestrzelone" — so release day is never the first time it runs.
-- Trigger policy: build on **tags + manual dispatch**, not on every push (Tauri matrix builds are slow and costly). Day-to-day development uses the web build; CI artifacts double as test binaries for the rust-libp2p ↔ js-libp2p WebRTC interop test (open item 6).
-- Same pipeline later grows signing (operator root key) and reproducible-build verification.
+- **What runs:** `desktop.yml` (tags + manual dispatch) builds linux-amd64/arm64, macOS, Windows, Windows-arm64 via `tauri-action` into a **draft release** — the draft is the deliberate publish gate for the updater's `latest.json`. `android.yml` builds and **signs** the APK (keystore from repository secrets; missing secrets fail the job by name) and an unsigned `.aab` for Play App Signing. `ci.yml` runs the test suite and the two-browser harness.
+- The web host self-deploys on a pushed tag (`infra/deploy-on-tag.sh` + systemd timer — pull model, no production credential in any runner).
+- The pipeline later grows Windows signing activation (wired, waiting on an Azure tenant) and reproducible-build verification.
 
 ## Modularity & UI
 
-**Decided: the UI is a replaceable module, decoupled from day one.** The application core is headless; any UI — including community-built and white-label ones — talks to it through one narrow, versioned interface.
+**The UI is decoupled in fact, not yet in packaging.** The application core is headless — `impl/lib/` + `impl/eh2/` + `impl/net/` contain no DOM access, and the seam is `lib/core.ts` (`startSession` / `session.open` / `openConversation`, an `Identity` contract, event callbacks). Three consumers prove it: the web UI, the CLI, and the test harnesses — none with privileged access.
 
-- **Headless core** (`core/`): libp2p node, rendezvous, transport modes, E2E crypto, identity (HEM adapter). Framework-agnostic TS/JS package with no DOM access. API surface kept small: commands (`join / leave / send / setProfile`), events (`message / presence / transport-state / rotation`), and a state snapshot.
-- **UI packages** (`ui-*/`): consume the core API and nothing else. The reference UI is just the first consumer with **no privileged access** — the proof of decoupling is that the reference UI needs nothing a community UI doesn't get.
-- Why: alternative UIs from the GitHub community, easy adaptation and white-labeling, and auditability — the security-critical surface is the small core, not the skin.
-- Both shells (web, Tauri) wrap the same core + a chosen UI package.
+- **Not yet done:** publishing the core as a versioned package (`@encedo/chat-core`) and turning the web UI into a mountable component — measured and priced in `EMBED-PLAN.md` (the core needs no architectural work; the UI does).
+- Why it matters: alternative UIs from the community, white-labeling, and auditability — the security-critical surface is the small core, not the skin.
+- Both shells (web, Tauri) wrap the same engine + the same UI today.
 
 ### Reference UI notes
 
 Look & feel is open — two clickable mockups exist sharing **the same DOM skeleton and logic, differing only in the stylesheet** (a working demonstration of the skin-swap principle): `ui-mockup.html` (light, dashboard-style; accepted as the starting point) and `ui-mockup-hacker.html` (terminal skin in v5's GitHub-dark palette). Agreed regardless of skin:
 
 - The mental model is an **arranged meeting, not a mailbox** — rooms as meetings, presence, no fake message history (no "recent messages" previews: there is no history to preview).
-- **Security state must be visible and honest**: current transport (direct vs relay-only), active profile (P1/P2/P3), room rotation. The v5 badge (🟢 direct / ⚪ relay) is the seed of this.
+- **Security state must be visible and honest**: the security badge (🤝 → 🔐) and the transport badge (⚪ relay / 🟢 direct) report the measured state of *this* conversation, never a configured wish. Capability probing separates REQUIRED (refuse to start, say why) from DEGRADED (say so, carry on) — a platform that cannot do WebRTC or notifications is told, not silently downgraded.
 - Avatars/identicons derived locally from keys — never fetched from a server.
-- **Slash commands in the message input** (`/join`, `/who`, `/mode relay`, `/quit`) — full keyboard-only operation. Decided: these map 1:1 onto the core↔UI command API, so the parser lives in the core and every skin gets them for free; in the terminal skin they are the stylistically native way to operate the app.
+- Slash commands exist in the CLI (`/who`, `/me`, `/react`, `/quit`); the web UI has none. Moving the parser into the core so every skin gets them is an open refinement, not a shipped property.
 
 ## Explicit non-goals
 
 - Offline messaging, network-side message history, simultaneous multi-device (single active session — `PROTOCOL.md` §9). If offline delivery ever becomes a product goal, the archived X3DH/prekeys design is the starting blueprint (`PROTOCOL.md` §16, §19 anticipate exactly this).
 - Anonymity against a global passive observer (traffic correlation) — requires a mixnet; recorded as a boundary in the threat models.
-- **Voice/video — permanently out of this codebase.** It lives in a separate, existing service; possible later pairing at the product level (the Google Chat + Meet model). This also settles TURN: it never comes back here.
+- **Live voice/video calls — permanently out of this codebase.** A separate, existing service; possible later pairing at the product level (the Google Chat + Meet model). This also settles TURN: it never comes back here. **Recorded voice notes ship** — they travel as ordinary encrypted files (`PROTOCOL.md` §7.5) and add nothing to the wire.
 - Being a Slack/Teams replacement. This is a focused instant messenger; channels-and-integrations platforms are a different product.
 
 ## Open items
 
-Resolved in `PROTOCOL.md` (2026-07-23): E2E scheme, presence (Announce), HEM integration surface (three calls), Tauri webview-WebRTC spike (dissolved — rust-libp2p in the Rust core).
-
-| # | Item | Blocked on |
+| # | Item | Status / blocked on |
 |---|---|---|
-| 1 | Signing model details (root key handling, formats) | — |
+| 1 | Signing model details (offline root key over releases + node list) | open — today: CID-pinned list + three CI keys (Distribution) |
 | 2 | Open federation policy | operational experience |
-| 3 | Reference UI skin choice + core↔UI API definition (slash commands; `PROTOCOL.md` §17.5 component list) | iteration |
-| 4 | Self-hosting recipe (Docker image + manual + $5-VPS guide) | MVP |
+| 3 | Core↔UI packaging (`@encedo/chat-core`, mountable UI) | priced in `EMBED-PLAN.md` |
+| 4 | Self-hosting recipe (Docker image + manual + $5-VPS guide) | today: `relay/README.md` |
 | 5 | Reproducible builds (closes the CID→binary trust chain) | toolchain work, P3 requirement |
-| 6 | Interop test: rust-libp2p ↔ js-libp2p over WebRTC (Tauri↔PWA pairs) | first coding session |
-| 7 | Fold `network_id` + group-topic derivation into `PROTOCOL.md` normative key schedule | next revision |
-| 8 | Identity backend for the open channel's P1 (software keystore vs PPA required — `PROTOCOL.md` assumes HSM) | product decision |
-| 9 | Spec open questions P1–P8 (OIDC auth, EPA rate limits, serialization format, GossipSub DoS, device enrollment, IK rotation, lib audit, cache backend) | pre-implementation |
-| 10 | HEM side-items from archived notes: `x25519` dual key type (decided: ships) + attestation PoP variant for dual-pubkey slots | HEM firmware roadmap |
+| 6 | Relay-blind data plane + user-selectable relay-only mode | GossipSub release for libp2p v3 (Transport) |
+| 7 | Hardened tier (`core-rs` outside the webview) | roadmap (`PROTOCOL.md` §3.2) |
+| 8 | ~~Identity backend for the open channel~~ — **resolved: the software profile ships** (`PROTOCOL.md` §4.5) | — |
+| 9 | Spec open questions (`PROTOCOL.md` §16 — the remaining ones: device enrollment, IK rotation, lib audit, serialization) | pre-1.0 |
+| 10 | HEM side-items: `x25519` dual key type (decided: ships) + attestation PoP variant; **HKDF-in-HSM firmware** (closes S13) | HEM firmware roadmap |

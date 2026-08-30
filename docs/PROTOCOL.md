@@ -1,26 +1,24 @@
 # v6 — PROTOCOL.md
 
-Status: **normative protocol reference, draft (protocol version 1, key schedule "v2" / EH-2).**
+Status: **normative protocol reference (protocol version 1, key schedule "v2" / EH-2) — describes the shipped implementation** (`impl/`, deployed as onchato 0.5.x). Kept 1:1 with the code: a wire behaviour the client has and this document omits, or the reverse, is a defect in one of them. Earlier drafts and the Proposal history are in git.
 
-This is the single source of truth for the chat protocol: identity, rendezvous, handshake, ratchet, groups, session management, transport, cryptographic analysis, PQ roadmap, and the implementation guide. It stands alongside `ARCHITECTURE.md` (product & infrastructure — why and where this runs) and `THREAT-MODELS.md` (deployment profiles — against whom).
+This is the single source of truth for the chat protocol: identity, rendezvous, handshake, ratchet, groups, files, session management, transport, cryptographic analysis, PQ roadmap, and the implementation map. It stands alongside `ARCHITECTURE.md` (product & infrastructure — why and where this runs) and `THREAT-MODELS.md` (deployment profiles — against whom).
 
 The design targets a **synchronous, HSM-anchored, post-quantum-hybrid** secure messenger for private, commercial, and critical-infrastructure use. It ships in two go-to-market channels from one core: **Encedo Chat** (enterprise/tenant: EPA HSM, OIDC, DORA/NIS2 framing) and **onchato** (open public network: self-hosting, community UIs, takedown resistance).
-
-Sections marked **[v6 extension]** are additions beyond the audited crypto design (network isolation, transport modes, group-topic derivation) and are flagged for review.
 
 ---
 
 ## 1. Summary
 
-- **HSM-anchored identity** — the identity private key never leaves the HSM (Encedo PPA or EPA, reachable over REST/TLS 1.3). Chat's entire HSM crypto surface is a single call — `ecdh`, in two modes (raw, or with the HKDF step executed inside the HSM) — plus key management (generate / delete / search).
+- **HSM-anchored identity** — the identity private key never leaves the HSM (Encedo PPA or EPA, reachable over REST/TLS 1.3). Chat's entire HSM crypto surface is a single call — `ecdh` — plus key management (generate / import / delete / search). A **software identity** (§4.5) implements the same contract with a password-sealed key for onboarding without hardware, at reduced assurance.
 - **Post-quantum hybrid confidentiality from day 1** — the handshake combines classical ECDH (X25519) with a post-quantum KEM (ML-KEM-768); "harvest now, decrypt later" is defeated.
 - **One identity key** — native X25519, purpose `ecdh` enforced by an HEM flag. No dual-use, no curve conversion, no dormant keys. It never signs.
 - **Deniability** — authentication by MAC over the transcript, not by signature.
 - **Metadata privacy** — deterministic, daily-rotated rendezvous topics; ephemeral PeerIds; no central server.
-- **Synchronous model** — no store-and-forward; both parties must be online. This is what eliminates prekeys, prekey servers, and multi-device ratchet sync.
-- **Single active session** per identity; switching device force-logs-out the previous one (dead man's switch).
+- **Synchronous model** — no store-and-forward; both parties must be online. This is what eliminates prekeys, prekey servers, and multi-device ratchet sync. The one bounded exception is a shared **file**: its ciphertext rests on an operator store for minutes (§7.5).
+- **Single active session** per identity — a duplicate session is detected on the self-topic and **both** copies stand down (§9.1).
 
-Transport: **libp2p** (WebRTC + WebSocket Secure + GossipSub). Clients: one core in two tiers — PWA (browser, zero-install) and Tauri 2 (desktop + mobile, Rust core keeping crypto and ratchet state outside the webview).
+Transport: **libp2p** (WebSocket Secure to a discovery node + GossipSub; WebRTC DataChannel as the opportunistic 1:1 direct plane). Clients: one TypeScript engine consumed by the web app, the CLI, and the Tauri 2 shells (desktop + Android) — the shells wrap the same web bundle, so crypto and transport run in the webview on every platform (§3.2).
 
 **Conscious v1 tradeoff:** confidentiality is PQ-safe; **authentication remains classical** until Phase 3 (§15). A future active quantum MITM is the only unaddressed threat, realistic for state-level adversaries against high-value targets around 2035–2040; the in-band migration path (§15) closes it before then.
 
@@ -43,9 +41,9 @@ Transport: **libp2p** (WebRTC + WebSocket Secure + GossipSub). Clients: one core
 
 ### 2.2 Adversaries
 
-**In scope:** passive network observer (sees all libp2p traffic, GossipSub topics, direct streams; cannot break TLS 1.3 or libp2p Noise); active MITM on the libp2p transport; compromise of the long-term IK (HSM theft / insider); compromise of ratchet state (device theft with live cache); compromise of individual message keys (side channel); quantum "harvest now, decrypt later".
+**In scope:** passive network observer (sees all libp2p traffic, GossipSub topics, WebRTC DataChannel flows; cannot break TLS 1.3, DTLS, or libp2p Noise); active MITM on the transport; compromise of the long-term IK (HSM theft / insider); compromise of ratchet state (device theft with live cache); compromise of individual message keys (side channel); quantum "harvest now, decrypt later".
 
-**Out of scope:** HSM core compromise (firmware-level — assumed trusted, it is its job to protect keys); endpoint compromise (root on a running client reads plaintext at display time — no E2E protocol solves this); ISP-level statistical traffic analysis (timing/size — the protocol protects logical metadata, not statistical); coercion (organizational, not protocol); DoS by flooding rendezvous (rate-limited at the libp2p/GossipSub layer).
+**Out of scope:** HSM core compromise (firmware-level — assumed trusted, it is its job to protect keys); endpoint compromise (root on a running client reads plaintext at display time — no E2E protocol solves this); ISP-level statistical traffic analysis (timing/size — the protocol protects logical metadata, not statistical); coercion (organizational, not protocol); DoS by flooding rendezvous (rate-limited per real client IP at the reverse proxy — the deployed control, since GossipSub's own IP scoring is off behind it; §16 P4, `relay/README.md`).
 
 ### 2.3 Environment assumptions
 
@@ -83,14 +81,14 @@ Transport: **libp2p** (WebRTC + WebSocket Secure + GossipSub). Clients: one core
 │   IK in HEM · deterministic topics · Announce ·           │
 │   self-topic · single active session                      │
 ├───────────────────────────────────────────────────────────┤
-│ Transport (two planes, two modes)                         │
-│   control: GossipSub        data: direct stream /         │
-│   over discovery mesh             circuit-relay-v2        │
+│ Transport (two planes)                                    │
+│   control + fallback content: GossipSub over a discovery  │
+│   node · data (1:1, browser): WebRTC DataChannel          │
 ├───────────────────────────────────────────────────────────┤
-│ libp2p     rust-libp2p (Tauri tier) · js-libp2p (PWA tier)│
+│ libp2p     js-libp2p (every client) · MQTT fall-back      │
 ├───────────────────────────────────────────────────────────┤
 │ HSM layer  HEM REST over TLS 1.3 (X25519MLKEM768)         │
-│   ecdh (raw) · key_search · key_generate                  │
+│   ecdh (raw) · key_search · key_generate · key_import     │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -98,19 +96,20 @@ The protocol assumes **no security property from libp2p** beyond hop-to-hop tran
 
 ### 3.1 Responsibility split
 
-- **HSM** — key management (create/delete/search) and crypto on IK: `ecdh` raw, or `ecdh`+HKDF in one call (§4.3). **HKDF over an IK-derived secret runs inside the HSM** so the raw pair secret never reaches the client; the only exception is EH-2, where raw mode is required to concatenate the DH outputs (§6.2).
-- **Client** — all ephemeral operations (EK, ML-KEM keygen/encap/decap, AEAD, ratchet) and any HKDF whose input is **not** an IK-derived secret (e.g. the ratchet chain KDFs, keyed by ratchet state that already lives in client RAM), plus session state, cache, presence.
-- **libp2p** — message transport and pubsub for rendezvous only.
+- **HSM** — key management (create/import/delete/search) and one crypto operation on IK: **raw `ecdh`** (the current HEM firmware exposes no in-HSM HKDF). Every IK-derived HKDF — topics, announce MAC keys, rotation offset, the per-store keys over the §10 cache base (itself a raw ECDH) — therefore runs **client-side over the raw ECDH output** (§4.3), and the raw pair secret transits client RAM. When firmware ships `ecdh`+HKDF in one call, these derivations move in-device and the exposure closes (§4.3 records the consequence precisely).
+- **Client** — all ephemeral operations (EK, ML-KEM keygen/encap/decap, AEAD, ratchet), all HKDFs, session state, cache, presence.
+- **libp2p** — pubsub for rendezvous, handshake frames, and the fallback content path; a WebRTC DataChannel where both browsers can open one.
 
-### 3.2 Two client tiers
+### 3.2 Client tiers — what ships
 
-- **Tauri 2 = hardened tier** (desktop Win/macOS/Linux + mobile iOS/Android): a **Rust core** runs rust-libp2p, all ephemeral crypto, ratchet state, and the HEM client **outside the webview**; the webview receives only plaintext-to-render and UI events over IPC. Webview compromise (XSS, UI-layer npm supply chain) does not reach keys or ratchet state — this mitigates S1/S5 (§11.3). Binary single-digit MB; signed auto-updates.
-- **PWA = convenience tier** (zero-install, browser): js-libp2p + WebCrypto/`@noble` in the JS context. Same protocol, weaker isolation — honest tiering.
-- **One `core-rs`, two targets**: the Rust core compiles natively for Tauri and to WASM for the PWA; the TS side degrades to thin glue (transport adapter, bindings). One handshake, one ratchet, one set of test vectors, one audit. Caveat: WASM in the browser shares memory with JS — XSS still reaches module state; the Tauri advantage comes from **process separation**, not compilation form.
+- **One TypeScript engine** (`impl/lib/`, `impl/eh2/`, `impl/net/`) consumed by three front-ends: the web app, the CLI, and the **Tauri 2 shells** (Linux/Windows/macOS desktop + Android). The shells wrap the same web bundle in a native window: **all crypto and transport run in the webview** on every platform. What the shell adds is platform reach — tray, autostart, notifications, single-instance, self-update, and the Android foreground service — not isolation.
+- Crypto libraries: WebCrypto for X25519/HKDF/HMAC/SHA-256/AES-GCM; `@noble/post-quantum` for ML-KEM-768 (the single third-party crypto dependency).
+- **The hardened tier — a Rust core keeping keys and ratchet state outside the webview, `core-rs` compiled natively and to WASM — is a roadmap item, not the build.** Until it exists, webview compromise reaches ratchet state on every platform alike; the mitigations of S1/S5 (§11.3) read accordingly.
+- Platform limit worth naming here because it changes the transport story: the **Linux** desktop webview (WebKitGTK) has **no `RTCPeerConnection`** — measured in the packaged app, with the relevant WebKit settings enabled — so the Linux desktop build's content always rides the relay (§13; Windows/macOS shells use different webviews and are untested on this point).
 
 ### 3.3 No application server
 
-There is no prekey server, directory service, or message relay. The only central points are the **HSM** (EPA, per-tenant, Encedo-provided or self-hosted) and **libp2p bootstrap/discovery nodes** (standard p2p infrastructure — see `ARCHITECTURE.md`).
+There is no prekey server, directory service, or message relay for text. The central points are the **HSM** (EPA, per-tenant, Encedo-provided or self-hosted), the **libp2p discovery nodes**, and — for shared files only — an operator **IPFS store** that holds ciphertext for minutes (§7.5). Standard p2p infrastructure otherwise — see `ARCHITECTURE.md`.
 
 ---
 
@@ -118,150 +117,72 @@ There is no prekey server, directory service, or message relay. The only central
 
 | Key | Type | Where | Lifetime | Used for |
 |---|---|---|---|---|
-| **IK** | X25519, purpose=`ecdh` (HEM flag) | HSM (PPA/EPA) | permanent | EH-2 DHs, topic derivation. **Never signs.** |
+| **IK** | X25519, purpose=`ecdh` (HEM flag) | HSM (PPA/EPA) — or password-sealed on device for a software identity (§4.5) | permanent | EH-2 DHs, topic derivation. **Never signs.** |
 | **EK** | X25519 | client RAM | one handshake (initiator's EK doubles as its initial ratchet key — §6.2) | EH-2 forward secrecy |
 | ML-KEM pair | ML-KEM-768 | client RAM | one handshake | PQ hybrid component |
-| Ratchet state (RK/CK/MK) | symmetric | client RAM (Rust core, Tauri tier) | session | per-message keys |
-| Sender key + per-epoch signing | symmetric + Ed25519 | client | group epoch | group messages |
+| Ratchet state (RK/CK/MK) | symmetric | client RAM (webview) | session | per-message keys |
+| Sender key (`chain_key`) | symmetric | client (encrypted cache §10) | group epoch | group messages (§8) |
+| **GK** (group identity) | X25519 | admin: HSM keypair; member: `GK_pub` entry | group lifetime | group marker + roster MAC (§8) |
+| `emp_pub` | X25519 public value | localStorage, plain | per profile | the device half of the §10 cache base |
 | libp2p PeerId | Ed25519 (libp2p) | client RAM | one app start | transport only; unlinked to IK |
-| Node key | libp2p keypair | node disk (`--key-file`; `--pass` derivation dev-only) | permanent | node identity, pinned in signed node list |
+| Node key | Ed25519 (libp2p) | derived from the node's `--pass` seed | permanent | node identity, pinned in the compiled-in node list (§5.6) |
 
 ### 4.1 Key-per-purpose
 
-IK does not sign anything — deniability (§6.4) excludes handshake signatures, group sender signatures use separate ephemeral keys (§8), and topics rest on ECDH only. A key declared Ed25519 (even dual-flagged) would carry a capability the protocol never uses, plus a Montgomery-conversion step per operation. HEM enforces purpose separation by hardware flag, so separation is a property of the device, not of implementation discipline. **No key sharing across products** (Chat, Mail/PGP, Vault, Identity have separate HSM keys) — removes joint-security questions from a whole-stack audit. **No dormant keys** — an unused key is not a security property.
+IK does not sign anything — deniability (§6.4) excludes handshake signatures, groups authenticate by ECDH-derived HMACs (§8), and topics rest on ECDH only. **There is no signature anywhere in the protocol.** A key declared Ed25519 (even dual-flagged) would carry a capability the protocol never uses, plus a Montgomery-conversion step per operation. HEM enforces purpose separation by hardware flag, so separation is a property of the device, not of implementation discipline. **No key sharing across products** (Chat, Mail/PGP, Vault, Identity have separate HSM keys) — removes joint-security questions from a whole-stack audit. **No dormant keys** — an unused key is not a security property.
 
 ### 4.2 DESCR (key metadata)
 
-Format: `<namespace>:<role>:<key_type>:<principal>:<attributes>`.
+Two HSM fields with different consumers: `label` is what a human sees in the device's own key list (a 32-limit the client enforces in **UTF-8 bytes**, the conservative reading of the firmware's "32 characters"), `descr` is what the client searches and reads (**128 bytes**, a fixed record that silently truncates). The prefix must be ≥ 6 bytes because the HEM's `allow_keysearch` matches the first six (`ETSEIC`, not a 4-byte `CHAT`), and it carries a **generation digit** so the next format change leaves old records inert rather than misread.
 
 ```
-CHAT:self:ik:krzysztof@encedo.com                          ← X25519, purpose=ecdh
-CHAT:contact:ik:alice@proton.me:fp=<sha256(pub)[0:16] hex> ← imported contact pubkey
-CHAT:channel:<channel-id>:member:<user-principal>
-CHAT:channel:<channel-id>:sender_key:epoch=<n>
+IK     label  Onchato-IK-<handle>                       (truncated to fit)
+       DESCR  ETSEIC:self1,<handle>
+PEER   label  Onchato-Peer-<name>                       (truncated to fit)
+       DESCR  ETSEIC:peer1,<owner_KID base64url>,<name>
+GROUP  →  the marker format is defined in §8
 ```
 
-Contacts are stored as **public keys with metadata**, not private keys. The client verifies `SHA-256(pubkey)[0:16] == fp` on every use. Import (QR / bundle) carries one X25519 pubkey + fingerprint; the user compares one fingerprint out-of-band, not a set.
+- **The identity's ID is the KID of its own IK entry** — `KID = SHA-1(pub)[0:16]`, a firmware-defined index on key content, so the same identity on another device has the same ID and nothing new is minted or stored. (SHA-1 truncated to 128 bits: hijacking a specific KID is a second preimage on 2¹²⁸; SHA-1's chosen-prefix collision weakness does not lower that, so truncated SHA-256 would change no attack cost here.)
+- **Contacts are scoped by the owning identity's KID.** `key_search` matches an anchored prefix, so `ETSEIC:peer1,<owner_KID>,` returns exactly one identity's contacts. Field order is fixed for every generation: identifiers of fixed width first, free text last, **the name read as the whole tail** (it is user-supplied and may contain the delimiter).
+- **A contact belongs to exactly one identity per device** — the HEM refuses to hold the same public key twice, whatever DESCR it sits under. The client predicts this without touching the device (it can compute the KID from the public key) via one broad `key_search("ETSEIC:peer1,")` on the add path, and says which identity holds the contact instead of surfacing a device error.
+- There is **no `fp=` field**: verifying `KID == SHA-1(pub)[0:16]` gives what a stored fingerprint gave without spending 32 bytes. Neither defends against an attacker who can write to the HEM (they would replace key and identifier together) — the real protection is §4.4's out-of-band verification at import.
+- Two identities may be signed in at once (two tabs); §9.1 is per-identity so they never see each other. All per-identity client state is keyed by the **KID**, never the handle — handles may repeat and may be edited.
+
+Contacts are stored as **public keys with metadata**, not private keys. Import (QR / invite link) carries one X25519 pubkey; the user compares a fingerprint (`SHA-256(pub)`, §4.4) out-of-band. The invite itself is a URL fragment `#i=base64url(JSON { p, n, r? })` — `p` the pubkey (base64, exactly 32 bytes), `n` a display name (≤ 64 chars, control/format characters stripped), and `r: 1` marking a **reply** to an invite, so the receiver adds the contact without sending its own key back again.
 
 ### 4.3 HSM operations
 
-HEM provides two things: **key management** (create, delete, search keys) and **crypto on those keys** — `ecdh` in two modes: raw, or with an **HKDF step executed inside the HSM** (the secret is the ECDH output; salt, info and length are API arguments).
+The current HEM firmware exposes **raw `ecdh` only** — there is no in-HSM HKDF yet. The design target (and the assumption earlier drafts were written against) is `ecdh`+HKDF in one call, so that IK-derived secrets never leave the device; **until that firmware ships, every IK-derived HKDF runs client-side over the raw ECDH output.**
 
 | Operation | Use | Frequency |
 |---|---|---|
-| `ecdh(kid, peer_pub, raw=true)` | **EH-2 only** — the raw shared point feeds the concatenated ikm (§6.2) | 1 call per handshake |
-| `ecdh(kid, peer_pub, hkdf={salt, info, L})` | topic material (§5.1), announce MAC keys (§5.2, §5.5), cache key (§10) — HKDF runs **inside the HSM**; the raw secret never leaves it | 2–3 calls/contact/day |
-| `key_generate(type=X25519, purpose=ecdh)` | IK at onboarding; contact import (public-key entries) | once/user, once/contact |
-| `key_delete(kid)` | contact removal, IK rotation (§16 P6) | rare |
-| `key_search(prefix)` | resolve contacts, group membership | medium |
-| `key_list` | initial contact-book load | rare (client start) |
+| `ecdh(kid, peer_pub)` → raw 32 B | EH-2 DHs (§6.2); the base of every IK-derived HKDF: pair topic (§5.1), announce MAC keys (§5.5), rotation offset (§5.4), the cache base (§10) | 1/handshake; 1/contact/session (memoised) |
+| `key_generate(type=X25519, purpose=ecdh)` | IK at onboarding; GK at group creation | once/user, once/group |
+| `key_import(pub)` | contact IK_pub; a member's `GK_pub` (§8) | once/contact, once/group |
+| `key_delete(kid)` | contact removal, group leave, IK rotation (§16 P6) | rare |
+| `key_search(prefix)` | resolve identities, contacts, group markers | sign-in + add paths |
+| `getPubKey(kid)` | read a public half (until `key_search` returns them) | per contact/group at sign-in |
 | `exdsa_sign` | **not used** — deniability requires MAC, not signature | zero |
 | ML-KEM / ML-DSA in HSM | **not used in Phase 1** — ML-KEM is ephemeral & client-side; long-term PQ key only from Phase 3 (§15) | zero |
 
-The whole Chat↔HSM boundary is **one crypto call in two modes** plus key management (`key_generate`, `key_delete`, `key_search`, `key_list`). Everything else (HMAC, AES-GCM, ML-KEM, ratchet, and HKDFs whose ikm is not an IK-derived secret) is client-side with standard libraries. **Zero firmware changes for Phase 1.**
+Everything else (HMAC, AES-GCM, ML-KEM, ratchet, every HKDF) is client-side with standard libraries. **Zero firmware changes for Phase 1.**
 
-**Mode rule:** raw mode is used **only inside EH-2**, where the shared point must be concatenated with the other DH outputs client-side (and is zeroized immediately after `SK` derivation). Every other IK-based derivation uses the HKDF mode, so **raw IK-derived secrets never sit in client memory outside a handshake** — a compromised client leaks at most the current day's derived material, never the permanent pair secret.
+**Consequence of client-side HKDF, stated precisely:** the pair secret `ss = ECDH(IK_a, IK_b)` sits in client RAM (memoised per contact per session). It is **rendezvous-only material** — disjoint from the message-key DHs — so its exposure does not affect message confidentiality; what a compromised client leaks is metadata-linkability of that pair until an IK rotates. EH-2 needs raw mode regardless (the DH outputs are concatenated client-side and zeroized after `SK` derivation). When HKDF-in-HSM firmware lands, the derivations move in-device and this paragraph tightens to "raw mode only inside EH-2".
 
 ### 4.4 Contact integrity
 
-Contacts are public keys (confidentiality not critical); **integrity is critical** — an attacker swapping a contact's IK_pub achieves a perfect MITM. Protection: (1) fingerprint-in-DESCR check on every use; (2) HSM authentication (OIDC token or PKI client cert) gates key modification as a privileged op; (3) out-of-band fingerprint verification at import.
+Contacts are public keys (confidentiality not critical); **integrity is critical** — an attacker swapping a contact's IK_pub achieves a perfect MITM: the client derives the rendezvous with the attacker, handshakes with the attacker and encrypts to the attacker, with every layer below working perfectly on the key it was handed. Protection, per store:
 
-> **Proposal — several identities in one HEM: DESCR scoped by the identity's KID** *(v6, 2026-08-09; not yet normative — §4.2 above stands until this is accepted).*
->
-> §4.2 gives one identity per device: `CHAT:self:ik:<principal>` names the user, and
-> contacts sit beside it in a flat namespace with nothing saying whose they are. A
-> client therefore takes the first `self` entry it finds and shows **every** contact in
-> the device. Two identities on one HEM — a personal one and a work one, or a throwaway
-> — are not merely unsupported; they would silently share a contact book, which is the
-> opposite of what a second identity is for.
->
-> **Format.** Two HSM fields with different consumers, and both are used deliberately:
-> `label` is what a human sees in the device's own key list (**32 characters**, a
-> firmware limit), `descr` is what the client searches and reads (**128 bytes**).
-> ```
-> IK     label  Onchato-IK-<handle>                       (truncated to fit)
->        DESCR  ETSEIC:self1,<handle>
-> PEER   label  Onchato-Peer-<name>                       (truncated to fit)
->        DESCR  ETSEIC:peer1,<owner_KID base64url>,<name>
-> ```
-> The identity's ID is **the KID of its own IK entry** — nothing new is minted, stored or
-> risked being lost, and it is portable for free because `KID = SHA-1(IK_pub)[0:16]` is
-> derived from the key's content, so the same identity on another device has the same ID.
-> The `self` entry does not name itself: its KID *is* the name, and `key_search` returns it.
->
-> **The name appears in both fields on purpose.** They have different budgets (32 vs 128)
-> and different readers; `label` is a truncated copy for the device's UI and **`descr` is
-> authoritative**. Putting the name only in `label` would cap contact names at 19
-> characters; putting it only in `descr` would leave thirty keys labelled identically in
-> the device's key list, which is the one job `label` has.
->
-> **Scoping falls out of the search API.** `key_search` matches an **anchored prefix**, so
-> `ETSEIC:peer1,<owner_KID>,` returns exactly one identity's contacts and nothing else —
-> the filter is free. This fixes the field order for every future generation: **identifiers
-> of fixed width first, free text last, and the tail read whole.** A name is user-supplied
-> and may contain the delimiter, so it must never be read by ordinal position.
->
-> **A contact belongs to exactly one identity.** Not a policy choice — `KID` indexes the
-> key's *content*, so a HEM refuses to hold the same public key twice whatever DESCR it
-> sits under. Two identities cannot each own a contact; the second import fails. Because
-> the KID is computable by the client from the public key alone, this is **predictable
-> without touching the device**: one broad `key_search("ETSEIC:peer1,")` on the add path
-> (it returns KIDs and DESCRs, not public keys, so it is cheap and happens only there)
-> tells the client which identity already holds that key, and it can say so instead of
-> surfacing a device error. A client-side contact book, if it has one, may still hold the
-> contact for the second identity — at the cost of the portability that putting it in the
-> HEM buys.
->
-> **What is removed, and why it is safe.**
-> - The **creation timestamp** — never read by the client, and available from a separate
->   API call for anything that wants it, so it does not belong in a 128-byte field.
-> - The **role tag** (`ik`) — every entry under `self`/`peer` is an identity key; when a
->   second kind arrives (a PQ public key, §15) the generation in the prefix distinguishes
->   it, which is what a generation is for.
-> - The **`fp=` fingerprint of §4.2** — redundant with the KID, which the *device* derives
->   from the key's content. Verifying `KID == SHA-1(pub)[0:16]` gives what the field gave,
->   without spending 32 bytes. Note what this does and does not buy, since §4.4 leans on
->   it: neither the field nor the KID defends against an attacker who can write to the HEM
->   at all (they would replace the key and its identifier together). The real protection is
->   §4.4's (3) — out-of-band verification at import, and pinning what was verified. The
->   self-consistent field only ever caught corruption.
->
-> **Generation in the prefix stays** (`self1`, `peer1`), even though this revision does not
-> keep backward compatibility — the project is pre-MVP and the old format is simply
-> dropped. It costs one character now and is the only thing that will make the *next*
-> change cheap.
->
-> **A note for review, because SHA-1 draws the eye.** `KID = SHA-1(pub)[0:16]` is a
-> firmware-defined index on key content. Hijacking a specific KID is a **second preimage
-> on 128 truncated bits (2¹²⁸)**; SHA-1's practical weakness is chosen-prefix *collision*
-> (~2⁶³ on the full 160 bits), which requires controlling both inputs and is bounded below
-> by the generic 2⁶⁴ birthday cost once the output is truncated to 128 bits — so replacing
-> it with truncated SHA-256 (the RFC 7093 construction, as used for X.509 SKIDs) would
-> change no attack cost here. It is kept.
->
-> **Client-visible consequences.** Sign-in becomes a choice: one `key_search("ETSEIC:self1,")`
-> lists the identities, sorted **alphabetically by handle** (stable, unlike creation order).
-> Handles may repeat — the KID distinguishes them — so the picker must show a short KID
-> beside the name, or two identities named the same are indistinguishable and the wrong one
-> is chosen silently. Any client-side state kept per identity must be keyed by the **KID**
-> rather than the handle: keyed by a name it collides between two identities that share one,
-> and is orphaned when a name is edited.
->
-> **Two identities may be signed in at once** (two tabs, two windows) and this is supported
-> rather than tolerated — it is what makes the feature testable by one person. It does not
-> weaken §9.1: that rule is *one active session per identity*, enforced on a topic derived
-> from the IK, so two different identities are two different topics and never see one
-> another, while a duplicate of the same identity is still caught. What it does impose is
-> exactly the requirement above: two identities signed in at once share one browser origin
-> and therefore one local store, so a per-identity key carrying the *handle* rather than the
-> KID is not merely stale — two identities that happen to share a name write over each
-> other's state.
->
-> **The group marker (§8) is scoped by its own field, not by this one.** A marker is written
-> only by the group's admin, and there the admin *is* the owner, so a multi-identity client
-> scopes by the existing `admin_hint`. That holds only while admins alone write markers; the
-> §8 Proposal that has members write one too introduces an owner field for precisely this
-> reason.
+- **HEM-held contacts:** HSM authentication (scoped token) gates key modification as a privileged op; the KID indexes key content.
+- **The local contact book** (software identities; the local cache for HEM ones): a **keyed MAC over the stored text** — `HMAC(k)` with `k = HKDF(base, salt="encedo-chat-contact-book-v1", info=idKey)`, `base` from the §10 schedule — verified once at sign-in. The key is derivable only by the identity holder, and binding `info` to the identity's key makes a book copied between profiles fail. `unsigned` (a pre-MAC book) is accepted and upgraded; **`tampered` is not used and not overwritten** — the mismatching text is evidence. MAC, not encryption, by decision: reads stay synchronous, and secrecy of public keys buys nothing.
+- **At import**, both: out-of-band fingerprint verification (`SHA-256(pub)`), and pinning what was verified.
+
+### 4.5 Software identity
+
+A first-class identity backend for onboarding without hardware (and the packaged clients' default): a WebCrypto **X25519 keypair generated on device**, private half sealed with a password (PBKDF2-SHA256, 1 000 000 iterations, per-profile random salt → AES-GCM) in localStorage. It implements the same `Identity` contract as a HEM — one `ecdh` capability — and interoperates byte-for-byte with HEM identities; nothing downstream knows which backend it talks to.
+
+Honest assurance difference: the key is **on the user's disk under a password**, not in hardware — theft of the sealed blob plus a guessed password is the identity, the §9.3 dead-man's-switch does not apply (a re-handshake needs no device), and the profile-export file (§10) carries the whole identity under that same password. Multiple software profiles per browser are supported; each is its own identity with its own KID-scoped state.
 
 ---
 
@@ -274,157 +195,110 @@ shared_secret  = ECDH(IK_a_priv, IK_b_pub)            // HSM call; equal on both
 topic_material = HKDF-SHA256(
                    ikm  = shared_secret,
                    salt = "encedo-chat-rendezvous-v1",
-                   info = network_id || 0x00 || date_UTC,   // [v6 extension]; audited baseline was date_UTC only
+                   info = network_id || 0x00 || date_UTC,
                    L    = 32)
 topic          = base32(topic_material)[0:52]
 ```
 
-- `date_UTC` = `YYYY-MM-DD` → 24 h rotation, bounding the metadata-correlation window.
-- **[v6 extension]** `network_id` (the `--network` identifier, default `main`) is mixed in so independent networks are disjoint even if their nodes interconnect by accident. `0x00` is a domain separator against ambiguity between `network_id` and date.
+- `date_UTC` = `YYYY-MM-DD` **on the pair's shifted clock** (§5.4 — each pair rolls over at its own instant, not at 00:00 UTC).
+- `network_id` (the `--network` identifier, default `main`) is mixed in so independent networks are disjoint even if their nodes interconnect by accident. `0x00` is a domain separator against ambiguity between `network_id` and date.
 - Topic is indistinguishable from random without `shared_secret`. **Circular knowledge requirement:** to map a topic to (Alice, Bob) an observer must already know both IK_pubs — i.e. already know the relationship they seek.
-- Executed as **one HSM call** in the `ecdh`+HKDF mode (§4.3): the client receives the day's `topic_material` directly; the raw `shared_secret` never leaves the HSM. Computed **lazily** (first use per contact per day), not batched at midnight (see §16 P2 on rate limits).
+- The HKDF runs client-side over the raw `ecdh` output (§4.3 firmware phase); `ss` is computed **lazily** (first use per contact per session) and memoised, not batched at midnight (see §16 P2 on rate limits).
 
 ### 5.2 Self-topic
 
-Same construction with `ikm = IK_a_pub` (public), `salt = "encedo-chat-self-rendezvous-v1"`. Anyone knowing IK_pub can compute it — **deliberate** (documented presence leak, S2). Used for session takeover (§7). Its content is authenticated: the MAC key derives from `ECDH(IK_a_priv, IK_a_pub)` (a DH of the key with itself), computable only inside the HSM, so only the IK holder can post valid announces — obtained via the `ecdh`+HKDF mode, so only the derived MAC key reaches the client.
+Same construction and the **same salt** as the pair topic, with `ss = ECDH(IK_a_priv, IK_a_pub)` — a DH of the key with itself. Only the IK holder can compute that value, so the self-topic is **not publicly computable**: an observer holding IK_pub alone can neither find it nor confirm presence on it (the presence-leak register entry S2 records this). The same `ss` keys the announce MAC (§5.5), so anything validly MAC'd there is another window of the same identity. Used for duplicate-session detection (§9.1). Derivation is best-effort: an identity whose backend refuses a self-ECDH runs without the §9.1 rule rather than failing.
 
-### 5.3 Group topic — **[v6 extension, to confirm at next revision]**
+⚠️ The `date_UTC` input is the plain UTC date **at session start** — the self-topic does not rotate mid-session. A window held open across midnight and a window opened after it can therefore sit on different self-topics, and §9.1 silently does not fire between them until the older reloads. **Known defect**, recorded rather than papered over; the fix is a rotating watch like the pair topics have.
 
-Same construction with `ikm = group_secret` (from Sender-Key distribution context), `salt = "encedo-chat-rendezvous-v1"`, same `info`. The audited design references `group_topic` without fixing derivation; this fills the gap symmetrically with the pair topic.
+### 5.3 Group topic
 
-> **Proposal — group topic from a client-side per-epoch secret** *(v6, 2026-08-01; not yet normative — fills the §5.3 [v6 extension] gap for the auditor).*
->
-> **Seed.** `group_secret` is a random 32-byte value the group creator generates
-> and distributes pairwise (with the sender keys, §8) over existing 1:1 sessions;
-> it is **rotated on every membership change** (new epoch → new `group_secret`). It
-> lives **client-side** (the encrypted cache, §10), **not** in the HSM — a disposable
-> metadata seed, kept forward-secret with the rest of the group state. (An HSM cannot
-> import a symmetric secret; keeping it client-side also avoids a retrievable topic.)
->
-> **Topic.**
-> ```
-> topic = base32(HKDF-SHA256(
->           ikm  = group_secret,
->           salt = "encedo-chat-group-rendezvous-v1",
->           info = network_id ‖ 0x00 ‖ date_UTC,
->           L    = 32))[0:52]
-> ```
-> The HKDF runs **client-side** (the client holds `group_secret`) — unlike the pair
-> topic (§5.1), whose `ikm = ss` is an HSM-protected DH secret; here the ikm is not an
-> HSM secret, so nothing needs the device. Rotates **per epoch** (`group_secret` changes
-> on membership change) and **daily** (`date_UTC`, §5.4). A removed member holds only
-> the old `group_secret` → cannot derive the new topic; with the sender-key rotation
-> (§8) it can neither find nor read the group.
->
-> **Rejected seeds.**
-> - *A per-group public key `GK_pub` as ikm* (`topic = HKDF(GK_pub)`): `GK_pub` is a
->   stored, retrievable HSM value, so a HEM dump would compute the topic. `GK` is kept
->   as the group **identity/marker** and roster-MAC key (§8), **not** the topic seed —
->   the two are deliberately separated so a `GK_pub` leak does not expose the topic.
-> - *A contributory group DH `abc·G`* (each member contributes an ephemeral, all derive
->   the same seed via chained `ecdh`): correct and HEM-native, but a multi-round
->   synchronised ceremony re-run on every membership change, fragile over async
->   GossipSub — for a value that is random either way, not worth it.
+Same construction with a client-side seed and its own salt:
 
-### 5.4 UTC rollover
+```
+topic = base32(HKDF-SHA256(
+          ikm  = group_secret,
+          salt = "encedo-chat-group-rendezvous-v1",
+          info = network_id ‖ 0x00 ‖ date_UTC,
+          L    = 32))[0:52]
+```
 
-- Within ±5 min of midnight UTC: subscribe `[yesterday, today, tomorrow]`; otherwise `today` only.
-- Publish always on sender's `today`. Accept if timestamp within ±5 min **and** topic matches any of the three.
+**Seed.** `group_secret` is a random 32-byte value the group's admin generates and distributes pairwise (with the sender keys, §8) over existing 1:1 sessions; it is **rotated on every membership change** (new epoch → new `group_secret`). It lives **client-side** (the encrypted cache, §10), **not** in the HSM — a disposable metadata seed, kept forward-secret with the rest of the group state. The HKDF runs client-side (the ikm is not an HSM secret). A removed member holds only the old `group_secret` → cannot derive the new topic; with the sender-key rotation (§8) it can neither find nor read the group.
 
-> **Proposal — per-pair rotation offset** *(v6, 2026-08-01; not yet normative — the fixed-midnight rollover above stands until this is accepted).*
->
-> **Motivation.** The baseline rotates every pair at 00:00 UTC, so the whole user
-> base re-subscribes inside one ±5 min window — a synchronised load spike on the
-> discovery nodes (§5.6) — and the window must be wide enough to absorb clock skew
-> between the two members. Deriving each pair's own rollover time-of-day from the
-> pair secret fixes both: rotations spread ~uniformly across 24 h across the user
-> base (no midnight spike), and both members derive the **identical** offset, so
-> they cross together and the overlap shrinks to a skew/propagation guard.
->
-> **Derivation** (date-independent, so computed once per contact and cached until
-> IK rotation — same `ecdh`+HKDF-in-HSM mode as §5.1, the raw secret never leaves):
->
-> ```
-> rotation_material = HKDF-SHA256(
->                       ikm  = shared_secret,
->                       salt = "encedo-chat-rotation-v1",
->                       info = network_id || 0x00,          // NO date — the offset is stable per pair
->                       L    = 4)
-> offset_seconds    = be32(rotation_material) mod 86400     // rollover time-of-day, seconds past 00:00 UTC
-> ```
->
-> The topic itself still rotates **daily** per §5.1 (`date_UTC` stays in its
-> `info`); only the *instant* of rollover moves from 00:00 UTC to
-> `00:00 + offset_seconds`. The offset is secret to the pair — derived from
-> `shared_secret`, so not predictable without a private IK, exactly like the topic.
->
-> **Rollover rule** (replaces the fixed-midnight window, for this pair):
-> - The pair's topic transitions from day `D` to `D+1` at
->   `T = midnight(D+1) + offset_seconds`.
-> - Within ±`guard` of `T`, subscribe **both** adjacent days' topics; otherwise the
->   current day only. Because both members share `offset_seconds` they cross
->   together, so `guard` covers only clock skew + GossipSub mesh-graft propagation
->   on the new topic — not a 24 h disagreement, and only **two** topics overlap, not
->   three. (A per-*client* jittered offset, which the members do NOT share, would
->   need a wide overlap to cover the disagreement — rejected.)
-> - Publish on the sender's current-day topic under this schedule; accept if the
->   topic matches either side of the guard.
->
-> **Clock synchronisation** (lets `guard` shrink from minutes to seconds).
-> Members SHOULD anchor the rollover to a common clock so the guard covers only
-> propagation, not device drift. Browsers cannot run NTP (no UDP), so time comes
-> over HTTPS from an operator host. The cheapest source is the **`Date` response
-> header**, which every HTTPS response already carries: a **same-origin** `HEAD /`
-> on the web app's own host (e.g. `onchato.com`) exposes it with no endpoint and no
-> server code, and its 1 s resolution sits well inside any `guard`. Caveats — the
-> request must not be answered from a cache (use a dynamic/no-store path); a
-> *cross-origin* host must add `Access-Control-Expose-Headers: Date` for JS to read
-> it; and the WebSocket-upgrade response's own headers are **not** exposed to JS, so
-> this is a separate cheap request, not a free read off the relay socket. A
-> dedicated `GET /now` → epoch-ms is warranted only for sub-second precision, which
-> rollover does not need. The client computes `skew = server_time − (t_send +
-> t_recv)/2` (SNTP-style RTT correction), caches it, uses `local_clock + skew`, and
-> re-syncs ~hourly / on reconnect — not per message. The time source is a **soft hint, not a trust anchor**: a discovery
-> node is already trusted only for availability (threat model), so a false clock is
-> a denial-of-service (desync) it could already cause by dropping traffic, and it
-> never learns `offset_seconds` (secret) from serving a global clock. Clients clamp
-> the correction (reject/alert if it disagrees with the local clock by more than a
-> few minutes) and fall back to the local clock (wider guard) if the time fetch
-> is unavailable; native clients MAY use the OS clock instead.
->
-> **Compatibility.** Two implementations MUST agree on the schedule: a client
-> applying the offset and one still on fixed-midnight would miss each other for up
-> to `offset_seconds`. Hence this is gated behind the amendment, not a unilateral
-> client change; the interim client-side behaviour is the baseline ±5 min midnight
-> window.
+**Rotation — what actually rotates.** The topic rotates **per epoch** (membership change). The `date_UTC` input is the plain UTC date **at session start**, frozen for the session: the daily component moves only when a member's session (re)starts, there is no overlap window, and no group counterpart of §5.4 exists. ⚠️ Consequence, recorded as a **known defect**: two members whose sessions started on different UTC days derive different group topics and silently cannot hear each other until the older session restarts. (In practice sessions are short-lived enough that this has not been observed live; the defect stands regardless.)
+
+**Rejected seeds** (recorded for the auditor):
+- *A per-group public key `GK_pub` as ikm*: `GK_pub` is a stored, retrievable HSM value, so a HEM dump would compute the topic. `GK` is kept as the group **identity/marker** and roster-MAC key (§8), **not** the topic seed — separated so a `GK_pub` leak does not expose the topic.
+- *A contributory group DH `abc·G`*: correct and HEM-native, but a multi-round synchronised ceremony re-run on every membership change, fragile over async GossipSub — for a value that is random either way, not worth it.
+
+### 5.4 Daily rotation — per-pair instant
+
+The pair topic rotates daily, but **each pair rolls over at its own instant**, derived from the pair secret — not at 00:00 UTC. Two things follow: rotations spread ~uniformly across 24 h across the user base (no synchronized midnight re-subscribe spike on the discovery nodes), and both members derive the **identical** offset, so they cross together and the overlap shrinks to a skew/propagation guard.
+
+**Derivation** (date-independent, so computed once per contact and cached until IK rotation; client-side over the raw `ecdh` output, §4.3):
+
+```
+rotation_material = HKDF-SHA256(
+                      ikm  = shared_secret,
+                      salt = "encedo-chat-rotation-v1",
+                      info = network_id || 0x00,          // NO date — the offset is stable per pair
+                      L    = 4)
+offset_seconds    = be32(rotation_material) mod 86400     // rollover time-of-day, seconds past 00:00 UTC
+```
+
+The offset is secret to the pair — derived from `shared_secret`, so not predictable without a private IK, exactly like the topic.
+
+**Rollover rule.** The mechanism is *shift the clock back by the offset, then apply a plain 00:00 rollover*: the pair's rendezvous day is `utcDate(now − offset_seconds)`, and it goes into `date_UTC` of §5.1.
+
+- Within ±`guard` (**30 minutes** default) of the pair's rollover instant, subscribe **both** adjacent days' topics — two topics, never three; otherwise the current day only. Because both members share `offset_seconds` they cross together, so the guard covers only clock skew + GossipSub mesh-graft propagation. (A per-*client* jittered offset, which the members do NOT share, would need a wide overlap to cover the disagreement — rejected.)
+- Announce on every active day's topic; a contact is online if it announces on **any** of them. Publish content on the current day's topic under this schedule.
+- A conversation held open **across** a rotation keeps its topic to the end (both sides consistent) — live re-rendezvous of an established room is deliberately out of scope; new conversations open on the pair's current rendezvous day.
+
+**Clock source.** Clients run on the local clock; the 30-minute guard absorbs ordinary device skew (the ±5 min assumption of §2.3 sits well inside it). *Future, non-normative:* anchoring to an HTTPS `Date` header from an operator host (SNTP-style RTT correction, clamped, soft hint only) would let the guard shrink to seconds; it is not implemented.
+
+**Compatibility.** Two implementations MUST agree on this schedule: a client applying the offset and one on fixed-midnight would miss each other for up to `offset_seconds`. The whole deployment cut over together.
+
+*Test hook:* `forcedRotationSec` (web `?rot=<hour>`) overrides every pair's offset with one fixed time-of-day so a topic-hop can be watched on demand; behaviour is otherwise identical, and absent the flag the per-pair algorithm is the only one.
 
 ### 5.5 Announce (presence)
 
-Published on every active topic (contact topics + self-topic) at session start, every 60 s (heartbeat), and at rollover. This is also the room-presence signal ("is Y in the park yet").
+Published on pair topics and the self-topic — never on group topics (those carry the §8 keepalive instead). Cadence on **pair topics**: at join, early beacons at **[1 s, 3 s, 7 s]** (the first Announce goes out before the relay grafts the topic's mesh and reaches nobody), then a heartbeat every **15 s**. On the **self-topic**: one Announce at subscribe (no beacons), a heartbeat every **10 s**, and a farewell Announce on §9.1 stand-down. This is also the room-presence signal ("is Y in the park yet").
+
+**Wire encoding** (normative — a second implementation must interoperate): a UTF-8 JSON object `{ v, peer, nonce, ts, mac }` with `v = 1`, `peer` the sender's PeerId string, `nonce` = base64 of 16 random bytes, `ts` unix ms, and
 
 ```
-Announce { version=1, peer_id (~38 B), nonce (16 B), timestamp (unix ms), mac }
-
-announce_mac_key = HKDF-SHA256(ikm  = shared_secret,    // or the self-DH value for self-topic
+announce_mac_key = HKDF-SHA256(ikm  = shared_secret,    // the pair ss; the self-DH value on the self-topic
                                salt = "encedo-chat-announce-mac-v1",
-                               info = network_id || 0x00 || date_UTC,   // [v6 extension] — uniform with §5.1
+                               info = network_id || 0x00 || date_UTC,
                                L    = 32)
-mac = HMAC-SHA256(announce_mac_key, version || peer_id || nonce || timestamp)
+mac = base64( HMAC-SHA256(announce_mac_key, ASCII("<v>|<peer>|<nonce>|<ts>")) )
 ```
 
-`announce_mac_key` is obtained via the `ecdh`+HKDF mode (§4.3) — one HSM call per contact per day; the raw pair secret stays in the HSM.
+— the MAC message is the ASCII string of the four fields joined with `|`, not a binary concatenation. `announce_mac_key` derives client-side from the memoised pair `ss` (§4.3), once per contact per day.
 
-Receiver: check version; timestamp ±5 min (replay); `(peer_id, nonce, timestamp)` unseen today (duplicate); MAC constant-time. On success update `contact → peer_id`. The PeerId↔user mapping exists **only** inside this MAC'd channel; IK_pub never appears on the wire.
+Receiver: check `v` and shape; timestamp ±5 min (replay); MAC verify (WebCrypto `subtle.verify`, constant-time); then the subscriber deduplicates by nonce (a per-watch seen-set, kept for the session). On success update `contact → peer_id`. The PeerId↔user mapping exists **only** inside this MAC'd channel; IK_pub never appears on the wire.
+
+**Presence without a conversation.** Each contact gets a light watch on the pair topic — subscribe, Announce on the heartbeat, report whether the contact is announcing — so being *visible* to twenty contacts costs twenty subscriptions, not twenty handshakes. The watch also hears an incoming EH-2 msg1 and hands the topic over warm to a full room ("upgrade on send" — the receiver never has to open the conversation first). A peer silent for ~35 s (2.5 missed heartbeats) is reported `quiet`; ~90 s counts as gone.
 
 ### 5.6 Discovery nodes (transport infrastructure)
 
-3–5 operator-run libp2p nodes: GossipSub mesh (flood + seen-cache dedup between nodes) + circuit-relay-v2, behind nginx (WSS/443). `--network` isolation, keys on disk, PeerIds pinned in the operator-signed node list, **topic TTL eviction** instead of a hard cap (per-pair daily topics → many short-lived topics). Node selection: dial 2–3 nearest from the signed list in parallel, keep the fastest. Full node-operations detail in `ARCHITECTURE.md`.
+Operator-run libp2p nodes (two in production: bs1, bs2; a third precomputed) — GossipSub (flood + seen-cache dedup between nodes) + circuit-relay-v2 reservations, behind nginx (WSS/443). Network isolation is **cryptographic, not operational**: `network_id` enters every topic derivation, so foreign networks cannot collide even on a shared node — the node itself has no network flag. A node's Ed25519 key is derived from its `--pass` seed, so its PeerId is knowable before the machine exists. Topic budget: a **hard cap on concurrent live topics** (default 250) *plus* **TTL eviction** (a topic silent for the idle TTL returns its slot; a topic with heartbeats is never evicted). When the cap bites, the client sees an empty room and the relay logs the refusal — watch for it.
+
+**The node list** ships **compiled into the client** (`infra/nodes.json`) and can be refreshed at runtime by fetching a **compiled-in IPFS CID** — content addressing is the whole of the list's integrity (a new list means a new build); there is no signature on it. The client dials the list in order and fails over down it; the user can reorder or override locally. Full node-operations detail in `relay/README.md` and `ARCHITECTURE.md`.
 
 ---
 
 ## 6. Handshake — EH-2
 
-Interactive, Noise-XX-flavored with an ephemeral ML-KEM extension. **1.5 round-trips** (msg1 → msg2 → msg3_confirm), over a direct stream opened after discovery. Produces `SK` (32 B) = `RK_0`.
+Interactive, Noise-XX-flavored with an ephemeral ML-KEM extension. **1.5 round-trips** (msg1 → msg2 → msg3_confirm). The frames ride the **pair topic itself** (GossipSub, unsealed — told apart from content by their type byte, §6.1); no separate stream is opened for the handshake. **Whoever is in the room initiates on discovery** — nobody waits for a tie-break, because a presence watch is passive and the sender must be able to open (§5.5); **crossed msg1s** are settled on receipt: the lower PeerId keeps its own in-flight attempt (for a 2 s window) and ignores the incoming msg1, the higher one yields and responds. Produces `SK` (32 B) = `RK_0`.
+
+Delivery discipline, normative because GossipSub is fire-and-forget:
+
+- the opening frame is re-sent a few times while an attempt waits; a silent attempt times out and is retried on a backoff that slows (settling at roughly one attempt per 10 s) but never stops;
+- a **byte-identical repeat of msg1** (the initiator re-sending) gets the **stored msg2 replayed**, not a fresh attempt — a fresh responder ephemeral would doom the initiator's `mac_i`;
+- a *new* msg1 restarts a responder that already holds a session (peer reloaded / rotated its PeerId), the session being replaced only once msg3 verifies;
+- a responder that receives msg1 carrying an `initiator_id` that does not match the contact it holds a key for ignores that peer for 5 minutes — this is the one conclusive identity statement (a failed MAC is not: honest crossed handshakes produce those routinely);
+- content typed before establishment queues in a bounded buffer (32 envelopes) and flushes when the session is live; overflow is dropped.
 
 ### 6.1 Messages
 
@@ -433,6 +307,16 @@ I → R  msg1 { version, ek_i_pub, pq_pub (ML-KEM-768), timestamp, initiator_id 
 R → I  msg2 { version, ek_r_pub, pq_ct, timestamp, mac_r }
 I → R  msg3 { version, mac_i }
 ```
+
+**Serialization (normative — `h1 = SHA-256(serialize(msg1))` salts `SK`, so two encodings of one frame are two different session keys):**
+
+```
+msg1 = 0x01 ‖ ver(1) ‖ ek_i_pub(32) ‖ u16be(|pq_pub|) ‖ pq_pub(1184) ‖ u64be(ts_ms) ‖ initiator_id(8)
+msg2 = 0x02 ‖ ver(1) ‖ ek_r_pub(32) ‖ u16be(|pq_ct|)  ‖ pq_ct(1088)  ‖ u64be(ts_ms) ‖ mac_r(32)
+msg3 = 0x03 ‖ ver(1) ‖ mac_i(32)
+```
+
+`ver = 1`; trailing bytes are rejected (a frame parses exactly or not at all). The type bytes are the discriminators of §6's "told apart by their type byte" — `0x01–0x03` handshake, `0x10` ratchet content (§7.2), `0x20`/`0x21` group (§8.2). In `h2_partial` (§6.2), `ts_r` enters as the same `u64be`.
 
 `initiator_id` is a non-security hint for R to resolve IK_i_pub from its contact book.
 
@@ -450,7 +334,7 @@ h3    = SHA-256(h2_partial || mac_r)
 mac_i = HMAC-SHA256(SK, "initiator" || h3)               // I authenticates to R (in msg3)
 ```
 
-Each side makes exactly **one HSM ECDH call** (the DH involving its own IK; raw mode — this is the only place raw mode is used, §4.3); the other two DHs are local. DH outputs, `ss`, `sk_i` and R's `EK_r_priv` are zeroized as soon as `SK` is derived. **Exception — `EK_i_priv` lives longer:** R seeds the ratchet's first `DH_peer_pub` with `EK_i_pub` from msg1 (saves one round), so I keeps `EK_i_priv` as its initial ratchet private key until the first DH-ratchet step replaces it; it is zeroized then, not at handshake end.
+Each side makes exactly **one identity-backend ECDH call** (the DH involving its own IK); the other two DHs are local. Erasure, stated precisely because it is what an auditor will check: `dh1`, `dh2` and `ss` are wiped as soon as `SK` is derived; **`dh3` deliberately survives** — it is the first DH-ratchet step's ikm (below, §7.2) and is wiped when that step consumes it at ratchet construction. `sk_i` lives inside the ML-KEM decapsulation closure and is dropped, not explicitly zeroized (a JS-runtime limit); the `EK_*` private halves are non-extractable WebCrypto `CryptoKey`s — droppable, usable under compromise, but not exportable and not zeroizable from script. **`EK_i_priv` lives longest:** R seeds the ratchet's first `DH_peer_pub` with `EK_i_pub` from msg1 (saves one round), so I keeps `EK_i_priv` as its initial ratchet private key until the first DH-ratchet step replaces it.
 
 Two rules the wire flow implies but implementers miss:
 
@@ -474,7 +358,7 @@ The initiator computes the same values from the other side via X25519 commutativ
 - **PQ hybrid.** `SK = f(dh1 || dh2 || dh3 || ss)`; `dh*` rest on ECDLP (classical), `ss` on MLWE (ML-KEM-768, PQ). Breaking one problem is insufficient: `SK` confidentiality holds while **either** assumption stands. Concatenation-in-HKDF is the standard hybrid combiner (draft-ietf-tls-hybrid-design; Bindel et al. 2019). Framing for the auditor: EH-2 is an **AKE** (MAC-authenticated, Noise-style) whose classical component is a NIKE (X25519), not a CCA-secure KEM — the security argument lives at the AKE level, not as "two IND-CCA2 KEMs combined".
 - **Deniability.** No long-term-key signatures. Both MACs use `SK`, shared by both parties — either could have produced any MAC on `SK` post hoc, so neither holds proof of authorship (offline/non-repudiation deniability). Online real-time deniability would need ZK proofs (not used; unnecessary for the target).
 - **KCI resistance.** An attacker with `IK_r_priv` still cannot impersonate someone else *to* R: forging `mac_i` needs `SK`, needing `dh2 = DH(IK_i_priv, EK_r_pub)`, needing `IK_i_priv`.
-- **Replay protection.** (1) timestamps ±5 min; (2) `h1 = SHA-256(msg1)` salts `SK`, so every session's `SK` differs; (3) per-topic-per-day nonce cache.
+- **Replay protection.** (1) timestamps ±5 min; (2) `h1 = SHA-256(msg1)` salts `SK`, so every session's `SK` differs; (3) the Announce nonce dedup — a per-watch seen-set kept for the session (§5.5).
 
 ---
 
@@ -494,272 +378,161 @@ DR_State { RK, CK_send, CK_recv, DH_self_priv, DH_self_pub, DH_peer_pub,
 ```
 DH step:        RK', CK = HKDF-SHA256(ikm = X25519(DH_self, DH_peer), salt = RK,
                                       info = "encedo-ratchet-dh-v1", L = 64)
-Message key:    MK       = HKDF-SHA256(CK, info = "encedo-msg-key",   L = 32)
-Chain advance:  CK'      = HKDF-SHA256(CK, info = "encedo-chain-key", L = 32)
-Nonce:          12 B     = HKDF-SHA256(MK, info = "encedo-aead-nonce" || N_bytes, L = 12)
+Message key:    MK       = HKDF-SHA256(CK, salt = ∅, info = "encedo-msg-key",   L = 32)
+Chain advance:  CK'      = HKDF-SHA256(CK, salt = ∅, info = "encedo-chain-key", L = 32)
+Nonce:          12 B     = HKDF-SHA256(MK, salt = ∅, info = "encedo-aead-nonce" || u32be(N), L = 12)
 AEAD:           AES-256-GCM(MK, nonce, plaintext, aad = header)
-Header:         { dh_pub, pn, n }
+Header (wire):  0x10 ‖ ver(1) ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be)      — 42 bytes, and ALL 42 are the AAD
 ```
+
+Where the chain labels appear without a salt, the label is the **info** and the salt is empty — mixing that up derives different keys (the topic/announce/group-auth derivations of §5 and §8.1 use the label as the *salt*; the two families differ and both are normative as written).
+
+**The first root step is immediate and consumes the handshake's `dh3`.** At ratchet construction both sides run one DH step with `ikm = dh3` (= `DH(EK_r, EK_i)`, §6.2) against `RK = SK`, after which `SK` is zeroized: the initiator receives `CK_send`, the responder `CK_recv` (the responder has no sending chain until its own first DH step). The initiator's first header therefore carries `dh_pub = EK_i_pub`. A second implementation that starts from a bare `RK_0 = SK` without this step derives nothing the shipped client can read.
 
 Nonce via HKDF (not a bare counter) for defensive robustness against implementation nonce-reuse bugs; collisions are mathematically impossible across distinct MKs.
 
 ### 7.3 Rules
 
 - MK is single-use, zeroized after use; a state snapshot after message *n* cannot decrypt messages < *n* (per-message FS).
-- **Skipped-key bounds** (DoS protection against "future" DH publics): max 1000 per chain, 5 chains back, 24 h TTL.
-- **Bounded session lifetime** (S10 mitigation): forced background re-handshake every **4–8 h** (policy-configurable), transparent to the UI → hard upper bound on classical-PCS exposure. Reconnects and device switches also force a fresh EH-2 with new ML-KEM material; note that the daily topic rollover by itself does **not** break an established stream — the guaranteed cadence comes from the lifetime timer. Either way, PQ re-key is measured in hours, not months. The timer has a second, independent job: it is the hard bound on how long a hijacked live session can survive without the HSM (§9.3).
-- Message content travels **only** on the data plane (direct/relay stream) — never GossipSub.
+- **Skipped-key bounds** (DoS protection against "future" DH publics): a single counter jump larger than **1000** is refused (the gap bound — not a cap on the total stored); at most **5** superseded receiving chains are retained; unclaimed keys expire after **24 h**.
+- **Bounded session lifetime** (S10 mitigation): forced background re-handshake every **4–8 h** (randomised per session, so a fleet does not re-key in lockstep; the **lower PeerId** initiates it), transparent to the UI → hard upper bound on classical-PCS exposure. The replaced ratchet is kept for 60 s so frames already in flight under it still open. A **device switch** forces a fresh EH-2 (new PeerId ⇒ new handshake, new ML-KEM material); a mere relay reconnect keeps the live ratchet and re-sends the backlog. The daily topic rollover by itself does **not** break an established stream. The timer has a second, independent job: it is the hard bound on how long a hijacked live session can survive without the HSM (§9.3).
+- **Content plane.** Sealed content prefers a **direct WebRTC DataChannel** between the two peers (browser clients; signalling is the `rtc` envelope, §7.4) and falls back to **GossipSub through the discovery node** — always as ratchet ciphertext, so the relay carries opaque bytes either way. GossipSub is the *only* content path for groups (§8; an N² channel mesh is not a data plane) and for the Linux desktop build (its webview has no `RTCPeerConnection`, §3.2). A DataChannel (label `onchato`) is trusted only after a type-prefixed **2-byte ping/pong** (`0x00 0x50` / `0x00 0x4f`, up to 4 probes at 700 ms) proves both directions, and the first unconfirmed re-send while content rides it demotes the conversation back to GossipSub for its remaining life.
+- **Delivery contract** (above the transport, because nothing under it retransmits): `msg` and `file` envelopes carry an `id`; the receiver replies with an `ack` envelope `{ ref, rts }`; an unconfirmed message is re-sent under the **same id** on a widening backoff — **1.5 s, 4 s, 8 s, 15 s, 15 s**, capped at 60 s of budget, plus an **8 s grace** after the last re-send before the ⚠ verdict. The first two tries go out unconditionally; from the third the clock runs only while the peer is still announcing. Running out of budget keeps the bytes and marks the message for a manual re-send; a reconnect re-sends the backlog oldest-first with fresh budgets. Silence from a peer that has never acked at all is read as "old build", not loss.
 - Serialization: the application envelope of §7.4, encoded as JSON. A binary encoding (Protobuf, CBOR) would be smaller on the wire and remains open as an optimisation (P3, §16); **nothing in the key schedule, the header or the AAD depends on the encoding** — the ratchet seals opaque bytes.
 
-### 7.4 Application payload (plaintext inside the seal) — **[v6 extension]**
+### 7.4 Application payload (plaintext inside the seal)
 
 What §7.2 seals is a versioned application envelope, not a bare string:
-`{ v, t, id, ts, seq, …payload }`. `t` discriminates the payload type, `id` is a short per-message identifier (6 random bytes), `ts` the sender's UTC clock in ms, `seq` a per-sender counter used for de-duplication and display order — **UX only, not a security counter**; replay is prevented by the ratchet, not by `seq`. An unknown `t` decodes as an opaque envelope and is ignored, which is what makes payload additions backward-compatible. Types in use: `msg` (text, `format: plain`, never markup), `typing`, `presence`, `reaction`, `edit`, `knock`, `file` (CID + content key for a blob encrypted before upload), `ack`, `rtc` (the direct-plane signalling of §13), and the group distribution messages of §8 (`group-skd`, `group-skd-req` on the wire). It is encoded as JSON; the encoding is an efficiency question, not a security one (§7.3, P3).
+`{ v, t, id, ts, seq, …payload }`. `t` discriminates the payload type, `id` is a short per-message identifier (6 random bytes), `ts` the sender's UTC clock in ms, `seq` a per-sender counter used for de-duplication and display order — **UX only, not a security counter**; replay is prevented by the ratchet, not by `seq`. An unknown `t` decodes as an opaque envelope and is ignored, which is what makes payload additions backward-compatible. Types in use — exactly these eleven: `msg` (text, `format: plain`, never markup), `typing` (`state: start|stop` — sent on input, `stop` after ~4 s idle; `away` follows after ~60 s as a `presence` state), `presence` (`active|away|leave`), `reaction`, `edit`, `knock`, `file` (§7.5 — the blob's CID, content key, and metadata `{ name, size, mime, chunk, chunks, alg, exp }`, plus an optional caption in `body` and an optional `re`), `ack` (`{ ref, rts }` — the id being confirmed and the receiver's clock, feeding the §7.3 delivery contract), `rtc` (the direct-plane signalling of §13), and the group distribution messages of §8 (`group-skd`, `group-skd-req`). It is encoded as JSON; the encoding is an efficiency question, not a security one (§7.3, P3).
 
-Two payload conventions name a person or another message, and therefore belong in this document rather than only in the implementation:
+Three payload conventions name a person or another message, and therefore belong in this document rather than only in the implementation:
 
-**Reply — `re` on `msg` / `file`.** `re = { id, au, text }`: the id of the message being answered, the first 4 bytes of its author's public key as a hint, and a bounded copy (≤ 160 code points) of what it said. The copy is there because the transcript is ephemeral (§1, synchronous model) — the receiver usually no longer holds the message being quoted. It is content that already travelled on this ratchet under this key, so quoting costs length, not exposure. The author travels as a **key hint, never a name**: the reader resolves it against the participants of that conversation and displays its own name for that key, and an unresolvable or ambiguous hint is displayed without a name. A quote therefore cannot assert the presence of a party outside the conversation.
+**Mention — `@Name#<hint>` inside a `msg` body.** A mention travels as the visible name the sender used (sanitized — no `@`/`#`, collapsed whitespace, ≤ 48 chars) followed by `#` and **8 hex characters — the first 4 bytes of the mentioned member's public key**. The receiver resolves the hint against the participants of that conversation and renders its **own** name for that key (the sender's spelling is a fallback, never an assertion); a hint matching nobody, or two people, renders as plain text with no highlight. Same rule as `re`'s author hint: a key hint, never a name, so a message cannot claim the presence of a party outside the conversation.
 
-**Correction — `edit`.** `edit = { to, body, format }` replaces the displayed text of an earlier message. Its authenticity is exactly the ratchet's; on top of that the receiver accepts a correction **only from the peer whose message it names**, and only within **15 minutes** of that message (with ±5 min tolerated for clock skew, §14). It is **1:1 only**: a group broadcast (§8) carries no acknowledgements, so a sender could not be told that a correction failed to arrive.
+**Reply — `re` on `msg` / `file`.** `re = { id, au?, text }`: the id of the message being answered, optionally the first 4 bytes of its author's public key as a hint, and a bounded copy (≤ 160 code points) of what it said. The copy is there because the transcript is ephemeral (§1, synchronous model) — the receiver usually no longer holds the message being quoted. It is content that already travelled on this ratchet under this key, so quoting costs length, not exposure. The author travels as a **key hint, never a name**: the reader resolves it against the participants of that conversation and displays its own name for that key, and an unresolvable or ambiguous hint is displayed without a name. A quote therefore cannot assert the presence of a party outside the conversation.
 
-**Knock — `knock`.** An empty envelope: "I am here, are you?". It exists because §1's synchronous model has no push and no queue — two people have to be present at the same time, and nothing else in this protocol can turn "online but looking elsewhere" into a conversation. It is deliberately **not tracked for delivery, not re-sent and not acknowledged**: a knock that arrives ten minutes late is worse than one that never arrived, so it either reaches a peer in the room now or it does nothing. Rate-limited at both ends (the sender's own control locks for 10 s; a receiver ignores a second knock from the same peer within 5 s), because attention is precisely what an unwanted contact would try to take. 1:1 only — in a group it would be a room-wide alarm.
+**Correction — `edit`.** `edit = { to, body, format }` replaces the displayed text of an earlier message. Its authenticity is exactly the ratchet's; on top of that the receiver accepts a correction **only from the peer whose message it names**, and only within **15 minutes** of that message (plus **5 minutes of tolerance for a future-stamped message** — the skew allowance is one-sided, §14). It is **1:1 only**: a group broadcast (§8) carries no acknowledgements, so a sender could not be told that a correction failed to arrive.
 
 Consequences worth stating, because a correction is easy to mistake for a deletion:
 
+- A correction is a request to **display** different text, not a capability to remove text. A client that has already shown, logged or exported the original is unaffected. **No part of this protocol offers "delete for everyone".**
+- A correction that does not arrive leaves the two sides displaying different text. The sender is shown the delivery state of the correction itself (it is acknowledged under its own `id`), so the divergence is visible to the party that caused it.
+- Neither `re` nor `edit` changes the key schedule, the header, or the AEAD's AAD.
+
+**Knock — `knock`.** An empty envelope: "I am here, are you?". It exists because §1's synchronous model has no push and no queue — two people have to be present at the same time, and nothing else in this protocol can turn "online but looking elsewhere" into a conversation. It is deliberately **not tracked for delivery, not re-sent and not acknowledged**: a knock that arrives ten minutes late is worse than one that never arrived, so it either reaches a peer in the room now or it does nothing. Rate-limited at both ends (the sender's own control locks for 10 s; a receiver ignores a second knock from the same peer within 5 s), because attention is precisely what an unwanted contact would try to take. 1:1 only — in a group it would be a room-wide alarm.
+
 **Signalling — `rtc`.** `rtc = { to, sig }` carries one WebRTC signal — an offer, an answer, or an ICE candidate — towards the direct plane of §13. Two properties are the reason it is an ordinary envelope rather than a side channel: it is **sealed by the same ratchet as a message**, so the relay carrying it learns that a pair is negotiating and nothing about the addresses being exchanged; and it is **addressed** (`to`), so a signal meant for another peer on a topic that can hold more than two (§9.1, a second window of one identity) is reported rather than acted on.
 
-Signalling is fire-and-forget like everything else on the topic, and a lost offer would silently cost a conversation its direct path for its whole life — so the offering side (the lower peer id; the answering side must never compete) re-offers after 10 s without a proven channel, three times, and then stays on the relay. A channel counts as proven only after a byte has crossed it in both directions: `onopen` alone has been observed to lie, with both ends reporting a live channel while content vanished.
+Signalling is fire-and-forget like everything else on the topic, and a lost offer would silently cost a conversation its direct path for its whole life — so the offering side (the lower peer id; the answering side must never compete) makes up to **three attempts in total** — the offer and two re-offers, each after 10 s without a proven channel — and then stays on the relay. A channel counts as proven only after the §7.3 ping/pong has crossed it in both directions: `onopen` alone has been observed to lie, with both ends reporting a live channel while content vanished.
 
 1:1 only. A group rides GossipSub (§8) because a mesh of N² channels is not a data plane.
 
-- A correction is a request to **display** different text, not a capability to remove text. A client that has already shown, logged or exported the original is unaffected. **No part of this protocol offers "delete for everyone".**
-- A correction that does not arrive leaves the two sides displaying different text. The sender is shown the delivery state of the correction itself (it is acknowledged under its own `id`), so the divergence is visible to the party that caused it.
-- Neither field changes the key schedule, the header, or the AEAD's AAD.
+### 7.5 Files — the one bounded exception to "the network stores nothing"
+
+A shared file (images, documents, and **voice notes** — a recording is an ordinary file with an audio MIME type, no new envelope type) is too large for the message path, so its **ciphertext** rests briefly on an operator-run IPFS store while the envelope carries the key.
+
+**Encryption — `alg = "A256GCM-chunked-v1"`, before any byte leaves the device:**
+
+- One **single-use random 32-byte key per file**. It travels in the `file` envelope over the 1:1 ratchet or the group sender key — both PQ-hybrid already (EH-2 seeds them), so no KEM per file is needed; the body is symmetric and Grover leaves AES-256 at 128 bits.
+- The plaintext is split into chunks (**4 MiB** default; the chunk size is a **wire field** in the manifest, not a build constant; hard caps: 16 MiB/chunk, **128 MiB**/file) and each chunk sealed with AES-256-GCM under nonce `0x00000000 ‖ u64be(chunk_index)` — a counter nonce, safe solely because the key is never reused.
+- The AAD of every chunk is `u32be(chunk_index) ‖ u32be(chunk_count)`: altered bytes fail the tag, reordered chunks open at the wrong index and fail, a truncated file is missing chunks every survivor names. A wrong key, tampered blob, reordered or truncated file all land in one refusal — none may yield partial plaintext.
+- The manifest `{ name, size, mime, chunk, chunks, alg, exp }` rides the same authenticated envelope as the key; the CID (a hash of the ciphertext) arrives authenticated too, covering the whole blob independently.
+
+**Storage.** The client uploads through its **own origin** (`/f/…`, proxied by nginx to the operator's Kubo node) and fetches the same way; a public IPFS gateway serves the same bytes (verifiable independence — `net/file-decrypt.ts` in the repo exists so the ciphertext-only claim can be checked by hand). The blob is **unpinned and swept after a TTL of ~5 minutes** (`exp` in the manifest tells the receiver when to stop offering the download). The store holds ciphertext and never sees a key.
+
+**What this concedes, stated for §12:** the store operator (and the public gateway) observes upload/download events — IP, blob size, timing, and the download pattern of a CID — for the blob's lifetime. That is a third central point (§3.3) with a metadata surface the text path does not have; the ciphertext itself is covered by the AEAD argument above. Files are deliberately **not pinnable** (§10): a kept file would outlive the sweep only as a button that lies.
 
 ---
 
-## 8. Groups — Sender Keys
+## 8. Groups — Sender Keys, all-ECDH
 
 Scale assumption: **3–5 members, max 8–10** (1:1 goes through §6–7, not the group mechanism). MLS (RFC 9420) deferred, not rejected — its O(log N) advantage matters above ~50 members; at this scale the pairwise redistribution cost on membership change is ~9 messages, negligible.
 
-- Per group per member: `{ chain_key, per-epoch Ed25519 signing pair, epoch }`.
-- **Distribution:** `SenderKeyDistribution { group_id, epoch, chain_key, signing_pub }` sent pairwise through existing EH-2/ratchet sessions.
-- **Send:** `MK = HKDF(chain_key, info="encedo-group-msg")`; advance via `"encedo-group-chain"`; `ct = AES-256-GCM(MK, ...)`; `sig = Ed25519(hash(header || ct))`; broadcast `{ sender_id = SHA-256(IK_pub)[0:8], epoch, header, ct, sig }` on the group topic.
-- **Membership change:** every remaining member increments epoch, regenerates its sender key, and redistributes — on *add*, including the newcomer; on *remove*, excluding the removed (who then cannot read post-removal messages).
-- Signatures use **ephemeral per-epoch keys**, not IK — insider-forgery protection (member A cannot forge a message as B), at the cost of reduced in-group deniability (accepted, S3).
-- **Property note (vs 1:1):** the group chain gives forward secrecy within a chain (hash-ratchet forward) but **no post-compromise security inside an epoch** — a compromised `chain_key` reads all of that sender's group traffic until the next membership change / epoch rotation re-keys it. The 1:1 DH-ratchet self-healing has no group counterpart here (that is MLS territory — deferred, §11.4).
+A group is a software layer over the 1:1 mesh: each member has its own sending chain, everyone broadcasts on a shared topic derived from a client-side `group_secret` (§5.3), and messages are authenticated by **per-recipient ECDH-derived HMACs — no signatures anywhere**, so deniability holds in groups exactly as in 1:1. The design history (an earlier Ed25519 per-epoch variant, and why it was replaced) is in `GROUPS-DESIGN.md` and git.
 
-> **Proposal — deniable groups: ECDH-HMAC auth, a group identity key, HEM-portable membership** *(v6, 2026-08-01; not yet normative — the Sender-Key baseline above stands until this is accepted).*
->
-> The baseline authenticates group messages with per-epoch **Ed25519 signatures** —
-> the protocol's only signature, and the reason for the S3 deniability exception. This
-> replaces them with **ECDH-derived HMACs**, restoring deniability and keeping the whole
-> protocol on ECDH (no `exdsa_sign`, §4.3), at the cost of O(N-1) MACs per message —
-> negligible at 3–10 members. Sender Keys (`chain_key` + hash ratchet) are unchanged.
->
-> **Message authentication (replaces the signature).** For each recipient `j` the
-> sender `i` attaches a MAC under a key both derive from their pair:
-> ```
-> mk_ij  = HKDF(ECDH(IK_i, IK_j), "encedo-group-msg-mac" ‖ group_id ‖ epoch)
-> MAC_ij = HMAC(mk_ij, header ‖ ct)
-> broadcast { header, ct, {MAC_ij} }          // header = { group_id, sender_id, epoch, ctr }
-> ```
-> `MK`, `ct`, chain advance and `sender_id` are as in the baseline. Recipient `j` derives
-> `mk_ij` from its own IK and the sender's IK_pub (a contact), verifies, then opens.
-> **Insider-unforgeable** — `B` lacks `mk_AC` (needs A's or C's private IK), so cannot
-> forge A→C; **deniable** — `C` holds `mk_AC` and could have produced the MAC. The
-> per-epoch signing keypair is **removed**: `mk_ij` is *derived* from the IK pair, never
-> generated or distributed. (`mk_ij` authenticates, not encrypts; content FS stays with
-> `chain_key`. A compromised IK forges, does not decrypt — as it already could in 1:1.)
->
-> **Group identity `GK`.** A per-group **X25519** keypair the creator (admin) generates
-> in the HSM; the admin holds `GK_priv`, members import `GK_pub`. Roles: (1) the group's
-> stable identity/marker; (2) roster authentication —
-> ```
-> rk_i  = HKDF(ECDH(GK_priv, IK_i), "encedo-chat-group-roster-mac" ‖ group_id ‖ epoch)
-> MAC_i = HMAC(rk_i, roster)
-> ```
-> only the admin (holds `GK_priv`) can MAC a roster member `i` accepts (verified with
-> `ECDH(IK_i, GK_pub)`); deniable, and it gives cryptographic admin authority over
-> membership without a signature. **`GK` does not seed the topic** (§5.3) — identity and
-> topic seed are separated so a `GK_pub` leak does not expose the topic.
->
-> **Membership.** A contact is a **precondition** — sender keys ride 1:1 sessions, so you
-> cannot be in a group with someone you have no 1:1 channel with. **v1: all members are
-> mutual contacts** (every fingerprint verified out of band; no in-group TOFU).
-> Introduction (the admin vouches, a member does in-group TOFU) is a deferred extension.
-> `group_id = SHA-256(GK_pub)[0:16]`.
->
-> **HEM marker (portable membership).** The only per-group HSM object: the `GK_pub` entry
-> (admin: the `GK` keypair), DESCR `CHAT:channel:<group_id>:admin=<admin_KID>`.
-> `key_search("CHAT:channel:")` yields the portable group list. It holds **no**
-> `group_secret` (topic) and **no** sender keys (content) — those are client-side and
-> forward-secret. Optionally the DESCR carries a **compact roster** (≤10 members:
-> `KID[0:4]` per member + `CRC32` of the full KIDs, ~44 B; `KID = SHA1(pub)[0:16]`),
-> reconstructed by HSM KID-prefix lookup — CRC for reconstruction integrity, the admin's
-> `rk_i` MAC for authenticity. Trade-off: the roster blob lets one HEM dump reveal the
-> whole membership graph; without it a dump reveals only that the group exists.
->
-> **Portability & recovery.** `group_secret` + sender keys are client-side (forward
-> secret) and **re-synced** over 1:1 on a device change — messages sent while away are
-> unrecoverable (FS, by design). If **all** members lose their client state at once, the
-> admin **founds a new group** (fresh `GK`) rather than partially rebuilding the old one:
-> a member re-imported into a half-rebuilt group would hold a live `GK_pub` but no
-> `group_secret` — a "zombie" membership.
->
-> **Rejected.** A **deterministic HSM-derived** group key (re-derivable on any device):
-> re-derivable-from-HSM ⟺ no forward secrecy — rejected for message keys. Storing
-> `group_secret` **in the HSM via `cipherUnwrap`**: makes the seed durable but adds a
-> per-member group keypair, a wrap ceremony and a re-wrap every epoch, for a partial gain
-> (sender keys re-sync regardless) — a documented variant, not v1.
->
-> **New HKDF labels:** `encedo-chat-group-rendezvous-v1` (§5.3), `encedo-group-msg-mac`,
-> `encedo-chat-group-roster-mac`. (`encedo-group-msg` / `encedo-group-chain` unchanged.)
->
-> ---
->
-> **Implementation note — 2026-08-07, non-normative.** `impl/` writes the marker DESCR in a
-> compact, versioned form. The security argument above is unchanged: every identifier in
-> this field is a **lookup hint**, and authenticity comes from the admin's `rk_i` MAC (and
-> the CRC for reconstruction integrity), never from the field itself.
->
-> ```
-> ETSEIC:chan1:<admin_KID[0:4] base64url>:<name>:<compact roster base64url>
-> ```
->
-> - **`ETSEIC:` rather than `CHAT:`** — the HEM's `allow_keysearch` matches the **first six
->   bytes** of the DESCR, and `CHAT` is four. The generation rides in the prefix
->   (`chan1`, `chan2`, …), so a later format change leaves markers already written on a
->   device readable, and `key_search("ETSEIC:chan")` still returns every generation.
-> - **No `group_id`.** The marker *is* the DESCR of the `GK_pub` entry, and
->   `group_id = SHA-256(GK_pub)[0:16]`, so it is derivable from the record that carries it.
->   (Until firmware returns public keys from `key_search` this costs one extra `getPubKey`
->   per group; that firmware is expected 2026-08-10.)
-> - **`admin_KID` truncated to 4 bytes**, exactly as the roster hints are and for the same
->   reason — it is resolved against keys the device already holds. Note the consequence
->   explicitly: a 4-byte identifier is **grindable** (~2³² work), so nothing may treat this
->   field as evidence of *who* the admin is; it selects a candidate, the MAC decides.
-> - **A group name is carried** (≤16 characters, separator character excluded), which this
->   section does not describe. It is a label shown on a recovered device and sits outside
->   the roster's integrity story.
->
-> **Budget.** The DESCR field is **128 bytes**, which carries a full name and the ten
-> members the roster allows. Firmware before 2026-08-10 accepted **63**; the compact form
-> was sized against that and still carries a name plus three members there — which is the
-> reason the format is versioned rather than simply changed.
+### 8.1 Keys and derivations
 
-> **Proposal — a member holds the group key too, and generation 1 is redefined** *(v6, 2026-08-09; not yet normative — the layout above stands until this is accepted).*
->
-> **Correction of record first.** This section says members import `GK_pub`; the
-> implementation does not — `key_import` is used only for contacts, and a member keeps
-> `GK_pub` as bytes in the §10 encrypted local cache. So today the marker exists **only on
-> the admin's device**, and the "portable membership" this section promises holds for
-> exactly one member of each group. A member who moves to a new device with the same HEM
-> recovers nothing: not the group's existence, not its name, not who administers it.
->
-> **The change.** A member imports `GK_pub` as an ordinary public-key entry, with a marker
-> of its own:
-> ```
-> label   Onchato-Group-<name>                             (truncated to fit)
-> DESCR   ETSEIC:chan1:<owner_hint>:<admin_hint>:<name>:   ← roster blob omitted
-> ```
-> `owner_hint` is 4 bytes of the OWNING IDENTITY's KID in base64url — the same convention,
-> and the same "hint, not proof" semantics, as `admin_hint`. It is needed **because
-> members now write markers**: on an admin's marker the admin *is* the owner, so the field
-> is unnecessary while admins alone write them, and a client holding several identities
-> (§4 Proposal) can scope by `admin_hint`. On a member's marker the admin is someone else,
-> and without the owner the group list of one identity leaks into another's.
->
-> **This redefines generation 1 rather than spending generation 2**, which is only sound
-> because every existing marker is being erased with the devices that hold them (pre-MVP;
-> the same decision as §4's). The distinction matters and should be recorded: a new field
-> is inserted *before* `admin_hint`, so a surviving old record would not fail to parse — it
-> would parse as a different group, attributing it to the wrong identity and naming the
-> wrong admin, silently. Making old records inert rather than misread is what the
-> generation digit is for, and it is kept unspent for the first change that lands after
-> MVP.
->
-> A member **omits the roster blob**. The roster is the admin's authority and arrives
-> attested in the distribution; carrying a copy would add nothing and would turn every
-> member's device into a copy of the membership graph. Budget: the header grows from 20 to
-> 27 bytes, so an admin's marker with ten members and a 16-character name occupies 119 of
-> 128; a member's is ~60.
->
-> **A member's marker is near-immutable.** `GK` lives for the group's life — an epoch
-> rotation changes `group_secret` and the topic but never `GK` — so the entry is written
-> once at joining, rewritten only if the group is renamed, and deleted on leaving.
->
-> **Recovery needs no new protocol.** From the entry a returning member has `GK_pub`,
-> hence `group_id = SHA-256(GK_pub)[0:16]`, the admin and the name. It has **not** got
-> `group_secret` or any sender key — those stay client-side and forward-secret, which is
-> the point — so it cannot derive the topic and cannot join. It asks: the sender-key
-> request proposed above carries `{group_id, epoch}` over the 1:1 ratchet, the responder
-> re-checks the roster (a returning member is in it, a removed one is not), and the answer
-> is an ordinary distribution carrying `group_secret`. An unknown epoch is sent as 0 and
-> the responder answers at its own, which is the existing newer-epoch path. **Recovery is
-> a second trigger for one mechanism, not a second mechanism.**
->
-> **Consequences, all three deliberate.**
-> - **A member's device now admits membership.** Before this a seized HEM revealed nothing
->   about a member's groups. It now reveals that this person is in a group, and a hint of
->   who administers it — membership, not the graph, since the roster is omitted. The bound
->   on this is the device's own policy: `key_search` may be configured to require
->   authorisation, and a deployment that cares should set it, which leaves a seized HEM
->   yielding nothing without the password. Nothing in the client is affected, because
->   every search it makes already follows an authorisation.
-> - **A group belongs to one identity per device**, for the same reason a contact does —
->   the HEM refuses to hold one public key twice, and `GK_pub` is the same bytes for both
->   of a user's identities. The same client-side precheck applies unchanged. There is no
->   clash with contacts: `GK` is a fresh per-group keypair and never an identity key.
-> - **A removed member keeps its entry.** Nothing can delete it remotely, so a recovering
->   ex-member sees a group it cannot rejoin: its request is refused at the roster check.
->   That refusal is correct and must be surfaced as such — "you are no longer a member,
->   remove this?" — or it presents as a broken group that never loads.
+```
+group_id  = SHA-256(GK_pub)[0:16]
+sender_id = SHA-256(IK_pub)[0:8]
+mk_ij     = HKDF(ECDH(IK_i, IK_j), salt = "encedo-group-msg-mac",         info = group_id ‖ epoch_be32, L = 32)   // pairwise message auth
+rk_i      = HKDF(ECDH(GK,   IK_i), salt = "encedo-chat-group-roster-mac", info = group_id ‖ epoch_be32, L = 32)   // admin roster auth
+MK        = HKDF(chain_key, salt = ∅, info = "encedo-group-msg",   L = 32)   // per message
+chain_key′ = HKDF(chain_key, salt = ∅, info = "encedo-group-chain", L = 32)  // hash-ratchet forward, old discarded (FS)
+```
 
-> **Proposal — sender-key re-request, and the counter a distribution must carry** *(v6, 2026-08-09; not yet normative — an availability repair, no change to what is authenticated or encrypted).*
->
-> §8 distributes a sender key **once**, over a 1:1 session that may not exist at that
-> instant, and the receiving side of Sender Keys cannot derive what it was never given.
-> The failure that follows is silent and one-directional: the member whose distribution
-> was lost cannot open **that one sender's** messages for the life of the epoch, while
-> every other pair in the group works, and nothing in §8 lets either side notice. Neither
-> the MAC nor the AEAD has failed — there is simply no chain to walk. Observed in a live
-> 3-member group, 2026-08-09.
->
-> **The re-request.** On receiving a group message whose per-recipient MAC **verifies**
-> (so the sender is an authenticated member and the frame is addressed to us) for which we
-> hold no `chain_key`, a member may ask that sender to distribute again:
-> ```
-> SenderKeyRequest { group_id, epoch }      // over the 1:1 EH-2/ratchet, as the SKD itself travels
-> ```
-> The answer is an ordinary `SenderKeyDistribution`; a responder at a newer epoch answers
-> at that epoch, which is the existing membership-change path. Two conditions are
-> **normative for this proposal**, and each closes a way to abuse it:
->
-> - The request is emitted only **after** MAC verification, never on unauthenticated bytes.
->   The group topic is public and a frame on it is attacker-chosen; a request emitted
->   before verification would let anyone on the topic direct a member's 1:1 traffic.
-> - The responder **re-checks the roster** before answering. The 1:1 ratchet proves *who*
->   is asking, not that they are still in the group — and a removed member holds both our
->   contact and the old `group_id`. Answering without that check would return post-removal
->   read access, undoing §8's removal semantics.
->
-> Requests are rate-limited per member (the condition recurs on every frame that sender
-> sends). This is deliberately **not** an epoch rotation: rotating re-keys the group and
-> changes the topic (§5.3), so using it as a repair would lock out any member who is
-> offline at that moment — a repair that can drop a healthy member is worse than the fault.
->
-> **`ctr` in the distribution.** A `SenderKeyDistribution` must carry the counter its
-> `chain_key` stands at:
-> ```
-> SenderKeyDistribution { group_id, epoch, chain_key, ctr, … }      // ctr absent ⇒ 0
-> ```
-> The sending chain ratchets per message, so a key handed over mid-conversation is
-> `chain@k`. A receiver seeding it at 0 walks k steps that already happened and fails to
-> open every subsequent frame — indistinguishably from having received nothing. Without
-> this field a re-distribution repairs nothing **precisely when a repair is needed**, and
-> the original distribution (at `ctr = 0`) keeps working, so the omission is invisible in
-> testing. Absent ⇒ 0 keeps distributions from builds predating the field valid.
+Note the two salt/info conventions coexisting deliberately (§7.2 has the same split): the ECDH-based auth keys put the label in the **salt**; the chain-walk derivations put it in the **info** with an empty salt. Both are normative as written — swapping them derives different keys.
+
+Per group: **`GK`** — a per-group X25519 keypair the admin generates in the HSM (members hold `GK_pub`); **`group_secret`** — random 32 B, admin-generated, client-side only, seeds the topic (§5.3), rotates per epoch; per member a **sending `chain_key`** (client-side, encrypted cache §10). `GK` is stable for the group's life; it never seeds the topic (a `GK_pub` leak must not expose it).
+
+### 8.2 Message wire format (normative)
+
+```
+frame  = 0x20 ‖ version(1) ‖ header(32) ‖ macCount(1) ‖ { recipient_id(8) ‖ mac(32) }* ‖ ct
+header = group_id(16) ‖ sender_id(8) ‖ epoch(4 BE) ‖ ctr(4 BE)          // also the AEAD AAD
+ct     = AES-256-GCM(MK, nonce = HKDF(MK, salt = ∅, info = "encedo-aead-nonce", L=12), envelope, aad = header)
+mac    = HMAC(mk_ij, header ‖ ct)     // one per other member
+```
+
+`recipient_id = SHA-256(recipient IK_pub)[0:8]` — the same function as `sender_id`.
+
+The plaintext inside `ct` is the ordinary §7.4 envelope — of which a group receiver **dispatches only `msg`, `reaction` and `file`**; the 1:1-only types (`edit`, `knock`, `ack`, `typing`, `presence`, `rtc`) do not exist on a group topic and are ignored if sealed into one. The nonce comes whole from the single-use MK (no counter — MK never seals twice; note for the auditor: the 1:1 path of §7.2 uses the same `"encedo-aead-nonce"` label **with** `u32be(N)` appended to the info — one label, two constructions, both safe because each MK is single-use, but a unification is a fair review comment). A recipient locates its `recipient_id`, **verifies its MAC before deriving anything**, then walks its copy of the sender's chain to `ctr` and decrypts. Skipped positions are messages it never received (bounded: **2000 skipped keys per sender chain, 24 h TTL**; a larger gap is repaired by re-distribution, §8.4, not by iterating). A frame consisting of the single byte `0x21` is the **topic keepalive** (§8.5), not a message.
+
+**Insider-unforgeable and deniable at once:** member B lacks `mk_AC` (it needs A's or C's private IK), so B cannot forge A→C even holding A's chain key from the distribution; and C holds `mk_AC`, so C could have produced any A→C MAC — nothing here proves authorship to a third party. A compromised IK forges, it does not decrypt (content FS lives in the chain keys, which the pair ECDH never yields).
+
+**FS within a chain, no PCS within an epoch** — a compromised `chain_key` reads that one sender's traffic until the next epoch; the 1:1 DH-ratchet self-healing has no counterpart here (MLS territory, deferred).
+
+### 8.3 Distribution and membership
+
+```
+group-skd     { gid, gkPub, epoch, secret, chain, ctr?, roster[], rmac?, name? }   // over the 1:1 ratchet
+group-skd-req { gid, epoch }                                                        // over the 1:1 ratchet
+```
+
+`SenderKeyDistribution` (envelope type `group-skd`) rides the **existing 1:1 EH-2/ratchet**, which authenticates it. Fields: the group id and `GK_pub`; the epoch; `secret` = `group_secret` (topic seed); `chain` = the sender's current sending-chain key with **`ctr` — the counter that chain stands at** (absent ⇒ 0; a chain handed over mid-conversation is `chain@k`, and a receiver seeding it at 0 could never open anything — the omission repairs nothing precisely when a repair is needed, invisibly, because the original `ctr = 0` distribution keeps working); the `roster` (member IK_pubs — **`roster[0]` is the admin by convention**, and position carries meaning: a member's marker names `roster[0]` as its admin, and a rename in `name` is accepted only from `roster[0]`); `rmac` — the admin's roster MAC, present when the sender is the admin; and optionally `name`, the human group name (app metadata the crypto ignores; it is how a rename reaches every member).
+
+**Canonical roster form under `rmac` (normative):** `HMAC(rk_i, UTF-8( sort(roster base64 strings).join("\\n") ))` — the pubkeys **sorted**, newline-joined. ⚠️ Flag for the auditor: because the MAC'd form is sorted, the *order* of `roster` — which carries the admin convention above — is not covered by `rmac`.
+
+- **Membership precondition:** sender keys ride 1:1 sessions, so you cannot be in a group with someone you have no 1:1 channel with. v1: all members are contacts of the creator; mutuality is enforced structurally (the SKD cannot arrive until the 1:1 opens), not by an explicit check.
+- **Admin authority is cryptographic:** a member accepts a roster only under a verifying `rmac` (it derives `rk_i` from `ECDH(IK_i, GK_pub)`), and binds `gid == SHA-256(GK_pub)[0:16]`. Epoch advancement requires the admin's MAC; a distribution at a **newer epoch replaces** the session (fresh sender key), the **same epoch keeps** it. Deniable — any member could have produced the MAC it accepts.
+- **Membership change = admin rekey:** epoch++, new `group_secret` (new topic), fresh sender chains, distributed to those who remain — on *add* including the newcomer, on *remove* excluding the removed, who then can neither find the topic (§5.3) nor pass the epoch-scoped MACs.
+- **Dissolution** is a rekey to a one-member roster (distributed to nobody) followed by destroying `GK`. It is not a delete-for-others: their clients observe only silence.
+- **A distribution that cannot be sent now is queued**, and flushed when that member's 1:1 comes up — a member must not be silently skipped because their room was still opening.
+
+### 8.4 Repair — the sender-key re-request
+
+A sender key is handed out once, over a 1:1 that may not exist at that moment, and the receiving side cannot derive what it was never given. A lost SKD makes one member deaf to exactly one sender for the life of the epoch — no MAC failure, no AEAD failure, nothing in a log. So:
+
+- On receiving a group frame whose per-recipient MAC **verifies** and for which no chain exists, the member asks that sender over the 1:1: `group-skd-req { gid, epoch }`. The answer is an ordinary `group-skd` (a responder at a newer epoch answers at its own — the existing membership-change path). Two conditions are **normative**: the request fires only **after** MAC verification (the group topic is public; a request emitted on unauthenticated bytes would let anyone aim a member's 1:1 traffic), and the responder **re-checks the roster** before answering (the ratchet proves who asks, not that they are still a member — a removed member holds both the contact and the old gid).
+- Rate-limited to one ask per member per **30 s** (the condition recurs on every frame that sender sends).
+- This is deliberately **not** an epoch rotation: rotating changes the topic and would lock out any member who is offline at that instant — a repair that can drop a healthy member is worse than the fault.
+
+The same request is the **recovery path** for a member returning on a new device (§8.6): unknown epoch is sent as 0.
+
+### 8.5 Topic liveness — the keepalive
+
+A group is passive for hours; GossipSub prunes idle mesh links, and after relay churn a silent topic quietly stops delivering. Every member therefore publishes a **single-byte frame `0x21`** on the group topic every **20–28 s** (20 s + 0–8 s of jitter), with early beacons at [1 s, 3 s, 7 s] after join and a burst at [0, 800 ms, 2 s] after a reconnect. Receivers ignore it. It is plain and unauthenticated — it carries nothing and authenticates nothing; its only job is that the mesh sees traffic. **Announces (§5.5) are never sent on group topics** — an Announce is a pair construction and has no MAC key here.
+
+### 8.6 HEM marker — portable membership
+
+One DESCR per group, on the `GK_pub` entry, found by `key_search("ETSEIC:chan")` (every generation); this build writes generation 1:
+
+```
+admin   ETSEIC:chan1:<owner hint>:<admin hint>:<name ≤16 chars>:<roster blob base64url>
+member  ETSEIC:chan1:<owner hint>:<admin hint>:<name ≤16 chars>:
+```
+
+- Every identifier in this field is a **lookup hint** — the first 4 bytes of a KID, carried as **6 base64url characters** (8 characters in hex contexts), grindable at ~2³², so it only selects a candidate among keys the device already holds; the admin's `rk_i` MAC decides, never this field. `owner hint` = the owning identity's KID (needed because members write markers too — without it one identity's groups leak into another's on a multi-identity device); `admin hint` = the KID of `roster[0]` (§8.3) — whom to ask for re-sync.
+- No `group_id` field — the marker is the DESCR *of* the `GK_pub` entry and the gid is derivable from it. No `iat` — the HSM timestamps its own records.
+- **Budget is 128 bytes** and over-length silently truncates, so fields yield in priority order: hints always survive; the roster blob (admin only, ≤10 members: 4-byte KID hints + CRC32 of the full KIDs — reconstruction integrity only, the MAC is authenticity) is dropped **whole**, never partial; the name truncates first, on a character boundary. Header is 27 bytes; measured with the real builder, an admin marker with ten members and a 16-char ASCII name is ~103 of 128 and a member's ~44 — the test pins `≤ 128` at the maxima rather than the exact figures.
+- Only generation 1 is parsed — **the earlier comma-separated form is not read** (pinned by test). The generation digit exists so the *next* format change can leave old records inert rather than misread; it is kept unspent.
+- Written at group creation, rewritten on membership change (admin) or rename, deleted on leave; **never on message activity**. A member's import can be refused (the HEM holds one copy of any public key — a second identity in the same group cannot hold `GK_pub` twice); the group then runs from the local cache with no portable record.
+- **Recovery:** the entry yields `GK_pub` → gid, the admin hint and the name — never `group_secret` or sender keys (client-side, forward-secret, by design). The returning member asks over the 1:1 (§8.4). A **removed** member is refused at the roster check; the client surfaces that as "no longer a member", not as a group that never loads. A seized HEM with `key_search` gated on authorisation yields nothing without the password; ungated, a member's device admits membership (hints, not the graph — members carry no roster).
+- **All-wipe** (every member loses client state at once): the admin founds a **new group** (fresh `GK`) rather than partially rebuilding — a member re-imported into a half-rebuilt group would hold a live `GK_pub` and no `group_secret`, a zombie membership.
+
+### 8.7 Labels
+
+`encedo-chat-group-rendezvous-v1` (§5.3), `encedo-group-msg`, `encedo-group-chain`, `encedo-group-msg-mac`, `encedo-chat-group-roster-mac`.
 
 ---
 
@@ -767,13 +540,17 @@ Scale assumption: **3–5 members, max 8–10** (1:1 goes through §6–7, not t
 
 **Single active session per identity.**
 
-### 9.1 Takeover via self-topic
+### 9.1 Duplicate detection via self-topic — both stand down
 
-Bootstrap: generate `peer_id`, subscribe self-topic, wait 2 s collecting historical announces, verify each MAC, then publish own announce. During operation, on a valid self-topic announce with `peer_id != mine`: if its timestamp is **newer** than my session start → graceful shutdown; if equal → tie-break, higher `peer_id` wins.
+Bootstrap: generate `peer_id`, subscribe the self-topic (§5.2), **publish own announce immediately** (heartbeat every 10 s thereafter), and arm a **3 s settling window** — announces heard inside it are collected, and only after it may the client *act* on a duplicate (the immediate announce is what lets a settled window hear a newcomer at once; delaying it would delay detection by the window). On a valid self-topic announce with `peer_id != mine`, outside a reload's grace: **both copies stand down** — each closes its session and puts the user in a position to re-enter one deliberately (the web client clears the session in place and says what to do; the CLI exits).
 
-### 9.2 Graceful shutdown
+Fail-closed by decision, and diverging from the takeover design earlier drafts described (newer timestamp wins): nothing in the client can tell which window the user meant, and if one of them is not the user at all, letting it win by arriving second is the wrong default. There is also a mechanical reason a timestamp comparison cannot be implemented as specified: the §5.5 Announce carries the **send** time, not the session start, so a literal newest-wins rule would have every newcomer evict itself on the first heartbeat it hears. (If the Announce ever grows a field, `since` — session start — is the one to add; a hand-the-session-over rule becomes implementable then.)
 
-Close all direct streams; unsubscribe all topics; clear ratchet state from RAM; clear decrypted messages from UI (encrypted disk cache stays if enabled); notify "session moved"; optionally quit / return to login.
+Load-bearing detail: the window that stands down publishes **one last Announce on its way out** — without it the settled window goes silent immediately and the newcomer, still inside its own settling window, may never learn a duplicate existed and carry on alone. A page **reload is unaffected** (the old window is gone before the new one starts announcing). The watch is best-effort (§5.2): an identity that cannot derive the self-topic runs without the rule rather than failing.
+
+### 9.2 Stand-down shutdown
+
+Close all rooms; unsubscribe all topics; clear ratchet state from RAM; clear the transcript from the UI (the encrypted cache of §10 stays); tell the user what happened and what to do (the web client stays on screen with the session dead and asks for a close + refresh; the CLI exits).
 
 ### 9.3 Dead man's switch (device theft)
 
@@ -783,7 +560,7 @@ What an attacker holding the device but **not** the HSM can and cannot do:
 - **Can:** keep reading an **already-open, unlocked session** — the Double Ratchet runs on ephemeral keys in client RAM (§7.1) and does not touch the HSM. This is the same exposure as any stolen unlocked messenger.
 - **Hard stop:** the **bounded session lifetime** (§7.3). The next forced re-handshake (≤ 4–8 h) requires the HSM the attacker does not have — the hijacked session dies at the timer, guaranteed. This is the actual security boundary of the stolen-device scenario, and the second job of the lifetime timer beyond PCS.
 
-Self-topic takeover is a **coordination mechanism for honest clients, not a security control**: a malicious client simply ignores `graceful_shutdown`, or cuts the network so it never sees the announce. Ignoring it buys nothing beyond the timer bound above — an isolated client receives no new messages, and a connected one still dies at the next re-handshake. An attacker **with** a live HSM token extends the window only until that token expires or is revoked.
+Self-topic duplicate detection is a **coordination mechanism for honest clients, not a security control**: a malicious client simply ignores the stand-down, or cuts the network so it never sees the announce. Ignoring it buys nothing beyond the timer bound above — an isolated client receives no new messages, and a connected one still dies at the next re-handshake. An attacker **with** a live HSM token extends the window only until that token expires or is revoked. For a **software identity** (§4.5) this section's boundary does not exist — the re-handshake needs no hardware; the seal password is the whole of it.
 
 ### 9.4 Ratchet-state portability — Option C
 
@@ -793,21 +570,29 @@ Ratchet state is **not** carried between devices. A device switch requires a fre
 
 ## 10. Local persistence (cache)
 
-The network stores **nothing**, ever — no store-and-forward, no server-side history. Local, device-only cache is a per-profile default:
+The network stores nothing for the text path (files: §7.5, minutes of ciphertext). Locally, the **transcript is RAM-only** — a reload takes it. What persists: **three stores keyed off one device-bound, identity-gated base** (below), plus the sealed profile of §4.5, which is deliberately **not** on this schedule (it is what unlocks the identity, so it seals under the password's PBKDF2 instead):
 
-| Profile | Default | Notes |
+```
+base = ECDH(IK_priv, emp_pub)                                   // one device call per session, memoised
+```
+
+`emp_pub` is a random X25519 public value generated at first run and stored **in plain sight** in localStorage; X25519 consumes it as if it were a public key (RFC 7748 clamping; the output feeds HKDF, so contributory-behaviour caveats do not apply). This is a deliberate "KDF through the HSM": deriving `base` requires the IK holder *plus* this device-local value, so a stolen disk yields ciphertext and a public key. On current firmware `base` transits client RAM (§4.3); with HKDF-in-HSM firmware the per-store keys below derive in-device.
+
+Three derivations share the one `base`, each with its own salt — the design rule being that the *next* consumer reuses `base` too, instead of adding a device call:
+
+| store | key schedule | protects |
 |---|---|---|
-| P1 | **Encrypted cache** — key via HSM ECDH, HSM-unlockable | stolen disk without HSM = unreadable; user may switch to ephemeral |
-| P2 | **Ephemeral** (RAM only) | user may opt into encrypted cache |
-| P3 | **Ephemeral, enforced by policy** | no persistence option exposed |
+| group state | `HKDF(base, salt = "encedo-chat-group-cache-v1", info = group_id as hex text, L = 32)` → AES-256-GCM per group | `group_secret`, sender chains, roster, epoch (§8) |
+| pinned messages | `HKDF(base, salt = "encedo-chat-pin-cache-v1", info = roomId, L = 32)` → AES-256-GCM per room | messages the user deliberately kept (opt-in per message, capped at 32/room, refused not evicted; **files not pinnable** — §7.5) |
+| contact book | `HKDF(base, salt = "encedo-chat-contact-book-v1", info = idKey, L = 32)` → **HMAC key** | integrity of the stored book (§4.4 — MAC, not encryption, so reads stay synchronous) |
 
-```
-cache_master_key     = ECDH(IK_priv, device_bound_public_salt)             // HSM call — the user's IK
-cache_encryption_key = HKDF-SHA256(cache_master_key, salt = device_id,
-                                   info = "encedo-chat-cache-v1", L = 32)
-```
+An encrypted blob is stored as `base64( iv(12) ‖ ct )` under its store's key.
 
-`device_bound_public_salt` is a random 32 B value generated at first run and stored locally; X25519 consumes it as if it were a public key. This is a deliberate **"KDF through the HSM"** construction, executed as a single `ecdh`+HKDF call (§4.3): deriving the cache key requires the HSM (which holds IK) *plus* this device-local value, and `cache_master_key` **never materializes outside the HSM** — the client receives only `cache_encryption_key`. X25519 accepts arbitrary 32-byte inputs safely (RFC 7748 clamping; the output feeds HKDF, so contributory-behaviour caveats do not apply). Per-device separation comes from the random salt and `device_id` in HKDF. Cache (and persisted ratchet state, if enabled) unlocks **only** through the user's HSM. Logout deletes the salt and all cached data.
+A pin blob cannot be opened as a group-cache blob even by its own author — the salts separate the schedules. All three work identically for a HEM identity and a software identity (whose `ecdh` is local).
+
+**Lock vs wipe.** An ordinary sign-out/shutdown **keeps** the cache — it is already identity-gated, and groups resume without a re-sync. A deliberate **wipeout** deletes every `ec-*` key including `emp_pub`, after which the cached data is cryptographically dead even if the identity is later coerced — that is the cache-forward-secrecy action, and it is opt-in.
+
+**Profile export** (software identities): the whole profile — identity, contacts, groups, pins, settings — can be exported as **one sealed blob** under the profile password, for moving between browsers. The owner's name is *inside* the seal (the file does not say whose it is in transit); import refuses a name collision (overwriting would be somebody's identity) and the source is verified before anything is written. It is presented as a **move**, not a copy. The file is an offline-attackable artifact: file + guessed password = the identity (§4.5).
 
 ---
 
@@ -818,7 +603,7 @@ cache_encryption_key = HKDF-SHA256(cache_master_key, salt = device_id,
 | Primitive | Algorithm | Standard |
 |---|---|---|
 | ECDH | X25519 | RFC 7748 |
-| Signatures (groups only, ephemeral per-epoch) | Ed25519 | RFC 8032 |
+| Signatures | **none** — every authentication is an HMAC (§4.1) | — |
 | PQ KEM | ML-KEM-768 (NIST Level 3) | FIPS 203 |
 | Hash | SHA-256 | FIPS 180-4 |
 | KDF | HKDF-SHA256 | RFC 5869 |
@@ -836,16 +621,19 @@ cache_encryption_key = HKDF-SHA256(cache_master_key, salt = device_id,
 
 ### 11.3 Weakness register (for the auditor)
 
-- **S1 — EK not in HSM.** Client compromise *during* handshake exposes EK_priv; with an HSM token this can reveal SK. Mitigation: narrow window, HSM session lock, and (Tauri tier) EK lives in the Rust process, not the webview.
-- **S2 — self-topic is publicly computable.** An observer with IK_pub confirms a user's session is active (presence leak; cannot read/forge content). Acceptable for enterprise; weigh for the open channel.
-- **S3 — no deniability in groups.** Sender signatures give non-repudiation in-group. Accepted.
+- **S1 — EK not in HSM.** EK privates are non-extractable WebCrypto `CryptoKey`s, so script compromise *during* the handshake cannot export them — but it can **use** them, which is enough to derive SK; and `dh3`/`sk_i` byte material exists in JS memory in that window (§6.2). Mitigation: narrow window, HSM session lock. (The planned Rust-core tier that would move this out of the webview is roadmap, not the build — §3.2.)
+- **S2 — [REWRITTEN 2026-08; the leak described in earlier drafts does not exist in the implementation.]** The self-topic derives from `ECDH(IK, IK_pub)` (§5.2), computable only by the IK holder — an observer with IK_pub can neither find it nor confirm presence on it. What remains: the self-topic shares the pair topic's salt (`encedo-chat-rendezvous-v1`) rather than carrying its own; domain separation comes from the ikm (a self-DH vs a pair DH), which is sound but worth an auditor's glance. Numbering kept for cross-reference stability.
+- **S3 — [WITHDRAWN 2026-08.]** Earlier drafts authenticated group messages with per-epoch Ed25519 signatures and accepted lost in-group deniability. The shipped §8 authenticates with pairwise ECDH-HMACs — deniability holds in groups as in 1:1, and no signature exists in the protocol. Numbering kept for cross-reference stability.
 - **S4 — GossipSub subscription timing.** An observer with GossipSub logs sees who subscribes which topics; correlating to a pairing still needs both IK_pubs. Mitigation: daily rotation, ephemeral PeerId.
-- **S5 — ML-KEM encap client-side.** `sk_i` in client RAM; client compromise during handshake + message capture reveals `ss`. Active-attacker + endpoint-compromise only; (Tauri tier) in the Rust process.
+- **S5 — ML-KEM encap client-side.** `sk_i` in client RAM; client compromise during handshake + message capture reveals `ss`. Active-attacker + endpoint-compromise only.
 - **S6 — [WITHDRAWN in v1.3].** "IK reuse for X25519 and Ed25519" does not occur: IK is native X25519, purpose `ecdh`, no conversion, no signing capability, not shared across products. Numbering kept for cross-reference stability.
 - **S7 — nonce via HKDF.** Non-standard vs a GCM counter; auditor should confirm no collision edge case (impossible across distinct MKs, but review).
 - **S8 — ±5 min replay window.** Needs NTP; skew can DoS legitimate messages or widen replay. A UX↔security compromise.
 - **S9 — classical authentication in Phase 1 (the PQ gap).** Confidentiality is PQ-safe; authentication is classical X25519. "Harvest now, decrypt later" is fully covered (ML-KEM protects `ss`, a required SK component even if all DHs break). "Future active MITM" (CRQC, est. 2035–2040) is realistic only for state-level adversaries vs high-value targets. "Retrospective impersonation proof" is impossible even with a broken IK (no long-term signatures; deniability holds). Mitigation: Phase 3 in-band migration (§15) — done **before** CRQC exists (target 2030 vs 2035+). Why not now: PQ signatures (ML-DSA, standardized Aug 2024) are far less audited than classical curves; an identity certificate adds classical attack surface (parser, chain validation, revocation) — a real CVE risk today against a decade-away threat; the Phase 3 construction should be chosen at a mature standardization state.
-- **S10 — in-session PCS is classical, bounded by session lifetime.** The hybrid PQ protects SK derivation, but ratchet DH steps (§7.2) use X25519 only. An adversary with both a ratchet snapshot **and** a CRQC could track subsequent steps within one continuous session. The window is narrow here because the product forces frequent full re-key (no store-and-forward, non-portable ratchet, single-session takeover, and above all the lifetime timer — every such re-key is a fresh EH-2 with ML-KEM). **Phase 1 mitigation:** the bounded session lifetime (§7.3) turns this from emergent into guaranteed. **Optional Phase 2.5:** a hybrid ratchet injecting periodic ML-KEM into DH steps — simple here (reliable ordered stream, PQ key fits one header; no SPQR-style chunking/FEC needed).
+- **S10 — in-session PCS is classical, bounded by session lifetime.** The hybrid PQ protects SK derivation, but ratchet DH steps (§7.2) use X25519 only. An adversary with both a ratchet snapshot **and** a CRQC could track subsequent steps within one continuous session. The window is narrow here because the product forces frequent full re-key (no store-and-forward, non-portable ratchet, single-session stand-down, and above all the lifetime timer — every such re-key is a fresh EH-2 with ML-KEM). **Phase 1 mitigation:** the bounded session lifetime (§7.3) turns this from emergent into guaranteed. **Optional Phase 2.5:** a hybrid ratchet injecting periodic ML-KEM into DH steps — simple here (reliable ordered stream, PQ key fits one header; no SPQR-style chunking/FEC needed).
+- **S11 — the file store sees file metadata (§7.5).** The operator IPFS node and any public gateway observe blob size, timing, uploader/downloader IPs and the fetch pattern of a CID for the blob's ~5-minute life. Content is covered by the AEAD; this is a metadata concession the text path does not make, taken for the product value of files. Mitigation: TTL, ciphertext-only storage, verifiability (`file-decrypt`).
+- **S12 — software-identity assurance (§4.5).** The IK of a software profile is a password-sealed blob on disk: offline-guessable after theft, no hardware bound on the §9.3 timer, and the §10 export file carries the whole identity under the same password. Accepted as the explicit trade of the zero-hardware onboarding path; the HEM path is the assurance tier.
+- **S13 — the pair secret transits client RAM on current firmware (§4.3).** Rendezvous-only material; exposure is pair-linkability metadata, not content. Closes when HKDF-in-HSM firmware ships.
 
 ### 11.4 Considered and rejected
 
@@ -870,9 +658,11 @@ cache_encryption_key = HKDF-SHA256(cache_master_key, salt = device_id,
 
 ## 12. Metadata & privacy analysis
 
-**Passive observer sees:** libp2p packets with ephemeral peer_ids; GossipSub subscriptions (pseudorandom 52-char strings); Announce contents (structured but MAC'd — sender unknown without `shared_secret`); direct streams (libp2p-Noise encrypted); TLS to the HSM. **Does not see:** user identities (IK_pub is off-wire except inside MACs verifiable only by the shared-secret holder); conversation pairs (topic→pair needs both IK_pubs); message content; who-talks-to-whom at the application layer.
+**Passive observer sees:** libp2p packets with ephemeral peer_ids; GossipSub subscriptions (pseudorandom 52-char strings); Announce contents (structured but MAC'd — sender unknown without `shared_secret`); WebRTC DataChannels (DTLS) and relayed content (ratchet ciphertext over libp2p-Noise); TLS to the HSM. **Does not see:** user identities (IK_pub is off-wire except inside MACs verifiable only by the shared-secret holder); conversation pairs (topic→pair needs both IK_pubs); message content; who-talks-to-whom at the application layer.
 
-**Active MITM (libp2p) can:** delay, drop, inject (rejected by MAC/signature), attempt replay (rejected by timestamp/nonce). **Cannot:** decrypt, break the handshake, or impersonate (needs IK_priv in the HSM).
+**The discovery node** additionally sees, for traffic it carries: which topics are active, frame sizes and timing, and — on the direct plane — that a pair is negotiating WebRTC (the `rtc` envelope is sealed, so not the addresses). **The STUN server** (§13 — a public third party, Google's by default) sees a client's IP and negotiation timing on every direct attempt. **The file store (§7.5, S11)** sees blob sizes, fetch timing and IPs for a blob's ~5-minute life. **The MQTT fall-back transport**, where an operator deploys it, concedes more: any connected client can subscribe to the wildcard and observe every room's activity/timing/size (a static broker ACL cannot scope reads to runtime-secret rooms) — content stays E2E; documented in the README as a reach-over-privacy trade, and GossipSub does not have this (no wildcard subscribe, unguessable topics).
+
+**Active MITM (libp2p) can:** delay, drop, inject (rejected by MAC), attempt replay (rejected by timestamp/nonce). **Cannot:** decrypt, break the handshake, or impersonate (needs IK_priv in the HSM).
 
 **Compromised EPA (insider) can:** see all `ecdh` queries and results; run `ecdh(IK_a, peer_pub)` — but recovers only one of three DHs, never the full SK, and cannot decrypt; can log usage patterns (when Alice does ECDH, against which peer_pub → contact identification via DESCR). Mitigation: EPA audit logs visible to tenant admin, multi-operator controls for privileged ops, encrypted-DESCR storage (post-MVP).
 
@@ -884,12 +674,13 @@ cache_encryption_key = HKDF-SHA256(cache_master_key, salt = device_id,
 
 | Plane | Carries | Mechanism |
 |---|---|---|
-| Control | rendezvous subscriptions, Announce, self-topic, WebRTC signaling | GossipSub over the discovery-node mesh |
-| Data | EH-2 + ratchet + group messages | direct stream (rust-libp2p: TCP/QUIC/WebRTC · js-libp2p: WebRTC/WSS); fallback **circuit-relay-v2 stream** through one node |
+| Control | rendezvous subscriptions, Announce, EH-2 frames, `rtc` signalling, group keepalive | GossipSub over the discovery node |
+| Data (1:1, browser) | ratchet content | **WebRTC DataChannel**, opportunistic — established when both browsers can, demoted on stall (§7.3) |
+| Data (fallback; groups always; Linux desktop always) | ratchet / sender-key ciphertext | **GossipSub through the discovery node** |
 
-- **Two modes** (profile-bound): *direct* (P2P preferred; peers see each other's IPs) and *relay-only* ("anonymous": never dial direct; a blind relay forwards opaque NOISE bytes; Tor/VPN-compatible since the TCP/WSS path traverses Tor while WebRTC/UDP does not). The session layer is transport-agnostic — modes are invisible to EH-2/ratchet.
-- The rule "GossipSub carries rendezvous only, never content" equals the crypto design's rule. Relay data-path limits are raised on our nodes (circuit-relay-v2 defaults ~2 min/128 KB are signaling-sized).
-- Full node operations, distribution, signing, and UI modularity: `ARCHITECTURE.md`.
+- **Direct is the P1 posture** (peers see each other's IPs). ICE additionally consults a **public STUN server** (default `stun:stun.l.google.com:19302`, configurable) to learn reflexive addresses — a third party outside the operator's infrastructure that sees a client's IP and the timing of its negotiations, on every direct attempt. What rides GossipSub — presence, signalling, handshake frames, fallback and group content — is ciphertext + metadata to the relay. A **relay-blind plane** (circuit-relay-v2 streams: no IP exposure, opaque NOISE bytes, Tor-compatible) is **designed but parked**: on the pinned libp2p 2.2.x generation circuit-relay-v2's destination-side STOP handling is broken, and the v3 upgrade is blocked until GossipSub ships a libp2p-v3-compatible release. A user-selectable relay-only mode ships with that plane, not before. The Linux desktop is relay-only today by platform limitation (§3.2), not by choice.
+- **MQTT fall-back:** the same engine runs over an MQTT broker (QoS 0 only, no retention — the subset that cannot store) chosen per session, for operators who cannot run libp2p; metadata trade in §12.
+- Full node operations: `relay/README.md`; product architecture: `ARCHITECTURE.md`.
 
 ---
 
@@ -897,19 +688,37 @@ cache_encryption_key = HKDF-SHA256(cache_master_key, salt = device_id,
 
 | Constant | Value |
 |---|---|
-| HKDF labels | `encedo-chat-rendezvous-v1`, `encedo-chat-self-rendezvous-v1`, `encedo-chat-announce-mac-v1`, `encedo-handshake-v2`, `encedo-ratchet-dh-v1`, `encedo-msg-key`, `encedo-chain-key`, `encedo-aead-nonce`, `encedo-group-msg`, `encedo-group-chain`, `encedo-chat-cache-v1` |
+| HKDF labels (pair/self/announce/rotation) | `encedo-chat-rendezvous-v1`, `encedo-chat-announce-mac-v1`, `encedo-chat-rotation-v1` |
+| HKDF labels (handshake/ratchet) | `encedo-handshake-v2`, `encedo-ratchet-dh-v1`, `encedo-msg-key`, `encedo-chain-key`, `encedo-aead-nonce` |
+| HKDF labels (groups) | `encedo-chat-group-rendezvous-v1`, `encedo-group-msg`, `encedo-group-chain`, `encedo-group-msg-mac`, `encedo-chat-group-roster-mac` |
+| HKDF labels (local stores, §10) | `encedo-chat-group-cache-v1`, `encedo-chat-pin-cache-v1`, `encedo-chat-contact-book-v1` |
+| Frame type bytes | `0x01`–`0x03` EH-2 msg1–3 · `0x10` 1:1 ratchet content · `0x20` group message · `0x21` group keepalive |
+| Ratchet content header (§7.2) | 42 B = `0x10` ‖ ver ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be); all 42 B are the AAD |
 | Topic | base32, 52 chars |
-| Clock tolerance / replay window | ±5 min (NTP assumed) |
-| Rollover window | ±5 min around 00:00 UTC, triple-subscribe |
-| Announce heartbeat | 60 s |
-| Takeover bootstrap wait | 2 s |
-| Skipped keys | 1000/chain, 5 chains, 24 h |
-| Session lifetime | 4–8 h, then forced re-handshake |
-| Group scale | 3–5 typical, 8–10 max |
-| Edit window (§7.4) | 15 min from the message; receiver tolerates ±5 min of clock skew |
-| Reply quote (§7.4) | ≤ 160 code points of the quoted text; 4-byte author key hint |
+| Clock tolerance / replay window | ±5 min |
+| Rotation | per-pair instant (§5.4); overlap guard ±30 min, double-subscribe |
+| Announce heartbeat | 15 s (pair topics, with beacons [1 s, 3 s, 7 s]) / 10 s (self-topic, no beacons) |
+| Typing cadence (§7.4) | `stop` after ~4 s idle; `away` after ~60 s |
+| Presence thresholds | `quiet` after ~35 s of silence; gone after ~90 s |
+| Group keepalive (§8.5) | frame `0x21`, every 20–28 s; reconnect burst [0, 800 ms, 2 s] |
+| Self-topic settling window (§9.1) | 3 s |
+| Skipped keys | 1:1 — gap bound 1000, 5 chains retained, 24 h; group — gap bound 2000/sender chain, 24 h |
+| Session lifetime | 4–8 h (randomised), then forced re-handshake (lower PeerId initiates); replaced ratchet kept 60 s |
+| Delivery backoff (§7.3) | 1.5 s, 4 s, 8 s, 15 s, 15 s; budget cap 60 s + 8 s grace; first two tries unconditional |
+| Pre-establishment queue (§6) | 32 envelopes |
+| WebRTC (§7.3/§7.4) | ping/pong `0x00 0x50`/`0x00 0x4f`, 4 probes × 700 ms; 3 offer attempts total, 10 s apart; channel label `onchato` |
+| Mismatched-identity ignore (§6) | 5 min |
+| Group SKD re-request rate limit (§8.4) | one per member per 30 s |
+| Group scale | 3–5 typical, 8–10 max; roster blob ≤ 10 members |
+| Group frame | type `0x20`, version 1, header 32 B (gid 16 ‖ sender 8 ‖ epoch 4 ‖ ctr 4) |
+| DESCR budget | 128 bytes; label 32 bytes; group name ≤ 16 chars |
+| Edit window (§7.4) | 15 min from the message; +5 min tolerance for future-stamped messages |
+| Reply quote (§7.4) | ≤ 160 code points sent, ≤ 400 accepted; 4-byte author key hint |
+| Knock rate limit (§7.4) | sender 10 s; receiver ignores repeats within 5 s |
+| Files (§7.5) | chunk 4 MiB default / 16 MiB max; file ≤ 128 MiB; store TTL ~5 min |
+| Pins (§10) | 32 per room, refuse not evict |
 
-No custom primitives anywhere. Frozen library choices in §17.4.
+No custom primitives anywhere. Library choices in §17.4.
 
 ---
 
@@ -929,90 +738,78 @@ Two distinct problems on different horizons: **PQ confidentiality** (needed *now
 
 ## 16. Known limitations & open questions
 
-**Limitations (by design):** no offline messages; no message-history portability across devices; out-of-band trust establishment (no built-in key transparency); NTP dependency (±5 min); single active session (no simultaneous laptop+phone).
+**Limitations (by design):** no offline messages; no message-history portability across devices (the §10 export moves identity + contacts + groups, never a transcript); out-of-band trust establishment (no built-in key transparency); clock dependency (±5 min, absorbed by the §5.4 guard); single active session (no simultaneous laptop+phone).
 
-**Open questions before/near implementation:**
+**Open questions:**
 
-- **P1** — OIDC integration for HSM auth vs a separate mechanism (affects bootstrap).
-- **P2** — EPA rate limits: ECDH/sec per user; lazy topic computation (first use) spreads the midnight-rollover burst — confirm sizing. With the HKDF mode, per-day derivations are 2–3 calls per contact (topic + announce MAC; self MAC once); if this bites at scale, consider a batched multi-derivation variant of the API.
-- **P3** — serialization format (Protobuf vs CBOR vs custom) — wire-format stability.
-- **P4** — GossipSub flooding DoS: confirm score-based mesh pruning suffices at target scale; per-IP rate limiting can be added at nginx.
+- **P1** — answered in part: HSM auth is the SDK's scoped-JWT model (`authorizePassword` / `authorizeRemote`); an OIDC-fronted enrollment remains open.
+- **P2** — EPA rate limits: with client-side HKDF (§4.3) a session costs one `ecdh` per contact (memoised), so the per-day load is lower than the drafted 2–3 calls; re-confirm when HKDF-in-HSM firmware moves derivations in-device. The §5.4 per-pair offset already removed the midnight burst.
+- **P3** — serialization format (JSON today; Protobuf/CBOR as an optimisation) — wire-format stability.
+- **P4** — answered by operations: GossipSub's own score-based protection had to be **disabled** behind the reverse proxy (every client arrives from loopback, so IP-colocation scoring graylisted the whole user base), and per-IP `limit_conn`/`limit_req` at nginx — where the real address exists — is the deployed flood control (`relay/README.md`).
 - **P5** — device enrollment flow (how a user authorizes a new device to use its IK: OIDC, TOTP, push to primary).
 - **P6** — IK rotation on HSM compromise: no built-in contact notification; needs out-of-band re-import (MVP-acceptable, v2 feature).
 - **P7** — crypto library audit (esp. `@noble/post-quantum` ML-KEM quality).
-- **P8** — cache backend: IndexedDB (PWA) vs SQLite via Rust core (Tauri); different disk-encryption control (reinforces Tauri as hardened tier).
-- **[v6]** — fold `network_id` (§5.1, §5.5) and the group-topic derivation (§5.3) into the normative key schedule at the next revision.
-- **[v6]** — identity backend for the open channel's P1: the design assumes IK in an HSM (PPA/EPA); a zero-hardware onboarding path (software keystore, reduced assurance) is a product decision for onchato (`ARCHITECTURE.md` open item 8).
+- **P8** — cache backend: localStorage today; IndexedDB / SQLite-in-shell as data outgrows it.
 
 ---
 
-## 17. Implementation guide
+## 17. Implementation map
 
 **Overriding rule: do not invent cryptography.** Every primitive comes from a standard, audited library. Implementation is composition, not algorithm design.
 
-### 17.1 Repository (monorepo)
+### 17.1 Repository (what exists)
 
 ```
-encedo-chat/
-├── proto/          handshake.proto · message.proto · announce.proto · group.proto   (wire-format truth)
-├── core-rs/        crypto/ · handshake/ · ratchet/ · rendezvous/ · transport/ · hem/ · session/
-├── core-ts/        thin glue for the PWA (js-libp2p adapter, WASM bindings) — NO protocol logic
-├── ui/             Web Components (shared PWA + Tauri webview)
-├── tauri/          Tauri 2 shell (desktop + mobile), IPC bridge
-└── tests/          vectors/ (handshake KAT, ratchet KAT) · interop/ (PWA↔Tauri)
+impl/
+├── eh2/        wire.ts (msg1/2/3 + transcript) · handshake.ts (state machines, SK)
+│               · mlkem.ts (ML-KEM-768) · ratchet.ts (Double Ratchet) · establish.ts
+├── lib/        rendezvous · announce · presence · room (delivery contract, EH-2 seam)
+│               · envelope · session (crypto seam) · core (session/room facade)
+│               · senderkey/group/grouproom/gmarker (§8) · gcache/pincache/bookmac (§10)
+│               · filecrypto (§7.5) · migrate · profile (§4.5) · selfsession (§9.1)
+│               · quote/edits/mentions/linkify (§7.4) · capabilities · webrtc-probe
+├── net/        onchato/peer (libp2p) · webrtc, webrtc-plane (§13) · ipfs, file-decrypt (§7.5)
+│               · mqtt, mqtt-node · browser-test (the two-browser live harness) · load tools
+├── web/        the web UI (app.ts + index.html + i18n)
+├── cli/        ec / alice / bob (the same engine from a terminal)
+├── src-tauri/  the desktop + Android shell (§3.2 — wraps the web bundle)
+└── test/       ~50 files, ~380 tests: KATs (eh2-handshake, eh2-mlkem, senderkey),
+                FS/PCS and forge tests, wire-format pins, §8 repair, §9.1, §10 stores
 ```
 
-**One `core-rs`, two targets** (native for Tauri, WASM for PWA). Rationale is correctness, not security: two independent implementations inevitably diverge on edge cases (DH ordering, skipped keys, UTC rollover), and crypto divergence is costly to detect. **Transport must sit behind a trait** (rust-libp2p doesn't compile cleanly to browser transports → PWA keeps js-libp2p); never weave `rust-libp2p` into the handshake or ratchet. The crypto layer should be `no_std`-friendly to keep the WASM target cheap.
+One TypeScript engine; the planned `core-rs` (native + WASM) remains the roadmap for the hardened tier (§3.2). Transport sits behind the de-facto node interface (`net/mqtt-node.ts` proves it — MQTT wears the libp2p node's shape and everything above is untouched).
 
-### 17.2 Order of work (each step ends in a verifiable assert)
-
-- **Step 0 — skeleton.** Start with one `core-rs` + a Node binding for PoC; don't build two cores before the protocol works once. Define all of `proto/` (freeze wire format before logic). Stub `tests/vectors/`.
-- **Step 1 — HEM client (blocks everything).** Implement `ecdh` (**both modes**: raw and hkdf), `key_search`, `key_generate`, `key_delete`. Integration test against a real HEM: generate X25519 purpose=`ecdh`; raw ECDH both ways, assert commutativity `ECDH(a,B)==ECDH(b,A)`; assert raw mode returns the raw point (no hidden KDF); assert **hkdf mode equals a local reference HKDF over the raw output** (same salt/info/L); assert the purpose flag rejects a signing attempt; assert `key_delete` removes resolvability via `key_search`; assert TLS negotiates X25519MLKEM768.
-- **Step 2 — EH-2 (in-process, no network).** Initiator+responder state machines in one process. Primitives: `x25519-dalek`, `ml-kem`, HKDF-SHA256, HMAC-SHA256. **Assert `SK_i == SK_r`**; assert MAC verify (positive + negative); record a fixed-seed KAT. Watch §6.3 DH ordering — the usual "SK mismatch" source.
-- **Step 3 — Double Ratchet (in-process).** Symmetric + DH ratchet, `RK_0 = SK`. Test 100 messages each way; FS test (snapshot after *n* can't read < *n*); out-of-order with skipped-key bounds. Ratchet KAT. **Do not implement Phase 2.5 PQ ratchet now.**
-- **Step 4 — rendezvous + presence (mock transport).** Topic derivation (lazy), self-topic, Announce + MAC + verify. Test: two clients derive an identical topic, a third (foreign IK) differs; UTC rollover triple-subscribe; replay/duplicate rejection.
-- **Step 5 — libp2p integration (two processes).** GossipSub for rendezvous, direct stream for content. Discovery → MAC verify → stream → EH-2 → ratchet. **Never push DM content over GossipSub.** End-to-end conversation across the network.
-- **Step 6 — single session + self-topic takeover.** Publish/monitor self-topic; graceful shutdown on a newer announce; tie-break timestamp then peer_id. Test A-active/B-starts → A shuts down; dead-man's-switch simulation.
-- **Step 7 — Sender Keys (groups 3–5).** Pairwise distribution over EH-2; send/receive; epoch rotation on add/remove; Ed25519 sender signature (negative forge test). Scale test at 8 members.
-- **Step 7b — bounded session lifetime.** Configurable max lifetime (4–8 h); background re-handshake; assert post-re-key SK differs and pre-re-key messages don't decrypt with new state. The base classical-PCS mitigation — not deferred to Phase 2.5.
-- **Step 8 — cache.** Key from `HEM.ecdh(device_key, device_salt)` → HKDF; restart→unlock→continue ratchet; security test: cache without HEM = unreadable.
-- **Step 9 — UI (Web Components) + integration.** Components §17.5; connect to core via IPC (Tauri) or directly (PWA). Existing HTML mockups are the visual reference, not the code base.
-- **Step 10 — Tauri 2 shell + IPC.** Rust core behind IPC; webview gets only plaintext + events. **Ephemeral keys and ratchet state NEVER cross IPC to the webview.** Mobile after desktop is green.
-
-### 17.3 Module contracts (boundaries not to cross)
+### 17.2 Module contracts (boundaries not to cross)
 
 | Module | In | Out | Does NOT |
 |---|---|---|---|
-| `hem/` | kid, peer_pub | raw ECDH bytes | derive session keys; know ratchet |
-| `handshake/` | contact IK, transport | SK (32 B) | manage sessions; touch libp2p directly |
-| `ratchet/` | SK, DH inputs | MK per message | know identity; do I/O |
-| `rendezvous/` | IK pair, date | topic, announce | encrypt content |
-| `transport/` | topic, peer_id | bytes | know message crypto |
-| `session/` | announce events | active/shutdown | touch keys |
+| `Identity` (HEM / software) | peer_pub | raw ECDH bytes | derive session keys; know ratchet |
+| `eh2/` | contact IK, frames | SK (32 B), `Session` | manage rooms; touch libp2p |
+| `lib/session.ts` | SK | `encrypt`/`decrypt` opaque bytes | know envelope types |
+| `lib/envelope.ts` | payload | bytes ⇄ typed envelope | crypto; transport |
+| `lib/rendezvous.ts` | ss, date, network | topic, offsets, MAC keys | encrypt content |
+| `lib/room.ts` | topics, session, transport | delivery-tracked conversation | know identity backend |
+| transport (`net/`) | topic, bytes | bytes | know message crypto |
 
-Separation is an **audit requirement**: a cryptographer auditing `handshake/` shouldn't need to read `transport/`. Keep I/O away from crypto.
+Separation is an **audit requirement**: a cryptographer auditing `eh2/` does not need to read `net/`. The ratchet **serialises its own calls** (a promise chain around encrypt/decrypt) — two same-tick calls would derive one message key twice and desync the chains permanently; `decrypt` is transactional (state advances only after the AEAD verifies — a forged frame must burn nothing).
 
-### 17.4 Frozen library choices (don't substitute without a decision)
+### 17.3 Library choices
 
-**Rust core:** `x25519-dalek`, `ed25519-dalek` (group sender signatures only), `ml-kem` (RustCrypto), `hkdf`/`hmac`/`sha2`, `aes-gcm` (AES-256-GCM), `rust-libp2p`, `prost` (Protobuf), `rustls` (TLS 1.3 to HEM — confirm hybrid-group support; else document the gap). `ml-dsa` — **not Phase 1**; maybe Phase 3. `zeroize` for erasure, `subtle` for constant-time compare. **PWA:** `@noble/post-quantum` (ephemeral ML-KEM), `@noble/curves` or WebCrypto, WebCrypto (HKDF/HMAC/SHA-256/AES-GCM), `js-libp2p`, `protobufjs`. **Forbidden:** own AES, own curves, own HKDF. If a library lacks something, that is a discussion, not a reason to hand-roll.
+WebCrypto (`crypto.subtle`) for X25519, HKDF, HMAC, SHA-256, AES-GCM, PBKDF2; **`@noble/post-quantum`** for ML-KEM-768 — the single third-party crypto dependency; js-libp2p + `@chainsafe/libp2p-gossipsub` for transport. **Forbidden:** own AES, own curves, own HKDF. If a library lacks something, that is a discussion, not a reason to hand-roll.
 
-### 17.5 UI components (Web Components; visual reference = the HTML mockups)
+### 17.4 Review checklist (common pitfalls)
 
-`<ec-contact-list>` (contacts/channels, search, presence) · `<ec-conversation>` (window, virtual scroll, bubbles) · `<ec-composer>` (input, attach, security indicator) · `<ec-message>` (statuses) · `<ec-security-panel>` (fingerprint, handshake status, OOB verify) · `<ec-session-notice>` (session moved, HSM disconnected, handshake complete) · `<ec-contact-import>` (QR scan, fingerprint verify) · `<ec-device-switch>` (takeover dialog). UI state = signals/reactivity, **never keys**. UI gets plaintext + presence + security metadata from the core; sends intents (send, switch, import) to the core. See also the separate Core↔UI API document (commands/events, slash commands) — not yet written.
+DH ordering (§6.3) — first test · **msg3 gating** (R rejects application data until `mac_i` verifies — §6.2) · nonce reuse (MK single-use, nonce from MK) · UTC not local time, on the pair's shifted clock (§5.4) · erasure per §6.2's precise statement (**`dh3` and `EK_i_priv` outlive SK derivation by design** — dh3 to the first ratchet step, EK_i_priv until it) · constant-time MAC/tag compare (`subtle.verify`) · content is ciphertext on every path it takes (§7.3) · ratchet call serialisation + transactional decrypt (§17.2) · skipped-key limits (both §7.3 and §8.2) · group MAC verified **before** any derivation, and `group-skd-req` only after it (§8.4) · roster re-check before answering a re-request (§8.4) · key purpose flag (IK is X25519/`ecdh`; a negative signing test is a **manual HEM-path check**, not automated — §17.5) · bounded session lifetime timer active · storage keys per identity KID, never handle (§4.2).
 
-### 17.6 Review checklist (common pitfalls)
+### 17.5 Verification status
 
-DH ordering (§6.3) — first test · **msg3 gating** (R rejects application data until `mac_i` verifies — §6.2) · nonce reuse (MK single-use, nonce from MK) · UTC not local time (§5.4) · zeroize secrets after use (`zeroize`); **`EK_i_priv` is zeroized at the first DH-ratchet step, not at handshake end** (§6.2) · constant-time MAC/tag compare (`subtle`) · GossipSub rendezvous-only · IPC boundary (secrets never reach webview) · skipped-key limits · ecdh modes (raw stays raw, hkdf matches local reference — re-run both asserts on firmware change; raw mode only in EH-2) · key purpose flag (IK is X25519/`ecdh`; negative signing test) · bounded session lifetime timer active.
-
-### 17.7 PoC "done"
-
-`SK_i == SK_r` + handshake KAT green · ratchet 100 msgs both ways + FS test green · two clients derive identical topic, discovery works · end-to-end over libp2p · single-session takeover via self-topic works · all secrets zeroized, all compares constant-time · zero own crypto (import audit).
+KATs pin the EH-2 schedule and the group sender chain with fixed keys (re-record deliberately; they are the vectors for any future port). `SK_i == SK_r`, FS ("snapshot after *n* cannot read < *n*"), insider-forge negative tests, §8 repair-path and §9.1 stand-down scenarios run in `npm test` (offline, deterministic); the two-browser harness (`npm run browser-test`) drives the real bundle against the real relay through the DOM, including handshake, groups, files, and the §7.5 ciphertext-only check. What no automated harness covers: the HEM device paths (real-device walkthroughs only).
 
 ---
 
 ## 18. Glossary
 
-**IK** identity key (long-term X25519 in HSM, purpose `ecdh`) · **EK** ephemeral X25519 per handshake · **SK** 32 B handshake output = `RK_0` · **RK/CK/MK** ratchet root / chain / message key · **DESCR** HSM key-metadata field · **PPA** Personal Peripheral Appliance (USB HSM) · **EPA** Enterprise Peripheral Appliance (rack HSM, public) · **HEM** Hardware Encryption Module firmware (REST API) · **EH-2** the handshake here · **self-topic** per-user GossipSub topic for takeover detection · **Announce** rendezvous presence message (peer_id + MAC) · **FS/PCS/KCI** forward secrecy / post-compromise security / key-compromise impersonation · **ML-KEM** FIPS 203 PQ KEM · **CRQC** cryptographically relevant quantum computer · **Sender Key** symmetric group key distributed pairwise.
+**IK** identity key (long-term X25519 in HSM or password-sealed on device, purpose `ecdh`) · **EK** ephemeral X25519 per handshake · **SK** 32 B handshake output = `RK_0` · **RK/CK/MK** ratchet root / chain / message key · **GK** per-group X25519 identity key (§8) · **KID** `SHA-1(pub)[0:16]`, the HEM's index on key content · **DESCR** HSM key-metadata field · **PPA** Personal Peripheral Appliance (USB HSM) · **EPA** Enterprise Peripheral Appliance (rack HSM, public) · **HEM** Hardware Encryption Module firmware (REST API) · **EH-2** the handshake here · **self-topic** per-identity GossipSub topic for duplicate-session detection (§9.1) · **Announce** rendezvous presence message (peer_id + MAC) · **FS/PCS/KCI** forward secrecy / post-compromise security / key-compromise impersonation · **ML-KEM** FIPS 203 PQ KEM · **CRQC** cryptographically relevant quantum computer · **Sender Key** symmetric group sending chain distributed pairwise (§8).
 
 ---
 
@@ -1033,35 +830,37 @@ Mermaid — rendered natively by GitHub and most markdown viewers. Convention (S
 
 ### 20.1 End-to-end lifecycle — from app start to conversation
 
-Who computes what, where (§4–§7). Note both HSMs produce the **same** derived material independently — that is the whole rendezvous trick; the raw pair secret never leaves either HSM (hkdf mode, §4.3).
+Who computes what, where (§4–§7). Note both identities produce the **same** derived material independently — that is the whole rendezvous trick. On current firmware the client derives topics from the raw `ecdh` output (§4.3).
 
 ```mermaid
 sequenceDiagram
     participant HA as HSM (Alice)
     participant A as Alice client
-    participant N as Discovery mesh (GossipSub)
+    participant N as Discovery node (GossipSub)
     participant B as Bob client
     participant HB as HSM (Bob)
 
-    Note over A,B: day D — lazy per-contact setup (first use)
-    A->>HA: ecdh+hkdf(IK_A, IK_B_pub, rendezvous / announce params)
-    HA-->>A: topic_material(D) + announce_mac_key (raw secret stays in HSM)
-    B->>HB: ecdh+hkdf(IK_B, IK_A_pub, same params)
-    HB-->>B: identical topic_material(D) + announce_mac_key
+    Note over A,B: pair day D (shifted clock, §5.4) — lazy per-contact setup
+    A->>HA: ecdh(IK_A, IK_B_pub)
+    HA-->>A: ss (raw) → client HKDF: topic(D), announce_mac_key, offset
+    B->>HB: ecdh(IK_B, IK_A_pub)
+    HB-->>B: same ss → identical topic(D), announce_mac_key, offset
 
-    A->>N: subscribe(topic), Announce{peer_id_A, nonce, ts, MAC}
-    B->>N: subscribe(topic), Announce{peer_id_B, nonce, ts, MAC}
+    A->>N: subscribe(topic), Announce{peer, nonce, ts, MAC} + beacons [1,3,7 s]
+    B->>N: subscribe(topic), Announce{peer, nonce, ts, MAC}
     N-->>A: Bob's Announce
     A->>A: verify MAC → map contact to peer_id_B
-    A->>B: open direct stream (direct mode or circuit-relay)
-    Note over A,B: EH-2 handshake (20.2) → SK
-    loop until re-key timer (4-8 h) or session end
-        A->>B: ratchet message (AES-256-GCM)
-        B->>A: ratchet message
-        A->>N: Announce heartbeat (60 s)
-        B->>N: Announce heartbeat (60 s)
+    Note over A,B: EH-2 frames on this same topic (20.2) → SK
+    opt both browsers can
+        A->>B: WebRTC DataChannel (rtc envelopes signal over the topic)
     end
-    Note over HA,HB: timer → background EH-2 re-handshake (needs both HSMs)
+    loop until re-key timer (4-8 h) or session end
+        A->>B: ratchet content (DataChannel, or the topic as ciphertext)
+        B->>A: ratchet content + ack (§7.3 delivery contract)
+        A->>N: Announce heartbeat (15 s)
+        B->>N: Announce heartbeat (15 s)
+    end
+    Note over HA,HB: timer → background EH-2 re-handshake (one ecdh per side)
 ```
 
 ### 20.2 EH-2 handshake — message by message (§6)
@@ -1138,70 +937,72 @@ The implementer's map for `handshake/` + `session/` (§17.3). Note which events 
 ```mermaid
 stateDiagram-v2
     [*] --> Idle
-    Idle --> Discovering: day topic subscribed
-    Discovering --> Connecting: valid peer Announce (MAC ok)
-    Connecting --> Handshaking: direct stream open (direct or relay)
+    Idle --> Discovering: pair topic subscribed (watch or room)
+    Discovering --> Handshaking: valid peer Announce, or an incoming msg1
     Handshaking --> Established: EH-2 done (mac_i verified)
-    Handshaking --> Discovering: timeout / MAC failure
+    Handshaking --> Discovering: timeout → retry (slows, never stops)
     Established --> Rekeying: lifetime timer (4-8 h)
-    Rekeying --> Established: background EH-2 (needs HSM)
-    Established --> Discovering: stream lost
-    Established --> Closed: takeover announce / logout
+    Rekeying --> Established: background EH-2 (needs the identity backend)
+    Established --> Discovering: peer gone (~90 s silent)
+    Established --> Closed: §9.1 stand-down / sign-out
     Closed --> [*]
     note right of Established
-        daily topic rollover rotates
-        discovery topics only —
-        the established stream continues
+        the daily rotation moves the
+        rendezvous topic only — an
+        established room keeps its
+        topic to the end (§5.4)
     end note
 ```
 
-### 20.5 Session takeover & dead man's switch (§9)
+### 20.5 Duplicate session & dead man's switch (§9)
 
-The honest-client path and the stolen-device path differ only in who enforces the ending — the client, or the timer.
+The honest-client path and the stolen-device path differ only in who enforces the ending — the clients, or the timer.
 
 ```mermaid
 sequenceDiagram
-    participant Old as Old device (active session)
+    participant Old as First window (active session)
     participant ST as Self-topic (GossipSub)
-    participant New as New device
+    participant New as Second window
     participant H as HSM
 
-    New->>H: login / HSM auth
-    New->>ST: subscribe, wait 2 s (collect announces)
-    New->>H: ecdh+hkdf(IK, IK_pub) → announce_mac_key
-    New->>ST: Announce{peer_id_new, ts_new, MAC}
-    ST-->>Old: Announce (newer ts, foreign peer_id)
-    alt honest client
-        Old->>Old: graceful shutdown (close streams, zeroize ratchet, notify user)
+    New->>H: sign-in / auth
+    New->>H: ecdh(IK, IK_pub) → self ss → topic + announce_mac_key
+    New->>ST: subscribe + Announce{peer_id_new, ts, MAC} at once
+    Note over New: 3 s settling window - collect, act only after it
+    ST-->>Old: foreign valid Announce → duplicate detected
+    alt honest clients
+        Old->>ST: one farewell Announce (so New learns too)
+        Old->>Old: stand down - session dead, user told what to do
+        New->>New: stand down likewise (user re-enters ONE deliberately)
     else stolen / malicious client
-        Old->>Old: ignores announce (or stays offline)
-        Note over Old,H: still dies at next forced re-handshake - it has no HSM
+        Old->>Old: ignores the announce (or stays offline)
+        Note over Old,H: still dies at the next forced re-handshake - it has no HSM
     end
 ```
 
 ### 20.6 Groups — epoch rotation on membership change (§8)
 
-Remove flow shown; add is identical except the newcomer is included. Distribution rides existing 1:1 ratchet sessions — the group topic carries only encrypted, signed messages.
+Remove flow shown; add is identical except the newcomer is included. Distribution rides existing 1:1 ratchet sessions — the group topic carries only ciphertext with per-recipient MACs (and 1-byte keepalives).
 
 ```mermaid
 sequenceDiagram
-    participant A as Alice
+    participant A as Alice (admin)
     participant B as Bob
     participant C as Carol
     participant D as Dave (removed)
-    participant G as Group topic
+    participant G as Group topic (new, from new group_secret)
 
-    Note over A,D: membership change: remove Dave → epoch n+1
-    A->>A: new chain_key + per-epoch Ed25519 pair
-    A->>B: SenderKeyDistribution (via 1:1 ratchet)
-    A->>C: SenderKeyDistribution (via 1:1 ratchet)
-    Note over A,C: B and C do the same, nobody distributes to Dave
-    A->>A: MK = HKDF(chain_key), ct = AES-GCM, sig = Ed25519(hash(header || ct))
-    A->>G: {sender_id, epoch: n+1, header, ct, sig}
-    G-->>B: message
-    G-->>C: message
-    B->>B: verify sig (epoch key) → decrypt
-    Note over D: Dave holds keys for epoch <= n only - cannot read
+    Note over A,D: membership change: remove Dave → epoch n+1 (admin rekey)
+    A->>A: new group_secret + fresh chain_key; roster MACs rk_B, rk_C
+    A->>B: group-skd {gid, gkPub, n+1, secret, chain, ctr, roster, rmac} (1:1 ratchet)
+    A->>C: group-skd (1:1 ratchet)
+    Note over B,C: B and C verify rmac, rekey their own chains, distribute back - never to Dave
+    A->>A: MK = HKDF(chain_key), ct = AES-GCM(MK, aad=header), MAC_AB, MAC_AC
+    A->>G: 0x20 | v1 | header | 2 | {id_B, MAC_AB} {id_C, MAC_AC} | ct
+    G-->>B: frame
+    G-->>C: frame
+    B->>B: verify MAC_AB (mk_AB) BEFORE deriving → walk chain to ctr → decrypt
+    Note over D: Dave holds the old group_secret only - cannot even find the topic
 ```
 
 ---
