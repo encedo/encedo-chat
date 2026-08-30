@@ -12,7 +12,7 @@
  * t:'rtc' routes to onSignal, everything else to the UI callbacks.
  */
 
-import { buildAnnounce, verifyAnnounce } from './announce.ts'
+import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
 import type { Session } from './session.ts'
 import type { Dh } from './x25519.ts'
 import type { RatchetOpts } from '../eh2/ratchet.ts'
@@ -34,8 +34,12 @@ import { nowMs } from './time.ts'
  *   - the three handshake frames travel UNSEALED on the control plane (they
  *     have to — the session key is what they produce), authenticated by their
  *     own MACs, not by the Announce key;
- *   - who initiates is decided by peer id (lower initiates), the same tie-break
- *     the WebRTC plane uses, so two peers never cross;
+ *   - WHOEVER is in the room initiates on discovery — nobody waits for a
+ *     tie-break (a presence peer is passive, so the opener must be able to
+ *     open). Crossed msg1s are settled on receipt: the lower peer id keeps its
+ *     own in-flight attempt for a 2 s window and ignores the incoming one, the
+ *     higher yields and responds. Only the WebRTC plane's OFFERS are
+ *     lower-id-initiated;
  *   - content typed before the handshake finishes is queued, not dropped.
  */
 export interface Eh2Options {
@@ -171,7 +175,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   /** Two and a half missed heartbeats: late enough not to fire on jitter, early enough to matter. */
   const quietMs = Math.max(heartbeatMs * 2.5, 35_000)
   const self = node.peerId.toString()
-  const seenNonces = new Set<string>()
+  const seenNonces = nonceCache()
   const seenSeq = new Set<string>() // dedup msg/reaction/file by `${from}:${seq}` (both planes)
   const lastSeen = new Map<string, number>()
 

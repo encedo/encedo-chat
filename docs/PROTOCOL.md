@@ -276,7 +276,7 @@ mac = base64( HMAC-SHA256(announce_mac_key, ASCII("<v>|<peer>|<nonce>|<ts>")) )
 
 — the MAC message is the ASCII string of the four fields joined with `|`, not a binary concatenation. `announce_mac_key` derives client-side from the memoised pair `ss` (§4.3), once per contact per day.
 
-Receiver: check `v` and shape; timestamp ±5 min (replay); MAC verify (WebCrypto `subtle.verify`, constant-time); then the subscriber deduplicates by nonce (a per-watch seen-set, kept for the session). On success update `contact → peer_id`. The PeerId↔user mapping exists **only** inside this MAC'd channel; IK_pub never appears on the wire.
+Receiver: check `v` and shape; timestamp ±5 min (replay); MAC verify (WebCrypto `subtle.verify`, constant-time); then the subscriber deduplicates by nonce (a per-watch cache pruned past twice the replay window — a nonce the timestamp check would refuse anyway is not worth remembering). On success update `contact → peer_id`. The PeerId↔user mapping exists **only** inside this MAC'd channel; IK_pub never appears on the wire.
 
 **Presence without a conversation.** Each contact gets a light watch on the pair topic — subscribe, Announce on the heartbeat, report whether the contact is announcing — so being *visible* to twenty contacts costs twenty subscriptions, not twenty handshakes. The watch also hears an incoming EH-2 msg1 and hands the topic over warm to a full room ("upgrade on send" — the receiver never has to open the conversation first). A peer silent for ~35 s (2.5 missed heartbeats) is reported `quiet`; ~90 s counts as gone.
 
@@ -358,7 +358,7 @@ The initiator computes the same values from the other side via X25519 commutativ
 - **PQ hybrid.** `SK = f(dh1 || dh2 || dh3 || ss)`; `dh*` rest on ECDLP (classical), `ss` on MLWE (ML-KEM-768, PQ). Breaking one problem is insufficient: `SK` confidentiality holds while **either** assumption stands. Concatenation-in-HKDF is the standard hybrid combiner (draft-ietf-tls-hybrid-design; Bindel et al. 2019). Framing for the auditor: EH-2 is an **AKE** (MAC-authenticated, Noise-style) whose classical component is a NIKE (X25519), not a CCA-secure KEM — the security argument lives at the AKE level, not as "two IND-CCA2 KEMs combined".
 - **Deniability.** No long-term-key signatures. Both MACs use `SK`, shared by both parties — either could have produced any MAC on `SK` post hoc, so neither holds proof of authorship (offline/non-repudiation deniability). Online real-time deniability would need ZK proofs (not used; unnecessary for the target).
 - **KCI resistance.** An attacker with `IK_r_priv` still cannot impersonate someone else *to* R: forging `mac_i` needs `SK`, needing `dh2 = DH(IK_i_priv, EK_r_pub)`, needing `IK_i_priv`.
-- **Replay protection.** (1) timestamps ±5 min; (2) `h1 = SHA-256(msg1)` salts `SK`, so every session's `SK` differs; (3) the Announce nonce dedup — a per-watch seen-set kept for the session (§5.5).
+- **Replay protection.** (1) timestamps ±5 min; (2) `h1 = SHA-256(msg1)` salts `SK`, so every session's `SK` differs; (3) the Announce nonce dedup — a per-watch bounded cache (§5.5).
 
 ---
 

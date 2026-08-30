@@ -4,7 +4,7 @@
  * the meet integration check. WebCrypto (async). See room.ts for presence+chat.
  */
 
-import { buildAnnounce, verifyAnnounce } from './announce.ts'
+import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
 
 export interface JoinOpts {
   onPeer?: (peerId: string) => void
@@ -21,7 +21,7 @@ export function joinRoom(node, topic: string, macKey: CryptoKey, opts: JoinOpts 
   const initialDelayMs = opts.initialDelayMs ?? 1_500
   const presenceTtlMs = opts.presenceTtlMs ?? Math.max(heartbeatMs * 3, 30_000)
   const self = node.peerId.toString()
-  const seenNonces = new Set<string>()
+  const seenNonces = nonceCache()
   const lastSeen = new Map<string, number>()
 
   const handler = async (evt) => {

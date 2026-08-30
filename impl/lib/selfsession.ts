@@ -29,7 +29,7 @@
  * duplicate either way — and either way both of us stop.
  */
 
-import { buildAnnounce, verifyAnnounce } from './announce.ts'
+import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
 
 export interface SelfWatchOpts {
   /** How often we say we are here. */
@@ -52,7 +52,7 @@ export function watchSelfSession(
 
   /** Sessions heard during our own first seconds: they were here before us. */
   const preexisting = new Set<string>()
-  const seenNonces = new Set<string>()
+  const seenNonces = nonceCache()
   let done = false
   let settled = false
 

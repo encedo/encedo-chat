@@ -36,3 +36,31 @@ export async function verifyAnnounce(data: Uint8Array, macKey: CryptoKey, nowMs 
   if (!ok) return { ok: false, reason: 'mac' }
   return { ok: true, peer: m.peer, nonce: m.nonce }
 }
+
+/**
+ * The dedup set for accepted nonces — bounded, because the replay window is.
+ *
+ * `verifyAnnounce` refuses any timestamp outside ±5 min, so a nonce seen ten
+ * minutes ago can never be replayed successfully; remembering it forever costs
+ * memory for nothing. Every watch used to keep a plain Set that only grew — a
+ * session left open for days accumulated one entry per heartbeat per topic.
+ * This keeps the same has/add surface and prunes on insert, amortized: a Map
+ * iterates in insertion order and the timestamps only move forward, so the
+ * sweep stops at the first entry still young enough to matter.
+ */
+export function nonceCache(windowMs = 2 * REPLAY_WINDOW_MS) {
+  const seen = new Map<string, number>()
+  return {
+    has: (n: string) => seen.has(n),
+    add: (n: string) => {
+      const now = Date.now()
+      seen.set(n, now)
+      if (seen.size <= 256) return
+      for (const [k, t] of seen) {
+        if (now - t > windowMs) seen.delete(k)
+        else break
+      }
+    },
+    get size() { return seen.size },
+  }
+}

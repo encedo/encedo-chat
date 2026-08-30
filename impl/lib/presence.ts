@@ -26,7 +26,7 @@
  * the Announce (a spec-queue item); for now §9.1 resolves duplicates in seconds.
  */
 
-import { buildAnnounce, verifyAnnounce } from './announce.ts'
+import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
 import { isHandshakeFrame } from '../eh2/establish.ts'
 import { nowMs, utcDateOf, addUTCDays, msToNextUTCMidnight, msSincePrevUTCMidnight } from './time.ts'
 
@@ -55,7 +55,7 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
   const log = opts.onLog ?? (() => {})
   const heartbeatMs = opts.heartbeatMs ?? 15_000
   const ttlMs = Math.max(heartbeatMs * 6, 90_000)
-  const seenNonces = new Set<string>()
+  const seenNonces = nonceCache()
   let lastSeen = 0
   let online = false
   let stopped = false
