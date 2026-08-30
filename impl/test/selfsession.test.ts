@@ -130,3 +130,51 @@ test('an announce that does not verify is ignored', async () => {
   assert.deepEqual(taken, [], 'a forged announce must not take a session over')
   mine.stop()
 })
+
+// ---- rotation: §9.1 keeps firing across midnight ----------------------------
+// The defect this pins (2026-08-30 audit): the self-topic's date was frozen at
+// session start, so a window held open across midnight and a window opened
+// after it sat on DIFFERENT topics and the duplicate rule silently never fired.
+
+import { watchSelfSessionRotating } from '../lib/selfsession.ts'
+
+function rotatingWindow(net: ReturnType<typeof hub>, id: string, macKey: CryptoKey, taken: string[], now: () => number) {
+  return watchSelfSessionRotating(net.node(id), async (d) => ({ topic: `self-${d}`, macKey }), id, {
+    heartbeatMs: 100, graceMs: 200, now, tickMs: 50,
+    onTakenOver: (by) => taken.push(`${id}<-${by}`),
+  })
+}
+
+test('rotating: windows on opposite sides of midnight still see each other', async () => {
+  const net = hub()
+  const macKey = await key()
+  const taken: string[] = []
+  // w1's clock is 23:50 on day D (guard → D and D+1 live); it settles alone.
+  const w1 = rotatingWindow(net, 'w1', macKey, taken, () => Date.UTC(2031, 4, 10, 23, 50))
+  await sleep(300)
+  assert.equal(taken.length, 0, 'a lone window is left alone')
+  // w2 opens at 00:05 on D+1 (guard → D+1 and D live) — the overlap is where they meet.
+  const w2 = rotatingWindow(net, 'w2', macKey, taken, () => Date.UTC(2031, 4, 11, 0, 5))
+  await sleep(500)
+  try {
+    assert.ok(taken.some((t) => t.startsWith('w1<-')), 'the settled window stands down')
+    assert.ok(taken.some((t) => t.startsWith('w2<-')), 'the newcomer stands down too — §9.1 is both, not a winner')
+  } finally { w1.stop(); w2.stop() }
+})
+
+test('rotating: a window that slept through midnight is caught after the tick', async () => {
+  const net = hub()
+  const macKey = await key()
+  const taken: string[] = []
+  let t1 = Date.UTC(2031, 4, 10, 12, 0) // mid-day: one topic, no guard
+  const w1 = rotatingWindow(net, 'w1', macKey, taken, () => t1)
+  await sleep(300)
+  t1 = Date.UTC(2031, 4, 11, 0, 5) // the laptop wakes up on the new day
+  await sleep(150)                  // > tickMs — the watch must now hold D+1 too
+  const w2 = rotatingWindow(net, 'w2', macKey, taken, () => Date.UTC(2031, 4, 11, 0, 5))
+  await sleep(500)
+  try {
+    assert.ok(taken.some((t) => t.startsWith('w1<-')), 'the slept-through window is evicted on the new day')
+    assert.ok(taken.some((t) => t.startsWith('w2<-')), 'and the newcomer stands down with it')
+  } finally { w1.stop(); w2.stop() }
+})

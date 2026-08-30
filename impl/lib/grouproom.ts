@@ -14,12 +14,22 @@
  * **keepalive** on the topic on a jittered interval, exactly as the 1:1 room's
  * Announce keeps its mesh warm; members ignore the keepalive frame. `refresh()`
  * re-warms it after the transport reconnects.
+ *
+ * Rotation: the topic carries `date_UTC` (§5.3), and the date used to be frozen
+ * at session start — two members whose sessions started on different UTC days
+ * derived DIFFERENT topics and silently could not hear each other (the defect
+ * the 2026-08-30 audit flagged in the spec). The room now walks the date itself:
+ * groups roll at plain UTC midnight (there is no pair secret to derive an offset
+ * from), and within the same ±30 min guard the pairs use (§5.4, offset 0) BOTH
+ * adjacent days' topics are live — keepalives go to all of them, sends go to the
+ * current day's. Both members run the same clock rule, so they cross together.
  */
 
 import type { GroupSession } from './group.ts'
 import { envMsg, envReaction, envFile, encodeEnvelope, decodeEnvelope, type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta } from './envelope.ts'
 import type { QuoteRef } from './quote.ts'
 import { nowMs } from './time.ts'
+import { activeDatesForOffset, type RotationConfig } from './presence.ts'
 
 const T_GKEEPALIVE = 0x21 // a 1-byte mesh keepalive frame — NOT a group message (T_GMSG is 0x20)
 const KEEPALIVE = new Uint8Array([T_GKEEPALIVE])
@@ -43,6 +53,10 @@ export interface GroupRoomOpts {
    *  rate-limited per member when this fires. */
   onNeedSenderKey?: (memberPub: string) => void
   onLog?: (msg: string) => void
+  /** Rotation overrides — TESTS ONLY. `now` fakes the clock, `tickMs` tightens
+   *  the re-evaluation interval, `overlapMs` the §5.4 guard. Production runs on
+   *  the real clock with the defaults. */
+  rotation?: RotationConfig & { now?: () => number; tickMs?: number }
 }
 
 export interface GroupRoom {
@@ -61,12 +75,63 @@ export interface GroupRoom {
 
 export async function joinGroup(node: any, session: GroupSession, opts: GroupRoomOpts = {}): Promise<GroupRoom> {
   const log = opts.onLog ?? (() => {})
-  const topic = await session.topic()
+  const rot = opts.rotation ?? {}
+  const rnow = rot.now ?? nowMs
   let seq = 0
   let stopped = false
 
+  // unref so timers never keep a Node process alive (tests, CLI) — a no-op in
+  // the browser, where setTimeout returns a number, so the heartbeat still runs.
+  const unref = (t: any) => { try { t?.unref?.() } catch {} return t }
+  const keepaliveOn = (t: string) => { try { node.services.pubsub.publish(t, KEEPALIVE).catch(() => {}) } catch {} }
+
+  // ---- the live day-topics (rotation) ---------------------------------------
+  // `byDate` is the truth (date → topic); `live` is the handler's fast lookup.
+  // `primary` is the current day's topic — the only one we SEND on; the adjacent
+  // day inside the guard is subscribe+keepalive only, so a member on the other
+  // side of the boundary still hears us on the day it considers current.
+  const byDate = new Map<string, string>()
+  const live = new Set<string>()
+  let primary = ''
+  const pending: ReturnType<typeof setTimeout>[] = []
+
+  let syncing = false
+  const syncTopics = async () => {
+    if (stopped || syncing) return
+    syncing = true
+    try { await syncTopicsInner() } finally { syncing = false }
+  }
+  const syncTopicsInner = async () => {
+    const dates = activeDatesForOffset(rnow(), 0, rot)
+    for (const d of dates) {
+      if (byDate.has(d)) continue
+      const t = await session.topicFor(d)
+      if (stopped) return
+      byDate.set(d, t)
+      live.add(t)
+      node.services.pubsub.subscribe(t)
+      // Early beacons — the relay's mesh grafts over hundreds of ms after
+      // (re)subscribing, so the first heartbeat would otherwise reach nobody
+      // (same trick as join/presence).
+      for (const ms of [1_000, 3_000, 7_000]) pending.push(unref(setTimeout(() => { if (!stopped) keepaliveOn(t) }, ms)))
+      log(`group topic live for ${d}: ${t.slice(0, 12)}…`)
+    }
+    for (const [d, t] of byDate) {
+      if (dates.includes(d)) continue
+      byDate.delete(d)
+      live.delete(t)
+      try { node.services.pubsub.unsubscribe(t) } catch {}
+      log(`group topic retired for ${d}`)
+    }
+    primary = byDate.get(dates[0])!
+  }
+  await syncTopics()
+  // The rollover check. 60 s of granularity against a ±30 min guard is plenty,
+  // and one cheap date computation a minute costs nothing.
+  const rotTimer = unref(setInterval(() => { void syncTopics().catch(() => {}) }, rot.tickMs ?? 60_000))
+
   const handler = async (evt: any) => {
-    if (stopped || evt.detail.topic !== topic) return
+    if (stopped || !live.has(evt.detail.topic)) return
     const data: Uint8Array = evt.detail.data
     if (data.length === 1 && data[0] === T_GKEEPALIVE) return // a member's mesh keepalive — ignore
     const opened = await session.receive(data)
@@ -97,18 +162,13 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
   }
 
   node.services.pubsub.addEventListener('message', handler)
-  node.services.pubsub.subscribe(topic)
-  log(`joined group on ${topic.slice(0, 12)}…`)
+  log(`joined group on ${primary.slice(0, 12)}…`)
 
   // Keepalive: publish is fire-and-forget; a NoPeers error just means nobody is on
-  // the topic right now, which the next tick handles.
-  const keepalive = () => { try { node.services.pubsub.publish(topic, KEEPALIVE).catch(() => {}) } catch {} }
-  // unref so the keepalive timers never keep a Node process alive (tests, CLI) — a
-  // no-op in the browser, where setTimeout returns a number, so the heartbeat still runs.
-  const unref = (t: any) => { try { t?.unref?.() } catch {} return t }
-  // Early beacons — the relay's mesh grafts over hundreds of ms after (re)subscribing,
-  // so the first heartbeat would otherwise reach nobody (same trick as join/presence).
-  const beacons = [1_000, 3_000, 7_000].map((ms) => unref(setTimeout(() => { if (!stopped) keepalive() }, ms)))
+  // the topic right now, which the next tick handles. Every LIVE topic gets one —
+  // inside the guard window the adjacent day's mesh must stay warm too, or the
+  // member who crosses first would graft into a cold mesh.
+  const keepalive = () => { for (const t of live) keepaliveOn(t) }
   // Jittered steady heartbeat (self-rescheduling so members don't sync into a herd).
   let kaTimer: ReturnType<typeof setTimeout> | null = null
   const scheduleKeepalive = () => {
@@ -119,16 +179,16 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
   const broadcast = async (bytes: Uint8Array) => {
     const frame = await session.send(bytes)
     try {
-      const r = await node.services.pubsub.publish(topic, frame)
-      log(`published ${frame.length} B → ${topic.slice(0, 8)}… (recipients: ${r?.recipients?.length ?? '?'})`)
+      const r = await node.services.pubsub.publish(primary, frame)
+      log(`published ${frame.length} B → ${primary.slice(0, 8)}… (recipients: ${r?.recipients?.length ?? '?'})`)
     } catch (e: any) {
-      log(`publish FAILED on ${topic.slice(0, 8)}…: ${e?.message ?? e}`)
+      log(`publish FAILED on ${primary.slice(0, 8)}…: ${e?.message ?? e}`)
       throw e
     }
   }
 
   return {
-    topic,
+    get topic() { return primary },
     async sendText(body: string, re?: QuoteRef) {
       const env = envMsg(seq++, body, 'plain', re)
       await broadcast(encodeEnvelope(env))
@@ -144,21 +204,25 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
     },
     refresh() {
       // The transport came back: GossipSub re-sends subscriptions on the new
-      // connection, but re-assert it and burst keepalives so the mesh re-grafts
-      // promptly instead of waiting a whole heartbeat.
+      // connection, but re-assert every live topic and burst keepalives so the
+      // mesh re-grafts promptly instead of waiting a whole heartbeat. Also
+      // re-check the date — a laptop that slept through midnight wakes up here.
       if (stopped) return
-      try { node.services.pubsub.subscribe(topic) } catch {}
-      for (const ms of [0, 800, 2_000]) setTimeout(() => { if (!stopped) keepalive() }, ms)
+      void syncTopics().catch(() => {})
+      for (const t of live) { try { node.services.pubsub.subscribe(t) } catch {} }
+      for (const ms of [0, 800, 2_000]) unref(setTimeout(() => { if (!stopped) keepalive() }, ms))
     },
     stop() {
       stopped = true
       // The session outlives the room (the manager owns it), so hand it back
       // without our handler rather than leaving a stopped room reachable.
       if (session.onNeedSenderKey) session.onNeedSenderKey = undefined
-      for (const b of beacons) clearTimeout(b)
+      for (const b of pending) clearTimeout(b)
       if (kaTimer) clearTimeout(kaTimer)
+      clearInterval(rotTimer)
       try { node.services.pubsub.removeEventListener('message', handler) } catch {}
-      try { node.services.pubsub.unsubscribe(topic) } catch {}
+      for (const t of live) { try { node.services.pubsub.unsubscribe(t) } catch {} }
+      live.clear(); byDate.clear()
     },
   }
 }

@@ -20,7 +20,7 @@ import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { createMqttPeer } from '../net/mqtt-node.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
-import { watchSelfSession, type SelfWatch } from './selfsession.ts'
+import { watchSelfSessionRotating, type SelfWatch } from './selfsession.ts'
 import { watchPresenceRotating, rendezvousDay, type PresenceWatch } from './presence.ts'
 import { GroupManager, type AdminGk, type GkBackend } from './group.ts'
 import {
@@ -870,6 +870,9 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   }
   const stopWatch = (pub: string) => { presence.get(pub)?.watch.stop(); presence.delete(pub); upgradeDate.delete(pub) }
 
+  // The §9.1 rotating watch (declared here — shutdown stops it).
+  let selfWatch: SelfWatch | null = null
+
   const shutdown = async (why: string) => {
     if (closed) return
     closed = true
@@ -890,11 +893,18 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // refuses an ECDH against its own public key, say) the session runs on without
   // it. Losing the takeover rule is a nuisance; losing the chat is not an
   // acceptable trade for it.
-  let selfWatch: SelfWatch | null = null
+  //
+  // The self-DH is done ONCE — for a HEM identity that is the device call — and
+  // each active day's topic + MAC key derive from it client-side, so the
+  // rotating watch (`watchSelfSessionRotating`, which walks the UTC date so
+  // §9.1 keeps firing across midnight) costs no hardware round-trip at rollover.
   if (opts.onSessionTakenOver) {
     try {
-      const selfRoom = await deriveSelfRoom(id, params)
-      selfWatch = watchSelfSession(node, selfRoom.topic, selfRoom.macKey, self, {
+      const selfSs = await id.ecdh(id.pub)
+      selfWatch = watchSelfSessionRotating(node, async (dateUTC) => {
+        const p = { ...params, dateUTC }
+        return { topic: await topicFromSecret(selfSs, p), macKey: await announceMacKey(selfSs, p) }
+      }, self, {
         onLog: opts.onLog,
         onTakenOver: (byPeer) => {
           void (async () => {

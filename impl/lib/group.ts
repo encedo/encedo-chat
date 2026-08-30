@@ -178,6 +178,14 @@ export class GroupSession {
 
   async topic(): Promise<string> { return groupTopicFromSecret(this.groupSecret, this.params) }
 
+  /** The topic for one specific rendezvous day. Groups roll over at plain UTC
+   *  midnight (no pair offset to derive one from — §5.3), so the room keeps the
+   *  adjacent day's topic live inside the §5.4 guard window and walks the date
+   *  forward itself; `params.dateUTC` is only the day the session STARTED. */
+  async topicFor(dateUTC: string): Promise<string> {
+    return groupTopicFromSecret(this.groupSecret, { ...this.params, dateUTC })
+  }
+
   /** My current sending key — this is what distribution hands to the other members. */
   mySenderKey(): Uint8Array { return this.send_.key.slice() }
   /** The counter that chain key is AT. A key without it is only usable by someone

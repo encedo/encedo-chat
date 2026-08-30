@@ -30,6 +30,7 @@
  */
 
 import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
+import { activeDatesForOffset } from './presence.ts'
 
 export interface SelfWatchOpts {
   /** How often we say we are here. */
@@ -121,4 +122,74 @@ export function watchSelfSession(
   }
 
   return { stop }
+}
+
+export interface RotatingSelfOpts extends SelfWatchOpts {
+  /** §5.4 guard half-window (default 30 min). */
+  overlapMs?: number
+  /** TESTS ONLY — fake clock / tighter rollover check. */
+  now?: () => number
+  tickMs?: number
+}
+
+/**
+ * §9.1 across midnight. The self-topic carries the UTC date, and the date used
+ * to be frozen at session start — a window held open across midnight and a
+ * window opened after it sat on DIFFERENT self-topics, and the duplicate rule
+ * silently never fired between them (the defect the 2026-08-30 audit flagged).
+ *
+ * This keeps one `watchSelfSession` per ACTIVE day — plain UTC rollover with
+ * the pairs' ±30 min guard (offset 0, §5.4) — re-evaluated on a 60 s tick.
+ * `deriveForDate` maps a `YYYY-MM-DD` to that day's topic + MAC key; the caller
+ * memoises the self-DH, so crossing midnight costs no device call. A duplicate
+ * heard on ANY live day stands the whole session down exactly once.
+ */
+export function watchSelfSessionRotating(
+  node: any,
+  deriveForDate: (dateUTC: string) => Promise<{ topic: string; macKey: CryptoKey }>,
+  self: string,
+  opts: RotatingSelfOpts,
+): SelfWatch {
+  const rnow = opts.now ?? Date.now
+  const watches = new Map<string, SelfWatch>()
+  let taken = false
+  let stopped = false
+  let syncing = false
+
+  const onTaken = (byPeer: string) => {
+    if (taken || stopped) return
+    taken = true
+    stopAll()
+    opts.onTakenOver(byPeer)
+  }
+
+  const sync = async () => {
+    if (stopped || taken || syncing) return
+    syncing = true
+    try {
+      const dates = activeDatesForOffset(rnow(), 0, { overlapMs: opts.overlapMs })
+      for (const d of dates) {
+        if (watches.has(d)) continue
+        const room = await deriveForDate(d)
+        if (stopped || taken || watches.has(d)) return
+        watches.set(d, watchSelfSession(node, room.topic, room.macKey, self, { ...opts, onTakenOver: onTaken }))
+      }
+      for (const [d, w] of watches) {
+        if (dates.includes(d)) continue
+        try { w.stop() } catch {}
+        watches.delete(d)
+      }
+    } finally { syncing = false }
+  }
+  void sync()
+  const tick = setInterval(() => { void sync().catch(() => {}) }, opts.tickMs ?? 60_000)
+  ;(tick as any).unref?.()
+
+  function stopAll() {
+    clearInterval(tick)
+    for (const w of watches.values()) { try { w.stop() } catch {} }
+    watches.clear()
+  }
+
+  return { stop() { stopped = true; stopAll() } }
 }
