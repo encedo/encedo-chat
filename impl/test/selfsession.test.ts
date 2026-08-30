@@ -131,30 +131,35 @@ test('an announce that does not verify is ignored', async () => {
   mine.stop()
 })
 
-// ---- rotation: §9.1 keeps firing across midnight ----------------------------
+// ---- rotation: §9.1 keeps firing across the rollover ------------------------
 // The defect this pins (2026-08-30 audit): the self-topic's date was frozen at
-// session start, so a window held open across midnight and a window opened
+// session start, so a window held open across the rollover and a window opened
 // after it sat on DIFFERENT topics and the duplicate rule silently never fired.
+// The instant is the IDENTITY'S OWN (offsetMs from the self-DH, §5.4) — the
+// tests pick a deliberately un-midnight one and place the clocks around it.
 
 import { watchSelfSessionRotating } from '../lib/selfsession.ts'
 
+const SELF_OFF = (7 * 3600 + 13 * 60) * 1000 // 07:13 UTC — anything but 00:00
+const BOUNDARY = Date.UTC(2031, 4, 11) + SELF_OFF
+
 function rotatingWindow(net: ReturnType<typeof hub>, id: string, macKey: CryptoKey, taken: string[], now: () => number) {
   return watchSelfSessionRotating(net.node(id), async (d) => ({ topic: `self-${d}`, macKey }), id, {
-    heartbeatMs: 100, graceMs: 200, now, tickMs: 50,
+    heartbeatMs: 100, graceMs: 200, now, tickMs: 50, offsetMs: SELF_OFF,
     onTakenOver: (by) => taken.push(`${id}<-${by}`),
   })
 }
 
-test('rotating: windows on opposite sides of midnight still see each other', async () => {
+test('rotating: windows on opposite sides of the identity\'s instant still see each other', async () => {
   const net = hub()
   const macKey = await key()
   const taken: string[] = []
-  // w1's clock is 23:50 on day D (guard → D and D+1 live); it settles alone.
-  const w1 = rotatingWindow(net, 'w1', macKey, taken, () => Date.UTC(2031, 4, 10, 23, 50))
+  // w1's clock is 10 min before the identity's rollover (guard → both days live); it settles alone.
+  const w1 = rotatingWindow(net, 'w1', macKey, taken, () => BOUNDARY - 10 * 60_000)
   await sleep(300)
   assert.equal(taken.length, 0, 'a lone window is left alone')
-  // w2 opens at 00:05 on D+1 (guard → D+1 and D live) — the overlap is where they meet.
-  const w2 = rotatingWindow(net, 'w2', macKey, taken, () => Date.UTC(2031, 4, 11, 0, 5))
+  // w2 opens 5 min after the rollover (guard → both days live) — the overlap is where they meet.
+  const w2 = rotatingWindow(net, 'w2', macKey, taken, () => BOUNDARY + 5 * 60_000)
   await sleep(500)
   try {
     assert.ok(taken.some((t) => t.startsWith('w1<-')), 'the settled window stands down')
@@ -162,16 +167,16 @@ test('rotating: windows on opposite sides of midnight still see each other', asy
   } finally { w1.stop(); w2.stop() }
 })
 
-test('rotating: a window that slept through midnight is caught after the tick', async () => {
+test('rotating: a window that slept through the instant is caught after the tick', async () => {
   const net = hub()
   const macKey = await key()
   const taken: string[] = []
-  let t1 = Date.UTC(2031, 4, 10, 12, 0) // mid-day: one topic, no guard
+  let t1 = BOUNDARY - 12 * 3_600_000 // half a day behind: one topic, no guard
   const w1 = rotatingWindow(net, 'w1', macKey, taken, () => t1)
   await sleep(300)
-  t1 = Date.UTC(2031, 4, 11, 0, 5) // the laptop wakes up on the new day
-  await sleep(150)                  // > tickMs — the watch must now hold D+1 too
-  const w2 = rotatingWindow(net, 'w2', macKey, taken, () => Date.UTC(2031, 4, 11, 0, 5))
+  t1 = BOUNDARY + 5 * 60_000 // the laptop wakes up past the rollover
+  await sleep(150)            // > tickMs — the watch must now hold the new day too
+  const w2 = rotatingWindow(net, 'w2', macKey, taken, () => BOUNDARY + 5 * 60_000)
   await sleep(500)
   try {
     assert.ok(taken.some((t) => t.startsWith('w1<-')), 'the slept-through window is evicted on the new day')

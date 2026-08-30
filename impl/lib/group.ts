@@ -24,7 +24,7 @@
 
 import { subtle, hkdfBits, sha256, unb64, b64, concat, randomBytes } from './wc.ts'
 import type { RvParams } from './rendezvous.ts'
-import { groupTopicFromSecret } from './rendezvous.ts'
+import { groupTopicFromSecret, rotationOffsetSec } from './rendezvous.ts'
 import { seal, sendChainFrom, newSendChain, SenderReceiver, tag, verify, type SendChain, type ReceiverOpts } from './senderkey.ts'
 import { x25519FromPriv } from './x25519.ts'
 import type { SkdFields } from './envelope.ts'
@@ -178,12 +178,23 @@ export class GroupSession {
 
   async topic(): Promise<string> { return groupTopicFromSecret(this.groupSecret, this.params) }
 
-  /** The topic for one specific rendezvous day. Groups roll over at plain UTC
-   *  midnight (no pair offset to derive one from — §5.3), so the room keeps the
-   *  adjacent day's topic live inside the §5.4 guard window and walks the date
-   *  forward itself; `params.dateUTC` is only the day the session STARTED. */
+  /** The topic for one specific rendezvous day. The room keeps the adjacent
+   *  day's topic live inside the §5.4 guard window and walks the date forward
+   *  itself; `params.dateUTC` is only the day the session STARTED. */
   async topicFor(dateUTC: string): Promise<string> {
     return groupTopicFromSecret(this.groupSecret, { ...this.params, dateUTC })
+  }
+
+  /** WHEN this group rotates (§5.4 applied to groups): the instant derives from
+   *  `group_secret` with the same construction the pairs use on their pair
+   *  secret — every member holds the secret, so every member derives the same
+   *  instant, and rotations spread across the day instead of herding at
+   *  midnight (a fixed hour would also let a topic observer tell group topics
+   *  from pair topics by their hop time). A new epoch means a new secret and so
+   *  a new instant — irrelevant in practice, because the topic changes with the
+   *  epoch anyway. */
+  async rotationOffsetMs(): Promise<number> {
+    return (await rotationOffsetSec(this.groupSecret, this.params)) * 1000
   }
 
   /** My current sending key — this is what distribution hands to the other members. */

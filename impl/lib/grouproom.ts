@@ -18,11 +18,13 @@
  * Rotation: the topic carries `date_UTC` (§5.3), and the date used to be frozen
  * at session start — two members whose sessions started on different UTC days
  * derived DIFFERENT topics and silently could not hear each other (the defect
- * the 2026-08-30 audit flagged in the spec). The room now walks the date itself:
- * groups roll at plain UTC midnight (there is no pair secret to derive an offset
- * from), and within the same ±30 min guard the pairs use (§5.4, offset 0) BOTH
- * adjacent days' topics are live — keepalives go to all of them, sends go to the
- * current day's. Both members run the same clock rule, so they cross together.
+ * the 2026-08-30 audit flagged in the spec). The room now walks the date itself,
+ * on the pairs' §5.4 rule applied to the group's own shared key: the instant
+ * derives from `group_secret` (`session.rotationOffsetMs()` — every member holds
+ * the secret, so every member derives the same instant, rotations spread across
+ * the day, and a topic observer cannot tell a group topic from a pair topic by
+ * its hop time). Within the ±30 min guard BOTH adjacent days' topics are live —
+ * keepalives go to all of them, sends go to the current day's.
  */
 
 import type { GroupSession } from './group.ts'
@@ -77,6 +79,7 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
   const log = opts.onLog ?? (() => {})
   const rot = opts.rotation ?? {}
   const rnow = rot.now ?? nowMs
+  const offsetMs = await session.rotationOffsetMs()
   let seq = 0
   let stopped = false
 
@@ -102,7 +105,7 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
     try { await syncTopicsInner() } finally { syncing = false }
   }
   const syncTopicsInner = async () => {
-    const dates = activeDatesForOffset(rnow(), 0, rot)
+    const dates = activeDatesForOffset(rnow(), offsetMs, rot)
     for (const d of dates) {
       if (byDate.has(d)) continue
       const t = await session.topicFor(d)

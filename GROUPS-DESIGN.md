@@ -40,11 +40,13 @@ topic = base32(HKDF-SHA256(
           info = network_id ‖ 0x00 ‖ date_UTC,
           L    = 32))[0:52]
 ```
-Rotates per-epoch (group_secret changes on membership change) and daily at
-plain UTC midnight, with the pairs' ±30 min guard (offset 0) and a 60 s
-re-check — the room walks the date itself, keepalives warm both live topics
-inside the guard, sends go to the current day's (`PROTOCOL.md` §5.3, fixed
-2026-08-30 after the audit flagged the frozen-date defect).
+Rotates per-epoch (group_secret changes on membership change) and daily at the
+**group's own instant** — `rotationOffsetSec(group_secret)`, the pairs' §5.4
+construction on the group's shared key, so every member derives the same
+instant and rotations spread across the day — with the ±30 min guard and a
+60 s re-check: the room walks the date itself, keepalives warm both live
+topics inside the guard, sends go to the current day's (`PROTOCOL.md` §5.3,
+fixed 2026-08-30 after the audit flagged the frozen-date defect).
 A removed member has the old group_secret only → cannot derive the new topic.
 
 ### Message (send)

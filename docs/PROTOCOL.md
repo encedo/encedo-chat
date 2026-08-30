@@ -209,7 +209,7 @@ topic          = base32(topic_material)[0:52]
 
 Same construction and the **same salt** as the pair topic, with `ss = ECDH(IK_a_priv, IK_a_pub)` — a DH of the key with itself. Only the IK holder can compute that value, so the self-topic is **not publicly computable**: an observer holding IK_pub alone can neither find it nor confirm presence on it (the presence-leak register entry S2 records this). The same `ss` keys the announce MAC (§5.5), so anything validly MAC'd there is another window of the same identity. Used for duplicate-session detection (§9.1). Derivation is best-effort: an identity whose backend refuses a self-ECDH runs without the §9.1 rule rather than failing.
 
-The self-topic **rotates at plain UTC midnight** (there is no pair to derive a §5.4 offset with), under the same ±30 min guard: within it the watch holds **both** adjacent days' topics, and a re-evaluation tick (60 s) walks the date, so §9.1 keeps firing across midnight — including against a window that slept through it. The self-DH is done once per session; each day's topic and MAC key derive from it client-side, so a rollover costs no device call.
+The self-topic **rotates at the identity's own instant** — `offset = rotationOffsetSec(self ss)`, the §5.4 construction applied to the self-DH, so every window of the identity derives the same instant, self rotations spread across the day like the pairs', and a topic observer cannot tell a self-topic from a pair topic by its hop time. Same ±30 min guard: within it the watch holds **both** adjacent days' topics, and a re-evaluation tick (60 s) walks the date, so §9.1 keeps firing across the rollover — including against a window that slept through it. The self-DH is done once per session; the offset and each day's topic + MAC key derive from it client-side, so a rollover costs no device call.
 
 ### 5.3 Group topic
 
@@ -225,7 +225,7 @@ topic = base32(HKDF-SHA256(
 
 **Seed.** `group_secret` is a random 32-byte value the group's admin generates and distributes pairwise (with the sender keys, §8) over existing 1:1 sessions; it is **rotated on every membership change** (new epoch → new `group_secret`). It lives **client-side** (the encrypted cache, §10), **not** in the HSM — a disposable metadata seed, kept forward-secret with the rest of the group state. The HKDF runs client-side (the ikm is not an HSM secret). A removed member holds only the old `group_secret` → cannot derive the new topic; with the sender-key rotation (§8) it can neither find nor read the group.
 
-**Rotation.** The topic rotates **per epoch** (membership change) and **daily at plain UTC midnight** (no pair secret exists to derive a §5.4 offset from, so groups use offset 0). Within the same ±30 min guard the room holds **both** adjacent days' topics — keepalives (§8.5) go to every live topic so the next day's mesh is warm before anyone crosses, sends go to the current day's — and a 60 s tick walks the date, so a session that slept through midnight re-converges on its next tick or `refresh()`. Both members run the same clock rule and cross together.
+**Rotation.** The topic rotates **per epoch** (membership change) and **daily at the group's own instant** — `offset = rotationOffsetSec(group_secret)`, the §5.4 construction applied to the group's shared key: every member holds `group_secret`, so every member derives the identical instant, group rotations spread across the day instead of herding at midnight, and a topic observer cannot tell a group topic from a pair topic by its hop time. (A new epoch means a new secret and so a new instant — irrelevant, since the topic changes with the epoch anyway.) Within the same ±30 min guard the room holds **both** adjacent days' topics — keepalives (§8.5) go to every live topic so the next day's mesh is warm before anyone crosses, sends go to the current day's — and a 60 s tick walks the date, so a session that slept through the boundary re-converges on its next tick or `refresh()`.
 
 **Rejected seeds** (recorded for the auditor):
 - *A per-group public key `GK_pub` as ikm*: `GK_pub` is a stored, retrievable HSM value, so a HEM dump would compute the topic. `GK` is kept as the group **identity/marker** and roster-MAC key (§8), **not** the topic seed — separated so a `GK_pub` leak does not expose the topic.
@@ -696,7 +696,7 @@ A pin blob cannot be opened as a group-cache blob even by its own author — the
 | Ratchet content header (§7.2) | 42 B = `0x10` ‖ ver ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be); all 42 B are the AAD |
 | Topic | base32, 52 chars |
 | Clock tolerance / replay window | ±5 min |
-| Rotation | pairs: per-pair instant (§5.4); groups & self-topic: plain UTC midnight; all: ±30 min guard, double-subscribe, 60 s re-check |
+| Rotation | one rule (§5.4): the instant derives from the topic's own key — pairs from the pair `ss`, groups from `group_secret`, self from the self-DH; all: ±30 min guard, double-subscribe, 60 s re-check |
 | Announce heartbeat | 15 s (pair topics, with beacons [1 s, 3 s, 7 s]) / 10 s (self-topic, no beacons) |
 | Typing cadence (§7.4) | `stop` after ~4 s idle; `away` after ~60 s |
 | Presence thresholds | `quiet` after ~35 s of silence; gone after ~90 s |

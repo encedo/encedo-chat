@@ -896,16 +896,20 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   //
   // The self-DH is done ONCE — for a HEM identity that is the device call — and
   // each active day's topic + MAC key derive from it client-side, so the
-  // rotating watch (`watchSelfSessionRotating`, which walks the UTC date so
-  // §9.1 keeps firing across midnight) costs no hardware round-trip at rollover.
+  // rotating watch (`watchSelfSessionRotating`, which walks the date so §9.1
+  // keeps firing across the rollover) costs no hardware round-trip. The instant
+  // is the identity's own, derived from the self-DH the way a pair derives its
+  // from the pair secret (§5.4) — every window computes the same one.
   if (opts.onSessionTakenOver) {
     try {
       const selfSs = await id.ecdh(id.pub)
+      const selfOffsetMs = (await rotationOffsetSec(selfSs, params)) * 1000
       selfWatch = watchSelfSessionRotating(node, async (dateUTC) => {
         const p = { ...params, dateUTC }
         return { topic: await topicFromSecret(selfSs, p), macKey: await announceMacKey(selfSs, p) }
       }, self, {
         onLog: opts.onLog,
+        offsetMs: selfOffsetMs,
         onTakenOver: (byPeer) => {
           void (async () => {
             await shutdown(`a second window of this identity appeared (${byPeer.slice(0, 12)}…)`)

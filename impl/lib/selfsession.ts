@@ -125,6 +125,11 @@ export function watchSelfSession(
 }
 
 export interface RotatingSelfOpts extends SelfWatchOpts {
+  /** WHEN this identity's self-topic rotates: ms past UTC midnight, derived by
+   *  the caller from the self-DH with the §5.4 construction (`rotationOffsetSec`)
+   *  — the same instant in every window of the identity, and indistinguishable
+   *  from a pair topic's hop time to an observer. */
+  offsetMs?: number
   /** §5.4 guard half-window (default 30 min). */
   overlapMs?: number
   /** TESTS ONLY — fake clock / tighter rollover check. */
@@ -138,11 +143,13 @@ export interface RotatingSelfOpts extends SelfWatchOpts {
  * window opened after it sat on DIFFERENT self-topics, and the duplicate rule
  * silently never fired between them (the defect the 2026-08-30 audit flagged).
  *
- * This keeps one `watchSelfSession` per ACTIVE day — plain UTC rollover with
- * the pairs' ±30 min guard (offset 0, §5.4) — re-evaluated on a 60 s tick.
- * `deriveForDate` maps a `YYYY-MM-DD` to that day's topic + MAC key; the caller
- * memoises the self-DH, so crossing midnight costs no device call. A duplicate
- * heard on ANY live day stands the whole session down exactly once.
+ * This keeps one `watchSelfSession` per ACTIVE day — rolling at the identity's
+ * OWN instant (`offsetMs`, derived from the self-DH exactly as a pair derives
+ * its instant from the pair secret, §5.4) with the same ±30 min guard —
+ * re-evaluated on a 60 s tick. `deriveForDate` maps a `YYYY-MM-DD` to that
+ * day's topic + MAC key; the caller memoises the self-DH, so crossing the
+ * rollover costs no device call. A duplicate heard on ANY live day stands the
+ * whole session down exactly once.
  */
 export function watchSelfSessionRotating(
   node: any,
@@ -167,7 +174,7 @@ export function watchSelfSessionRotating(
     if (stopped || taken || syncing) return
     syncing = true
     try {
-      const dates = activeDatesForOffset(rnow(), 0, { overlapMs: opts.overlapMs })
+      const dates = activeDatesForOffset(rnow(), opts.offsetMs ?? 0, { overlapMs: opts.overlapMs })
       for (const d of dates) {
         if (watches.has(d)) continue
         const room = await deriveForDate(d)

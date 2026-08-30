@@ -125,63 +125,73 @@ test('scale: 8 members, one broadcast reaches the other 7', async () => {
 // The defect this pins (2026-08-30 audit): the topic's date_UTC used to be
 // frozen at session start, so two members whose sessions started on different
 // UTC days derived DIFFERENT topics and silently could not hear each other.
+// The rotation instant is the GROUP'S OWN — derived from group_secret exactly
+// as a pair derives its instant from the pair secret (§5.4) — so the tests
+// read it from the session and place their clocks around the group's boundary,
+// not around midnight.
 
-/** Two peers, cross-distributed keys, each joined with its OWN clock and params
- *  — exactly what two real sessions started on different days look like. */
-async function makeSplitClockPair(nowA: () => number, nowB: () => number, dateA: string, dateB: string) {
+/** Two peers with cross-distributed keys, not yet joined to rooms. */
+async function makeDistributedPair() {
   const net = hub()
   const a = { id: await softId(), node: net.node('na'), recv: [] as { from: string; body: string }[] }
   const b = { id: await softId(), node: net.node('nb'), recv: [] as { from: string; body: string }[] }
-  const mgrA = new GroupManager(a.id, { networkId: 'groom', dateUTC: dateA })
-  const mgrB = new GroupManager(b.id, { networkId: 'groom', dateUTC: dateB })
+  const mgrA = new GroupManager(a.id, P)
+  const mgrB = new GroupManager(b.id, P)
   const { gk, pub: gkPub } = await softwareGk()
   const roster: Member[] = [{ pub: a.id.pub }, { pub: b.id.pub }]
   const gid = await mgrA.createGroup(gkPub, roster, gk)
   await mgrB.applySkd(a.id.pub, (await mgrA.skdFor(gid, b.id.pub))!)
   await mgrA.applySkd(b.id.pub, (await mgrB.skdFor(gid, a.id.pub))!)
-  const roomA = await joinGroup(a.node, mgrA.session(gid)!, {
-    onMessage: (from, env) => a.recv.push({ from, body: env.body }),
-    rotation: { now: nowA, tickMs: 40 },
-  })
-  const roomB = await joinGroup(b.node, mgrB.session(gid)!, {
-    onMessage: (from, env) => b.recv.push({ from, body: env.body }),
-    rotation: { now: nowB, tickMs: 40 },
-  })
-  return { a, b, roomA, roomB }
+  return { a, b, mgrA, mgrB, gid }
 }
 
-test('rotation: sessions started on opposite sides of midnight still hear each other (guard window)', async () => {
-  // A joined at 23:45 on day D, B at 00:10 on D+1 — both inside the ±30 min
-  // guard, so each holds BOTH days' topics and every send lands.
-  const nowA = Date.UTC(2031, 4, 10, 23, 45)
-  const nowB = Date.UTC(2031, 4, 11, 0, 10)
-  const { a, b, roomA, roomB } = await makeSplitClockPair(() => nowA, () => nowB, '2031-05-10', '2031-05-11')
+const joinAt = (peer: any, mgr: GroupManager, gid: string, now: () => number) =>
+  joinGroup(peer.node, mgr.session(gid)!, {
+    onMessage: (from: string, env: any) => peer.recv.push({ from, body: env.body }),
+    rotation: { now, tickMs: 40 },
+  })
+
+test('rotation: the instant is the group\'s own, and both members derive the same one', async () => {
+  const { mgrA, mgrB, gid } = await makeDistributedPair()
+  const offA = await mgrA.session(gid)!.rotationOffsetMs()
+  const offB = await mgrB.session(gid)!.rotationOffsetMs()
+  assert.equal(offA, offB, 'every member derives the identical instant from the shared secret')
+  assert.ok(offA >= 0 && offA < 86_400_000)
+})
+
+test('rotation: sessions started on opposite sides of the boundary still hear each other (guard window)', async () => {
+  const { a, b, mgrA, mgrB, gid } = await makeDistributedPair()
+  const off = await mgrA.session(gid)!.rotationOffsetMs()
+  // The group's own rollover instant on an arbitrary day — NOT midnight.
+  const boundary = Date.UTC(2031, 4, 11) + off
+  const roomA = await joinAt(a, mgrA, gid, () => boundary - 15 * 60_000)
+  const roomB = await joinAt(b, mgrB, gid, () => boundary + 10 * 60_000)
   try {
-    await roomB.sendText('po polnocy') // B's primary is D+1 — A must be subscribed there
-    await roomA.sendText('przed polnoca') // A's primary is D — B must still hold yesterday
+    await roomB.sendText('po rotacji') // B's primary is the new day — A must be subscribed there
+    await roomA.sendText('przed rotacja') // A's primary is the old day — B must still hold it
     await sleep(40)
-    assert.deepEqual(a.recv, [{ from: b.id.pub, body: 'po polnocy' }])
-    assert.deepEqual(b.recv, [{ from: a.id.pub, body: 'przed polnoca' }])
+    assert.deepEqual(a.recv, [{ from: b.id.pub, body: 'po rotacji' }])
+    assert.deepEqual(b.recv, [{ from: a.id.pub, body: 'przed rotacja' }])
   } finally { roomA.stop(); roomB.stop() }
 })
 
-test('rotation: a session that slept through midnight catches up on the tick', async () => {
-  // A's clock starts mid-day D (one topic live); B starts at 00:10 on D+1.
-  // B's send lands on D+1 while A still only holds D — lost, honestly. Then A's
-  // clock moves past midnight, the 40 ms tick re-syncs it, and the next send lands.
-  let tA = Date.UTC(2031, 4, 10, 12, 0)
-  const nowB = Date.UTC(2031, 4, 11, 0, 10)
-  const { a, b, roomA, roomB } = await makeSplitClockPair(() => tA, () => nowB, '2031-05-10', '2031-05-11')
+test('rotation: a session that slept through the boundary catches up on the tick', async () => {
+  const { a, b, mgrA, mgrB, gid } = await makeDistributedPair()
+  const off = await mgrA.session(gid)!.rotationOffsetMs()
+  const boundary = Date.UTC(2031, 4, 11) + off
+  let tA = boundary - 12 * 3_600_000 // half a day behind: one topic, no guard
+  const roomA = await joinAt(a, mgrA, gid, () => tA)
+  const roomB = await joinAt(b, mgrB, gid, () => boundary + 10 * 60_000)
   try {
     await roomB.sendText('za wczesnie')
     await sleep(40)
-    assert.equal(a.recv.length, 0, 'A is a full day behind — this send cannot reach it yet')
+    assert.equal(a.recv.length, 0, 'A is a rotation behind — this send cannot reach it yet')
 
-    tA = Date.UTC(2031, 4, 11, 0, 12) // A wakes up on the new day
+    tA = boundary + 12 * 60_000 // A wakes up past the group's instant
     await sleep(120) // > tickMs — the rollover check must pick the new date up
     await roomB.sendText('teraz slychac')
     await sleep(40)
     assert.deepEqual(a.recv, [{ from: b.id.pub, body: 'teraz slychac' }])
-    assert.equal(roomA.topic, roomB.topic, 'both primaries converged on the new day')
+    assert.equal(roomA.topic, roomB.topic, 'both primaries converged past the boundary')
   } finally { roomA.stop(); roomB.stop() }
 })
