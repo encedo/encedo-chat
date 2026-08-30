@@ -987,6 +987,19 @@
       <label data-i18n="Powtórz hasło">Powtórz hasło</label>
       <input id="soft-pass2" type="password" autocomplete="new-password">
     </div>
+    <!-- Creation only, and only when there IS another profile to copy from.
+         The book travels as names and keys; the source password is required
+         because copying without VERIFYING would launder a tampered book into a
+         freshly-signed one (bookmac.ts is the whole story). -->
+    <div id="soft-copy-wrap" hidden>
+      <label data-i18n="Przepisz kontakty z profilu">Przepisz kontakty z profilu</label>
+      <span class="sel-wrap"><select id="soft-copy-from" class="sel"></select></span>
+      <div id="soft-copy-pass-wrap" hidden>
+        <label data-i18n="Hasło profilu źródłowego">Hasło profilu źródłowego</label>
+        <input id="soft-copy-pass" type="password" autocomplete="off">
+        <div class="msub" data-i18n="Kontakty przechodzą jako nazwy i klucze. Rozmówcy znają Cię ze starego klucza — z nowego profilu muszą Cię dodać ponownie.">Kontakty przechodzą jako nazwy i klucze. Rozmówcy znają Cię ze starego klucza — z nowego profilu muszą Cię dodać ponownie.</div>
+      </div>
+    </div>
     <div class="msg" id="soft-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="soft-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="soft-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>

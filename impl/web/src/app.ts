@@ -799,6 +799,24 @@ function softMode(creating: boolean) {
   softCreating = creating ? val('soft-name') : ''
   $('soft-pass2-wrap').hidden = !creating
   ;($('soft-pass2') as HTMLInputElement).value = ''
+  // The copy-from block appears only when creating AND there is a profile to
+  // copy from — an empty select would be a question with no answers.
+  const copySel = $('soft-copy-from') as HTMLSelectElement
+  const others = creating ? listSoftProfiles() : []
+  copySel.innerHTML = ''
+  const none = document.createElement('option')
+  none.value = ''
+  none.textContent = tr('— nie przepisuj —')
+  copySel.appendChild(none)
+  for (const p of others) {
+    const o = document.createElement('option')
+    o.value = p
+    o.textContent = p
+    copySel.appendChild(o)
+  }
+  $('soft-copy-wrap').hidden = !creating || others.length === 0
+  $('soft-copy-pass-wrap').hidden = true
+  ;($('soft-copy-pass') as HTMLInputElement).value = ''
   $('soft-sub').textContent = creating
     ? tr('Nowa tożsamość na tym urządzeniu. Hasła nie da się odzyskać ani zmienić bez niego — nie ma czego z nim porównać.')
     : tr('Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.')
@@ -819,6 +837,26 @@ $('soft-cancel').addEventListener('click', closeSoftModal)
 ;($('soft-name') as HTMLInputElement).addEventListener('input', () => {
   if (!softIntendsNew && softCreating && softCreating !== val('soft-name')) { clr('soft-msg'); softMode(false) }
 })
+;($('soft-copy-from') as HTMLSelectElement).addEventListener('change', () => {
+  const picked = !!val('soft-copy-from')
+  $('soft-copy-pass-wrap').hidden = !picked
+  if (picked) $('soft-copy-pass').focus()
+})
+
+/**
+ * The §10 base for an identity that is NOT the session's. `cacheBaseFor`
+ * memoises into a module global — correct for the one signed-in identity, and
+ * exactly wrong here, where the copy flow needs the SOURCE profile's base and
+ * the NEW profile's base in the same breath: the memo would hand the first
+ * computation back for both, and the new book would be signed under the wrong
+ * key. No memo; two calls per copy, once per profile creation, is nothing.
+ */
+async function bookBaseFor(id: Identity, idKey: string): Promise<Uint8Array | null> {
+  const key = 'ec-gcache-emp-' + idKey
+  let empPub = localStorage.getItem(key)
+  if (!empPub) { empPub = b64((await generateX25519()).pub); localStorage.setItem(key, empPub) }
+  try { return await id.ecdh(empPub) } catch { return null }
+}
 
 async function softLogin() {
   const name = val('soft-name')
@@ -862,6 +900,8 @@ async function softLogin() {
     }
 
     let id: Identity
+    let copyFrom = ''
+    let copiedContacts: Array<{ name: string; pub: string }> | null = null
     if (!raw) {
       // Twice, and compared before anything is written: there is no verifier
       // stored anywhere, so a typo sealed into the profile is unrecoverable and
@@ -869,9 +909,56 @@ async function softLogin() {
       if (pass !== ($('soft-pass2') as HTMLInputElement).value) {
         setMsg('soft-msg', tr('Hasła się różnią.'), 'err'); return
       }
+
+      // ---- przepisanie kontaktów z innego profilu (creation only) ----------
+      // Read and VERIFY the source before anything is written: a refused copy
+      // must leave the device exactly as it was — the new profile included.
+      // The source password is not ceremony: the book is MAC'd under a key only
+      // the source identity can derive (bookmac.ts), and copying WITHOUT that
+      // check would launder a swapped key into a freshly-signed book — the
+      // exact attack the MAC exists to catch.
+      copyFrom = (($('soft-copy-from') as HTMLSelectElement).value) || ''
+      if (copyFrom) {
+        const srcRaw = localStorage.getItem(softKey(copyFrom))
+        const srcBlob = srcRaw ? JSON.parse(srcRaw) : null
+        if (!srcBlob || !isSealedProfile(srcBlob)) {
+          setMsg('soft-msg', tr('Profil źródłowy jest w starym formacie — nie da się z niego przepisać.'), 'err'); return
+        }
+        const srcPass = ($('soft-copy-pass') as HTMLInputElement).value
+        if (!srcPass) { setMsg('soft-msg', tr('Podaj hasło profilu źródłowego.'), 'err'); return }
+        let srcPlain: string
+        try { srcPlain = await unseal(srcPass, srcBlob) } catch (e) {
+          if (e instanceof BadPassword) { setMsg('soft-msg', tr('Złe hasło profilu źródłowego.'), 'err'); return }
+          throw e
+        }
+        const srcId = await browserSoftwareIdentity(copyFrom, () => srcPlain, () => {})
+        const srcKey = await identityKey(srcId.pub)
+        const srcBase = await bookBaseFor(srcId, srcKey)
+        if (!srcBase) { setMsg('soft-msg', tr('Nie udało się zweryfikować książki profilu źródłowego.'), 'err'); return }
+        const { verdict, body } = await checkBook(srcBase, srcKey, localStorage.getItem('ec-local-contacts-' + srcKey))
+        if (verdict === 'tampered') {
+          setMsg('soft-msg', tr('Książka profilu źródłowego nie przechodzi weryfikacji — przepisywanie odrzucone, a książka zostaje nietknięta jako dowód.'), 'err'); return
+        }
+        let list: any[] = []
+        try { list = JSON.parse(body || '[]') } catch { list = [] }
+        // Names and keys travel. A HEM `kid` would point into a device the new
+        // identity cannot authorize against, so it deliberately does not.
+        copiedContacts = list
+          .filter((e) => e && typeof e.pub === 'string' && typeof e.name === 'string')
+          .map((e) => ({ name: e.name, pub: e.pub }))
+      }
+
       let generated = ''
       id = await browserSoftwareIdentity(name, () => null, (v) => { generated = v })
       localStorage.setItem(softKey(name), JSON.stringify(await seal(pass, generated)))
+      if (copiedContacts) {
+        // Signed under the NEW identity from the first byte — makeLocalBook
+        // reads this back through the ordinary verify path a moment later.
+        const nk = await identityKey(id.pub)
+        const nbase = await bookBaseFor(id, nk)
+        const text = JSON.stringify(copiedContacts)
+        localStorage.setItem('ec-local-contacts-' + nk, nbase ? pack(text, await signBook(nbase, nk, text)) : text)
+      }
     } else {
       const blob = JSON.parse(raw)
       // A profile from before passwords existed. Not migrated by decision — the
@@ -888,6 +975,7 @@ async function softLogin() {
     const local = await makeLocalBook(await identityKey(id.pub), localStorage, id)
     if (local.verdict === 'tampered') warnTampered()
     await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
+    if (copiedContacts) toast(tr('Przepisano kontakty z „{name}": {n}.', { name: copyFrom, n: String(copiedContacts.length) }))
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
     else setMsg('soft-msg', tr('Błąd tożsamości software: ') + (e?.message ?? e), 'err')
