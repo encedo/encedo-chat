@@ -70,6 +70,12 @@ test('a peer that comes back under a new PeerId gets a new link', async () => {
 test('an offer nobody answers is made again, then given up', async () => {
   // Signalling rides GossipSub and is fire-and-forget: nothing here used to
   // retry, so one lost offer meant the relay for the rest of the conversation.
+  //
+  // ⚠️ This used to `await tick(140)` and assert 3 — the documented flake
+  // shape (CLAUDE.md): three 40 ms timers fire sequentially, so a full-suite
+  // event-loop stall between any two of them pushes the third past a fixed
+  // wall-clock deadline. Wait on the CONDITION, then prove "given up" with a
+  // margin that only has to catch a wrong FOURTH attempt, not to race a stall.
   const { links, makeLink } = fakeLink()
   const states: string[] = []
   const plane = attachWebRTC(room() as any, 'peer-a', {
@@ -77,9 +83,13 @@ test('an offer nobody answers is made again, then given up', async () => {
   })
 
   plane.onPeer('peer-z') // we are the lower id → we offer
-  await tick(140)
-  assert.equal(links.length, 3, 'three attempts, then it stops trying')
+  const deadline = Date.now() + 5_000
+  while (links.length < 3 && Date.now() < deadline) await tick(10)
+  assert.equal(links.length, 3, 'the offer is made three times in all')
   assert.equal(states.filter((s) => s.includes('offering again')).length, 2)
+
+  await tick(120) // three attempt windows past the last offer
+  assert.equal(links.length, 3, 'then it stops trying')
 
   plane.stop()
 })
