@@ -167,7 +167,13 @@ test('the status-bar icon exists at every density and both notification paths na
   assert.ok(kt.includes('R.drawable.ic_stat_onchato'), 'the service should draw the status-bar icon')
   assert.ok(!kt.includes('setSmallIcon(R.mipmap'), 'a mipmap in the status bar is the bug this fixed')
 
+  // ⚠️ BISECT IN PROGRESS (0.5.20): APKs die at launch from 0.5.10 onward —
+  // activity gone, service icon standing — and this plugin config is the one
+  // 0.5.10 change that runs in the ACTIVITY's process. It is removed
+  // diagnostically; the assertion flips to pin the removal so the suite stays
+  // honest about the state it tests. When the culprit is confirmed and fixed,
+  // restore: conf.plugins?.notification?.icon === 'ic_stat_onchato'.
   const conf = JSON.parse(readFileSync(new URL('tauri.android.conf.json', root), 'utf8'))
-  assert.equal(conf.plugins?.notification?.icon, 'ic_stat_onchato',
-    'message notifications should carry the same icon, not the system ℹ fallback')
+  assert.equal(conf.plugins?.notification?.icon, undefined,
+    'the notification plugin config is diagnostically removed — see the bisect note above')
 })

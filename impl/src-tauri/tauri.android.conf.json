@@ -1,8 +1,3 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
-  "plugins": {
-    "notification": {
-      "icon": "ic_stat_onchato"
-    }
-  }
+  "$schema": "https://schema.tauri.app/config/2"
 }
