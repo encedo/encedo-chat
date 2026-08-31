@@ -194,6 +194,29 @@ export async function initDesktop(s: {
   try { await invoke('desk_close_to_tray', { on: closeToTray() }) } catch {}
 }
 
+// ---- AppImage self-integration ---------------------------------------------
+/**
+ * An AppImage run from Downloads is in no menu and wears a generic gear icon:
+ * GNOME draws both from an INSTALLED .desktop file, and the AppImage carries
+ * its own inside, where the system never looks. The host can install it —
+ * move the file to ~/Applications, write the entry and the icon — but whether
+ * to ask, and in what words, is the webview's job like every other string.
+ *
+ *   `none`      — not an AppImage; say nothing.
+ *   `installed` — a desktop entry already answers for us; say nothing.
+ *   `offer`     — ask, once per launch, and install on a yes.
+ */
+export type AppimageStatus = 'none' | 'installed' | 'offer'
+
+export async function appimageStatus(): Promise<AppimageStatus> {
+  if (!isDesktopShell()) return 'none'
+  // An older shell (or the mobile one) has no such command; the safe reading
+  // of "no answer" is the one that asks nothing.
+  try { return await invoke<AppimageStatus>('desk_appimage_status') } catch { return 'none' }
+}
+
+export const appimageInstall = () => invoke<void>('desk_appimage_install')
+
 // ---- updating in place -----------------------------------------------------
 /**
  * What this copy of the app can do about a newer version.

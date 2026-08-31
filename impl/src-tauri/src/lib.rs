@@ -457,6 +457,165 @@ mod desk {
         { "self".into() }
     }
 
+    /// Where this AppImage stands with the person's desktop.
+    ///
+    /// GNOME draws the dock icon and the menu entry from an INSTALLED .desktop
+    /// file, matched to the window by WM_CLASS; the bundler puts the entry and
+    /// the icons inside the AppImage, where the system never looks. So an
+    /// AppImage run from Downloads wears the generic gear icon and is in no
+    /// menu — reported as a bug, reasonably.
+    ///
+    ///   `none`      — not an AppImage (a .deb, another OS): nothing to offer.
+    ///   `installed` — a desktop entry already answers for us: ours in
+    ///                 ~/.local, or the distro package's in /usr/share (then
+    ///                 the menu and the icon are already right, and a second
+    ///                 entry would only duplicate them).
+    ///   `offer`     — an AppImage with no working entry. The webview asks the
+    ///                 person — in the app's language, like every other string
+    ///                 — and calls `desk_appimage_install` on a yes.
+    #[tauri::command]
+    fn desk_appimage_status() -> String {
+        #[cfg(target_os = "linux")]
+        {
+            if std::env::var_os("APPIMAGE").is_none() {
+                return "none".into();
+            }
+            if std::path::Path::new("/usr/share/applications/onchato.desktop").exists() {
+                return "installed".into();
+            }
+            if let Some(entry) = desktop_entry_path() {
+                if let Ok(body) = std::fs::read_to_string(&entry) {
+                    if entry_target_exists(&body) {
+                        return "installed".into();
+                    }
+                    // The entry points at a file that is gone — the person
+                    // deleted the installed AppImage and is running a fresh
+                    // download. Offer again; a yes repairs the dead entry.
+                }
+            }
+            "offer".into()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            "none".into()
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn home() -> Result<std::path::PathBuf, String> {
+        std::env::var_os("HOME")
+            .map(Into::into)
+            .ok_or_else(|| "no HOME".to_string())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn desktop_entry_path() -> Option<std::path::PathBuf> {
+        Some(home().ok()?.join(".local/share/applications/onchato.desktop"))
+    }
+
+    /// Does the entry's TryExec still point at something on disk? Only entries
+    /// WE write carry one, and we write it precisely so this question is
+    /// answerable; an entry without it is somebody else's integration
+    /// (AppImageLauncher, Gear Lever, a hand-written one) and is left alone.
+    #[cfg(target_os = "linux")]
+    fn entry_target_exists(body: &str) -> bool {
+        for line in body.lines() {
+            if let Some(p) = line.strip_prefix("TryExec=") {
+                return std::path::Path::new(p.trim()).exists();
+            }
+        }
+        true
+    }
+
+    /// Put this AppImage where a person can find it again, and tell the desktop.
+    ///
+    /// The file MOVES to ~/Applications/Onchato.AppImage — a rename on the
+    /// same filesystem, a copy + remove across ones — rather than being copied:
+    /// a copy leaves the original in Downloads, where it is either launched
+    /// again later (two copies that disagree after the first update) or swept
+    /// out with the rest of the folder. Moving also renames: a filename
+    /// carrying a version number would start lying at the first in-place
+    /// update. Then the icon goes into the hicolor theme and a .desktop entry
+    /// beside the other apps' — the same fields the bundler writes into the
+    /// .deb, plus TryExec, which both lets `desk_appimage_status` notice a
+    /// deleted target and makes the menu hide the entry meanwhile.
+    ///
+    /// Only ever called after `desk_appimage_status` said `offer`, from a
+    /// dialog the person answered. The dock icon of the RUNNING window may only
+    /// match from the next launch — GNOME pairs a window with its entry when
+    /// the window appears.
+    ///
+    /// ⚠️ The updater replaces the file `APPIMAGE` names, so the variable is
+    /// repointed at the new home for the rest of this process — otherwise an
+    /// update accepted in this same session would try to land in the Downloads
+    /// path the file just left.
+    #[tauri::command]
+    fn desk_appimage_install() -> Result<(), String> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::fs;
+            let src = std::path::PathBuf::from(
+                std::env::var_os("APPIMAGE").ok_or_else(|| "not an AppImage".to_string())?,
+            );
+            let home = home()?;
+
+            let apps_dir = home.join("Applications");
+            fs::create_dir_all(&apps_dir).map_err(|e| e.to_string())?;
+            let dest = apps_dir.join("Onchato.AppImage");
+            if dest != src {
+                if fs::rename(&src, &dest).is_err() {
+                    fs::copy(&src, &dest).map_err(|e| e.to_string())?;
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o755));
+                    let _ = fs::remove_file(&src);
+                }
+            }
+            std::env::set_var("APPIMAGE", &dest);
+
+            let icon_dir = home.join(".local/share/icons/hicolor/128x128/apps");
+            fs::create_dir_all(&icon_dir).map_err(|e| e.to_string())?;
+            fs::write(
+                icon_dir.join("onchato.png"),
+                include_bytes!("../icons/128x128.png"),
+            )
+            .map_err(|e| e.to_string())?;
+
+            let entry_dir = home.join(".local/share/applications");
+            fs::create_dir_all(&entry_dir).map_err(|e| e.to_string())?;
+            let path_str = dest.to_string_lossy();
+            // Exec quoting per the spec: double quotes around the path, the
+            // reserved characters backslash-escaped, and % doubled so nothing
+            // in a path is ever read as a field code.
+            let exec = format!(
+                "\"{}\"",
+                path_str
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('$', "\\$")
+                    .replace('`', "\\`")
+                    .replace('%', "%%")
+            );
+            let body = format!(
+                "[Desktop Entry]\n\
+                 Type=Application\n\
+                 Name=onchato\n\
+                 Comment=onchato — P2P messenger\n\
+                 Exec={exec}\n\
+                 TryExec={path_str}\n\
+                 Icon=onchato\n\
+                 Terminal=false\n\
+                 Categories=Network;InstantMessaging;\n\
+                 StartupWMClass=onchato\n"
+            );
+            fs::write(entry_dir.join("onchato.desktop"), body).map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            Err("not an AppImage".to_string())
+        }
+    }
+
     /// Is there a newer release, and what is it?
     ///
     /// The whole update lives on THIS side of the seam on purpose. The plugin's
@@ -672,6 +831,8 @@ mod desk {
                 desk_platform,
                 desk_show,
                 desk_update_kind,
+                desk_appimage_status,
+                desk_appimage_install,
                 desk_update_check,
                 desk_update_download,
                 desk_update_progress,

@@ -35,6 +35,7 @@ import {
   isDesktopShell, notifySupported, notifyPermission, notifyRequest, notifyShow, type Banner,
   updateKind, updateCheck, updateDownload, updateProgress, updateApply,
   closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable, isMobileShell,
+  appimageStatus, appimageInstall,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
@@ -4607,7 +4608,39 @@ async function offerUpdate() {
   }
 }
 
-if (isDesktopShell()) setTimeout(() => void offerUpdate(), 15_000)
+// ---- an AppImage that is installed nowhere --------------------------------
+/**
+ * GNOME draws the dock icon and the menu entry from an INSTALLED .desktop
+ * file; the AppImage carries its own inside, where the system never looks. So
+ * an AppImage run from Downloads wears a generic gear icon and is in no menu —
+ * reported as a bug, reasonably. On a yes the host moves the file to
+ * ~/Applications and writes the entry + icon; a no with the checkbox is
+ * remembered for good, a plain no is asked again next launch.
+ */
+const APPIMAGE_DECLINED_KEY = 'ec-appimage-declined'
+
+async function offerAppimageInstall() {
+  try { if (localStorage.getItem(APPIMAGE_DECLINED_KEY) === '1') return } catch {}
+  if (await appimageStatus() !== 'offer') return
+  const a = await ask(tr('Zainstalować onchato?'),
+    tr('Plik AppImage zostanie przeniesiony do katalogu Applications w Twoim folderze domowym, a onchato pojawi się w menu aplikacji z właściwą ikoną.'),
+    tr('Zainstaluj'), tr('Nie pytaj więcej'), undefined, tr('Nie teraz'))
+  if (!a.ok) {
+    if (a.remember) { try { localStorage.setItem(APPIMAGE_DECLINED_KEY, '1') } catch {} }
+    return
+  }
+  try {
+    await appimageInstall()
+    toast(tr('Zainstalowano — onchato znajdziesz teraz w menu aplikacji. Ikona okna dopasuje się od następnego uruchomienia.'))
+  } catch (e: any) {
+    ecLog('appimage install failed: ' + (e?.message ?? e))
+    toast(tr('Nie udało się zainstalować — aplikacja działa dalej z obecnego miejsca.'))
+  }
+}
+
+// Chained, not parallel: both talk through the one `ask` modal, and two
+// dialogs racing for it would tear each other's listeners down.
+if (isDesktopShell()) setTimeout(() => void offerAppimageInstall().then(() => offerUpdate()), 15_000)
 
 // ---- links in a message ---------------------------------------------------
 /**

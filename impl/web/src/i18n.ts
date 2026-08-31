@@ -576,6 +576,12 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '🟢 Direct': '🟢 Direct',
     '🤝 Securing…': '🤝 Securing…',
     '🧨 Wipeout — wyczyść wszystko': '🧨 Wipeout — erase everything',
+    'Zainstalować onchato?': 'Install onchato?',
+    'Plik AppImage zostanie przeniesiony do katalogu Applications w Twoim folderze domowym, a onchato pojawi się w menu aplikacji z właściwą ikoną.': 'The AppImage file will move to the Applications folder in your home directory, and onchato will appear in the app menu with its proper icon.',
+    'Nie teraz': 'Not now',
+    'Nie pytaj więcej': 'Don’t ask again',
+    'Zainstalowano — onchato znajdziesz teraz w menu aplikacji. Ikona okna dopasuje się od następnego uruchomienia.': 'Installed — you will find onchato in the app menu now. The window icon will match from the next launch.',
+    'Nie udało się zainstalować — aplikacja działa dalej z obecnego miejsca.': 'Could not install — the app keeps running from where it is.',
   },
 }
 
