@@ -103,6 +103,41 @@ mod desk {
         }
     }
 
+    /// Run under XWayland when a Wayland session offers it.
+    ///
+    /// Not a prejudice — three window behaviours this shell depends on are
+    /// absent from the Wayland protocol BY DESIGN: a client cannot
+    /// un-minimize itself, cannot place its own window, and cannot take focus
+    /// without an activation token nobody hands to a tray menu. Each absence
+    /// was paid for in a live report: "Show onchato" doing nothing, then the
+    /// window coming back glued to a corner of the screen instead of where it
+    /// was. Under X11 all three are ordinary calls that simply work, which is
+    /// why desktop Electron apps shipped on XWayland for years.
+    ///
+    /// `DISPLAY` present means XWayland is there to catch us; a session
+    /// without it (rare) stays on Wayland and keeps the remap fallback in
+    /// `reveal`. An explicit `GDK_BACKEND` in the environment is the person's
+    /// own decision and is never overridden — which is also the no-rebuild
+    /// rollback: `GDK_BACKEND=wayland onchato` brings the native path back.
+    ///
+    /// The known cost: under fractional scaling (125%/150%) an XWayland
+    /// window is scaled as a bitmap and can look slightly soft. At 100% and
+    /// at whole factors there is no difference.
+    pub fn prefer_x11() {
+        #[cfg(target_os = "linux")]
+        if std::env::var_os("GDK_BACKEND").is_none() && std::env::var_os("DISPLAY").is_some() {
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
+    }
+
+    /// Are we actually drawing through Wayland — the one case where a
+    /// minimized window can only be brought back by remapping it?
+    #[cfg(target_os = "linux")]
+    fn pure_wayland() -> bool {
+        std::env::var_os("WAYLAND_DISPLAY").is_some()
+            && std::env::var("GDK_BACKEND").map(|b| b != "x11").unwrap_or(true)
+    }
+
     /// Bring the window back from wherever it went — hidden, minimised, or just
     /// behind something. All three happen, and only doing one of them is why
     /// "clicking the tray does nothing" is a common complaint about tray apps.
@@ -115,8 +150,13 @@ mod desk {
             // ready" notification instead of the window. The one road back is
             // remapping the surface: a hide/show cycle sheds the minimized
             // state and a freshly mapped window is focused normally.
+            //
+            // Only on PURE Wayland, though (no XWayland — `prefer_x11` was not
+            // able to catch us): a remapped window is placed by the compositor
+            // as if it were new, so this path trades position for existence.
+            // On X11 deiconify() works and the window keeps its place.
             #[cfg(target_os = "linux")]
-            if w.is_minimized().unwrap_or(false) {
+            if pure_wayland() && w.is_minimized().unwrap_or(false) {
                 let _ = w.hide();
             }
             let _ = w.show();
@@ -1018,6 +1058,10 @@ mod mobile {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before the builder: the backend choice must land before GTK first looks
+    // at the environment, and GTK initializes inside build()/run().
+    #[cfg(desktop)]
+    desk::prefer_x11();
     let builder = tauri::Builder::default();
     #[cfg(desktop)]
     let builder = desk::wire(builder);
