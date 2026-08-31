@@ -391,7 +391,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Przypnij — zachowa w tej przeglądarce': 'Pin — keeps it in this browser',
     'Przynajmniej jeden węzeł musi być aktywny.': 'At least one node must be enabled.',
     'Reset urządzenia': 'Device reset',
-    'Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji': 'This pair\'s room rotation: UTC midnight + offset (§5.4) — time until the next one',
+    'Rotacja pokoju tej pary (północ UTC + offset, §5.4) za {t}': "This pair's room rotates in {t} (UTC midnight + offset, §5.4)",
     'Rozmówca wciąż widzi starą treść — mimo ponowień nie ma potwierdzenia':
       'They are still reading the old text — there is no acknowledgement despite the retries',
     'Rozmowa wymaga, żeby obie strony miały swoje klucze publiczne — bez tego nie ma nawet gdzie się spotkać. Wyślij komuś swój link, a on odeśle swój. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie zobaczy.':
@@ -482,7 +482,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Węzły sieci': 'Network nodes',
     'Węzły sieci — wybierz/edytuj': 'Network nodes — choose / edit',
     'Wiadomość': 'Message',
-    'Wiadomość… (Enter = wyślij)': 'Message… (Enter to send)',
+    'Napisz wiadomość…': 'Type a message…',
     'Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.': 'Wipeout erases the local software identity, every contact and all state in this browser — like a new machine (§10). Irreversible. It does not touch keys in an HSM.',
     'wklej pubkey albo link zaproszenia…': 'paste their public key or an invite link…',
     'Wpis grupy „{name}” usunięty z HEM': 'The entry for “{name}” was removed from the HEM',
@@ -510,7 +510,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Wyślij ponownie mój klucz do wszystkich': 'Send my key to everyone again',
     'Wyślij ten link dowolnym kanałem. Nie zawiera niczego tajnego — sam klucz publiczny.':
       'Send this link by any channel. It holds nothing secret — a public key and a name.',
-    'Wyślij ➤': 'Send ➤',
+    'Wyślij (Enter)': 'Send (Enter)',
     'Wysyłam…': 'Sending…',
     'wyszedł/wyszła': 'left',
     'Wysłane do grupy (broadcast — bez potwierdzeń doręczenia)': 'Sent to the group (broadcast — no delivery acknowledgements)',

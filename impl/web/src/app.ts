@@ -3154,7 +3154,17 @@ function setBadge(el: HTMLElement, cls: string, label: string, title: string) {
   const text = sp > 0 ? label.slice(sp + 1) : ''
   el.className = cls
   el.innerHTML = `<span class="b-ico">${escapeHtml(icon)}</span>${text ? `<span class="b-txt">${escapeHtml(text)}</span>` : ''}`
-  el.title = title
+  // Two writers share the tooltip: the state (here) and the rotation
+  // countdown (startRotation's tick), which lost its own badge to header
+  // space. Each writes its dataset half and composes, so neither erases
+  // the other.
+  el.dataset.baseTitle = title
+  applyBadgeTitle(el)
+}
+
+function applyBadgeTitle(el: HTMLElement) {
+  const rot = el.dataset.rot
+  el.title = rot ? `${el.dataset.baseTitle ?? ''}\n${rot}` : (el.dataset.baseTitle ?? '')
 }
 
 function noteTransport(room: Room, state: string) {
@@ -5953,21 +5963,25 @@ window.addEventListener('beforeunload', () => {
 function startRotation() {
   if (rotTimer) return
   const tick = () => {
-    const el = document.getElementById('rot'); if (!el) return
-    const badge = el.closest('.badge.rotate') as HTMLElement | null
+    // No badge of its own any more (the user's call — header space is the
+    // scarcest on a phone and the value is advisory): the countdown rides in
+    // the security badge's tooltip, composed with the state text by
+    // applyBadgeTitle so neither writer erases the other. Groups rotate per
+    // epoch, not daily, so a group on screen carries no countdown.
+    const b = document.getElementById('e2e-badge'); if (!b) return
     const conv = activeGid ? null : activeRoom()?.conv
-    if (!conv) { if (badge) badge.style.display = 'none'; return }
-    if (badge) badge.style.display = ''
+    if (!conv) { delete b.dataset.rot; applyBadgeTitle(b); return }
     const now = Date.now()
     const next = nextRotationAfter(now, (conv.rotationOffsetSec ?? 0) * 1000)
     let s = Math.max(0, Math.floor((next - now) / 1000))
     const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60
-    // Hours and minutes only. This counts down to a DAILY rotation, so a ticking
-    // seconds field was three characters of header — the scarcest space on a
-    // phone — spent on precision nobody acts on. Rounded UP, so it never reads
-    // 00:00 while there is still time left.
+    // Hours and minutes only: this counts to a DAILY rotation, and seconds are
+    // precision nobody acts on. Rounded UP, so it never reads 00:00 while
+    // there is still time left.
     const mm = s > 0 ? m + 1 : m
-    el.textContent = `${String(h + (mm === 60 ? 1 : 0)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`
+    const t = `${String(h + (mm === 60 ? 1 : 0)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`
+    b.dataset.rot = tr('Rotacja pokoju tej pary (północ UTC + offset, §5.4) za {t}', { t })
+    applyBadgeTitle(b)
   }
   // Still every second: the value changes on a minute boundary, and polling for
   // it is cheaper than computing when that boundary falls.

@@ -422,6 +422,10 @@
   .prof-row .p-del:hover{color:var(--err,#c0392b)}
   @media (pointer:coarse){.prof-row .p-del{padding:9px 10px}}
   .btn-send{background:var(--accent);color:var(--accent-ink);border:none;padding:0 22px;border-radius:8px;font-weight:600}
+  /* The composer's send is icon-only — the word was the widest thing in the
+     row and said nothing the arrow does not (the user's call). Grid, to
+     center an SVG that baseline-aligns badly as inline content. */
+  #send{padding:0 14px;display:grid;place-items:center}
   /* Destructive confirm: the affirmative button must not look like the safe
      default, because "Tak" here deletes something. */
   .btn-send.danger{background:var(--err,#c0392b);color:#fff}
@@ -657,20 +661,14 @@
      desktop `min-height` has to be cancelled, or a keyboard-shrunk viewport
      pushes the composer off screen. */
   @media (max-width:900px), (max-height:560px){
-    /* Three badges plus a name do not fit a phone header, so the WORDS collapse
+    /* Badges plus a name do not fit a phone header, so the WORDS collapse
        and the glyph carries the state — hiding a badge outright would drop the
-       security state, which must stay visible. The rotation badge keeps its
-       countdown: it is the one whose value IS the information.
+       security state, which must stay visible.
        This lives in the PHONE block (narrow OR short), not the short-only one:
        it was in the latter, so it fired at 360x545 and not at 360x641 — same
        phone, two browsers, different toolbar heights, opposite results. */
     .chat-head .badge{white-space:nowrap;padding:4px 8px;gap:0;max-width:3.2em;overflow:hidden}
     .chat-head .badge .b-txt{display:none}
-    /* The countdown is the only badge whose VALUE is the information, so on a
-       phone it drops the glyph instead of the words — the opposite trade to its
-       neighbours — and gives up the shared max-width so the time fits. */
-    .chat-head .badge.rotate{gap:0;font-size:11px;max-width:none;padding:4px 7px}
-    .chat-head .badge.rotate .b-ico{display:none}
     /* `viewport-fit=cover` opts into drawing under the system bars, which is
        right in a browser (its chrome sits above) and wrong in the packaged app,
        where nothing does — the header slid under the Android status bar. The
@@ -907,8 +905,10 @@
           <button class="icon-btn" id="btn-knock" title="Puknij — zwróć uwagę" data-i18n-title="Puknij — zwróć uwagę" aria-label="Puknij"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"/><path d="M10.5 20a2 2 0 0 0 3 0"/></svg></button>
           <div class="badges">
             <span class="badge relay" id="transport-badge" title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi" data-i18n-title="Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi"><span class="b-ico">⚪</span><span class="b-txt">Relay</span></span>
+            <!-- The rotation countdown used to be a third badge here. Header
+                 space is the scarcest on a phone, and the value is advisory,
+                 so it rides in THIS badge's tooltip now (startRotation). -->
             <span class="badge e2e" id="e2e-badge" title="Szyfrowane E2E — interim, EH-2 w drodze" data-i18n-title="Szyfrowane E2E — interim, EH-2 w drodze"><span class="b-ico">🔒</span><span class="b-txt">E2E interim</span></span>
-            <span class="badge rotate" title="Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji" data-i18n-title="Rotacja pokoju tej pary: północ UTC + offset (§5.4) — czas do najbliższej rotacji"><span class="b-ico">↻</span><span id="rot">–:–</span></span>
           </div>
         </div>
         <div class="messages" id="messages"></div>
@@ -922,7 +922,7 @@
         <div class="composer">
           <input type="file" id="file-input" hidden>
           <div class="composer-field">
-            <input id="msg-input" type="text" placeholder="Wiadomość… (Enter = wyślij)" data-i18n-placeholder="Wiadomość… (Enter = wyślij)" autocomplete="off">
+            <input id="msg-input" type="text" placeholder="Napisz wiadomość…" data-i18n-placeholder="Napisz wiadomość…" autocomplete="off">
             <span class="attach-chip" id="attach-chip" hidden>
               <img class="t" id="attach-thumb" alt="" hidden>
               <span class="n" id="attach-name"></span>
@@ -935,7 +935,10 @@
             <button class="clip" id="btn-voice" hidden title="Nagraj głosówkę" data-i18n-title="Nagraj głosówkę" aria-label="Nagraj głosówkę"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/></svg></button>
             <button class="clip" id="btn-attach" title="Dołącz plik" data-i18n-title="Dołącz plik" aria-label="Dołącz plik">📎</button>
           </div>
-          <button class="btn-send" id="send" data-i18n="Wyślij ➤">Wyślij ➤</button></div>
+          <!-- Icon only, and a real SVG, not a glyph (the ⏻/✏ tofu rule). No
+               data-i18n: applyDom writes textContent and would replace the SVG
+               with words on a language switch — the label lives in the title. -->
+          <button class="btn-send" id="send" title="Wyślij (Enter)" data-i18n-title="Wyślij (Enter)" aria-label="Wyślij"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9 22 2"/></svg></button></div>
       </div>
     </main>
   </div>
