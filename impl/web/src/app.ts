@@ -35,7 +35,7 @@ import {
   isDesktopShell, notifySupported, notifyPermission, notifyRequest, notifyShow, type Banner,
   updateKind, updateCheck, updateDownload, updateProgress, updateApply,
   closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable, isMobileShell,
-  appimageStatus, appimageInstall, showWindow,
+  appimageStatus, appimageInstall, showWindow, openExternal,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
@@ -4539,7 +4539,7 @@ async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
  *   manager; the updater would download a bundle and fail at the last step. So
  *   that case gets the version, a link, and no promise.
  */
-const RELEASES_URL = 'https://github.com/encedo/encedo-chat/releases/latest'
+const RELEASES_URL_BASE = 'https://github.com/encedo/encedo-chat/releases'
 
 async function offerUpdate() {
   const kind = await updateKind()
@@ -4552,9 +4552,12 @@ async function offerUpdate() {
   if (!info) return
 
   if (kind === 'system') {
+    // The exact version's page, not /latest: its download section is the
+    // thing the person was just told about, and /latest can have moved
+    // between the check and the click.
     await ask(tr('Jest nowa wersja {v}', { v: info.version }),
       tr('Ta kopia pochodzi z pakietu systemowego, więc nie podmieni się sama. Nową wersję trzeba pobrać.'),
-      tr('Pobierz'), undefined, RELEASES_URL, tr('Później'))
+      tr('Pobierz'), undefined, `${RELEASES_URL_BASE}/tag/v${info.version}`, tr('Później'))
     return
   }
 
@@ -4648,6 +4651,21 @@ if (isDesktopShell()) setTimeout(() => void offerAppimageInstall().then(() => of
 // theme-correct paint provably exists — tell the host to map the window.
 // The host keeps its own watchdog for a bundle that breaks before this line.
 if (isDesktopShell()) requestAnimationFrame(() => requestAnimationFrame(() => showWindow()))
+
+// Every outward anchor in the desktop shell goes to the system browser.
+// The webview turns `target="_blank"` into a new-window request for the host,
+// no handler is installed for those, and the click DIES SILENTLY — which is
+// what the .deb's update-download button did. Capture phase, so the anchors'
+// own listeners (closing the ask modal, say) still run; the mobile shell is
+// left to its platform, checked at click time because the platform answer
+// arrives after this listener is registered.
+if (isDesktopShell()) document.addEventListener('click', (e) => {
+  if (isMobileShell()) return
+  const a = (e.target as HTMLElement | null)?.closest?.('a[target="_blank"]') as HTMLAnchorElement | null
+  if (!a?.href || !/^https?:/i.test(a.href)) return
+  e.preventDefault()
+  openExternal(a.href)
+}, true)
 // ---- links in a message ---------------------------------------------------
 /**
  * Whether the "you are leaving" warning has been silenced for this session.

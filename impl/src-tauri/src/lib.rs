@@ -526,6 +526,36 @@ mod desk {
         { "self".into() }
     }
 
+    /// Open a URL in the system browser — the only kind of "new window" this
+    /// app has.
+    ///
+    /// The webview forwards every `window.open` / `target="_blank"` to the
+    /// host as a new-window request, and the shell installs no handler for
+    /// those (a messenger opens no second webviews) — so without this command
+    /// an outward link DIES SILENTLY in the packaged build. That shipped: the
+    /// update dialog's download button for a .deb was such a link, and so is
+    /// the arrow beside a URL in a message.
+    ///
+    /// http/https only, verbatim from the check the webview's linkify makes:
+    /// this command is reachable from webview content, and a boundary that
+    /// launches whatever it is handed has stopped being one.
+    #[tauri::command]
+    fn desk_open_url(url: String) -> Result<(), String> {
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err("not a web url".into());
+        }
+        #[cfg(target_os = "linux")]
+        let r = std::process::Command::new("xdg-open").arg(&url).spawn();
+        #[cfg(target_os = "macos")]
+        let r = std::process::Command::new("open").arg(&url).spawn();
+        // Not `cmd /C start`: cmd splits on the `&` that query strings carry.
+        #[cfg(target_os = "windows")]
+        let r = std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", &url])
+            .spawn();
+        r.map(|_| ()).map_err(|e| e.to_string())
+    }
+
     /// Where this AppImage stands with the person's desktop.
     ///
     /// GNOME draws the dock icon and the menu entry from an INSTALLED .desktop
@@ -899,6 +929,7 @@ mod desk {
                 desk_tray_ok,
                 desk_platform,
                 desk_show,
+                desk_open_url,
                 desk_update_kind,
                 desk_appimage_status,
                 desk_appimage_install,

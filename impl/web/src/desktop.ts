@@ -176,6 +176,19 @@ export function showWindow() {
 }
 
 /**
+ * Open a URL outside the app. In a browser that is a new tab; in the packaged
+ * shell it is the SYSTEM browser — the webview forwards `target="_blank"` to
+ * the host as a new-window request, no handler is installed for those (a
+ * messenger opens no second webviews), and the click dies silently. The host
+ * command re-checks the scheme; a shell too old to know it swallows the click
+ * exactly as before, never navigates the app itself.
+ */
+export function openExternal(url: string) {
+  if (isDesktopShell()) void invoke('desk_open_url', { url }).catch(() => {})
+  else window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+/**
  * Hand the shell every string it shows, in the app's language, and tell it the
  * close-to-tray setting the webview is holding.
  *
