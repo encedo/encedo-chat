@@ -4647,10 +4647,14 @@ if (isDesktopShell()) setTimeout(() => void offerAppimageInstall().then(() => of
 
 // The shell starts the window HIDDEN so nobody sees the webview's white
 // pre-paint (reported as a white or half-white flash at every launch of a
-// dark desktop). Two animation frames into this script the first
-// theme-correct paint provably exists — tell the host to map the window.
-// The host keeps its own watchdog for a bundle that breaks before this line.
-if (isDesktopShell()) requestAnimationFrame(() => requestAnimationFrame(() => showWindow()))
+// dark desktop). Map it the moment this script runs: the bundle is deferred,
+// so the document is parsed and the inline stylesheet applied by now — the
+// first frame the compositor draws is already theme-correct. An animation
+// frame was the obvious "after first paint" signal and the wrong one: a
+// HIDDEN WebKitGTK window produces no frames, so the ping sat waiting for
+// the shell's watchdog — reported as the app taking two seconds to appear.
+// The watchdog stays, for a bundle that breaks before this line.
+if (isDesktopShell()) showWindow()
 
 // Every outward anchor in the desktop shell goes to the system browser.
 // The webview turns `target="_blank"` into a new-window request for the host,
