@@ -35,7 +35,7 @@ import {
   isDesktopShell, notifySupported, notifyPermission, notifyRequest, notifyShow, type Banner,
   updateKind, updateCheck, updateDownload, updateProgress, updateApply,
   closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable, isMobileShell,
-  appimageStatus, appimageInstall,
+  appimageStatus, appimageInstall, showWindow,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
@@ -4642,6 +4642,12 @@ async function offerAppimageInstall() {
 // dialogs racing for it would tear each other's listeners down.
 if (isDesktopShell()) setTimeout(() => void offerAppimageInstall().then(() => offerUpdate()), 15_000)
 
+// The shell starts the window HIDDEN so nobody sees the webview's white
+// pre-paint (reported as a white or half-white flash at every launch of a
+// dark desktop). Two animation frames into this script the first
+// theme-correct paint provably exists — tell the host to map the window.
+// The host keeps its own watchdog for a bundle that breaks before this line.
+if (isDesktopShell()) requestAnimationFrame(() => requestAnimationFrame(() => showWindow()))
 // ---- links in a message ---------------------------------------------------
 /**
  * Whether the "you are leaving" warning has been silenced for this session.

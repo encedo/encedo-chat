@@ -66,6 +66,16 @@ mod desk {
         pending_update: Mutex<Option<Vec<u8>>>,
         hidden_title: Mutex<String>,
         hidden_body: Mutex<String>,
+        /// The window has been revealed at least once — the webview said
+        /// "painted", or a person asked for it. Setup's watchdog checks this
+        /// before forcing the hidden-at-start window onto the screen, so it
+        /// can never resurrect a window somebody already hid to the tray.
+        booted: std::sync::atomic::AtomicBool,
+        /// Where the window stood when close-to-tray hid it. An X11 window
+        /// manager places a re-mapped window by its own heuristic (glued to a
+        /// screen corner, in the live report) unless it asks for its old spot
+        /// back — so the spot is saved at hide and spent at reveal.
+        hidden_at: Mutex<Option<tauri::PhysicalPosition<i32>>>,
         /// The session bus, held open for the life of the process. See
         /// `deliver` — this field IS the fix for the vanishing banners.
         #[cfg(target_os = "linux")]
@@ -92,6 +102,8 @@ mod desk {
                 pending_update: Mutex::new(None),
                 hidden_title: Mutex::new("onchato".into()),
                 hidden_body: Mutex::new("Still running in the tray.".into()),
+                booted: std::sync::atomic::AtomicBool::new(false),
+                hidden_at: Mutex::new(None),
                 #[cfg(target_os = "linux")]
                 bus: Mutex::new(None),
                 // Assumed absent until proven present: the failure of hiding a
@@ -142,6 +154,10 @@ mod desk {
     /// behind something. All three happen, and only doing one of them is why
     /// "clicking the tray does nothing" is a common complaint about tray apps.
     fn reveal<R: Runtime>(app: &AppHandle<R>) {
+        let shell = app.state::<Shell>();
+        shell
+            .booted
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         if let Some(w) = app.get_webview_window("main") {
             // Wayland has no "unminimize": xdg-shell offers set_minimized and
             // nothing in the other direction, so deiconify() is a no-op there,
@@ -159,7 +175,20 @@ mod desk {
             if pure_wayland() && w.is_minimized().unwrap_or(false) {
                 let _ = w.hide();
             }
+            // Put the window back where close-to-tray took it from — asked
+            // BEFORE the map so the wish rides the initial hints, and again
+            // after, for window managers that only honour a move once the
+            // window is mapped. Without this the WM places the re-mapped
+            // window itself, glued to a corner. On pure Wayland both calls
+            // are no-ops, which is the protocol's answer, not ours.
+            let back = shell.hidden_at.lock().unwrap().take();
+            if let Some(p) = back {
+                let _ = w.set_position(p);
+            }
             let _ = w.show();
+            if let Some(p) = back {
+                let _ = w.set_position(p);
+            }
             let _ = w.unminimize();
             let _ = w.set_focus();
         }
@@ -879,6 +908,35 @@ mod desk {
                 desk_update_apply,
             ])
             .setup(|app| {
+                // The webview's first frame is white — WebKitGTK paints before
+                // the page does — and on a dark desktop that is a flash of the
+                // wrong colour at every launch (reported: a white or half-white
+                // window that turns dark a moment later). So the window stays
+                // OFF screen until the page has painted: hidden here, before
+                // the event loop has mapped anything, and shown by the
+                // webview's own ping (`desk_show`, two animation frames into
+                // its script — the first moment a theme-correct paint provably
+                // exists). The watchdog is for a bundle that breaks before it
+                // can ping: a window with an error on it beats an app that
+                // looks like it never started. `booted` keeps the watchdog
+                // from resurrecting a window somebody already hid to the tray.
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+                {
+                    let h = app.handle().clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(4));
+                        if !h
+                            .state::<Shell>()
+                            .booted
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                        {
+                            reveal(&h);
+                        }
+                    });
+                }
+
                 let show = MenuItem::with_id(app, "show", "Show onchato", true, None::<&str>)?;
                 let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
                 let menu = Menu::with_items(app, &[&show, &quit])?;
@@ -950,6 +1008,9 @@ mod desk {
                     return;
                 }
                 api.prevent_close();
+                // Remembered before hiding, spent by `reveal` — the WM will
+                // not put a re-mapped window back by itself.
+                *shell.hidden_at.lock().unwrap() = window.outer_position().ok();
                 let _ = window.hide();
                 // A window that vanishes without a word reads as a crash, and
                 // the tray icon is small and easy to miss. Said once, through

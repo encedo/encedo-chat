@@ -4,6 +4,10 @@
 <meta charset="utf-8">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cg fill='%2316a37f'%3E%3Cpath d='M128 342 Q112 412 134 444 Q172 424 200 392 Z' stroke='%2316a37f' stroke-width='14' stroke-linejoin='round'/%3E%3Ccircle cx='256' cy='234' r='168'/%3E%3C/g%3E%3C/svg%3E">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Any paint that happens before our stylesheet applies uses the UA's canvas
+     colour, and without this line that canvas is white on every theme — the
+     white flash packaged builds showed on dark desktops. -->
+<meta name="color-scheme" content="light dark">
 <title>onchato</title>
 <style>
   /* The palette is shared with the public page (`landing.html`): a cool ground
