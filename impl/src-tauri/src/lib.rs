@@ -108,6 +108,17 @@ mod desk {
     /// "clicking the tray does nothing" is a common complaint about tray apps.
     fn reveal<R: Runtime>(app: &AppHandle<R>) {
         if let Some(w) = app.get_webview_window("main") {
+            // Wayland has no "unminimize": xdg-shell offers set_minimized and
+            // nothing in the other direction, so deiconify() is a no-op there,
+            // and present() without an xdg-activation token is refused by
+            // GNOME's focus-stealing guard — the user sees an "onchato is
+            // ready" notification instead of the window. The one road back is
+            // remapping the surface: a hide/show cycle sheds the minimized
+            // state and a freshly mapped window is focused normally.
+            #[cfg(target_os = "linux")]
+            if w.is_minimized().unwrap_or(false) {
+                let _ = w.hide();
+            }
             let _ = w.show();
             let _ = w.unminimize();
             let _ = w.set_focus();
