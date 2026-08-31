@@ -166,9 +166,14 @@ async function pressSoftGo(c: Chrome): Promise<'ask' | 'done' | 'form'> {
 }
 
 /**
- * Sign in with a software profile, walking the flow the app actually asks for:
- * a name with no profile behind it raises a confirm dialog first, and creating
- * one asks for the password twice.
+ * Sign in with a software profile, walking the flow the app actually asks for.
+ * Two disjoint doors now: an EXISTING profile is entered from the login card's
+ * list (`#login-profiles .pick` → `openSoftModal(name)` → password), while
+ * `go-soft` means CREATE from its first press — the modal opens in creation
+ * mode with the repeat-password field already showing, and a taken name there
+ * is refused, not signed into. The old single-door flow (press, confirm
+ * dialog, second password) is gone; walking it produced "the passwords do not
+ * match" on creation and "already here" on re-entry.
  *
  * This mirrors `softProfile` in browser-test.ts on purpose, and the duplication
  * is the point to notice: when the login changes, BOTH have to change. This
@@ -176,28 +181,37 @@ async function pressSoftGo(c: Chrome): Promise<'ask' | 'done' | 'form'> {
  * exactly how it came to be broken.
  */
 async function softProfile(c: Chrome, name: string) {
-  // `go-soft` is in the static markup, so it exists before the bundle has
-  // attached its handler and a single click can be silently lost. Click from
-  // inside the wait — `openSoftModal` is idempotent.
+  const picked = await c.eval<number>(`
+    const who = [...document.querySelectorAll('#login-profiles .pick .who')]
+      .find((w) => w.textContent === ${JSON.stringify(name)});
+    if (!who) return 0;
+    who.closest('.pick').click();
+    return 1;
+  `)
+  if (picked) {
+    await c.waitFor('software modal', `return document.getElementById('soft-modal').classList.contains('open')`, 20_000)
+    await c.eval(`document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)}; return 1`)
+    if (await pressSoftGo(c) !== 'done') {
+      throw new Error(`sign-in refused: ${await c.eval<string>(`return document.getElementById('soft-msg').textContent`)}`)
+    }
+    return
+  }
+  // No such profile on the card: create one. `go-soft` is in the static
+  // markup, so it exists before the bundle has attached its handler and a
+  // single click can be silently lost. Click from inside the wait —
+  // `openSoftModal` is idempotent.
   await c.waitFor('software modal', `
     const m = document.getElementById('soft-modal');
     if (!m.classList.contains('open')) document.getElementById('go-soft').click();
     return m.classList.contains('open');
   `, 20_000)
+  await c.waitFor('creation mode', `return !document.getElementById('soft-pass2-wrap').hidden`, 10_000)
   await c.eval(`
     document.getElementById('soft-name').value = ${JSON.stringify(name)};
     document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)};
+    document.getElementById('soft-pass2').value = ${JSON.stringify(SOFT_PASS)};
     return 1;
   `)
-  const first = await pressSoftGo(c)
-  if (first === 'done') return                    // the profile already existed
-  if (first === 'form') throw new Error(`the profile form refused the name: ${await c.eval<string>(`return document.getElementById('soft-msg').textContent`)}`)
-
-  await c.eval(`document.getElementById('ask-yes').click(); return 1`)
-  // The confirm field only exists once creation mode is on — filling it any
-  // earlier writes into a hidden input.
-  await c.waitFor('creation mode', `return !document.getElementById('soft-pass2-wrap').hidden`, 10_000)
-  await c.eval(`document.getElementById('soft-pass2').value = ${JSON.stringify(SOFT_PASS)}; return 1`)
   if (await pressSoftGo(c) !== 'done') {
     throw new Error(`the profile was not created: ${await c.eval<string>(`return document.getElementById('soft-msg').textContent`)}`)
   }
