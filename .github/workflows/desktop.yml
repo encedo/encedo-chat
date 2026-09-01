@@ -39,11 +39,44 @@ permissions:
   id-token: write
 
 jobs:
+  # The draft release exists BEFORE the matrix does. Five tauri-action jobs
+  # used to race to create it — two of them would both find no release for the
+  # tag and both create one, TWIN DRAFTS with the assets split between them.
+  # v0.5.35 shipped that way: updater-json read the first twin, found half the
+  # platforms, and went red (correctly — the silent version of this was
+  # v0.5.27). With the release pre-created there is nothing to race for; the
+  # updater-json job still knows how to merge twins, as the belt to this
+  # suspender.
+  draft:
+    name: draft release
+    if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Create the draft if the tag has none
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in refs/tags/*) ;; *) echo "not a tag build — nothing to create"; exit 0 ;; esac
+          TAG="$GITHUB_REF_NAME"
+          N=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+              | jq --arg t "$TAG" '[.[] | select(.tag_name == $t)] | length')
+          if [ "$N" -eq 0 ]; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$TAG" -f name="Encedo Chat $TAG" -F draft=true -F prerelease=false > /dev/null
+            echo "draft created for $TAG"
+          else
+            echo "release for $TAG already exists ($N) — leaving it alone"
+          fi
+
   bundle:
     name: ${{ matrix.label }}
     # Skipped only for the repair dispatch (a tag input): that run exists to
     # rewrite one small JSON on a draft, not to rebuild five platforms.
     if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
+    needs: draft
     runs-on: ${{ matrix.os }}
     # The OIDC subject Azure's federated credential matches against. Without
     # an environment the subject carries the REF — `ref:refs/tags/v0.5.34` —
@@ -251,10 +284,46 @@ jobs:
           set -euo pipefail
           # The by-tag endpoint hides drafts, so list and filter — the whole
           # point is writing into the draft before anyone publishes it.
-          REL=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
-                | jq --arg t "$TAG" '[.[] | select(.tag_name == $t)][0]')
-          RID=$(echo "$REL" | jq -r '.id // empty')
-          [ -n "$RID" ] || { echo "::error::no release (draft or published) for $TAG"; exit 1; }
+          RELS=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+                | jq --arg t "$TAG" '[.[] | select(.tag_name == $t)] | sort_by(.created_at)')
+          N=$(echo "$RELS" | jq length)
+          [ "$N" -gt 0 ] || { echo "::error::no release (draft or published) for $TAG"; exit 1; }
+          RID=$(echo "$RELS" | jq -r '.[0].id')
+
+          # TWIN drafts: before the `draft` job existed, tauri-action's five
+          # jobs raced to create the release and the losers' assets landed on
+          # a second copy — half the platforms on each, and whichever twin got
+          # published, the other half's URLs would 404. Merge every younger
+          # twin into the oldest (download + upload; the API cannot move an
+          # asset), then delete the emptied twin. Duplicate names keep the
+          # oldest release's copy.
+          if [ "$N" -gt 1 ]; then
+            echo "::warning::$N releases for $TAG — merging twins into $RID"
+            mkdir -p dup
+            HAVE=$(echo "$RELS" | jq -r '.[0].assets[].name')
+            echo "$RELS" | jq -c '.[1:][]' | while read -r rel; do
+              rid2=$(echo "$rel" | jq -r '.id')
+              echo "$rel" | jq -r '.assets[] | "\(.id)\t\(.name)"' | while IFS=$'\t' read -r aid name; do
+                if printf '%s\n' "$HAVE" | grep -qxF "$name"; then
+                  echo "skip duplicate: $name"
+                else
+                  echo "moving: $name"
+                  gh api -H "Accept: application/octet-stream" \
+                    "repos/$GITHUB_REPOSITORY/releases/assets/$aid" > "dup/$name"
+                  curl -sf -X POST \
+                    -H "Authorization: Bearer $GH_TOKEN" \
+                    -H "Content-Type: application/octet-stream" \
+                    --data-binary @"dup/$name" \
+                    "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RID/assets?name=$name" > /dev/null
+                fi
+              done
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$rid2"
+              echo "deleted twin release $rid2"
+            done
+          fi
+
+          # Re-read the survivor: the merge above may have grown its assets.
+          REL=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RID")
 
           mkdir sigs
           echo "$REL" | jq -r '.assets[] | select(.name | endswith(".sig")) | "\(.id) \(.name)"' \
