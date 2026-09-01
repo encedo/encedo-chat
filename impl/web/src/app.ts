@@ -5988,9 +5988,17 @@ document.addEventListener('visibilitychange', () => {
   // stay alive across the throttle too. Coming back, the tab's timers were
   // throttled while hidden, so our Announce heartbeat went quiet and the peer may
   // already have written us off — speak up now instead of waiting for the tick.
-  for (const r of rooms.values()) { if (document.hidden) r.conv?.noteAway(); else r.conv?.refresh() }
+  // Coming back also SAYS so: refresh() alone revived the transport but left
+  // the `away` flag set, so the peer saw "away" until the first keystroke —
+  // raising the window is the "I'm back" (the phone already reads that way
+  // on unlock, and the desktop should not be the quieter platform).
+  for (const r of rooms.values()) { if (document.hidden) r.conv?.noteAway(); else { r.conv?.refresh(); r.conv?.noteBack() } }
   if (document.hidden) void persistGroups() // best-effort flush on backgrounding (encrypt is async); sends are already durable
 })
+// Alt-tab back does not change visibility (the window never left the screen),
+// but focus fires — and an idle-away person who returns that way deserves the
+// same "I'm back". Idempotent: presence goes out only if `away` was set.
+window.addEventListener('focus', () => { for (const r of rooms.values()) r.conv?.noteBack() })
 /**
  * Phone layout: one pane at a time (see the ≤720px rules in index.html). The
  * class is what switches between the contact list and the conversation; on a

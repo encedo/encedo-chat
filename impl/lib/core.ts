@@ -508,6 +508,7 @@ export interface Conversation {
   sendFile(f: FileMeta): string
   noteActivity(): void // UI calls on user input → drives "typing" + resets "away"
   noteAway(): void // UI calls on blur/tab-hidden → "away" now
+  noteBack(): void // UI calls when the window comes back into view — "I'm back" without pretending to type
   refresh(): void | Promise<void> // UI calls when the tab becomes visible again (throttled/frozen)
   who(): string[]
   secured(): string[] // peers with a live EH-2 ratchet (empty in interim mode)
@@ -1107,6 +1108,12 @@ async function openRoom(
     armAway()
   }
   const noteAway = () => { stopTyping(); clearTimeout(aT); if (!away) { away = true; room.sendPresence('away') } }
+  // The half of noteActivity that raising the window can honestly claim:
+  // presence, without the typing notice. Reported live — coming back from the
+  // tray left the peer seeing "away" until the first keystroke, because the
+  // only road out of `away` ran through noteActivity, which also says
+  // "pisze…" about somebody who has not touched a key.
+  const noteBack = () => { if (away) { away = false; room.sendPresence('active') } armAway() }
 
   return {
     peerId: self,
@@ -1121,6 +1128,7 @@ async function openRoom(
     sendFile: (f) => room.sendFile(f),
     noteActivity,
     noteAway,
+    noteBack,
     refresh: async () => {
       // A tab that was hidden for a while may come back with its transport dead:
       // throttling turns into freezing (laptop asleep, app in the background)
