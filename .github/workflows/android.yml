@@ -220,6 +220,7 @@ jobs:
           name: android-sideload-${{ github.ref_name }}-${{ github.sha }}
           path: ${{ env.APK_OUT }}
           if-no-files-found: error
+          retention-days: 7
 
       # Kept apart from the APK above on purpose: one artifact is a thing to tap
       # on a phone, the other is a thing to upload to Play, and putting them in
@@ -229,3 +230,4 @@ jobs:
           name: android-aab-unsigned-${{ github.ref_name }}-${{ github.sha }}
           path: impl/src-tauri/gen/android/app/build/outputs/**/*.aab
           if-no-files-found: error
+          retention-days: 7

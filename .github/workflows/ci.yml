@@ -128,3 +128,36 @@ jobs:
           name: browser-test-log
           path: impl/*.log
           if-no-files-found: ignore
+          retention-days: 7
+
+  # Storage hygiene. Build artifacts belong to their RUNS; anything shipped
+  # lives on a Release, whose assets this never touches. A run's bundles are a
+  # week's convenience — long enough to grab a test build off a workflow page —
+  # and clutter after. Every upload in these workflows now says
+  # `retention-days: 7`, so GitHub expires the FUTURE ones by itself; this job
+  # sweeps the backlog uploaded before that setting existed and anything a
+  # future workflow uploads without it. On main only: a PR run has no write
+  # token, and one sweep per landed push is plenty.
+  sweep-artifacts:
+    name: sweep old artifacts
+    needs: [unit, browser]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Delete artifacts older than a week
+        run: |
+          set -euo pipefail
+          CUTOFF=$(date -u -d '7 days ago' +%s)
+          # `expired` ones still appear in the listing but cannot be deleted —
+          # GitHub already took them; skip rather than error.
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" --paginate \
+            -q '.artifacts[] | select(.expired | not) | "\(.id)\t\(.created_at)\t\(.name)"' \
+          | while IFS=$'\t' read -r id created name; do
+              [ "$(date -u -d "$created" +%s)" -lt "$CUTOFF" ] || continue
+              echo "deleting: $name ($created)"
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" || true
+            done

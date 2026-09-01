@@ -206,6 +206,9 @@ jobs:
             impl/src-tauri/target/**/bundle/**/*.msi
             impl/src-tauri/target/**/bundle/**/*.exe
           if-no-files-found: warn
+          # A run's bundles are a week's convenience, not an archive: anything
+          # released lives on the Release, and anything not released was a test.
+          retention-days: 7
 
   # ONE writer for `latest.json`, after every bundle job has finished.
   #
