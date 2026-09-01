@@ -38,6 +38,7 @@ import {
   appimageStatus, appimageInstall, showWindow, openExternal,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
+import { assessPassword } from '../../lib/passmeter.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -801,6 +802,7 @@ function softMode(creating: boolean) {
   softCreating = creating ? val('soft-name') : ''
   $('soft-pass2-wrap').hidden = !creating
   ;($('soft-pass2') as HTMLInputElement).value = ''
+  paintSoftMeter()
   // The copy-from block appears only when creating AND there is a profile to
   // copy from — an empty select would be a question with no answers.
   const copySel = $('soft-copy-from') as HTMLSelectElement
@@ -823,6 +825,49 @@ function softMode(creating: boolean) {
     ? tr('Nowa tożsamość na tym urządzeniu. Hasła nie da się odzyskać ani zmienić bez niego — nie ma czego z nim porównać.')
     : tr('Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.')
   ;($('soft-go') as HTMLButtonElement).textContent = creating ? tr('Utwórz profil') : tr('Dalej')
+}
+
+// ---- password strength (advisory — the user's decision, 2026-09-01) -------
+/**
+ * The meter paints only where a password is being CHOSEN: profile creation
+ * and the change-password modal. `mig-pass` gets none on purpose — a move
+ * seals under the profile's EXISTING password, and grading what cannot be
+ * changed in that window is noise. Enforcement later is `ENFORCE_MIN` in
+ * lib/passmeter.ts plus the two confirm sites below.
+ */
+function paintMeter(box: HTMLElement, pw: string, visible: boolean) {
+  if (!visible || !pw) { box.hidden = true; return }
+  const s = assessPassword(pw)
+  box.hidden = false
+  box.dataset.score = String(s.score)
+  box.querySelectorAll('.pwm-bar i').forEach((seg, i) => seg.classList.toggle('on', i <= s.score))
+  const word = [tr('słabe'), tr('przeciętne'), tr('dobre'), tr('mocne')][s.score]
+  const hint = {
+    common: tr('jest na listach najczęściej używanych haseł'),
+    short: tr('wydłuż je — najlepiej do 12+ znaków'),
+    'one-class': tr('dodaj inne rodzaje znaków albo drugie słowo'),
+    patterns: tr('unikaj sekwencji i powtórzeń'),
+    ok: '',
+  }[s.advice]
+  box.querySelector('.pwm-note')!.textContent = hint ? `${word} — ${hint}` : word
+}
+const paintSoftMeter = () =>
+  paintMeter($('pwm-soft'), ($('soft-pass') as HTMLInputElement).value, !$('soft-pass2-wrap').hidden)
+$('soft-pass').addEventListener('input', paintSoftMeter)
+$('pw-new').addEventListener('input', () =>
+  paintMeter($('pwm-new'), ($('pw-new') as HTMLInputElement).value, true))
+
+/** The weakest bucket asks once; everything else passes. Never refuses —
+ *  advisory today, and this is the site to gate on ENFORCE_MIN when that
+ *  changes. Re-adds the scrim after ask() for the modal still open under it. */
+async function confirmWeak(pw: string): Promise<boolean> {
+  if (assessPassword(pw).score > 0) return true
+  const { ok } = await ask(
+    tr('Słabe hasło'),
+    tr('To hasło łatwo złamać offline, gdyby ktoś skopiował profil z tego urządzenia. Hasła nie da się potem odzyskać ani wzmocnić bez niego. Użyć mimo to?'),
+    tr('Użyj słabego hasła'))
+  $('scrim').classList.add('open')
+  return ok
 }
 
 const closeSoftModal = () => { softIntendsNew = false; $('scrim').classList.remove('open'); $('soft-modal').classList.remove('open') }
@@ -911,6 +956,7 @@ async function softLogin() {
       if (pass !== ($('soft-pass2') as HTMLInputElement).value) {
         setMsg('soft-msg', tr('Hasła się różnią.'), 'err'); return
       }
+      if (!(await confirmWeak(pass))) return
 
       // ---- przepisanie kontaktów z innego profilu (creation only) ----------
       // Read and VERIFY the source before anything is written: a refused copy
@@ -2271,6 +2317,7 @@ async function removeProfile(name: string) {
 const openPasswd = () => {
   $('scrim').classList.add('open'); $('passwd-modal').classList.add('open'); clr('pw-msg')
   for (const f of ['pw-old', 'pw-new', 'pw-new2']) ($(f) as HTMLInputElement).value = ''
+  paintMeter($('pwm-new'), '', true) // empty hides — no stale bar from last time
   ;($('pw-who') as HTMLInputElement).value = activeSoftProfile
   $('pw-old').focus()
 }
@@ -2284,6 +2331,7 @@ $('pw-save').addEventListener('click', async () => {
   // Checked before touching the profile: a typo confirmed into the seal would
   // lock the identity away behind a password nobody knows.
   if (a !== b) { setMsg('pw-msg', tr('Nowe hasła się różnią.'), 'err'); return }
+  if (!(await confirmWeak(a))) return
   const raw = localStorage.getItem(softKey(activeSoftProfile))
   const blob = raw ? JSON.parse(raw) : null
   if (!isSealedProfile(blob)) { setMsg('pw-msg', tr('Nie znaleziono profilu do zmiany.'), 'err'); return }

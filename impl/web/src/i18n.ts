@@ -582,6 +582,17 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Nie pytaj więcej': 'Don’t ask again',
     'Zainstalowano — onchato znajdziesz teraz w menu aplikacji. Ikona okna dopasuje się od następnego uruchomienia.': 'Installed — you will find onchato in the app menu now. The window icon will match from the next launch.',
     'Nie udało się zainstalować — aplikacja działa dalej z obecnego miejsca.': 'Could not install — the app keeps running from where it is.',
+    'słabe': 'weak',
+    'przeciętne': 'fair',
+    'dobre': 'good',
+    'mocne': 'strong',
+    'jest na listach najczęściej używanych haseł': 'is on the most-used-passwords lists',
+    'wydłuż je — najlepiej do 12+ znaków': 'make it longer — 12+ characters is best',
+    'dodaj inne rodzaje znaków albo drugie słowo': 'add other kinds of characters, or a second word',
+    'unikaj sekwencji i powtórzeń': 'avoid sequences and repetitions',
+    'Słabe hasło': 'Weak password',
+    'To hasło łatwo złamać offline, gdyby ktoś skopiował profil z tego urządzenia. Hasła nie da się potem odzyskać ani wzmocnić bez niego. Użyć mimo to?': 'This password is easy to crack offline if someone copies the profile off this device. It cannot be recovered or strengthened later without it. Use it anyway?',
+    'Użyj słabego hasła': 'Use the weak password',
   },
 }
 
