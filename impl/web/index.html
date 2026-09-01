@@ -989,15 +989,22 @@
   <div class="modal" id="add-modal">
     <h2 data-i18n="Dodaj peera">Dodaj peera</h2>
     <div class="msub" data-i18n="Klucz publiczny (base64, X25519) albo link zaproszenia — i nazwa, pod którą go zapiszesz.">Klucz publiczny (base64, X25519) albo link zaproszenia — i nazwa, pod którą go zapiszesz.</div>
-    <!-- The key comes FIRST because that is the order of the task: you paste
+    <!-- The key comes FIRST because that is the order of the task: you take in
          what somebody gave you, and only then decide what to call them. Asking
          for the name first also asks it too early — when the paste turns out to
          be an invite link, the link carries a name of its own.
-         One field for both, because from the outside they are one thing: "what
-         that person gave me". A pasted invite link is recognised and handed to
-         the import window, fingerprint and all — there is no shortcut around
-         that check, since it is the only thing standing between a link and a
-         man in the middle. -->
+         On a phone "what that person gave me" arrives through the CAMERA, so
+         the scan button is the first control — it used to sit under the store
+         options, below the fold, and the most-used door on mobile needed a
+         scroll to reach (reported live). Scanning fills the field below it and
+         the rest follows in reading order; a desktop without a camera hides
+         the button (scanSupported) and looks as it always did.
+         One field for both paste shapes, because from the outside they are one
+         thing: "what that person gave me". A pasted invite link is recognised
+         and handed to the import window, fingerprint and all — there is no
+         shortcut around that check, since it is the only thing standing
+         between a link and a man in the middle. -->
+    <button class="btn" id="btn-scan" hidden style="margin:2px 0 10px;background:var(--accent-soft);color:var(--accent)" data-i18n="📷 Zeskanuj kod QR">📷 Zeskanuj kod QR</button>
     <label data-i18n="Klucz publiczny albo link zaproszenia">Klucz publiczny albo link zaproszenia</label><textarea id="add-pub" placeholder="wklej pubkey albo link zaproszenia…" data-i18n-placeholder="wklej pubkey albo link zaproszenia…"></textarea>
     <div class="label-row"><label data-i18n="Nazwa">Nazwa</label><span class="bytes-left" id="add-name-bytes"></span></div><input id="add-name" type="text" placeholder="np. bob" data-i18n-placeholder="np. bob" autocomplete="off">
     <label data-i18n="Zapis">Zapis</label>
@@ -1007,7 +1014,6 @@
       <label class="store-opt"><input type="radio" name="store" value="none"> <span data-i18n="⚡ Jednorazowo — nie zapisuj nigdzie (tylko ten czat)">⚡ Jednorazowo — nie zapisuj nigdzie (tylko ten czat)</span></label>
     </div>
     <div class="msg" id="add-msg"></div>
-    <button class="btn" id="btn-scan" hidden style="margin-top:4px;background:var(--accent-soft);color:var(--accent)" data-i18n="📷 Zeskanuj kod QR">📷 Zeskanuj kod QR</button>
     <div class="modal-actions"><button class="btn-send" id="add-save" style="flex:1;border-radius:8px" data-i18n="Zapisz">Zapisz</button><button class="btn-ghost" id="add-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 

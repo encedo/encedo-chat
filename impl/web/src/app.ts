@@ -1708,7 +1708,10 @@ function attachByteBudget(input: HTMLInputElement, max: number, out: HTMLElement
 }
 
 const paintScanButton = () => { $('btn-scan').hidden = !scanSupported() }
-const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; paintStoreOptions('add-store'); paintScanButton(); $('add-pub').focus() }
+// Focus only where a keyboard is already on the desk: on a phone, focusing
+// the field pops the software keyboard OVER the modal before the person can
+// reach the scan button — and scan is the primary door there.
+const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; paintStoreOptions('add-store'); paintScanButton(); if (matchMedia('(pointer:fine)').matches) $('add-pub').focus() }
 const closeModal = () => { $('scrim').classList.remove('open'); $('add-modal').classList.remove('open') }
 $('add-cancel').addEventListener('click', closeModal)
 
