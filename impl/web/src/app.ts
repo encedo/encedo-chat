@@ -4595,9 +4595,19 @@ async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
 
 // ---- a newer version ------------------------------------------------------
 /**
- * Offer an update ONCE per launch, and only where it can actually be taken.
+ * Offer an update, and only where it can actually be taken.
  *
- * Three restraints, each of them a decision:
+ * Not once per launch any more — that design met close-to-tray and lost: an
+ * app built to live for WEEKS in the tray (no store-and-forward, the process
+ * is meant to stay) asked about updates fifteen seconds into its life and
+ * never again, so the machines that most needed the news were exactly the
+ * ones that never got it. Reported live: a .deb launched minutes before the
+ * release was published stayed silent about it indefinitely, and "I
+ * restarted it" meant the window, not the process — X hides to the tray.
+ * Now: at launch, every six hours after, and on coming back from the tray
+ * (hourly at most — that is the moment somebody is actually looking).
+ *
+ * The restraints that stay, each of them a decision:
  *
  * - **It waits.** The first seconds of a launch are the handshake and the
  *   contact list; a dialog over that is a dialog in the way of the thing the
@@ -4608,10 +4618,27 @@ async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
  * - **A distro package is told, not updated.** `.deb` belongs to the package
  *   manager; the updater would download a bundle and fail at the last step. So
  *   that case gets the version, a link, and no promise.
+ * - **"Później" means later.** A version the person has already answered
+ *   about is not offered again this session — a six-hour nag loop about the
+ *   same release would teach people to dismiss the dialog unread. The next
+ *   LAUNCH asks again, which is what the old toast always promised.
  */
 const RELEASES_URL_BASE = 'https://github.com/encedo/encedo-chat/releases'
 
+/** Versions already answered about this session — see "Później" above. */
+const answeredUpdates = new Set<string>()
+/** One offer at a time: a periodic tick must not stack a second ask() onto
+ *  the modal while the first is still open (the listeners would shred each
+ *  other), and must not race a download already in progress. */
+let updateBusy = false
+
 async function offerUpdate() {
+  if (updateBusy) return
+  updateBusy = true
+  try { await offerUpdateInner() } finally { updateBusy = false }
+}
+
+async function offerUpdateInner() {
   const kind = await updateKind()
   if (kind === 'web' || kind === 'store') return
 
@@ -4619,7 +4646,7 @@ async function offerUpdate() {
   try { info = await updateCheck() } catch (e: any) {
     ecLog('update check failed: ' + (e?.message ?? e), 'debug'); return
   }
-  if (!info) return
+  if (!info || answeredUpdates.has(info.version)) return
 
   if (kind === 'system') {
     // The exact version's page, not /latest: its download section is the
@@ -4628,13 +4655,16 @@ async function offerUpdate() {
     await ask(tr('Jest nowa wersja {v}', { v: info.version }),
       tr('Ta kopia pochodzi z pakietu systemowego, więc nie podmieni się sama. Nową wersję trzeba pobrać.'),
       tr('Pobierz'), undefined, `${RELEASES_URL_BASE}/tag/v${info.version}`, tr('Później'))
+    // Either way answered: they went to the download page, or they said
+    // later. Both mean "stop asking about this one until the next launch".
+    answeredUpdates.add(info.version)
     return
   }
 
   const { ok } = await ask(tr('Jest nowa wersja {v}', { v: info.version }),
     tr('Pobrać ją teraz? Instalacja i restart przyjdą osobno, kiedy powiesz.'),
     tr('Pobierz'), undefined, undefined, tr('Później'))
-  if (!ok) return
+  if (!ok) { answeredUpdates.add(info.version); return }
 
   // The bar exists because its absence was the reported bug: between the click
   // and the restart 0.5.16 showed NOTHING, and a person watching nothing
@@ -4674,7 +4704,7 @@ async function offerUpdate() {
   const go = await ask(tr('Aktualizacja {v} pobrana', { v: info.version }),
     tr('Zainstalować i uruchomić ponownie teraz?'),
     tr('Uruchom ponownie'), undefined, undefined, tr('Później'))
-  if (!go.ok) { toast(tr('Dobrze — zaproponuję znów po następnym uruchomieniu.')); return }
+  if (!go.ok) { answeredUpdates.add(info.version); toast(tr('Dobrze — zaproponuję znów po następnym uruchomieniu.')); return }
   try { await updateApply() } catch (e: any) {
     ecLog('update install failed: ' + (e?.message ?? e))
     toast(tr('Nie udało się zaktualizować — pobierz nową wersję ręcznie'))
@@ -4713,7 +4743,22 @@ async function offerAppimageInstall() {
 
 // Chained, not parallel: both talk through the one `ask` modal, and two
 // dialogs racing for it would tear each other's listeners down.
-if (isDesktopShell()) setTimeout(() => void offerAppimageInstall().then(() => offerUpdate()), 15_000)
+if (isDesktopShell()) {
+  setTimeout(() => void offerAppimageInstall().then(() => offerUpdate()), 15_000)
+  // The re-checks a tray-resident process needs (see offerUpdate's note):
+  // every six hours flat, and on coming back into view — the tray reveal and
+  // the minimize both surface here as visibilitychange — at most hourly, so
+  // stepping out for coffee does not turn the badge click into a dialog.
+  // Seeded "now": the launch check above already covers the first hour.
+  setInterval(() => void offerUpdate(), 6 * 3600_000)
+  let lastRevealCheck = Date.now()
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return
+    if (Date.now() - lastRevealCheck < 3600_000) return
+    lastRevealCheck = Date.now()
+    void offerUpdate()
+  })
+}
 
 // The shell starts the window HIDDEN so nobody sees the webview's white
 // pre-paint (reported as a white or half-white flash at every launch of a

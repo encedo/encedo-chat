@@ -14,6 +14,14 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          Rebuild ONLY latest.json for this existing tag's release (repairs a
+          manifest the old per-job race crippled). Leave empty for the classic
+          manual run: build bundles, release nothing.
+        required: false
+        default: ''
 
 # The bundles built fine on the first tag and the job still went red, at the
 # very last step: "Resource not accessible by integration" from the create-a-
@@ -33,6 +41,9 @@ permissions:
 jobs:
   bundle:
     name: ${{ matrix.label }}
+    # Skipped only for the repair dispatch (a tag input): that run exists to
+    # rewrite one small JSON on a draft, not to rebuild five platforms.
+    if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false # one platform failing should not hide the others' artifacts
@@ -172,12 +183,14 @@ jobs:
           releaseName: Encedo Chat ${{ github.ref_name }}
           releaseDraft: true
           prerelease: false
-          # `latest.json` is what an installed app reads. It is attached to the
-          # release, and a DRAFT release's assets are not publicly downloadable —
-          # so cutting a tag builds an update and publishing the release is what
-          # ships it. That gate is deliberate: the alternative is that every tag
-          # reaches every machine the moment CI goes green.
-          includeUpdaterJson: true
+          # ⚠️ false ON PURPOSE — the manifest has ONE writer now, the
+          # `updater-json` job below. With true, each of the five matrix jobs
+          # merged its own platforms into the shared draft's latest.json by
+          # download-modify-upload, and the last writer dropped the others'
+          # entries (v0.5.27 shipped with no darwin and no linux-aarch64 that
+          # way). The .sig files this build produces still upload with the
+          # bundles; only the JSON assembly moves.
+          includeUpdaterJson: false
 
       - uses: actions/upload-artifact@v5
         with:
@@ -193,3 +206,101 @@ jobs:
             impl/src-tauri/target/**/bundle/**/*.msi
             impl/src-tauri/target/**/bundle/**/*.exe
           if-no-files-found: warn
+
+  # ONE writer for `latest.json`, after every bundle job has finished.
+  #
+  # It used to be five: each matrix job ran tauri-action with
+  # includeUpdaterJson, and each merge was download-modify-upload against the
+  # same draft asset — jobs finishing close together read the same snapshot
+  # and the last writer dropped the others' platforms. v0.5.27 shipped with no
+  # darwin-aarch64 and no linux-aarch64 in its manifest: a Mac on 0.5.24 and
+  # an arm64 .deb both asked, found no entry for themselves, and said nothing
+  # — the updater's deliberate silence turning a CI race into "updates do not
+  # work", with nothing red anywhere. Which platforms survived depended on
+  # finish order, so it came and went between releases.
+  #
+  # This job rebuilds the manifest from the release's own assets — every
+  # artifact with a .sig beside it gets its platform entries — uploads it, and
+  # only THEN verifies completeness: a partial matrix leaves a red job AND a
+  # usable manifest, not neither. `always()` is what lets it run over a
+  # partial matrix; the completeness check is what keeps that honest.
+  updater-json:
+    name: updater manifest
+    needs: bundle
+    if: always() && (startsWith(github.ref, 'refs/tags/') || inputs.tag != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Rebuild latest.json from the release assets
+        run: |
+          set -euo pipefail
+          # The by-tag endpoint hides drafts, so list and filter — the whole
+          # point is writing into the draft before anyone publishes it.
+          REL=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+                | jq --arg t "$TAG" '[.[] | select(.tag_name == $t)][0]')
+          RID=$(echo "$REL" | jq -r '.id // empty')
+          [ -n "$RID" ] || { echo "::error::no release (draft or published) for $TAG"; exit 1; }
+
+          mkdir sigs
+          echo "$REL" | jq -r '.assets[] | select(.name | endswith(".sig")) | "\(.id) \(.name)"' \
+          | while read -r id name; do
+              gh api -H "Accept: application/octet-stream" \
+                "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "sigs/$name"
+            done
+
+          json=$(jq -n --arg v "${TAG#v}" --arg d "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+                 '{version: $v, notes: "", pub_date: $d, platforms: {}}')
+          # The url is the PUBLIC download path the artifact will have once the
+          # draft is published — predictable from tag + name, which is exactly
+          # what tauri-action used to write.
+          add() {
+            json=$(echo "$json" | jq --arg k "$1" --arg s "$(cat "sigs/$2.sig")" \
+                   --arg u "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$2" \
+                   '.platforms[$k] = {signature: $s, url: $u}')
+          }
+          # Name → platform keys, mirroring what tauri-action emitted when it
+          # worked: the bare os-arch key points at the self-update artifact
+          # (AppImage on Linux, app.tar.gz on macOS, NSIS on Windows), the
+          # suffixed keys name each bundle. A .deb/.rpm cannot replace itself —
+          # the app offers a link there — but the updater still needs the entry
+          # to ANSWER, and silence was the bug being fixed.
+          for sig in sigs/*.sig; do
+            art=$(basename "${sig%.sig}")
+            case "$art" in
+              *_amd64.AppImage)     add linux-x86_64 "$art"; add linux-x86_64-appimage "$art" ;;
+              *_aarch64.AppImage)   add linux-aarch64 "$art"; add linux-aarch64-appimage "$art" ;;
+              *_amd64.deb)          add linux-x86_64-deb "$art" ;;
+              *_arm64.deb)          add linux-aarch64-deb "$art" ;;
+              *.x86_64.rpm)         add linux-x86_64-rpm "$art" ;;
+              *.aarch64.rpm)        add linux-aarch64-rpm "$art" ;;
+              *aarch64.app.tar.gz)  add darwin-aarch64 "$art"; add darwin-aarch64-app "$art" ;;
+              *x64.app.tar.gz)      add darwin-x86_64 "$art"; add darwin-x86_64-app "$art" ;;
+              *_x64-setup.exe)      add windows-x86_64 "$art"; add windows-x86_64-nsis "$art" ;;
+              *_x64_en-US.msi)      add windows-x86_64-msi "$art" ;;
+              *_arm64-setup.exe)    add windows-aarch64 "$art"; add windows-aarch64-nsis "$art" ;;
+              *) echo "::warning::unmapped updater artifact: $art" ;;
+            esac
+          done
+          echo "$json" | jq . > latest.json
+          echo "platforms:"; jq -r '.platforms | keys[]' latest.json
+
+          # Replace, never append: a manifest the old path (or a previous
+          # repair) left behind would otherwise shadow this one.
+          OLD=$(echo "$REL" | jq -r '.assets[] | select(.name == "latest.json") | .id')
+          [ -z "$OLD" ] || gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$OLD"
+          curl -sf -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary @latest.json \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RID/assets?name=latest.json" > /dev/null
+
+          # With the manifest safely uploaded, fail loudly if a matrix
+          # platform is missing — the quiet gap is the bug this job exists for.
+          jq -e '.platforms | has("linux-x86_64") and has("linux-aarch64")
+                 and has("darwin-aarch64") and has("windows-x86_64")
+                 and has("windows-aarch64")' latest.json > /dev/null \
+            || { echo "::error::latest.json is missing a matrix platform"; exit 1; }
