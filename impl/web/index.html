@@ -422,6 +422,15 @@
   .prof-row .p-del:hover{color:var(--err,#c0392b)}
   @media (pointer:coarse){.prof-row .p-del{padding:9px 10px}}
   .btn-send{background:var(--accent);color:var(--accent-ink);border:none;padding:0 22px;border-radius:8px;font-weight:600}
+  /* Show-the-password eye, attached to every password input at startup
+     (app.ts wraps them — the markup stays plain <input type="password">). */
+  .pw-wrap{position:relative;display:block}
+  .pw-wrap input{padding-right:38px}
+  .pw-wrap .pw-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);
+    border:none;background:none;color:var(--muted);padding:6px;cursor:pointer;display:grid;place-items:center}
+  .pw-wrap .pw-eye:hover{color:var(--text)}
+  @media (pointer:coarse){.pw-wrap .pw-eye{padding:10px}}
+
   /* The stale-tab banner: quiet, dismissible, above the contact list. */
   .upd-banner{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12.5px;
     background:var(--accent-soft);color:var(--text);border-bottom:1px solid var(--border)}

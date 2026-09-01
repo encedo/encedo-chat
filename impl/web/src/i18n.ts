@@ -595,6 +595,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Użyj słabego hasła': 'Use the weak password',
     'Jest nowa wersja aplikacji — odśwież, gdy skończysz rozmowę.': 'A newer version of the app is out — reload when you finish your conversation.',
     'Odśwież': 'Reload',
+    'Pokaż hasło': 'Show the password',
+    'Ukryj hasło': 'Hide the password',
   },
 }
 
