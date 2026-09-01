@@ -45,6 +45,14 @@ jobs:
     # rewrite one small JSON on a draft, not to rebuild five platforms.
     if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
     runs-on: ${{ matrix.os }}
+    # The OIDC subject Azure's federated credential matches against. Without
+    # an environment the subject carries the REF — `ref:refs/tags/v0.5.34` —
+    # which is different for every tag, and federated credentials have no
+    # wildcards: the sign-in would work exactly once, for whichever tag got
+    # hard-coded. With an environment the subject is the stable
+    # `environment:release`, one credential for ever. The environment itself
+    # is plain (no protection rules); it exists for its name.
+    environment: release
     strategy:
       fail-fast: false # one platform failing should not hide the others' artifacts
       matrix:
