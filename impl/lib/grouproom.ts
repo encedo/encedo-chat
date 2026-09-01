@@ -31,12 +31,13 @@ import type { GroupSession } from './group.ts'
 import { envMsg, envReaction, envFile, encodeEnvelope, decodeEnvelope, type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta } from './envelope.ts'
 import type { QuoteRef } from './quote.ts'
 import { nowMs } from './time.ts'
+import { alignedTimer, RADIO_TICK_MS } from './radiophase.ts'
 import { activeDatesForOffset, type RotationConfig } from './presence.ts'
 
 const T_GKEEPALIVE = 0x21 // a 1-byte mesh keepalive frame — NOT a group message (T_GMSG is 0x20)
 const KEEPALIVE = new Uint8Array([T_GKEEPALIVE])
-const KEEPALIVE_MS = 20_000
-const KEEPALIVE_JITTER_MS = 8_000
+// Cadence and phase come from lib/radiophase.ts now — one radio wake per
+// cycle carries the keepalives together with every announce.
 /**
  * How rarely we may ask one member for its sender key again. The answer travels
  * over a 1:1 that has to be dialled and handshaked, and the member we are asking
@@ -172,12 +173,13 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
   // inside the guard window the adjacent day's mesh must stay warm too, or the
   // member who crosses first would graft into a cold mesh.
   const keepalive = () => { for (const t of live) keepaliveOn(t) }
-  // Jittered steady heartbeat (self-rescheduling so members don't sync into a herd).
-  let kaTimer: ReturnType<typeof setTimeout> | null = null
-  const scheduleKeepalive = () => {
-    kaTimer = unref(setTimeout(() => { if (stopped) return; keepalive(); scheduleKeepalive() }, KEEPALIVE_MS + Math.floor(Math.random() * KEEPALIVE_JITTER_MS)))
-  }
-  scheduleKeepalive()
+  // On the session's shared radio grid (lib/radiophase.ts), so a phone's radio
+  // wakes once per cycle for keepalives AND announces together. Slightly more
+  // often than the old 20–28 s (a keepalive can only make the mesh warmer),
+  // and the bytes ride a wake that is happening anyway. The old per-member
+  // jitter kept members of one topic from herding; the per-session random
+  // phase does that same job now — no two sessions share one.
+  const stopKa = alignedTimer(() => { if (!stopped) keepalive() }, RADIO_TICK_MS)
 
   const broadcast = async (bytes: Uint8Array) => {
     const frame = await session.send(bytes)
@@ -221,7 +223,7 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
       // without our handler rather than leaving a stopped room reachable.
       if (session.onNeedSenderKey) session.onNeedSenderKey = undefined
       for (const b of pending) clearTimeout(b)
-      if (kaTimer) clearTimeout(kaTimer)
+      stopKa()
       clearInterval(rotTimer)
       try { node.services.pubsub.removeEventListener('message', handler) } catch {}
       for (const t of live) { try { node.services.pubsub.unsubscribe(t) } catch {} }

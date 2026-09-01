@@ -13,6 +13,7 @@
  */
 
 import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
+import { alignedTimer } from './radiophase.ts'
 import type { Session } from './session.ts'
 import type { Dh } from './x25519.ts'
 import type { RatchetOpts } from '../eh2/ratchet.ts'
@@ -996,7 +997,10 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       announceFirst()
     }
   }, Math.max(10, Math.min(50, firstAnnounceMs)))
-  const hb = setInterval(announce, heartbeatMs)
+  // Aligned with every other periodic publish of this session (presence
+  // watches, group keepalives) — one radio wake per cycle on a phone. See
+  // lib/radiophase.ts.
+  const stopHb = alignedTimer(() => void announce(), heartbeatMs)
   const sweep = setInterval(() => {
     const now = nowMs()
     // NOTE: silence drops presence, NOT the ratchet. Tearing the session down
@@ -1175,7 +1179,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       for (const p of new Set([...handshakes.keys(), ...attemptTimers.keys(), ...resendTimers.keys()])) clearAttempt(p)
       sessions.clear(); previous.clear(); establishedAt.clear()
       handshakes.clear(); queued.length = 0; resendable.clear(); firstSentAt.clear()
-      clearInterval(t0); clearInterval(hb); clearInterval(sweep)
+      clearInterval(t0); stopHb(); clearInterval(sweep)
       for (const t of earlyBeacons) clearTimeout(t)
       for (const id of [...pending.keys()]) clearPending(id)
       node.services.pubsub.removeEventListener('message', handler)

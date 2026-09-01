@@ -27,6 +27,7 @@
  */
 
 import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
+import { alignedTimer } from './radiophase.ts'
 import { isHandshakeFrame } from '../eh2/establish.ts'
 import { nowMs, utcDateOf, addUTCDays, msToNextUTCMidnight, msSincePrevUTCMidnight } from './time.ts'
 
@@ -95,8 +96,11 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
     return t
   })
 
-  const hb = setInterval(announce, heartbeatMs)
-  ;(hb as any).unref?.()
+  // Aligned, not a plain interval: every watch (and every room, and the group
+  // keepalives) fires in the same per-session instants, so a phone's radio
+  // wakes once per cycle for the whole batch instead of once per topic. See
+  // lib/radiophase.ts for why the phase must be per-session, not wall-clock.
+  const stopHb = alignedTimer(() => void announce(), heartbeatMs)
   const sweep = setInterval(() => {
     if (online && nowMs() - lastSeen > ttlMs) { online = false; log(`contact silent on ${topic.slice(0, 12)}… → offline`); opts.onOffline() }
   }, Math.min(heartbeatMs, 15_000))
@@ -107,7 +111,7 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
     stop(unsubscribe = true) {
       stopped = true
       for (const t of earlyBeacons) clearTimeout(t)
-      clearInterval(hb); clearInterval(sweep)
+      stopHb(); clearInterval(sweep)
       try { node.services.pubsub.removeEventListener('message', handler) } catch {}
       // On a handoff to a room (unsubscribe=false) the subscription and its warm
       // mesh stay; the room owns the topic from here and unsubscribes on its own
