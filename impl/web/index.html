@@ -638,7 +638,9 @@
   .kv{display:flex;justify-content:space-between;font-size:12.5px;padding:5px 0;gap:12px}
   .kv .k{color:var(--muted);flex-shrink:0}
   .kv .v{color:var(--text);font-weight:500;font-variant-numeric:tabular-nums;word-break:break-all;text-align:right}
-  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(8px);background:var(--text);color:var(--card);padding:9px 16px;border-radius:20px;font-size:13px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:20}
+  /* pre-line: the security badge's tap-toast carries two lines (countdown +
+     state); textContent newlines must survive. max-width for the same caller. */
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(8px);background:var(--text);color:var(--card);padding:9px 16px;border-radius:20px;font-size:13px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:20;white-space:pre-line;max-width:min(86vw,480px)}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   #btn-back{display:none;place-items:center;width:36px;height:36px;flex:none;border:1px solid var(--border);
             border-radius:10px;background:transparent;color:var(--text);font-size:18px;line-height:1}

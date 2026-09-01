@@ -2693,9 +2693,9 @@ $('members-pop').addEventListener('click', (e: any) => {
 
 // ---- copy my pubkey ----
 let toastT: any
-function toast(msg: string) {
+function toast(msg: string, ms = 1500) {
   const el = $('toast'); el.textContent = msg; el.classList.add('show')
-  clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), 1500)
+  clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), ms)
 }
 async function copyPub() {
   if (!session) return
@@ -3166,6 +3166,18 @@ function applyBadgeTitle(el: HTMLElement) {
   const rot = el.dataset.rot
   el.title = rot ? `${el.dataset.baseTitle ?? ''}\n${rot}` : (el.dataset.baseTitle ?? '')
 }
+
+// Hover does not exist on a phone, so the tooltip this badge carries — the
+// security state and the rotation countdown — was unreachable exactly where
+// the header is tightest. A tap says it out loud instead; the desktop keeps
+// its hover and loses nothing to the extra click.
+$('e2e-badge').addEventListener('click', () => {
+  const b = $('e2e-badge')
+  const line = [b.dataset.rot, b.dataset.baseTitle].filter(Boolean).join('\n')
+  // Two lines need more than the default blink — but this is the only caller
+  // that does; everything else keeps the short toast.
+  if (line) toast(line, 4000)
+})
 
 function noteTransport(room: Room, state: string) {
   // `demoted=` belongs here too: a stall hands content back to GossipSub for the
