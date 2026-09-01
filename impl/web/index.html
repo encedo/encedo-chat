@@ -422,6 +422,15 @@
   .prof-row .p-del:hover{color:var(--err,#c0392b)}
   @media (pointer:coarse){.prof-row .p-del{padding:9px 10px}}
   .btn-send{background:var(--accent);color:var(--accent-ink);border:none;padding:0 22px;border-radius:8px;font-weight:600}
+  /* The stale-tab banner: quiet, dismissible, above the contact list. */
+  .upd-banner{display:flex;align-items:center;gap:8px;padding:8px 12px;font-size:12.5px;
+    background:var(--accent-soft);color:var(--text);border-bottom:1px solid var(--border)}
+  .upd-banner[hidden]{display:none}  /* display:flex would defeat the attribute */
+  .upd-banner span{flex:1;min-width:0}
+  .upd-banner .upd-go{border:none;border-radius:6px;padding:5px 10px;background:var(--accent);
+    color:var(--accent-ink);font-size:12px;font-weight:600;cursor:pointer;flex:none}
+  .upd-banner .x{border:none;background:none;color:var(--muted);cursor:pointer;padding:2px 4px;flex:none}
+
   /* Password strength, advisory (lib/passmeter.ts): four segments lit up to
      the score, one muted line of words under them. Colors ride the state
      vars the presence dots already use. */
@@ -855,6 +864,15 @@
 
   <div class="app" id="app" hidden>
     <aside class="sidebar">
+      <!-- The browser is the platform this product asks people to LEAVE OPEN,
+           so a week-old tab on a stale bundle is the norm, not the edge case.
+           A banner, not a modal: the reload moment belongs to the person —
+           reloading kills the session's transcripts and ratchets by design. -->
+      <div class="upd-banner" id="web-upd" hidden>
+        <span data-i18n="Jest nowa wersja aplikacji — odśwież, gdy skończysz rozmowę.">Jest nowa wersja aplikacji — odśwież, gdy skończysz rozmowę.</span>
+        <button class="upd-go" id="web-upd-go" data-i18n="Odśwież">Odśwież</button>
+        <button class="x" id="web-upd-x" title="Zamknij" data-i18n-title="Zamknij" aria-label="Zamknij">✕</button>
+      </div>
       <div class="me">
         <div class="avatar" id="me-avatar" role="button" tabindex="0" title="Udostępnij swój profil" data-i18n-title="Udostępnij swój profil">··</div>
         <div class="info"><div class="name" id="me-handle">—</div><div class="fp" id="me-fp" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer"></div></div>

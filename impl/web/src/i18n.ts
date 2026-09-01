@@ -593,6 +593,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Słabe hasło': 'Weak password',
     'To hasło łatwo złamać offline, gdyby ktoś skopiował profil z tego urządzenia. Hasła nie da się potem odzyskać ani wzmocnić bez niego. Użyć mimo to?': 'This password is easy to crack offline if someone copies the profile off this device. It cannot be recovered or strengthened later without it. Use it anyway?',
     'Użyj słabego hasła': 'Use the weak password',
+    'Jest nowa wersja aplikacji — odśwież, gdy skończysz rozmowę.': 'A newer version of the app is out — reload when you finish your conversation.',
+    'Odśwież': 'Reload',
   },
 }
 

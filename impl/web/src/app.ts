@@ -4760,6 +4760,70 @@ if (isDesktopShell()) {
   })
 }
 
+// ---- a newer WEB bundle ---------------------------------------------------
+/**
+ * The browser tab is the platform this product asks people to LEAVE OPEN — no
+ * store-and-forward, a closed tab is unreachability — so "nobody sits in a
+ * browser that long" is exactly backwards here, and a week-old tab runs a
+ * week-old engine long after the host redeployed. That is not cosmetic: a
+ * protocol cutover (the §5.4 per-pair rotation was one) leaves a stale tab
+ * unable to meet an updated peer, with nothing anywhere saying why.
+ *
+ * Detection needs no infrastructure the deploy does not already have: bundle
+ * names carry a content hash and index.html is served with a short cache, so
+ * comparing the hash a fresh index.html names with the one this tab is
+ * actually running answers "am I stale" in one no-store fetch. A failed fetch
+ * says nothing (the updater's restraint, same reason); a dev build has no
+ * hash in its bundle name and opts out via `runningBundleHash === null`.
+ *
+ * A banner, not a modal, and never a forced reload: reloading kills the
+ * session's transcripts and ratchets BY DESIGN, so the moment belongs to the
+ * person. Dismissing silences that hash — a later deploy banners again.
+ */
+const runningBundleHash = (() => {
+  for (const s of document.querySelectorAll<HTMLScriptElement>('script[src]')) {
+    const m = s.src.match(/app\.([a-f0-9]+)\.bundle\.js/)
+    if (m) return m[1]
+  }
+  return null
+})()
+let webUpdOffered: string | null = null
+let webUpdDismissed: string | null = null
+
+async function checkWebUpdate() {
+  if (!runningBundleHash) return
+  let html = ''
+  try {
+    const r = await fetch('index.html', { cache: 'no-store' })
+    if (!r.ok) return
+    html = await r.text()
+  } catch { return }
+  const m = html.match(/app\.([a-f0-9]+)\.bundle\.js/)
+  if (!m || m[1] === runningBundleHash || m[1] === webUpdDismissed) return
+  webUpdOffered = m[1]
+  $('web-upd').hidden = false
+}
+
+if (!isDesktopShell()) {
+  // The desktop cadence, for the same reason: launch (a restored tab can
+  // come back from cache already stale), every six hours, and on coming
+  // back into view at most hourly.
+  setTimeout(() => void checkWebUpdate(), 15_000)
+  setInterval(() => void checkWebUpdate(), 6 * 3600_000)
+  let lastTabCheck = Date.now()
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return
+    if (Date.now() - lastTabCheck < 3600_000) return
+    lastTabCheck = Date.now()
+    void checkWebUpdate()
+  })
+  $('web-upd-go')?.addEventListener('click', () => location.reload())
+  $('web-upd-x')?.addEventListener('click', () => {
+    webUpdDismissed = webUpdOffered
+    $('web-upd').hidden = true
+  })
+}
+
 // The shell starts the window HIDDEN so nobody sees the webview's white
 // pre-paint (reported as a white or half-white flash at every launch of a
 // dark desktop). Map it the moment this script runs: the bundle is deferred,
