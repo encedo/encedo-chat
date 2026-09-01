@@ -1506,6 +1506,17 @@ function wireRowActions(row: HTMLElement) {
     if (!was) row.classList.add('show-actions')
   })
 }
+// A tap anywhere OUTSIDE the revealed row puts it away. Tapping another row
+// already worked by accident (opening it re-renders the list), but a tap into
+// empty space had no listener and the icons stood for ever (reported from the
+// phone, with a screenshot). Capture phase: the action buttons stopPropagation
+// for their own reasons, and the inside-the-row case must be decided BEFORE
+// they do — taps on the row's own icons keep it open.
+document.addEventListener('click', (e) => {
+  for (const open of document.querySelectorAll('.contact.show-actions')) {
+    if (!open.contains(e.target as Node)) open.classList.remove('show-actions')
+  }
+}, true)
 
 function renderContacts() {
   const pane = $('pane-contacts'); pane.innerHTML = ''
