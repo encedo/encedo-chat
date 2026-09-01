@@ -554,12 +554,24 @@
   .mention-pop .ga{min-width:22px;height:20px;flex-shrink:0;padding:0 5px;border-radius:7px;display:grid;place-items:center;
     font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-soft)}
   @media (pointer:coarse){.b-text .lnk{padding:2px 8px}}
-  /* An inline edit affordance next to a name. Hidden until the row is hovered
-     on a mouse, always visible on touch (no hover to reveal it). */
+  /* Inline row actions (rename/keys/members + the delete ×). Hidden until the
+     row is hovered on a mouse. Touch has no hover, and the old rule told HALF
+     the story: it kept the pencils permanently lit while the delete × had no
+     touch rule at all — rename reachable, delete IMPOSSIBLE on a phone, and a
+     group row wore three always-on icons (reported live, with a screenshot).
+     Now touch mirrors hover through the platform's own gesture: LONG-PRESS on
+     a row (Android reports it as contextmenu) flips .show-actions and reveals
+     the full set for that one row; rows are otherwise clean. */
   .c-edit,.g-edit{opacity:0;background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:2px 4px;line-height:1;flex-shrink:0}
   .contact:hover .c-edit,.contact:hover .g-edit{opacity:1}
   .c-edit:hover,.g-edit:hover{color:var(--text)}
-  @media (pointer:coarse){.c-edit,.g-edit{opacity:1;padding:6px}}
+  @media (pointer:coarse){
+    .c-edit,.g-edit{padding:6px}
+    /* Long-press must read as a gesture, not as selecting the label's text. */
+    .contact{-webkit-user-select:none;user-select:none}
+    .contact.show-actions .c-edit,.contact.show-actions .g-edit{opacity:1}
+    .contact.show-actions .c-x{opacity:.7;padding:0 6px}
+  }
   .btn-send:hover{filter:brightness(1.08)}
   .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:32px;text-align:center}
   .empty .big{font-size:34px}.empty h3{margin:0;color:var(--text);font-size:16px}

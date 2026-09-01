@@ -1443,6 +1443,24 @@ async function syncPresence() {
   // restores on leave) so removal always tears its watch down.
   for (const x of contactsCache) watchedPubs.add(x.pub)
 }
+/**
+ * Long-press flips a row's actions into view — the touch stand-in for hover
+ * (see the .c-edit CSS note: the delete × was unreachable on a phone).
+ * Android reports the gesture as `contextmenu`; a mouse keeps its real
+ * context menu, so the handler is gated to coarse pointers. One row at a
+ * time — the gesture that opens B closes A — and a re-render (which these
+ * lists do often) simply resets to clean rows.
+ */
+function wireRowActions(row: HTMLElement) {
+  row.addEventListener('contextmenu', (e) => {
+    if (!matchMedia('(pointer:coarse)').matches) return
+    e.preventDefault()
+    const was = row.classList.contains('show-actions')
+    for (const r of row.parentElement?.querySelectorAll('.show-actions') ?? []) r.classList.remove('show-actions')
+    if (!was) row.classList.add('show-actions')
+  })
+}
+
 function renderContacts() {
   const pane = $('pane-contacts'); pane.innerHTML = ''
   // Add-peer and the filter are static markup above this pane — see index.html
@@ -1485,6 +1503,7 @@ function renderContacts() {
       }
       void openRoomFor(c, true)
     })
+    wireRowActions(b)
     pane.appendChild(b)
   }
 }
@@ -5608,6 +5627,7 @@ function renderGroups() {
       }
       void activateGroup(gu.gid)
     })
+    wireRowActions(b)
     pane.appendChild(b)
   }
 }
