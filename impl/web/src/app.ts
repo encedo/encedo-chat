@@ -39,6 +39,7 @@ import {
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { assessPassword } from '../../lib/passmeter.ts'
+import { setRadioProfile } from '../../lib/radiophase.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -6137,6 +6138,12 @@ document.addEventListener('visibilitychange', () => {
   // raising the window is the "I'm back" (the phone already reads that way
   // on unlock, and the desktop should not be the quieter platform).
   for (const r of rooms.values()) { if (document.hidden) r.conv?.noteAway(); else { r.conv?.refresh(); r.conv?.noteBack() } }
+  // The screen-off radio profile (lib/radiophase.ts): a pocketed phone
+  // announces its dots and group keepalives at 60 s instead of 15 s — four
+  // times fewer radio wakes where battery is actually spent. Open rooms keep
+  // their cadence (their receivers' thresholds cannot be told about a
+  // slowdown); coming back re-arms everything onto the next 15 s tick.
+  setRadioProfile(document.hidden ? 'background' : 'active')
   if (document.hidden) void persistGroups() // best-effort flush on backgrounding (encrypt is async); sends are already durable
 })
 // Alt-tab back does not change visibility (the window never left the screen),

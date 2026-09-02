@@ -179,7 +179,11 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
   // and the bytes ride a wake that is happening anyway. The old per-member
   // jitter kept members of one topic from herding; the per-session random
   // phase does that same job now — no two sessions share one.
-  const stopKa = alignedTimer(() => { if (!stopped) keepalive() }, RADIO_TICK_MS)
+  // Slowable: 60 s in the background. ⚠️ The overnight-idle group death was
+  // fixed at a 20–28 s keepalive and 60 s is unverified against the relay's
+  // topic-liveness eviction — if passive groups ever die on a pocketed phone
+  // again, THIS is the first suspect (drop slowable here before digging).
+  const stopKa = alignedTimer(() => { if (!stopped) keepalive() }, RADIO_TICK_MS, { slowable: true })
 
   const broadcast = async (bytes: Uint8Array) => {
     const frame = await session.send(bytes)

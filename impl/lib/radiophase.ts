@@ -39,24 +39,66 @@ export const RADIO_TICK_MS = 15_000
 const radioPhase = Math.random() * RADIO_TICK_MS
 
 /**
+ * ## The screen-off profile
+ *
+ * A phone in a pocket does not need to say "still here" four times a minute.
+ * `setRadioProfile('background')` stretches every timer created with
+ * `slowable: true` to 4× its period — the watches (contact dots, the
+ * self-topic) and the group keepalives ride it, so an idle backgrounded
+ * phone wakes the radio once a minute instead of four times.
+ *
+ * What deliberately does NOT slow: the open rooms' announce heartbeats.
+ * Their receivers time a peer out on the 35 s "quiet" and 90 s "leave"
+ * thresholds, §5.5 carries no cadence field the sender could declare a
+ * slowdown in (frozen spec), and a phone that flaps quiet/leave on every
+ * lost frame is worse than the battery it saves. The watches' 90 s dot TTL
+ * tolerates a 60 s cadence as-is; a single lost beacon can blink a dot for
+ * under a minute, which is the price of the 4× and accepted (the user's
+ * decision, 2026-09-02). Background periods are multiples of the base tick,
+ * so slowed timers still land ON the shared grid — one wake carries whatever
+ * is due.
+ */
+export type RadioProfile = 'active' | 'background'
+let profile: RadioProfile = 'active'
+const rearms = new Set<() => void>()
+
+export function setRadioProfile(p: RadioProfile) {
+  if (p === profile) return
+  profile = p
+  // Re-arm the slowable timers now: coming back to 'active', a timer armed
+  // for a minute away would otherwise keep the dot dark long after unlock.
+  for (const r of [...rearms]) r()
+}
+
+/**
  * A repeating timer that fires at `radioPhase + k·periodMs` instead of
  * "creation time + k·periodMs". Drop-in for the publish heartbeats'
  * setInterval; returns the stop function. The first fire comes within one
  * period (possibly almost immediately — callers already tolerate that, their
  * announces are nonce-deduped and their keepalives idempotent).
+ * `slowable: true` opts the timer into the screen-off profile above.
  */
-export function alignedTimer(fn: () => void, periodMs = RADIO_TICK_MS): () => void {
+export function alignedTimer(
+  fn: () => void,
+  periodMs = RADIO_TICK_MS,
+  opts: { slowable?: boolean } = {},
+): () => void {
   let t: any
   let stopped = false
+  const period = () => (opts.slowable && profile === 'background' ? periodMs * 4 : periodMs)
   const arm = () => {
-    const into = (((Date.now() - radioPhase) % periodMs) + periodMs) % periodMs
+    clearTimeout(t)
+    const p = period()
+    const into = (((Date.now() - radioPhase) % p) + p) % p
     t = setTimeout(() => {
       if (stopped) return
       try { fn() } catch {}
       arm()
-    }, periodMs - into || periodMs)
+    }, p - into || p)
     ;(t as any).unref?.()
   }
   arm()
-  return () => { stopped = true; clearTimeout(t) }
+  const rearm = () => { if (!stopped) arm() }
+  if (opts.slowable) rearms.add(rearm)
+  return () => { stopped = true; rearms.delete(rearm); clearTimeout(t) }
 }

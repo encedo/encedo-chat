@@ -100,7 +100,9 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
   // keepalives) fires in the same per-session instants, so a phone's radio
   // wakes once per cycle for the whole batch instead of once per topic. See
   // lib/radiophase.ts for why the phase must be per-session, not wall-clock.
-  const stopHb = alignedTimer(() => void announce(), heartbeatMs)
+  // Slowable: a backgrounded phone announces its dots at 60 s — the 90 s TTL
+  // on the receiving side tolerates that as-is (rooms do NOT slow; see there).
+  const stopHb = alignedTimer(() => void announce(), heartbeatMs, { slowable: true })
   const sweep = setInterval(() => {
     if (online && nowMs() - lastSeen > ttlMs) { online = false; log(`contact silent on ${topic.slice(0, 12)}… → offline`); opts.onOffline() }
   }, Math.min(heartbeatMs, 15_000))

@@ -999,7 +999,10 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   }, Math.max(10, Math.min(50, firstAnnounceMs)))
   // Aligned with every other periodic publish of this session (presence
   // watches, group keepalives) — one radio wake per cycle on a phone. See
-  // lib/radiophase.ts.
+  // lib/radiophase.ts. NOT slowable, on purpose: the peer times this room's
+  // announces against the 35 s quiet / 90 s leave thresholds and §5.5 has no
+  // field to declare a slower cadence in — a background phone that flapped
+  // quiet on every lost frame would cost more trust than battery.
   const stopHb = alignedTimer(() => void announce(), heartbeatMs)
   const sweep = setInterval(() => {
     const now = nowMs()
