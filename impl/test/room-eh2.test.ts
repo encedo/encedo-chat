@@ -452,23 +452,29 @@ test('content that goes unconfirmed on a direct channel falls back to the relay'
   assert.deepEqual(got, ['przez martwy kanał'], 'the relay carried what the direct channel ate')
 })
 
-test('a peer that never confirms is not reported as a failure (old client)', async (t) => {
-  // Forward-compat: an older build ignores the ack type. Silence from such a
-  // peer must not paint every message with a warning.
+test('a secured peer whose acks never arrive gets the message marked resend-able', async (t) => {
+  // This REPLACES the old "never report an ack-less peer (old client)" test.
+  // That guess is what hung the bubble: a phone asleep for the whole room
+  // session had acked nothing YET, fell through the guard, and left "wysyłam…"
+  // for ever with no ↻ (reported live: desktop → dozing Android). EH-2 has
+  // been mandatory since 2026-07-30, so a peer we share a SESSION with is a
+  // current build that acks — its silence is loss, not antiquity, and it
+  // deserves the ⚠+↻ that lets the send be retried when the phone wakes.
   const got: string[] = []
   const undelivered: string[] = []
   const { A, B } = await rooms({
     collect: got,
     drop: (d, from) => d[0] === 0x10 && from === 'peer-b', // B's acks never make it out
     onUndeliveredA: (id) => undelivered.push(id),
+    retry: { retryMs: [50, 80], giveUpMs: 100, maxInflightMs: 5_000 },
   })
   t.after(() => { A.stop(); B.stop() })
   await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
 
-  A.sendText('do klienta bez potwierdzeń')
-  await until(() => got.length === 1, 8000)
-  await new Promise((r) => setTimeout(r, 6500)) // past both retries
-  assert.deepEqual(undelivered, [], 'no false alarm')
+  const id = A.sendText('do uśpionego telefonu')
+  await until(() => got.length === 1, 8000)   // B got it — only the ack is lost
+  await until(() => undelivered.length === 1, 5000)
+  assert.equal(undelivered[0], id, 'a secured-but-silent peer is flagged, so a ↻ exists to retry')
 })
 
 test('an outage longer than the old budget does not kill a message on a live session', async (t) => {

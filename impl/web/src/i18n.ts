@@ -597,6 +597,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Odśwież': 'Reload',
     'Pokaż hasło': 'Show the password',
     'Ukryj hasło': 'Hide the password',
+    'Bezpieczny kanał (EH-2)': 'Secure channel (EH-2)',
+    'Dostępny — otwórz rozmowę, żeby zestawić kanał': 'Available — open the chat to set up a channel',
   },
 }
 

@@ -256,9 +256,15 @@ function paintStatus() {
     txt.textContent = gu ? tr('{n} członków', { n: gu.members.length }) : ''
     return
   }
-  const lp = activeRoom()?.lastPresence
-  dot.className = 'dot ' + (lp === 'join' || lp === 'active' ? 'ok' : lp === 'away' || lp === 'quiet' ? 'away' : '')
-  txt.textContent = activeRoom()?.peerLabel ?? tr('łączę…')
+  // Green = a live EH-2 channel (secured), not merely "peer active" — the
+  // same delivery-promise meaning as the contact-list dot. A peer that is
+  // present but not yet secured (or gone away/quiet with the channel dropped)
+  // is orange; text still carries the exact presence word.
+  const r = activeRoom()
+  const lp = r?.lastPresence
+  const secured = !!r?.conv && r.conv.secured().length > 0
+  dot.className = 'dot ' + (secured ? 'ok' : lp && lp !== 'leave' ? 'online' : '')
+  txt.textContent = r?.peerLabel ?? tr('łączę…')
 }
 let rotTimer: any = null
 
@@ -1531,13 +1537,20 @@ function renderContacts() {
     const inRoom = !!room?.inRoom
     const online = onlinePubs.has(c.pub)
     const unseen = room?.unseen ?? 0
-    const dotTitle = inRoom ? 'W rozmowie' : online ? 'Online (widoczny na Waszym topicu)' : 'Offline'
+    // Green only for a live EH-2 channel; announcing-without-a-channel is
+    // orange (see the .dot CSS). secured() reads the engine's live session
+    // set, so it drops the instant the peer is forgotten.
+    const secured = !!room?.conv && room.conv.secured().length > 0
+    const dotClass = secured ? 'ok' : (inRoom || online) ? 'online' : ''
+    const dotTitle = secured ? tr('Bezpieczny kanał (EH-2)')
+      : (inRoom || online) ? tr('Dostępny — otwórz rozmowę, żeby zestawić kanał')
+        : tr('Offline')
     const src = c.source === 'hem' ? { i: '🔒', t: tr('W HEM (trwałe, przenośne)') } : { i: '💻', t: tr('Lokalnie (ta przeglądarka)') }
     const b = document.createElement('button'); b.className = 'contact' + (activePub === c.pub && chatOnScreen() ? ' active' : '') + (unseen ? ' unread' : '')
     // The unread pill is the whole point of the background model: a message that
     // arrived while you were elsewhere lights here instead of yanking the view.
     const pill = unseen ? `<span class="c-unread" title="${unseen} nieprzeczytane">${unseen > 99 ? '99+' : unseen}</span>` : ''
-    b.innerHTML = `<span class="dot ${inRoom || online ? 'ok' : ''}" title="${dotTitle}"></span><div class="avatar">${escapeHtml(initials(c.name))}</div>`
+    b.innerHTML = `<span class="dot ${dotClass}" title="${escapeHtml(dotTitle)}"></span><div class="avatar">${escapeHtml(initials(c.name))}</div>`
       + `<div class="c-info"><div class="c-name">${escapeHtml(c.name)} <span class="src" title="${src.t}">${src.i}</span></div>`
       + `<div class="c-sub" title="${escapeHtml(c.kid ? `KID ${c.kid}` : c.pub)}">🔑 ${escapeHtml(fpCache.get(c.pub) ?? '…')}${c.kid ? ' · KID ' + escapeHtml(shortKid(c.kid)) : ''}</div></div>`
       + pill + `<button class="c-edit" title="${tr('Zmień nazwę')}">✎</button><span class="c-x" title="${tr('Usuń')}">×</span>`
@@ -3254,7 +3267,10 @@ function refuse(rep: Awaited<ReturnType<typeof probeCapabilities>>) {
 function noteSecurity(room: Room, peer: string, state: 'handshaking' | 'established' | 'failed') {
   if (peer) room.security.set(peer, state)
   else { room.security.clear(); room.security.set('', state) }
-  if (room === activeRoom()) { paintSecurity(room); paintKnockButton() }
+  if (room === activeRoom()) { paintSecurity(room); paintKnockButton(); paintStatus() }
+  // The channel just came up or went down — the contact-list dot is
+  // green-vs-orange on exactly that, so repaint the list too.
+  renderContacts()
 }
 function paintSecurity(room: Room) {
   const states = [...room.security.values()]

@@ -286,9 +286,17 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       p.timer = setTimeout(() => {
         if (!pending.has(id)) return
         pending.delete(id)
-        // Only complain about peers we know DO confirm; silence from a client
-        // that predates acks means "old build", not "lost message".
-        if ([...lastSeen.keys()].some((peer) => acking.has(peer))) {
+        // Mark ⚠+↻ when a peer that OUGHT to confirm did not. "Ought to" is
+        // proven two ways: it has acked before (`acking`), OR we hold a live
+        // EH-2 session with it (`sessions`) — a peer that completed the
+        // handshake is a current build that acks, so its silence is loss, not
+        // an ancient ack-less client. Without the session clause a phone that
+        // was asleep for the whole room session had acked nothing yet, fell
+        // through, and left the bubble stuck on "wysyłam…" for ever with no ↻
+        // to retry it — reported live: desktop→dozing Android, hung minutes.
+        // (A genuinely ack-less legacy peer holds no session either, so it
+        // still stays quiet — but EH-2 has been mandatory since 2026-07-30.)
+        if ([...lastSeen.keys()].some((peer) => acking.has(peer) || sessions.has(peer))) {
           log(`no confirmation for message ${id} after ${p.tries + 1} sends over ${Math.round((nowMs() - p.sentAt) / 1000)}s → marking undelivered`)
           keepForResend(id, p.bytes, p.sentAt)
           onUndelivered(id)

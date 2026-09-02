@@ -94,7 +94,11 @@
   input,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px}
   textarea{font-family:ui-monospace,"Cascadia Code",monospace;font-size:13px;resize:vertical;min-height:54px}
   .dot{width:9px;height:9px;border-radius:50%;background:var(--off);flex-shrink:0;transition:background .2s}
-  .dot.ok{background:var(--good)}.dot.bad{background:var(--err)}.dot.away{background:var(--warn)}
+  /* Presence dot as a DELIVERY promise, not a beacon: green = a live EH-2
+     channel (a message will flow), orange = announcing but no channel yet
+     (opening the chat builds one), grey = offline. The old green-for-any-
+     announce read as "reachable" and lied about a dozing phone. */
+  .dot.ok{background:var(--good)}.dot.online{background:var(--warn)}.dot.bad{background:var(--err)}.dot.away{background:var(--warn)}
   .hint{font-size:11px;color:var(--muted);margin-top:4px;min-height:15px}
   .btn{width:100%;margin-top:20px;padding:11px;border:none;border-radius:8px;background:var(--accent);color:var(--accent-ink);font-size:14px;font-weight:600}
   .btn:hover{filter:brightness(1.06)}.btn:disabled{opacity:.55;cursor:not-allowed}
