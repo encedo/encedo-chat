@@ -100,7 +100,7 @@ out a different cause:
 A missing log line proves the deploy is unverified — not that the code is
 absent. Confirm on disk (`git log`, `grep`) before concluding anything.
 
-## Adding a node (bs3 and up)
+## Adding a node (bs4 and up)
 
 **A node's identity is knowable before the machine exists.** `--pass` is the
 Ed25519 seed, the convention is that the pass IS the hostname, so the PeerId —
@@ -110,17 +110,26 @@ and therefore the multiaddr clients will carry — can be derived on a laptop:
 import { generateKeyPairFromSeed } from '@libp2p/crypto/keys'
 import { peerIdFromPrivateKey } from '@libp2p/peer-id'
 import { createHash } from 'node:crypto'
-const key = await generateKeyPairFromSeed('Ed25519', createHash('sha256').update('bs3.onchato.com').digest())
+const key = await generateKeyPairFromSeed('Ed25519', createHash('sha256').update('bs4.onchato.com').digest())
 console.log(peerIdFromPrivateKey(key).toString())
 ```
 
-Verified against the two live nodes: it reproduces `12D3KooWP6Sp…cDmp` for bs1
-and `12D3KooWJJJt…1NT1y` for bs2, so the third is not a guess.
+Verified against the three live nodes: it reproduces `12D3KooWP6Sp…cDmp` for
+bs1, `12D3KooWJJJt…1NT1y` for bs2 and `12D3KooWLcDz…vSt5` for bs3 — the last
+one was derived here before bs3 existed and its log printed exactly that id
+when it came up (2026-09-03, DigitalOcean AMS3, `DEPLOY.md` followed to the
+letter). So the next one is not a guess either.
 
-**bs3.onchato.com, precomputed:**
+**bs3.onchato.com — live since 2026-09-03**, in `infra/nodes.json`:
 
 ```
 /dns4/bs3.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5
+```
+
+**bs4.onchato.com, precomputed:**
+
+```
+/dns4/bs4.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWNanmFHKtW2BB4r58VUJ6er1w3r2mB8gEbnnqaha8CGKo
 ```
 
 Order of work, and the order matters — the commands are in [`DEPLOY.md`](DEPLOY.md):
@@ -128,14 +137,15 @@ Order of work, and the order matters — the commands are in [`DEPLOY.md`](DEPLO
 1. VM, DNS (an explicit `A` record — the `*.onchato.com` wildcard points at
    bs1, so an unpublished name *resolves* and answers with the wrong
    certificate), certificate, nginx from the template `infra/nginx/relay-node.conf`.
-2. `--pass bs3.onchato.com`, systemd unit, then check the startup lines the way
+2. `--pass bs4.onchato.com`, systemd unit, then check the startup lines the way
    "Did it actually take?" above says — **the PeerId in the log must equal the
    one derived here.** If it does not, the pass is wrong and every client that
    ever caches this address will fail against it.
-3. `--peers` on **the new node only**, pointing at bs1 and bs2 over their public
-   WSS addresses (one address per peer). The link is bidirectional and the new
-   node re-dials every 10 s, so the existing nodes need neither a flag nor a
-   restart — verified 2026-09-03 by a fresh node meshing with both from a laptop.
+3. `--peers` on **the new node only**, pointing at bs1, bs2 and bs3 over their
+   public WSS addresses (one address per peer). The link is bidirectional and
+   the new node re-dials every 10 s, so the existing nodes need neither a flag
+   nor a restart — that is exactly how bs3 joined: it dialled, and bs1 and bs2
+   each logged a `[+]` for it without being touched.
 4. **Only then** add it to `infra/nodes.json`. That file is what a fresh client
    compiles its defaults from, so a node listed before it answers costs every
    new client a failed dial at startup — the failover survives it, but it is a
@@ -145,9 +155,10 @@ Order of work, and the order matters — the commands are in [`DEPLOY.md`](DEPLO
 
 The relay listens on `0.0.0.0:9001` — plain WS, not bound to loopback — so the
 **firewall is what keeps it private**: only nginx, over loopback (which ufw
-does not filter), may reach it. Since 2026-09-03 both nodes allow exactly
-22/80/443 in; 9001 had been open to the world on both until then (nothing was
-using it, but an open 9001 is a plain-WS door around every limit below). The
+does not filter), may reach it. Since 2026-09-03 every node allows exactly
+22/80/443 in; 9001 had been open to the world on bs1 and bs2 until then
+(nothing was using it, but an open 9001 is a plain-WS door around every limit
+below), and bs3 was born with it closed. The
 one exception is bs1's IPv6 port 9002, the inter-relay link for bs2 (its
 provider blocks IPv4 between VMs), and ufw restricts that to bs2's address.
 

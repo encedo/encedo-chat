@@ -1058,9 +1058,9 @@ members there, which is why the version prefix exists at all.
 
 ## Deploy (onchato.com)
 
-Pieces: the **relay** (bs1 on the main host, **bs2** on its own VM — the list
-clients compile in is `infra/nodes.json`, refreshable by CID; bs3's PeerId is
-precomputed in `relay/README.md`), the **web app**, the **IPFS file store**
+Pieces: the **relay** (bs1 on the main host, **bs2** and **bs3** on their own
+VMs — the list clients compile in is `infra/nodes.json`, refreshable by CID;
+the next node's PeerId is precomputed in `relay/README.md`), the **web app**, the **IPFS file store**
 (separate hosts — `infra/README.md`), and the **tag-driven auto-deploy**. The
 model is PULL: the host builds, nothing is uploaded, no production credential
 sits in any CI runner. Clone lives at **`/opt/github/encedo-chat`**.

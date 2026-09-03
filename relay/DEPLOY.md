@@ -28,7 +28,7 @@ IPv6 and you want clients to use it, `AAAA → <its IPv6>` (the nginx site below
 listens on both). Wait until it resolves from the outside:
 
 ```bash
-dig +short A bs3.onchato.com        # → the VM's address, and NOT 38.109.11.30 (bs1)
+dig +short A bs4.onchato.com        # → the VM's address, and NOT 38.109.11.30 (bs1)
 ```
 
 **The PeerId, computed before the node exists.** On a laptop with this repo:
@@ -41,10 +41,12 @@ node -e '
     const {createHash} = await import("node:crypto")
     const key = await generateKeyPairFromSeed("Ed25519", createHash("sha256").update(process.argv[1]).digest())
     console.log(peerIdFromPrivateKey(key).toString())
-  })' bs3.onchato.com
+  })' bs4.onchato.com
 ```
 
-For **bs3.onchato.com** this prints `12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5`.
+For **bs4.onchato.com** this prints `12D3KooWNanmFHKtW2BB4r58VUJ6er1w3r2mB8gEbnnqaha8CGKo`.
+(The same one-liner named bs3's id before bs3 existed, and bs3's log printed
+exactly that id when it came up on 2026-09-03 — the method is proven.)
 Write yours down — step 4 checks the running node against it, and the address
 you will publish in step 9 is:
 
@@ -55,7 +57,7 @@ you will publish in step 9 is:
 Everything below assumes one shell variable. Set it in every new session:
 
 ```bash
-HOST=bs3.onchato.com
+HOST=bs4.onchato.com
 ```
 
 ## 1. System and firewall
@@ -63,7 +65,8 @@ HOST=bs3.onchato.com
 ```bash
 sudo apt-get update && sudo apt-get -y upgrade
 sudo apt-get install -y ufw curl git jq
-sudo hostnamectl set-hostname ${HOST%%.*}        # optional: "bs3" in the prompt and the journal
+sudo hostnamectl set-hostname ${HOST%%.*}        # optional: "bs4" in the prompt and the journal
+                                                 # (skip on DigitalOcean: cloud-init restores its own name at every boot)
 
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
@@ -147,7 +150,8 @@ User=www-data
 WorkingDirectory=/opt/github/encedo-chat/relay
 ExecStart=/usr/bin/node relay.mjs --port 9001 --pass $HOST --host $HOST \\
   --peers /dns4/bs1.onchato.com/tcp/443/wss/http-path/%%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp \\
-          /dns4/bs2.onchato.com/tcp/443/wss/http-path/%%2Frelay/p2p/12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y
+          /dns4/bs2.onchato.com/tcp/443/wss/http-path/%%2Frelay/p2p/12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y \\
+          /dns4/bs3.onchato.com/tcp/443/wss/http-path/%%2Frelay/p2p/12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
@@ -165,12 +169,13 @@ sudo journalctl -u onchato-relay -n 25 --no-pager
 multiaddr's `%2F` has to be written `%%2F` there. Everywhere else (a shell,
 `nodes.json`, a browser) it is `%2F`.
 
-**Read the log before going on.** Five lines matter:
+**Read the log before going on.** Six lines matter:
 
 ```
-🔑 Pass: "bs3.onchato.com" → PeerId: 12D3KooWLcDz…vSt5   ← MUST equal the PeerId from step 0
+🔑 Pass: "bs4.onchato.com" → PeerId: 12D3KooWNanm…CGKo   ← MUST equal the PeerId from step 0
   ✓ /dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay…   ← mesh to bs1 is up
   ✓ /dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay…   ← mesh to bs2 is up
+  ✓ /dns4/bs3.onchato.com/tcp/443/wss/http-path/%2Frelay…   ← mesh to bs3 is up
 ✅ Relay uruchomiony na porcie 9001
 📦 Tematy: limit 250 równoczesnych, eviction po 120s ciszy (sweep 30s)
 ```
@@ -214,8 +219,12 @@ sudo cp infra/nginx/relay-limits.conf /etc/nginx/conf.d/relay-limits.conf
 sed "s/__HOST__/$HOST/g" infra/nginx/relay-node.conf | sudo tee /etc/nginx/sites-available/$HOST >/dev/null
 sudo ln -s /etc/nginx/sites-available/$HOST /etc/nginx/sites-enabled/$HOST
 sudo nginx -t && sudo systemctl reload nginx
-sudo certbot renew --dry-run                  # proves renewal survives the redirect
+sudo certbot renew --dry-run --no-random-sleep-on-renew   # proves renewal survives the redirect
 ```
+
+(`--no-random-sleep-on-renew` matters only when stdin is not a terminal —
+over `ssh host 'cmd'` or from a script certbot otherwise sleeps a random 0–8
+minutes before it does anything, which looks exactly like a hang.)
 
 `sites-enabled/$HOST` must stay a **symlink** — a copy there is two files, one
 edited and one served, and no error anywhere (`infra/nginx/README.md`).
@@ -225,8 +234,8 @@ edited and one served, and no error anywhere (`infra/nginx/README.md`).
 From your laptop, in this order — each check proves one more layer:
 
 ```bash
-HOST=bs3.onchato.com
-curl -s https://$HOST/health                  # → "bs3.onchato.com ok"   (DNS + TLS + nginx)
+HOST=bs4.onchato.com
+curl -s https://$HOST/health                  # → "bs4.onchato.com ok"   (DNS + TLS + nginx)
 curl -sS -i -N --max-time 3 \
   -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' \
   -H "Sec-WebSocket-Key: $(head -c16 /dev/urandom | base64)" \
@@ -241,7 +250,7 @@ the repo checkout on the laptop:
 cd encedo-chat/relay
 node relay.mjs --port 9379 --pass laptop \
   --peers /dns4/$HOST/tcp/443/wss/http-path/%2Frelay/p2p/<PeerId from step 0>
-# expect:  ✓ /dns4/bs3.onchato.com/tcp/443/wss/http-path/%2Frelay…   then Ctrl+C
+# expect:  ✓ /dns4/bs4.onchato.com/tcp/443/wss/http-path/%2Frelay…   then Ctrl+C
 ```
 
 A `✓` means the whole path works: TLS, the `/relay` upgrade, the Noise
@@ -259,15 +268,16 @@ npm run browser-test > browser-test.log 2>&1; tail -3 browser-test.log
 
 ## 8. The mesh — why only the new node dials
 
-Step 4 already meshed the node: `--peers` makes it dial bs1 and bs2 at start
-and re-dial any of them it is not connected to, every 10 s. The link is
+Step 4 already meshed the node: `--peers` makes it dial bs1, bs2 and bs3 at
+start and re-dial any of them it is not connected to, every 10 s. The link is
 bidirectional, so **the existing nodes need no change and no restart** — a
 pair split across bs1 and the new node meets through that link. When the new
 node restarts, it re-dials; when bs1 restarts, the new node notices within 10 s
-and re-dials. On the existing nodes you can see it arrive:
+and re-dials. On the existing nodes you can see it arrive (this is how bs3's
+arrival was confirmed on 2026-09-03 — a `[+]` on bs1 and on bs2, no `[-]`):
 
 ```bash
-ssh bs1.onchato.com 'journalctl -u onchato-relay -n 50 --no-pager | grep "\[+\] 12D3KooWLcDz"'
+ssh bs1.onchato.com 'journalctl -u onchato-relay -n 50 --no-pager | grep "\[+\] 12D3KooWNanm"'
 ```
 
 One address per peer in `--peers`, always: two addresses for the same PeerId
@@ -347,6 +357,7 @@ trying it — the failover survives that, but it costs them a dial each start.
 | `nginx -t`: `zero size shared memory zone "relay_conn"` / `unknown limit_conn_zone` | `relay-limits.conf` is not in `/etc/nginx/conf.d/`, or was named without `.conf` |
 | `nginx -t`: `limit_conn_zone "relay_conn" is already bound` | the zones are declared twice — only on the web host, whose `onchato.com` config already has them; do not install `relay-limits.conf` there |
 | `nginx -t`: cannot load certificate `/etc/letsencrypt/live/<host>/…` | step 5 did not finish, or `HOST` was set differently when the site was rendered — `grep server_name /etc/nginx/sites-enabled/$HOST` |
+| `certbot renew --dry-run` prints nothing for minutes, looks hung | not hung: without a terminal on stdin (`ssh host 'cmd'`, a script) certbot sleeps a random 0–8 min first (`Non-interactive renewal: random delay` in `/var/log/letsencrypt/letsencrypt.log`). Wait, or add `--no-random-sleep-on-renew`. A second `certbot` started meanwhile says `Another instance of Certbot is already running` |
 | `/health` answers, the `101` check gives `502` | the relay is not listening on 9001: `systemctl status onchato-relay`, `ss -ltnp \| grep 9001` |
 | `/health` answers with bs1's certificate or `bs1 ok` | you are talking to bs1 — the wildcard CNAME; see the first row |
 | log: PeerId differs from step 0 | `--pass` differs from the hostname you computed for — compare `systemctl cat onchato-relay` letter by letter |

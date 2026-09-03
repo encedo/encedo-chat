@@ -1073,7 +1073,7 @@ function nodeRowsHTML(list: NodeEntry[]): string {
  * conversation. Publishing an updated list therefore means publishing a new CID
  * and shipping a build, and that is the right price.
  */
-const OFFICIAL_NODES_CID = 'QmPqyS3E8NcSU6kNF9owmvLqemHiRYhDg2tdMQwB47heTJ'
+const OFFICIAL_NODES_CID = 'QmRtrkjbmMVrm3X33qQ79q8pAaVs5awxTmrwHxBAXbkSPn'
 
 /**
  * Replace the local list with the published one.
