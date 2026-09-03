@@ -685,7 +685,10 @@
   .drawer.open{transform:translateX(0)}
   .drawer h2{margin:0 0 4px;font-size:16px;color:var(--text)}
   .d-sub{font-size:12px;color:var(--muted);margin-bottom:18px}
-  .d-head{display:flex;align-items:start;justify-content:space-between}
+  /* Pinned while the drawer scrolls, so ✕ is always in reach. The negative
+     margins stretch it over the drawer's 20px padding — with top:0 alone the
+     list would show through that strip above the header. */
+  .d-head{display:flex;align-items:start;justify-content:space-between;position:sticky;top:-20px;margin:-20px -20px 0;padding:20px 20px 4px;background:var(--card);z-index:1}
   .d-section{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px}
   .opt{display:flex;gap:10px;padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px}
   .opt.ph{opacity:.5}
