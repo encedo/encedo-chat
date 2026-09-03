@@ -24,6 +24,7 @@ import type { GkBackend } from '../../lib/group.ts'
 // which is exactly how it failed once. `tr` cannot collide.
 import { t as tr, setLocale, getLocale, applyDom } from './i18n.ts'
 import { probeCapabilities, formatReport } from '../../lib/capabilities.ts'
+import { initFeedback, openFeedback } from './feedback.ts'
 import { probeWebrtc, formatWebrtcProbe, type WebrtcProbeResult, type ProbeStage } from '../../lib/webrtc-probe.ts'
 import { voiceSupported, startRecording, type Recording } from './voice.ts'
 import { splitByLinks } from '../../lib/linkify.ts'
@@ -2388,6 +2389,8 @@ function renderProfiles() {
   // Only the profile actually open can have its password changed — re-sealing
   // needs the old one, and we hold exactly one.
   $('btn-passwd').hidden = !activeSoftProfile
+  // The "ask about HEM" line is for the person whose key lives in this browser.
+  const hemAsk = document.getElementById('hem-ask-settings'); if (hemAsk) hemAsk.hidden = !activeSoftProfile
 }
 
 async function removeProfile(name: string) {
@@ -3972,6 +3975,40 @@ $('btn-diag-copy')?.addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(text); toast(tr('Raport skopiowany')) }
   catch { toast(tr('Nie udało się skopiować — zaznacz i skopiuj ręcznie')) }
 })
+
+/**
+ * 💬 Feedback (`feedback.ts`). Wired here because the technical attachment IS
+ * the diagnostics report above — the same text `Kopiuj raport` produces, so a
+ * tester never has to find `?debug=1` to give us the one thing a bug report
+ * needs. The module gets the report as a function, never the session.
+ *
+ * The endpoint is the canonical host's, whatever origin the bundle runs from
+ * (tauri://localhost, a phone, a dev server). `?fb=<url>` redirects it ONLY on
+ * localhost — for pointing a dev page at a local `feedback.mjs`; a shared
+ * link must not be able to choose where a report goes.
+ */
+const FEEDBACK_URL = (() => {
+  const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+  const q = local ? new URLSearchParams(location.search).get('fb') : null
+  return q || `${CANONICAL_ORIGIN}/feedback`
+})()
+initFeedback({
+  version: __EC_VERSION__,
+  commit: __EC_COMMIT__,
+  endpoint: FEEDBACK_URL,
+  diagnostics: () => capReport
+    ? formatReport(capReport) + (lastWebrtcProbe ? '\n' + formatWebrtcProbe(lastWebrtcProbe) : '')
+    : null,
+  toast,
+})
+$('btn-feedback')?.addEventListener('click', () => openFeedback('bug'))
+// The two "ask about HEM" lines — the login card's empty state and Settings'
+// software-profile section — open the same form on its HEM question. The
+// Settings one closes the drawer first: the form takes the shared scrim down
+// with it when it closes, and a drawer left open behind no backdrop is the
+// same trap `ask()` callers repair by hand.
+$('hem-ask-login')?.addEventListener('click', () => openFeedback('hem'))
+$('hem-ask-settings-link')?.addEventListener('click', () => { closeDrawer(); openFeedback('hem') })
 
 /**
  * Notify about one arriving event. `where` identifies the conversation twice

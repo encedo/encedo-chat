@@ -258,7 +258,19 @@
   .d-note{padding:0 16px 14px;font-size:12px;color:var(--muted);line-height:1.5}
   .profile-strip{border-top:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px}
   .profile-strip .lbl{font-size:12px;color:var(--muted)}
-  .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:500;padding:3px 10px;border-radius:4px;background:var(--accent-soft);color:var(--accent);border:none}
+  /* The right half of the strip is one unit — the label and the chip it
+     labels — so the feedback button on the left keeps its own edge. */
+  .profile-strip .strip-r{display:flex;align-items:center;gap:8px}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:500;padding:3px 10px;border-radius:4px;background:var(--accent-soft);color:var(--accent);border:none;cursor:pointer}
+  /* Feedback form. The kind chips are a segmented control drawn from the same
+     `.chip` idiom as the transport one, so the modal introduces no new colour;
+     the chosen one inverts. The preview is the diagnostics box, unchanged. */
+  .fb-kinds{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+  .fb-kind{font-family:var(--mono);font-size:11.5px;padding:5px 11px;border-radius:999px;border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer}
+  .fb-kind.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  .fb-pre{max-height:160px;overflow:auto;margin-top:8px}
+  .fb-link{font-size:12px;color:var(--accent);cursor:pointer;background:none;border:none;padding:0;margin-top:8px;text-decoration:underline}
+  #fb-text{min-height:84px;font-family:inherit;font-size:14px}
 
   .chat{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
   .chat-head{display:flex;align-items:center;gap:12px;flex-wrap:nowrap;padding:14px 20px;border-bottom:1px solid var(--border)}
@@ -824,6 +836,11 @@
              hardware they do not have. -->
         <button class="btn" id="go-create" data-i18n="Załóż profil na tym urządzeniu">Załóż profil na tym urządzeniu</button>
         <button class="btn btn-alt" id="go-hem-empty" data-i18n="Mam HEM — zaloguj">Mam HEM — zaloguj</button>
+        <!-- Under the two doors, because this is the moment the choice is made:
+             whoever takes the software door has just said "I have no HEM". It
+             opens the feedback form on its HEM question — no identity needed,
+             which is the point of asking here, before there is one. -->
+        <div class="toggle"><a id="hem-ask-login" data-i18n="Nie masz HEM? Zapytaj, co daje klucz sprzętowy →">Nie masz HEM? Zapytaj, co daje klucz sprzętowy →</a></div>
       </div>
 
       <div id="hem-sec" hidden>
@@ -934,7 +951,13 @@
       </div>
       <div class="pane" id="pane-groups" hidden></div>
       <div class="pane" id="pane-network" hidden><div class="pane-label" data-i18n="Sieć — wkrótce (lista węzłów, latencje)">Sieć — wkrótce (lista węzłów, latencje)</div></div>
-      <div class="profile-strip"><span class="lbl" data-i18n="Transport">Transport</span><button class="chip" id="chip-profile" title="Zmień w Ustawieniach" data-i18n-title="Zmień w Ustawieniach">—</button></div>
+      <!-- The one strip that is on screen whenever the list is, on every
+           platform — which is why the feedback button lives here and not in
+           Settings. Same `.chip` as the transport one: the strip stays quiet. -->
+      <div class="profile-strip">
+        <button class="chip" id="btn-feedback" title="Zgłoś błąd, pomysł lub pytanie" data-i18n-title="Zgłoś błąd, pomysł lub pytanie">💬 Feedback</button>
+        <span class="strip-r"><span class="lbl" data-i18n="Transport">Transport</span><button class="chip" id="chip-profile" title="Zmień w Ustawieniach" data-i18n-title="Zmień w Ustawieniach">—</button></span>
+      </div>
     </aside>
 
     <div class="splitter" id="splitter" title="Przeciągnij, aby zmienić szerokość (dwuklik = reset)" data-i18n-title="Przeciągnij, aby zmienić szerokość (dwuklik = reset)"></div>
@@ -1251,6 +1274,37 @@
     </div>
   </div>
 
+  <!-- Feedback: one screen, one step. The document that will be sent is shown
+       on this same screen (folded, one click away) rather than confirmed in a
+       second dialog — an app that avoids metadata everywhere else must not
+       phone home behind a form, and a second dialog is what makes people stop
+       reporting. `web/src/feedback.ts` owns it. -->
+  <div class="modal" id="fb-modal" role="dialog" aria-modal="true" aria-labelledby="fb-title">
+    <h2 id="fb-title" data-i18n="Zgłoś uwagę">Zgłoś uwagę</h2>
+    <div class="msub" data-i18n="Błąd, pomysł, pytanie — kilka zdań wystarczy. Bez konta, bez logowania.">Błąd, pomysł, pytanie — kilka zdań wystarczy. Bez konta, bez logowania.</div>
+    <div class="fb-kinds" id="fb-kinds" role="radiogroup">
+      <button type="button" class="fb-kind on" data-kind="bug" data-i18n="Usterka">Usterka</button>
+      <button type="button" class="fb-kind" data-kind="idea" data-i18n="Pomysł">Pomysł</button>
+      <button type="button" class="fb-kind" data-kind="question" data-i18n="Pytanie">Pytanie</button>
+      <button type="button" class="fb-kind" data-kind="hem" data-i18n="Pytanie o HEM">Pytanie o HEM</button>
+    </div>
+    <textarea id="fb-text" maxlength="4000" placeholder="Co się stało / co byś zmienił(a)?" data-i18n-placeholder="Co się stało / co byś zmienił(a)?" style="margin-top:12px"></textarea>
+    <label for="fb-contact" data-i18n="Kontakt (opcjonalnie — jeśli chcesz odpowiedzi)">Kontakt (opcjonalnie — jeśli chcesz odpowiedzi)</label>
+    <input id="fb-contact" type="text" maxlength="200" placeholder="e-mail lub handle" data-i18n-placeholder="e-mail lub handle" autocomplete="off">
+    <label class="ask-remember" style="margin-top:12px">
+      <input type="checkbox" id="fb-diag" checked><span data-i18n="Dołącz dane techniczne (wersja, platforma, diagnostyka)">Dołącz dane techniczne (wersja, platforma, diagnostyka)</span>
+    </label>
+    <div class="hint" style="margin-top:8px;min-height:0" data-i18n="Nie wysyłamy nic o Twojej tożsamości, kluczach ani rozmowach. Serwer onchato.com zobaczy Twój adres IP i godzinę — jak przy każdym żądaniu.">Nie wysyłamy nic o Twojej tożsamości, kluczach ani rozmowach. Serwer onchato.com zobaczy Twój adres IP i godzinę — jak przy każdym żądaniu.</div>
+    <button type="button" class="fb-link" id="fb-peek" data-i18n="Pokaż, co dokładnie wyślę">Pokaż, co dokładnie wyślę</button>
+    <div class="diag fb-pre" id="fb-pre" hidden></div>
+    <div class="msg" id="fb-msg"></div>
+    <div class="modal-actions">
+      <button class="btn-send" id="fb-send" style="flex:1;border-radius:8px" data-i18n="Wyślij">Wyślij</button>
+      <button class="btn-ghost" id="fb-copy" hidden data-i18n="Kopiuj zgłoszenie">Kopiuj zgłoszenie</button>
+      <button class="btn-ghost" id="fb-cancel" data-i18n="Anuluj">Anuluj</button>
+    </div>
+  </div>
+
   <aside class="drawer" id="drawer" aria-label="Ustawienia">
     <div class="d-head"><div><h2 data-i18n="Ustawienia">Ustawienia</h2><div class="d-sub" data-i18n="Sesja i transport">Sesja i transport</div></div><button class="icon-btn" id="btn-close-drawer" title="Zamknij" data-i18n-title="Zamknij">✕</button></div>
     <!-- This replaced three profile names that named a policy the app could not
@@ -1321,6 +1375,10 @@
 
     <div class="d-section" style="margin-top:22px" data-i18n="Profile software na tym urządzeniu">Profile software na tym urządzeniu</div>
     <div class="hint" style="margin-bottom:8px" data-i18n="Każdy profil to osobna tożsamość, zaszyfrowana swoim hasłem. Usunięcie jest nieodwracalne — klucza nie da się odtworzyć.">Każdy profil to osobna tożsamość, zaszyfrowana swoim hasłem. Usunięcie jest nieodwracalne — klucza nie da się odtworzyć.</div>
+    <!-- Only while a software profile is open (renderProfiles). Two spans, not
+         one data-i18n on the wrapper: applyDom writes textContent and would
+         erase the link. -->
+    <div class="hint" id="hem-ask-settings" hidden style="margin-bottom:8px"><span data-i18n="Ten profil trzyma klucz w przeglądarce. W HEM klucz nigdy nie opuszcza urządzenia —">Ten profil trzyma klucz w przeglądarce. W HEM klucz nigdy nie opuszcza urządzenia —</span> <a id="hem-ask-settings-link" style="color:var(--accent);cursor:pointer" data-i18n="zapytaj o HEM →">zapytaj o HEM →</a></div>
     <div id="profiles-list"></div>
     <button class="btn" id="btn-passwd" hidden style="margin-top:8px;background:var(--accent-soft);color:var(--accent)" data-i18n="Zmień hasło aktywnego profilu">Zmień hasło aktywnego profilu</button>
 

@@ -20,7 +20,7 @@ operational reality — lessons, deploy rituals, platform traps.
 - `docs/` — the three specs (PROTOCOL, ARCHITECTURE, THREAT-MODELS), kept 1:1 with the code.
 - `skin/` — UI mockups (`ui-mockup.html`, `ui-mockup-hacker.html`); the shipped UI is `impl/web/` and has long diverged.
 - `impl/` — the app: engine (`lib/`, `eh2/`, `net/`), web UI (`web/`), CLI (`cli/`), Tauri desktop + Android shell (`src-tauri/`), tests (`test/`).
-- `infra/` — `nodes.json` (the compiled-in node list), `deploy-on-tag.sh` + systemd units (tag-driven web deploy), `nginx/onchato.com` (the versioned nginx config — scp to sites-enabled), IPFS TTL sweeper.
+- `infra/` — `nodes.json` (the compiled-in node list), `deploy-on-tag.sh` + systemd units (tag-driven web deploy), `nginx/onchato.com` (the versioned nginx config — scp to sites-enabled), IPFS TTL sweeper, `feedback/` (the in-app 💬 Feedback sink — zero-dep Node, appends JSONL, its own systemd unit).
 - `MVP.md`, `MOBILE-PLAN.md`, `EMBED-PLAN.md`, `GROUPS-DESIGN.md`, `performance.md`, `hem_usage.md` — plans and measured records at root.
 - `relay/` — the onchato **bs1 relay** (libp2p GossipSub + circuit-relay-v2),
   self-contained + deployable (pull → `npm ci` → systemd `onchato-relay`).
@@ -1103,8 +1103,18 @@ cd impl && npm run web:deploy               # → impl/web/dist (what nginx serv
 
 nginx config is versioned at `infra/nginx/onchato.com` — edit locally, `scp` to
 `sites-enabled`, `nginx -t`, reload. It carries the `/relay` and `/mqtt` per-IP
-limits (the DDoS protection — libp2p's own is off) and the CORS on both `/f`
-blocks that the packaged apps need.
+limits (the DDoS protection — libp2p's own is off), the CORS on both `/f`
+blocks that the packaged apps need, and the `/feedback` block.
+
+**Feedback sink** (`infra/feedback/`, since 0.5.39): the app's 💬 Feedback form
+POSTs one JSON document to `https://onchato.com/feedback`; `feedback.mjs`
+(127.0.0.1:9201, systemd `onchato-feedback`, `User=www-data`) validates the
+shape and appends a line to `/var/lib/onchato/feedback.jsonl`. Not part of the
+tag-driven deploy — install once (`infra/feedback/README.md`), then it runs
+from the clone like the relay; restart it by hand when its code changes. nginx
+deliberately sends **no** `X-Real-IP` / `X-Forwarded-For` to it, so the file
+never holds an address — the form promises that. Read it with `jq` (recipes in
+the README); `journalctl -u onchato-feedback` shows one line per report.
 
 **Key material in the console is a BUILD decision, not a URL one.** `?debug=1`
 narrates the protocol with values elided; `?keys=1` prints the secret bytes

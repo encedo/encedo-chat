@@ -1,0 +1,25 @@
+# systemd — onchato feedback sink (encedo-chat/infra/feedback)
+# Install:  sudo cp onchato-feedback.service /etc/systemd/system/
+#           sudo systemctl daemon-reload && sudo systemctl enable --now onchato-feedback
+# Logs:     sudo journalctl -u onchato-feedback -f
+# Records:  /var/lib/onchato/feedback.jsonl  (StateDirectory creates it, owned by www-data)
+#
+# Listens on 127.0.0.1:9201 only — nginx's `location = /feedback` is the door.
+
+[Unit]
+Description=onchato feedback sink (encedo-chat)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/github/encedo-chat/infra/feedback
+ExecStart=/usr/bin/node feedback.mjs
+Environment=NODE_ENV=production
+Environment=FEEDBACK_FILE=/var/lib/onchato/feedback.jsonl
+StateDirectory=onchato
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

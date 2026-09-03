@@ -9,6 +9,11 @@ limit_req_zone  $binary_remote_addr zone=mqtt_req:10m rate=30r/s;
 limit_conn_zone $binary_remote_addr zone=relay_conn:10m;
 limit_req_zone  $binary_remote_addr zone=relay_req:10m rate=10r/s;
 
+# Feedback: formularz z aplikacji (infra/feedback). Człowiek pisze jedno
+# zgłoszenie na kilka minut — 1 r/s z burstem 5 puszcza każde uczciwe użycie
+# i zatrzymuje skrypt, zanim napełni plik.
+limit_req_zone  $binary_remote_addr zone=fb_req:10m rate=1r/s;
+
 
 # --- HTTP redirect: onchato.com + chat.encedo.com ---
 server {
@@ -120,6 +125,30 @@ server {
 	proxy_ssl_server_name on;
         rewrite ^ /api/v0/cat?arg=$cid&offline=true break;
         proxy_pass https://rpc.ipfs.encedo.com;
+    }
+
+    location = /feedback {
+        # Formularz „💬 Feedback” z aplikacji → infra/feedback/feedback.mjs
+        # (127.0.0.1:9201, jedna linia JSONL na zgłoszenie). CORS z tego
+        # samego powodu co /f: paczka (Tauri/Android) wysyła z tauri://localhost.
+        if ($request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin  "*";
+            add_header Access-Control-Allow-Methods "POST, OPTIONS";
+            add_header Access-Control-Allow-Headers "content-type";
+            add_header Access-Control-Max-Age       86400;
+            return 204;
+        }
+        add_header Access-Control-Allow-Origin "*" always;
+
+        limit_except POST OPTIONS { deny all; }
+        limit_req zone=fb_req burst=5 nodelay;      # per realne IP
+        client_max_body_size 32k;                   # serwis tnie to samo
+
+        # ŚWIADOMIE bez X-Real-IP / X-Forwarded-For: serwis nie ma poznać
+        # adresu nadawcy, więc go nie dostaje. Adres zostaje tylko w access.log.
+        proxy_set_header Origin  "";
+        proxy_set_header Referer "";
+        proxy_pass http://127.0.0.1:9201;
     }
 
     # zahashowane bundle: nazwa zmienia się z treścią → cache na zawsze
