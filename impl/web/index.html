@@ -681,14 +681,24 @@
   .src{font-size:11px;opacity:.75}
   .modal-actions{display:flex;gap:8px;margin-top:16px}
   .btn-ghost{background:var(--accent-soft);color:var(--accent);border:none;border-radius:8px;padding:0 18px;font-weight:600}
-  .drawer{position:fixed;top:0;right:0;bottom:0;width:360px;max-width:92vw;background:var(--card);border-left:1px solid var(--border);z-index:31;padding:20px;overflow-y:auto;transform:translateX(100%);transition:transform .2s ease}
+  /* The drawer is position:fixed, so it does NOT inherit the safe-area padding
+     .app gets in the compact layout — and the packaged webview is edge-to-edge,
+     so without its own insets the title and ✕ sat under the phone's status bar
+     and the last section under the gesture bar (seen on Android, 0.5.44). In a
+     browser tab both env() values are 0 and nothing here changes. */
+  .drawer{position:fixed;top:0;right:0;bottom:0;width:360px;max-width:92vw;background:var(--card);border-left:1px solid var(--border);z-index:31;padding:calc(20px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom));overflow-y:auto;transform:translateX(100%);transition:transform .2s ease}
   .drawer.open{transform:translateX(0)}
   .drawer h2{margin:0 0 4px;font-size:16px;color:var(--text)}
   .d-sub{font-size:12px;color:var(--muted);margin-bottom:18px}
   /* Pinned while the drawer scrolls, so ✕ is always in reach. The negative
-     margins stretch it over the drawer's 20px padding — with top:0 alone the
-     list would show through that strip above the header. */
-  .d-head{display:flex;align-items:start;justify-content:space-between;position:sticky;top:-20px;margin:-20px -20px 0;padding:20px 20px 4px;background:var(--card);z-index:1}
+     margins stretch it over the drawer's top padding (20px + the inset) — with
+     top:0 alone the list would show through that strip above the header.
+     ⚠️ The sticky offset is measured from the scroll container's CONTENT edge,
+     i.e. below its padding (measured in Chromium: the header parks at
+     padding-top + top), so it must be minus the whole padding-top — the header
+     then parks at the drawer's top edge and the title stays put when the list
+     starts to scroll. -20px alone would let it drop by the inset on a phone. */
+  .d-head{display:flex;align-items:start;justify-content:space-between;position:sticky;top:calc(-20px - env(safe-area-inset-top));margin:calc(-20px - env(safe-area-inset-top)) -20px 0;padding:calc(20px + env(safe-area-inset-top)) 20px 4px;background:var(--card);z-index:1}
   .d-section{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px}
   .opt{display:flex;gap:10px;padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px}
   .opt.ph{opacity:.5}
