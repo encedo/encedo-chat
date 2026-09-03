@@ -30,6 +30,21 @@ files, one edited, one served, and no error anywhere.
 ssh <host> 'ls -l /etc/nginx/sites-enabled/'   # -> onchato.com -> ../sites-available/onchato.com
 ```
 
+## The relay nodes (bs2, bs3, …) — two more files
+
+A relay-only box does not get a copy of `onchato.com`; it gets
+`relay-node.conf`, a **template** (`__HOST__` → the node's name, rendered with
+`sed`, symlinked into `sites-enabled` under the hostname), plus
+`relay-limits.conf` in `/etc/nginx/conf.d/` for the two per-IP zones the site
+uses — those are http-level directives and cannot live in a site file. On the
+web host the same zones sit at the top of `onchato.com`, so `relay-limits.conf`
+must **not** be installed there (nginx: `"relay_conn" is already bound`).
+
+The `/relay` block is the same in both files on purpose — the timeouts, the
+limits and `X-Real-IP` are what a node needs regardless of what else the box
+serves. Change it in one, change it in the other. The step-by-step that uses
+the template is `relay/DEPLOY.md`.
+
 ## Two things in there that look wrong and are not
 
 * **The redirect to HTTPS is inside `location /`, not at server level.** A

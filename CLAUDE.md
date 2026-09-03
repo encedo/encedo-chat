@@ -20,7 +20,7 @@ operational reality — lessons, deploy rituals, platform traps.
 - `docs/` — the three specs (PROTOCOL, ARCHITECTURE, THREAT-MODELS), kept 1:1 with the code.
 - `skin/` — UI mockups (`ui-mockup.html`, `ui-mockup-hacker.html`); the shipped UI is `impl/web/` and has long diverged.
 - `impl/` — the app: engine (`lib/`, `eh2/`, `net/`), web UI (`web/`), CLI (`cli/`), Tauri desktop + Android shell (`src-tauri/`), tests (`test/`).
-- `infra/` — `nodes.json` (the compiled-in node list), `deploy-on-tag.sh` + systemd units (tag-driven web deploy), `nginx/onchato.com` (the versioned nginx config — scp to sites-enabled), IPFS TTL sweeper, `feedback/` (the in-app 💬 Feedback sink — zero-dep Node, appends JSONL, its own systemd unit).
+- `infra/` — `nodes.json` (the compiled-in node list), `deploy-on-tag.sh` + systemd units (tag-driven web deploy), `nginx/onchato.com` (the versioned nginx config of the web host — scp to sites-available), `nginx/relay-node.conf` + `nginx/relay-limits.conf` (the template every relay-only node renders), IPFS TTL sweeper, `feedback/` (the in-app 💬 Feedback sink — zero-dep Node, appends JSONL, its own systemd unit).
 - `MVP.md`, `MOBILE-PLAN.md`, `EMBED-PLAN.md`, `GROUPS-DESIGN.md`, `performance.md`, `hem_usage.md` — plans and measured records at root.
 - `relay/` — the onchato **bs1 relay** (libp2p GossipSub + circuit-relay-v2),
   self-contained + deployable (pull → `npm ci` → systemd `onchato-relay`).
@@ -28,7 +28,9 @@ operational reality — lessons, deploy rituals, platform traps.
   PeerId (`12D3KooWP6Sp…cDmp`) — never change it or every client breaks.
   `DUMP=<dir>` env (`relay/dump.mjs`) traces every observable action to JSONL
   for debugging/audit — banner says `🧾 DUMP ON`; **never on production**
-  (`relay/README.md` § Dump).
+  (`relay/README.md` § Dump). A new node from a clean Ubuntu is
+  `relay/DEPLOY.md`, step by step; ufw on every node is 22/80/443 only — 9001
+  is reached by nginx over loopback and stays closed (since 2026-09-03).
 - `hem-sdk-js/` — the Encedo HEM SDK as a **git submodule** (→ `encedo/hem-sdk-js`).
   Our HEM client — do not fork; update via `git submodule update --remote`.
 - `CLAUDE.md` (this file), `README.md`, `LICENSE` at root.

@@ -9,6 +9,9 @@ and the client fails over down that list (`impl/lib/nodelist.ts`,
 
 Lives in `encedo-chat/relay/` so the whole system is one repo (web client + relay).
 
+**Standing up a new node on a clean Ubuntu, step by step: [`DEPLOY.md`](DEPLOY.md).**
+This file is the background — what each piece is and why it is shaped this way.
+
 ## Run
 
 ```bash
@@ -120,33 +123,48 @@ and `12D3KooWJJJt…1NT1y` for bs2, so the third is not a guess.
 /dns4/bs3.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5
 ```
 
-Order of work, and the order matters:
+Order of work, and the order matters — the commands are in [`DEPLOY.md`](DEPLOY.md):
 
-1. VM, DNS `bs3.onchato.com`, certificate, nginx from the block below (it is
-   host-agnostic apart from `server_name`).
+1. VM, DNS (an explicit `A` record — the `*.onchato.com` wildcard points at
+   bs1, so an unpublished name *resolves* and answers with the wrong
+   certificate), certificate, nginx from the template `infra/nginx/relay-node.conf`.
 2. `--pass bs3.onchato.com`, systemd unit, then check the startup lines the way
    "Did it actually take?" above says — **the PeerId in the log must equal the
    one derived here.** If it does not, the pass is wrong and every client that
    ever caches this address will fail against it.
-3. `--peers` on bs1 and bs2 pointing at bs3 (and bs3 at both), so a pair split
-   across nodes still meets.
+3. `--peers` on **the new node only**, pointing at bs1 and bs2 over their public
+   WSS addresses (one address per peer). The link is bidirectional and the new
+   node re-dials every 10 s, so the existing nodes need neither a flag nor a
+   restart — verified 2026-09-03 by a fresh node meshing with both from a laptop.
 4. **Only then** add it to `infra/nodes.json`. That file is what a fresh client
    compiles its defaults from, so a node listed before it answers costs every
    new client a failed dial at startup — the failover survives it, but it is a
    second of nothing for everybody.
 
-## nginx (bs1.onchato.com)
+## nginx and the firewall
 
-The relay listens on `0.0.0.0:9001` (plain WS — public access is cut by the
-firewall and nginx, the socket itself is not bound to loopback); nginx
-terminates TLS and proxies `/relay` (WSS).
+The relay listens on `0.0.0.0:9001` — plain WS, not bound to loopback — so the
+**firewall is what keeps it private**: only nginx, over loopback (which ufw
+does not filter), may reach it. Since 2026-09-03 both nodes allow exactly
+22/80/443 in; 9001 had been open to the world on both until then (nothing was
+using it, but an open 9001 is a plain-WS door around every limit below). The
+one exception is bs1's IPv6 port 9002, the inter-relay link for bs2 (its
+provider blocks IPv4 between VMs), and ufw restricts that to bs2's address.
 
-**The versioned config is `infra/nginx/onchato.com` — that file is the source of
-truth**, this section only says what to look for in it: the `Upgrade`/
-`Connection` headers, the hour-long read/send timeouts a long-lived WebSocket
-needs, and the `limit_conn`/`limit_req` pair on `/relay` (see the inbound-limits
-section below for why those limits are load-bearing, not optional). Deploy is
-`scp` to `sites-enabled` + `nginx -t` + reload.
+nginx terminates TLS and proxies `/relay` (WSS). Two versioned configs, and
+they must agree on the `/relay` block:
+
+- **bs1** shares the web host's file, `infra/nginx/onchato.com` — the source
+  of truth for that host.
+- **every other node** renders `infra/nginx/relay-node.conf` (`__HOST__` →
+  the node's name) plus `infra/nginx/relay-limits.conf` in `conf.d`.
+
+What to look for in either: the `Upgrade`/`Connection` headers, the hour-long
+read/send timeouts a long-lived WebSocket needs, `X-Real-IP` (read only by
+the Dump, below), and the `limit_conn`/`limit_req` pair on `/relay` (see the
+inbound-limits section for why those limits are load-bearing, not optional).
+Deploy is `scp` to `sites-available` (a symlink in `sites-enabled`) +
+`nginx -t` + reload.
 
 ## Peer scoring — why IP colocation is OFF
 
