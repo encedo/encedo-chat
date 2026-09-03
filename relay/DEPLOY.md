@@ -290,7 +290,10 @@ it answers costs every fresh client a failed dial at start-up. Only after
 step 7 is green:
 
 1. Append `{ "name": "<host>", "addr": "<the multiaddr from step 0>" }` to
-   `infra/nodes.json` and bump its `updated` date.
+   `infra/nodes.json` and bump its `updated` date. Then `cd impl && npm test`:
+   `test/nodelist.test.ts` parses the real file and rejects a copy-paste slip
+   (an address that is another node's, two entries with one id) — CI runs the
+   same and goes red on `main` otherwise.
 2. Publish the new list to the IPFS store (`ipfs add -Q infra/nodes.json` on
    the store host — `infra/README.md`) and put the CID in `OFFICIAL_NODES_CID`
    in `impl/web/src/app.ts`: the in-app "load the official list" button reads
