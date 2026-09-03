@@ -7,6 +7,8 @@
  *
  *   node relay.mjs --pass <secret> --port 9001 [--host bs1.onchato.com] [--peers <ma>...]
  *                  [--max-topics 250] [--idle-ttl 120]
+ *   DUMP=<dir> node relay.mjs …   — debug/audit: every observable action to JSONL
+ *                                  (dump.mjs). NEVER on production.
  *
  * ⚠️ --pass is the Ed25519 seed → the relay's PeerId. Production MUST keep
  *    --pass bs1.onchato.com so the PeerId stays 12D3KooWP6Sp…cDmp — clients
@@ -25,6 +27,7 @@ import { generateKeyPairFromSeed } from '@libp2p/crypto/keys'
 import { peerIdFromPrivateKey } from '@libp2p/peer-id'
 import { multiaddr } from '@multiformats/multiaddr'
 import { createHash } from 'crypto'
+import { createDump } from './dump.mjs'
 
 const args = process.argv.slice(2)
 const get = (flag, def) => { const i = args.indexOf(flag); return i !== -1 ? args[i + 1] : def }
@@ -62,6 +65,11 @@ const IDLE_TTL = parseInt(get('--idle-ttl', '120')) * 1000
 // editing this file (a local edit conflicts on every git pull). Default sized for
 // 512 clients + inter-relay headroom; a load test passes e.g. --max-connections 50000.
 const MAX_CONNS = parseInt(get('--max-connections', '520'))
+// DUMP=<dir> → full JSONL trace of everything the relay observes (see dump.mjs).
+// Null when unset — every use below is `dump?.…`, so production runs no dump
+// code at all. Created BEFORE the node: its X-Real-IP capture wraps
+// http.createServer, which libp2p calls when it opens the WebSocket listener.
+const dump = createDump(process.env.DUMP)
 
 const seed    = createHash('sha256').update(PASS).digest()
 const privKey = await generateKeyPairFromSeed('Ed25519', seed)
@@ -156,11 +164,13 @@ relay.services.pubsub.addEventListener('subscription-change', (evt) => {
         // The client gets no error for this — it just never sees anyone in the
         // room. Loud in the log, because it looks like "the app is broken".
         console.log(`[!topic] LIMIT ${MAX_TOPICS} reached — REFUSING "${topic}" (raise --max-topics)`)
+        dump?.event('topic.refuse', { topic, peer: evt.detail.peerId.toString(), limit: MAX_TOPICS })
         continue
       }
       relay.services.pubsub.subscribe(topic)
       lastSeen.set(topic, Date.now())
       console.log(`[+topic] "${topic}"`)
+      dump?.event('topic.add', { topic, peer: evt.detail.peerId.toString() })
     }
   }
 })
@@ -183,12 +193,15 @@ setInterval(() => {
       relay.services.pubsub.unsubscribe(topic)
       lastSeen.delete(topic)
       console.log(`[-topic] evicted "${topic}" (idle > ${IDLE_TTL / 1000}s)`)
+      dump?.event('topic.evict', { topic, idle_s: IDLE_TTL / 1000 })
     }
   }
 }, SWEEP_MS)
 
 relay.addEventListener('peer:connect', (evt) => console.log('[+]', evt.detail.toString().slice(0, 16) + '...'))
 relay.addEventListener('peer:disconnect', (evt) => console.log('[-]', evt.detail.toString().slice(0, 16) + '...'))
+// connections, subscriptions, every frame, reservations, start/stop → JSONL
+dump?.attach(relay, { flags: args })
 
 // Keep the inter-relay links UP. A one-shot dial is a lottery — it can time out
 // ("operation was aborted") or the link can drop later, and with no re-dial the
@@ -214,6 +227,9 @@ console.log(`\n✅ Relay uruchomiony na porcie ${PORT}`)
 // at all, and after a deploy it is the one line that proves which build is up.
 console.log(`📦 Tematy: limit ${MAX_TOPICS} równoczesnych, eviction po ${IDLE_TTL / 1000}s ciszy (sweep ${SWEEP_MS / 1000}s)`)
 console.log(`🔌 Połączenia: limit ${MAX_CONNS}`)
+// Loud on purpose: this line's ABSENCE from the journal is what proves a node
+// ran without the dump. Nothing is printed when DUMP is unset.
+if (dump) console.log(`🧾 DUMP ON → ${dump.dir}  (events-*.jsonl + payload-*.jsonl, pełne peer id, IP z X-Real-IP — NIE na produkcji)`)
 if (HOST) {
   console.log(`📋 Adres produkcyjny (WSS przez nginx):`)
   console.log(`   /dns4/${HOST}/tcp/443/wss/http-path/%2Frelay/p2p/${peerId.toString()}`)

@@ -26,6 +26,9 @@ operational reality — lessons, deploy rituals, platform traps.
   self-contained + deployable (pull → `npm ci` → systemd `onchato-relay`).
   Transport-only; v5 + v6 share it. `--pass bs1.onchato.com` seeds the fixed
   PeerId (`12D3KooWP6Sp…cDmp`) — never change it or every client breaks.
+  `DUMP=<dir>` env (`relay/dump.mjs`) traces every observable action to JSONL
+  for debugging/audit — banner says `🧾 DUMP ON`; **never on production**
+  (`relay/README.md` § Dump).
 - `hem-sdk-js/` — the Encedo HEM SDK as a **git submodule** (→ `encedo/hem-sdk-js`).
   Our HEM client — do not fork; update via `git submodule update --remote`.
 - `CLAUDE.md` (this file), `README.md`, `LICENSE` at root.

@@ -227,6 +227,10 @@ server {
         proxy_set_header   Upgrade    $http_upgrade;
         proxy_set_header   Connection "upgrade";
         proxy_set_header   Host       $host;
+        # Czyta go WYŁĄCZNIE tryb DUMP relaya (relay/README § Dump) — do złączenia
+        # "127.0.0.1:port" z realnym adresem. Bez DUMP nagłówek kończy w bibliotece
+        # ws po handshake'u i relay nigdzie go nie zapisuje.
+        proxy_set_header   X-Real-IP  $remote_addr;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
         limit_conn relay_conn 20;                    # per realne IP

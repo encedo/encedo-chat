@@ -30,6 +30,9 @@ Flags:
   inter-relay mesh (public IPv4 between the nodes is blocked; peers dial the raw
   port, nginx is not on that path).
 
+Environment: `DUMP=<dir>` — full JSONL trace of everything the relay observes,
+for debugging and audit; **never on production** (see Dump, bottom).
+
 ## ⚠️ The pass IS the identity
 
 `--pass bs1.onchato.com` seeds PeerId
@@ -367,4 +370,92 @@ trivial few-hundred-socket DoS into a real bandwidth problem.
   while, and only a restart cleared it.)
 - The per-message log is **metadata only** (truncated topic, sender prefix, byte
   count) — the payload is ciphertext and logging it only parked user metadata in
-  journald.
+  journald. The full frame goes to disk only under `DUMP=<dir>` (next
+  section), which production never sets.
+
+## Dump (debug / audit) — `DUMP=<dir>`, never on production
+
+`DUMP=<dir>` makes the relay write **everything it can observe** to JSONL files
+in `<dir>` (`dump.mjs`). Unset or empty = off, and off means off: no directory,
+no file, no listener, no wrapper — every call site is `dump?.…`. When it is on,
+the startup banner prints `🧾 DUMP ON → <dir>`, so **the absence of that line in
+`journalctl -u onchato-relay` is the proof a node ran without it.**
+
+Two purposes. Debugging (what did the relay actually see when a room "did not
+form"?), and audit: seven days of dump is the relay's complete observable
+surface — every address, peer id, topic and every frame byte — so an auditor
+can check that none of it links a person to a conversation or decodes to
+plaintext. That same completeness is why production must never set it: the
+files *are* the metadata the design promises not to keep.
+
+Two files per UTC day (dir `0700`, files `0600`), one JSON object per line,
+`{ts, type, …}`, **peer ids and multiaddrs in full**:
+
+| file | type | fields |
+|---|---|---|
+| `events-YYYY-MM-DD.jsonl` | `start` / `stop` | `pid`, `node`, `peer` (the relay), `flags` (`--pass` value redacted) / `signal` |
+| | `conn.open` / `conn.close` | `conn` (id, pairs open with close), `peer`, `ip`, `addr` (raw multiaddr), `dir` |
+| | `sub` / `unsub` | `peer`, `ip`, `topic` |
+| | `topic.add` / `topic.refuse` / `topic.evict` | `topic`, `peer` (who caused it), `limit` / `idle_s` |
+| | `reservation` | circuit-relay-v2 reservation: `peer`, `addr`, `expiry` |
+| `payload-YYYY-MM-DD.jsonl` | `msg` | `topic`, `from` (publisher) + `ip`, `via` (the peer that handed us the frame) + `viaIp`, `id` (GossipSub msgId), `seq`, `size`, `data` (**base64 of the whole frame**) |
+
+```json
+{"ts":"2026-09-03T09:37:33.024Z","type":"conn.open","conn":"gg17v5…","peer":"12D3KooWB6CY…VMtB","ip":"203.0.113.7","addr":"/ip6/::ffff:7f00:1/tcp/47040/p2p/12D3KooWB6CY…VMtB","dir":"inbound"}
+{"ts":"2026-09-03T09:37:36.111Z","type":"msg","topic":"room-1","from":"12D3KooWB6CY…VMtB","ip":"203.0.113.7","via":"12D3KooWB6CY…VMtB","viaIp":"203.0.113.7","id":"CAESIOgg…","seq":"8819469571316285728","size":7,"data":"AAEC/v9BQg=="}
+```
+
+**Where `ip` comes from.** Behind nginx every connection arrives from
+`127.0.0.1` (see Peer scoring above), and the libp2p WebSocket transport never
+surfaces the HTTP upgrade. So with the dump on, `dump.mjs` wraps
+`http.createServer` and reads **`X-Real-IP`** off the upgrade request itself,
+keyed by nginx's loopback source port — the same port libp2p reports in
+`connection.remoteAddr`, so the join is exact. The `/relay` block in
+`infra/nginx/onchato.com` sends that header; with the dump off it dies inside
+the `ws` library after the handshake and is stored nowhere. Without the header
+`ip` is `127.0.0.1`; direct peers (the IPv6 inter-relay mesh) carry their real
+address either way. The dual-stack listener reports IPv4 clients as
+`::ffff:7f00:1`-style mapped addresses — `ip` is folded back to dotted IPv4,
+`addr` keeps the raw multiaddr.
+
+**What it cannot see:** bytes inside a circuit-relay HOP stream — libp2p pipes
+them with no hook, so only the reservation and both connections show. The
+shipped client does not use circuits (`impl/net/peer.ts` has only the
+WebSocket transport); all its traffic is GossipSub, which lands in
+`payload-*.jsonl` whole. Note also that a peer that simply disconnects sends no
+`unsub` — you see `conn.close`, and the topic's `topic.evict` after `--idle-ttl`.
+
+Writes are synchronous appends on a held fd, so every line is on disk when the
+process dies; `SIGTERM`/`SIGINT` append a `stop` line first. The relay's rate
+(one Announce per client per ~15 s) makes the cost irrelevant.
+
+### Turn it on (a drop-in, not the unit file)
+
+```bash
+sudo systemctl edit onchato-relay
+```
+```ini
+[Service]
+StateDirectory=onchato
+Environment=DUMP=/var/lib/onchato/relay-dump
+```
+```bash
+sudo systemctl restart onchato-relay
+sudo journalctl -u onchato-relay -n 20 | grep '🧾'        # must show DUMP ON → …
+```
+
+Off again: `sudo systemctl revert onchato-relay && sudo systemctl restart
+onchato-relay`, confirm the `🧾` line is gone, then delete the files
+(`sudo shred -u /var/lib/onchato/relay-dump/*.jsonl`).
+
+### Reading it
+
+```bash
+cd /var/lib/onchato/relay-dump
+jq -r .type events-*.jsonl | sort | uniq -c                          # what happened, by kind
+jq -r 'select(.ip) | .ip' events-*.jsonl | sort | uniq -c | sort -rn  # who connected, how often
+jq -c 'select(.type=="topic.refuse")' events-*.jsonl                 # rooms the cap turned away
+jq -c '{ts,topic,from,ip,size}' payload-*.jsonl | head               # the data plane, without bytes
+jq -r .data payload-*.jsonl | base64 -d | strings -n 8 | head        # audit: readable text in ANY frame? should print nothing meaningful
+jq -c 'select(.type=="conn.open" and .ip=="203.0.113.7")' events-*.jsonl   # one address's whole story
+```
