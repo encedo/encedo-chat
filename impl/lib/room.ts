@@ -242,8 +242,6 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    */
   interface Pending { bytes: Uint8Array; sentAt: number; since: number; tries: number; timer: any }
   const pending = new Map<string, Pending>()
-  /** Peers known to send acks. A client that predates them must not be marked ⚠. */
-  const acking = new Set<string>()
 
   /**
    * Content we gave up on, kept so the user can send it again by hand (the ↻ in
@@ -286,17 +284,30 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       p.timer = setTimeout(() => {
         if (!pending.has(id)) return
         pending.delete(id)
-        // Mark ⚠+↻ when a peer that OUGHT to confirm did not. "Ought to" is
-        // proven two ways: it has acked before (`acking`), OR we hold a live
-        // EH-2 session with it (`sessions`) — a peer that completed the
-        // handshake is a current build that acks, so its silence is loss, not
-        // an ancient ack-less client. Without the session clause a phone that
-        // was asleep for the whole room session had acked nothing yet, fell
-        // through, and left the bubble stuck on "wysyłam…" for ever with no ↻
-        // to retry it — reported live: desktop→dozing Android, hung minutes.
-        // (A genuinely ack-less legacy peer holds no session either, so it
-        // still stays quiet — but EH-2 has been mandatory since 2026-07-30.)
-        if ([...lastSeen.keys()].some((peer) => acking.has(peer) || sessions.has(peer))) {
+        // Mark ⚠+↻ whenever somebody is ANNOUNCING in this room and the
+        // message is still unconfirmed. Presence is the whole condition now,
+        // and the two narrower ones it replaced are worth remembering because
+        // each was added to stop a different lie:
+        //
+        //  - "it has acked before" was the original guard against crying wolf
+        //    at an ancient client that does not send `ack` at all. EH-2 has
+        //    been mandatory since 2026-07-30, so such a client cannot complete
+        //    a handshake and cannot be in a conversation — the class is gone,
+        //    and the guard now only hides real failures. (The `acking` set it
+        //    was tracked in went with it: nothing read it any more.)
+        //  - `sessions` was added after "desktop → dozing Android hung for
+        //    minutes": a phone asleep for the whole room session had acked
+        //    nothing yet and fell through the first clause.
+        //
+        // What both still missed is the case that has to be reported most:
+        // the peer is here, announcing, and the HANDSHAKE never completed —
+        // so there is no session, no ack, and `emitContent` has been parking
+        // the message in `queued` all along. That left the bubble on
+        // "wysyłam…" with no ↻, for as long as the room stayed open (reported
+        // live 2026-09-03, phone → macMini1: 72 minutes and 🤝 Securing…).
+        // Sending into an EMPTY room is still silent — nobody is there to
+        // deliver to, and the budget stopped for that reason.
+        if (peerPresent()) {
           log(`no confirmation for message ${id} after ${p.tries + 1} sends over ${Math.round((nowMs() - p.sentAt) / 1000)}s → marking undelivered`)
           keepForResend(id, p.bytes, p.sentAt)
           onUndelivered(id)
@@ -394,7 +405,6 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       case 'group-skd-req': onGroupSkdReq(from, env as GroupSkdReqEnv); break
       case 'ack': {
         touch(from)
-        acking.add(from)
         const a = env as AckEnv
         const p = pending.get(a.ref)
         if (p) {
@@ -522,7 +532,6 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     previous.delete(peer)
     establishedAt.delete(peer)
     stuck.delete(peer)
-    acking.delete(peer)
   }
 
   /**

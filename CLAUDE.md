@@ -662,6 +662,17 @@ not an absent peer, and a peer that went quiet stops the retries rather than
 burning them. Silence from a peer that has never sent an `ack` at all is read as
 "old build", not as loss, and is never reported.
 
+**A peer that is ANNOUNCING owes a confirmation, whatever is wrong underneath.**
+The give-up path used to report ⚠ only if the peer had acked before or shared an
+EH-2 session; the case that fell through both is the one that hurts most — the
+peer is here, the handshake never completed, so `emitContent` parks every copy
+in the pre-handshake queue and the bubble sits on "wysyłam…" with no ↻ for as
+long as the room is open (reported 2026-09-03: phone → macMini1, 72 minutes at
+🤝 Securing…). Presence is the whole condition now; sending into an EMPTY room
+is still silent, because the retry budget stopped for that reason. The `acking`
+set went with the old guard — nothing read it any more. Pinned by
+`test/room-eh2.test.ts` "a peer that is present but never handshakes".
+
 **Running out of budget does not throw the message away.** The bytes stay in
 `resendable`, the bubble gets a ⚠ marker with a **↻** button, and
 `conversation.resend(id)` sends them again **under the same id** — so the marker
@@ -963,13 +974,21 @@ on the one transport, **not** twenty handshakes.
   `Session` (`encrypt`/`decrypt`), not to a key; today only `eh2Session`
   implements it, but room / envelope / transport stay decoupled from the scheme
   so a future one (core-rs, a new ratchet) drops in unchanged.
-- **Content prefers a direct WebRTC DataChannel** once two peers are in the room
-  — content goes P2P (relay-blind); GossipSub through the relay carries presence
-  + WebRTC signaling and is the content **fallback**. This is the **direct (P1)**
-  profile: peers see each other's IPs. Everything still on GossipSub (presence,
-  signaling, fallback content) is ciphertext + metadata to the relay. The
-  **relay-blind / anonymous** plane (blind circuit-relay, no IP exposure —
-  `docs/PROTOCOL.md` §13) is still the later step (see Directions).
+- **Content goes through the relay by default; the direct WebRTC DataChannel is
+  opt-in** (Settings → transport; `TRANSPORT_KEY` in `web/src/app.ts`, default
+  flipped 2026-09-03 on the user's call — "stabler UX"). Direct is faster where
+  it works and fails asymmetrically where it does not: a DataChannel that opens
+  and then swallows traffic, a NAT pair that never completes, a webview with no
+  `RTCPeerConnection` at all. Choosing it is stored, so only "never opened
+  Settings" moved. Two exposures come with the default being off — the peer does
+  not learn the device's address, and no STUN server is consulted. ⚠️
+  `browser-test` is the only cover the direct plane has (Node has no
+  `RTCPeerConnection`), so it seeds `ec-transport=auto` for both browsers; drop
+  that line and the WebRTC scenarios pass by negotiating nothing. Everything on
+  GossipSub (presence, signalling, relayed and group content) is ciphertext +
+  metadata to the relay. The **relay-blind** plane (`docs/PROTOCOL.md` §13) is a
+  different promise and still parked: today's default hides the address from the
+  PEER, that plane would hide it from the NODE.
 
 ### Groups — Sender Keys, all-ECDH (impl/lib, stages 1–5)
 

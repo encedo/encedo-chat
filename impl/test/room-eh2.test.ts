@@ -477,6 +477,31 @@ test('a secured peer whose acks never arrive gets the message marked resend-able
   assert.equal(undelivered[0], id, 'a secured-but-silent peer is flagged, so a ↻ exists to retry')
 })
 
+test('a peer that is present but never handshakes does not swallow the message', async (t) => {
+  // Reported live 2026-09-03 (phone → macMini1): both sides in the room, the
+  // badge on 🤝 Securing…, and a message sat on "wysyłam…" for 72 minutes with
+  // no ⚠ and no ↻ to retry it. With no session and no ack ever received, the
+  // give-up path judged there was nobody who "ought to" confirm and said
+  // nothing at all — while `emitContent` had been parking every copy in the
+  // pre-handshake queue. Announcing IS the peer being there; the message must
+  // be reported, whatever went wrong under it.
+  const undelivered: string[] = []
+  const { A, B } = await rooms({
+    collect: [],
+    drop: (d) => d[0] === 0x02, // msg2 never comes back: A keeps trying, never establishes
+    onUndeliveredA: (id) => undelivered.push(id),
+    retry: { retryMs: [50, 80], giveUpMs: 100, maxInflightMs: 2_000 },
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.who().length === 1, 8000) // B is announcing — that is the whole precondition
+  assert.equal(A.secured().length, 0, 'the handshake must NOT complete for this test to mean anything')
+
+  const id = A.sendText('do kogoś, z kim nie uzgodniono klucza')
+  await until(() => undelivered.length === 1, 8000)
+  assert.equal(undelivered[0], id, 'a present peer with no session still owes a confirmation')
+  assert.equal(A.secured().length, 0, 'still no session — the report is about the queue, not a lost ack')
+})
+
 test('an outage longer than the old budget does not kill a message on a live session', async (t) => {
   // Straight from a two-browser run: the relay went quiet for 9.4 s while both
   // peers were alive and announcing. The old budget (one re-send at 1.5 s, one
