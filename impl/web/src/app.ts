@@ -143,12 +143,24 @@ const WEBRTC_OFF = new URLSearchParams(location.search).get('webrtc') === '0'
  * behaviour — a pair behind hard NAT would have nowhere to send, and the honest
  * version of that needs a visible "not sent" state rather than a queue that
  * quietly fills. Worth building; not worth pretending it is a third radio.
+ *
+ * **`relay` is the default since 2026-09-03** (the user's decision: "stabler
+ * UX"). Direct is the faster path when it works and a source of asymmetric
+ * failure when it does not — a DataChannel that opens and then swallows
+ * traffic, a NAT pair that never completes, a webview with no
+ * `RTCPeerConnection` at all (the Linux desktop, measured). The relay path is
+ * the one that behaves the same everywhere. It costs a hop for text — files and
+ * voice notes ride the store either way — and it drops two exposures with it:
+ * the peer no longer learns this device's address, and no public STUN server is
+ * consulted. An explicit choice is stored, so anyone who picked `auto` keeps
+ * it; only "never opened Settings" moves.
  */
 const TRANSPORT_KEY = 'ec-transport'
 type TransportMode = 'auto' | 'relay'
 const transportMode = (): TransportMode =>
-  (localStorage.getItem(TRANSPORT_KEY) === 'relay' ? 'relay' : 'auto')
-/** The direct plane is enabled unless the user or `?webrtc=0` says otherwise. */
+  (localStorage.getItem(TRANSPORT_KEY) === 'auto' ? 'auto' : 'relay')
+/** The direct plane is negotiated only where it was CHOSEN (see above), and
+ *  never when `?webrtc=0` says otherwise. */
 const wantsDirect = () => !WEBRTC_OFF && transportMode() === 'auto'
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
@@ -1874,7 +1886,10 @@ $('chip-profile').addEventListener('click', () => openDrawer())
 for (const el of document.querySelectorAll('#tmode input')) {
   el.addEventListener('change', () => {
     const v = (document.querySelector('#tmode input:checked') as HTMLInputElement | null)?.value
-    try { localStorage.setItem(TRANSPORT_KEY, v === 'relay' ? 'relay' : 'auto') } catch {}
+    // Written on every press, both ways: the stored value is what tells an
+    // explicit choice apart from "never opened this drawer", and the default
+    // (relay) is what the second group gets.
+    try { localStorage.setItem(TRANSPORT_KEY, v === 'auto' ? 'auto' : 'relay') } catch {}
     paintTransportSetting()
     toast(v === 'relay'
       ? tr('Nowe rozmowy pójdą tylko przez węzeł')

@@ -1350,8 +1350,12 @@
          that was rejected from the invite links. -->
     <div class="d-section" data-i18n="Transport treści">Transport treści</div>
     <div class="store-opts" id="tmode" style="padding:0 16px 12px">
-      <label class="store-opt"><input type="radio" name="tmode" value="auto" checked> <span data-i18n="🟢 Automatycznie — bezpośrednio, gdy się da">🟢 Automatycznie — bezpośrednio, gdy się da</span></label>
-      <label class="store-opt"><input type="radio" name="tmode" value="relay"> <span data-i18n="⚪ Tylko przez węzeł — rozmówca nie pozna Twojego IP">⚪ Tylko przez węzeł — rozmówca nie pozna Twojego IP</span></label>
+      <label class="store-opt"><input type="radio" name="tmode" value="auto"> <span data-i18n="🟢 Automatycznie — bezpośrednio, gdy się da">🟢 Automatycznie — bezpośrednio, gdy się da</span></label>
+      <!-- `relay` is the default (app.ts TRANSPORT_KEY), so it is the one checked
+           in the markup: paintTransportSetting re-checks from storage on open,
+           but the static state must not contradict it for the split second
+           before that runs, or on a build where the drawer is opened first. -->
+      <label class="store-opt"><input type="radio" name="tmode" value="relay" checked> <span data-i18n="⚪ Tylko przez węzeł — rozmówca nie pozna Twojego IP">⚪ Tylko przez węzeł — rozmówca nie pozna Twojego IP</span></label>
     </div>
     <div class="d-note" data-i18n="Bezpośredni kanał jest szybszy i nie przechodzi przez węzeł, ale rozmówca widzi wtedy Twój adres IP. Wybór dotyczy rozmów otwieranych od teraz — trwającej nie przełączamy, bo to zerwałoby kanał w środku zdania. Odznaka w nagłówku pokazuje stan faktyczny każdej rozmowy.">Bezpośredni kanał jest szybszy i nie przechodzi przez węzeł, ale rozmówca widzi wtedy Twój adres IP. Wybór dotyczy rozmów otwieranych od teraz — trwającej nie przełączamy, bo to zerwałoby kanał w środku zdania. Odznaka w nagłówku pokazuje stan faktyczny każdej rozmowy.</div>
     <!-- Synchronous product, no store-and-forward: "your window is not on screen"

@@ -806,6 +806,13 @@ async function main() {
     const ghostPub = Buffer.from(Array.from({ length: 32 }, (_, i) => (i * 7 + 13) & 0xff)).toString('base64')
     await A.eval(`localStorage.setItem('ec-local-contacts-${idA}', ${JSON.stringify(JSON.stringify([{ name: 'sim-b', pub: pubB }, { name: 'ghost', pub: ghostPub }]))}); return 1`)
     await B.eval(`localStorage.setItem('ec-local-contacts-${idB}', ${JSON.stringify(JSON.stringify([{ name: 'sim-a', pub: pubA }]))}); return 1`)
+    // ⚠️ The shipped default is relay-only since 0.5.48 (app.ts TRANSPORT_KEY),
+    // and this harness is the ONLY thing that covers the direct plane at all —
+    // Node has no RTCPeerConnection. So both browsers opt into `auto` here, the
+    // way a user does in Settings; without it the WebRTC scenarios would pass by
+    // never negotiating anything. The relay path is what everything else covers,
+    // and `FAILOVER=1` / `?webrtc=0` still exercise it deliberately.
+    for (const b of [A, B]) await b.eval(`localStorage.setItem('ec-transport', 'auto'); return 1`)
     await Promise.all([A.reload(APP_URL), B.reload(APP_URL)])
     await Promise.all([login(A, 'sim-a'), login(B, 'sim-b')])
 
