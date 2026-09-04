@@ -94,7 +94,7 @@ jobs:
           # can produce — deb, rpm and AppImage in one artifact, as it always
           # has been.
           #
-          # ⚠️ The AppImage does not run on a VMware guest with no 3D: WebKit's
+          # WARNING: The AppImage does not run on a VMware guest with no 3D: WebKit's
           # web process dies with `Could not create default EGL display:
           # EGL_BAD_PARAMETER`, and the host's gio modules cannot load into the
           # older glib the bundle carries. Building it on ubuntu-24.04 instead
@@ -224,7 +224,7 @@ jobs:
           releaseName: Encedo Chat ${{ github.ref_name }}
           releaseDraft: true
           prerelease: false
-          # ⚠️ false ON PURPOSE — the manifest has ONE writer now, the
+          # WARNING: false ON PURPOSE — the manifest has ONE writer now, the
           # `updater-json` job below. With true, each of the five matrix jobs
           # merged its own platforms into the shared draft's latest.json by
           # download-modify-upload, and the last writer dropped the others'
@@ -342,7 +342,7 @@ jobs:
                    --arg u "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$2" \
                    '.platforms[$k] = {signature: $s, url: $u}')
           }
-          # Name → platform keys, mirroring what tauri-action emitted when it
+          # Name -> platform keys, mirroring what tauri-action emitted when it
           # worked: the bare os-arch key points at the self-update artifact
           # (AppImage on Linux, app.tar.gz on macOS, NSIS on Windows), the
           # suffixed keys name each bundle. A .deb/.rpm cannot replace itself —

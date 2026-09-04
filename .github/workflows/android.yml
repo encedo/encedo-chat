@@ -1,6 +1,6 @@
 # Android bundles (Tauri 2): a .aab for Play, and a .apk a phone will install.
 #
-# ⚠️ Those are not one file with two endings, and the difference is why this job
+# WARNING: Those are not one file with two endings, and the difference is why this job
 # was rewritten. Reported as "the APK from Actions does not install" — and it
 # could not: a release APK leaves Gradle UNSIGNED, and Android's package
 # installer refuses an unsigned package before it looks at anything else. The
@@ -154,7 +154,7 @@ jobs:
       # the Rust library by calling `npm run tauri` itself, from inside its own
       # task. With the CLI reachable only through npx there is no such script,
       # and the build dies deep in Gradle with one honest line — `Missing
-      # script: "tauri"` — buried in a page of Io(Env(…)) wrapping. Going
+      # script: "tauri"` — buried in a page of Io(Env(...)) wrapping. Going
       # through the same script the generated project does also means one
       # version, pinned by package-lock, on both sides.
       - name: Build the bundle

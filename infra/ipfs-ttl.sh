@@ -44,7 +44,7 @@ rpc files/mkdir "arg=$DIR&parents=true" >/dev/null 2>&1 || true
 now=$(date -u +%s)
 removed=0
 
-# Entries come back as {"Entries":[{"Name":"…",…}]}, or with Entries null when
+# Entries come back as {"Entries":[{"Name":"...",...}]}, or with Entries null when
 # empty. Names are ours and contain no quotes, so this needs no JSON parser —
 # and not depending on jq keeps the sidecar a stock alpine plus curl.
 names=$(rpc files/ls "arg=$DIR" | grep -o '"Name":"[^"]*"' | cut -d'"' -f4 || true)
@@ -52,7 +52,7 @@ names=$(rpc files/ls "arg=$DIR" | grep -o '"Name":"[^"]*"' | cut -d'"' -f4 || tr
 for name in $names; do
   [ -n "$name" ] || continue
 
-  ts=${name%%-*}          # <epoch>-<id>  →  <epoch>
+  ts=${name%%-*}          # <epoch>-<id>  ->  <epoch>
   ts=${ts%%.*}            # nginx $msec is "seconds.milliseconds"; keep seconds
 
   # Anything not named the way we name things is left alone. Deleting entries a

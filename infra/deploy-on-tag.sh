@@ -17,7 +17,7 @@
 # forward to origin/main, ask whether HEAD carries a `v*` tag, and build when
 # that tag is one we have not built yet.
 #
-# ⚠️ Consequence, stated rather than discovered: tag the commit you want live
+# WARNING: Consequence, stated rather than discovered: tag the commit you want live
 # and push both. A tag left BEHIND the tip is never seen, because HEAD will have
 # moved past it — the check is "is HEAD tagged", not "is there a newer tag".
 #
