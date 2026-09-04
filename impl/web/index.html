@@ -326,7 +326,12 @@
   .mrow.out .b-meta{text-align:right}
   .sysline{text-align:center;font-size:12px;color:var(--muted)}
   .b-react{display:none;gap:3px}
-  .mrow:hover .b-react,.mrow.tapped .b-react{display:flex}
+  /* Shown by PRESSING the bubble, on a mouse exactly as on a finger
+     (`.tapped`, app.ts attachReveal). Hover used to reveal it on desktop,
+     which meant the press was never discovered there and the bar kept
+     appearing under a pointer that was only passing over the message. */
+  .mrow.tapped .b-react{display:flex}
+  .mrow.has-act .bubble{cursor:pointer}
   .mrow.out .b-react{order:-1}
   .b-react button{background:var(--card);border:1px solid var(--border);border-radius:14px;cursor:pointer;font-size:14px;line-height:1;padding:3px 6px}
   .b-react button:hover{background:var(--accent-soft);border-color:var(--accent)}
@@ -343,7 +348,15 @@
      different text and only we can see it. */
   .edited-mark{font-style:italic}
   .edited-mark.warn{color:var(--err);font-style:normal}
+  .b-react button.b-more{display:grid;place-items:center;padding:3px 7px;color:var(--muted);font-size:15px;line-height:1}
+  .b-react button.b-more:hover{color:var(--accent)}
   .b-react button.b-pin.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+  /* The picker itself: a fixed grid, positioned from app.ts and clamped into
+     the viewport there. Eight to a row is what fits a 360px phone with the
+     44px touch targets below. */
+  .emoji-pop{position:fixed;z-index:12;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 30px rgba(18,38,63,.25);padding:6px;max-width:min(320px,92vw)}
+  .emoji-pop button{background:none;border:none;border-radius:8px;cursor:pointer;font-size:19px;line-height:1;padding:5px;min-width:34px;min-height:34px}
+  .emoji-pop button:hover{background:var(--accent-soft)}
   /* A kept message wears a hairline in the accent — side-agnostic, because these
      appear on both sides of the transcript, and quiet enough to be worn by a
      whole block of them at the top without shouting. */
@@ -794,6 +807,7 @@
      finger-sized. */
   @media (pointer:coarse){
     .b-react button{min-width:34px;min-height:34px}
+    .emoji-pop button{min-width:38px;min-height:38px;font-size:21px}
     .b-resend{min-height:32px;padding:0 10px}
     /* min-height alone stretched .icon-btn into an oval: it is 34px wide and
        border-radius:50% follows the box, not a circle. Both axes, or neither. */
@@ -1042,6 +1056,9 @@
        whenever no conversation is open — so opening it from the group list for a
        group that is not on screen showed nothing at all. -->
   <div class="members-pop" id="members-pop" hidden></div>
+  <!-- The reaction picker. One for the whole transcript (app.ts openEmojiPop):
+       a grid inside every bubble's bar would be 32 buttons per message. -->
+  <div class="emoji-pop" id="emoji-pop" hidden></div>
   <!-- The @ picker. Body-level for the same reason the members popover is: the
        composer lives inside #chat-view, which is `hidden` until a conversation
        is open, and a popup clipped by its own pane is a popup nobody sees. -->

@@ -252,6 +252,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Odpięcie skasuje ją z pamięci tej przeglądarki. Ten komunikat pokaże się raz na sesję.':
       'Unpinning erases it from this browser. This notice is shown once a session.',
     'Odpowiedz': 'Reply',
+    'Reakcja': 'React',
     'Odcisk': 'Fingerprint',
     'Odeślij swój profil': 'Send yours back',
     'Opuść': 'Leave',

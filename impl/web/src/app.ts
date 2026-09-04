@@ -1633,7 +1633,7 @@ function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string, h
     const no = $('ask-no')
     no.hidden = noLabel === null
     if (noLabel) no.textContent = noLabel
-    $('members-pop').hidden = true // nothing may stay clickable behind a modal
+    $('members-pop').hidden = true; closeEmojiPop() // nothing may stay clickable behind a modal
     $('scrim').classList.add('open'); $('ask-modal').classList.add('open')
     const done = (v: boolean) => {
       const remember = !!(rememberLabel && cb?.checked)
@@ -1668,7 +1668,7 @@ function promptName(title: string, sub: string, current: string, label = 'Nazwa'
     clr('rename-msg')
     const input = $('rename-input') as HTMLInputElement
     input.value = current
-    $('members-pop').hidden = true
+    $('members-pop').hidden = true; closeEmojiPop()
     $('scrim').classList.add('open'); $('rename-modal').classList.add('open')
     const done = (v: string | null) => {
       $('scrim').classList.remove('open'); $('rename-modal').classList.remove('open')
@@ -2970,7 +2970,21 @@ const COMPACT = matchMedia('(max-width:900px),(max-height:560px)')
 const chatOnScreen = () => !COMPACT.matches || $('app').classList.contains('chat-open')
 
 const msgEls = new Map<string, HTMLElement>() // msg id → its reactions container (both directions share the id)
-const QUICK_EMOJI = ['👍', '❤️', '😂', '😮']
+/**
+ * What the picker offers, most-used first.
+ *
+ * The bar used to carry the first four of these as four buttons of its own,
+ * beside reply / edit / pin — up to seven controls hanging off a bubble, which
+ * on a phone is most of its width. They live behind one opener now (the user's
+ * decision, 2026-09-03): a reaction costs a second tap and the bar stays short
+ * enough to read the message under it.
+ */
+const QUICK_EMOJI = [
+  '👍', '❤️', '😂', '😮', '😢', '🙏', '🔥', '🎉',
+  '👏', '💯', '✅', '❌', '🤔', '😅', '😍', '🥳',
+  '😎', '🤝', '👀', '💪', '🙌', '☕', '🍺', '🎂',
+  '🚀', '⭐', '⚡', '🐛', '🔒', '📌', '😴', '🤷',
+]
 function addReaction(msgId: string, emoji: string) {
   const rx = msgEls.get(msgId); if (!rx) return
   const chip = document.createElement('span'); chip.className = 'rchip'; chip.textContent = emoji
@@ -3152,15 +3166,7 @@ function appendMsg(ev: MsgEv) {
   if (id) {
     msgEls.set(id, rx)
     attachReactionBar(row, id, true)
-    // Touch has no hover: tap the bubble to reveal its reaction bar (one row at a
-    // time), tap again to hide. On desktop hover still shows it; this just adds a
-    // way in for fingers without a permanently-visible bar on every message.
-    bub.addEventListener('click', (e: any) => {
-      if (e.target.closest('button')) return // a control inside the bubble (e.g. ↻ resend), not a reveal
-      const open = row.classList.contains('tapped')
-      for (const r of $('messages').querySelectorAll('.mrow.tapped')) r.classList.remove('tapped')
-      if (!open) row.classList.add('tapped')
-    })
+    attachReveal(row, bub)
   }
   if (outOfOrder) insertByTime(box, row, Number(row.dataset.ts))
   else box.appendChild(row)
@@ -3538,9 +3544,11 @@ function attachReactionBar(row: HTMLElement, id: string, canPin = false) {
   // reaction sent for it would travel with an id the other side stopped holding
   // when its own transcript went, so it would land nowhere and say nothing.
   if (row.dataset.frompin) { row.appendChild(bar); return }
-  for (const e of QUICK_EMOJI) {
-    const btn = document.createElement('button'); btn.type = 'button'; btn.textContent = e
-    btn.addEventListener('click', () => {
+  // One opener instead of a row of emoji: the picker holds the whole set.
+  const more = document.createElement('button'); more.type = 'button'; more.className = 'b-more'
+  more.textContent = '☺'; more.title = tr('Reakcja'); more.setAttribute('aria-label', tr('Reakcja'))
+  more.addEventListener('click', () => {
+    openEmojiPop(more, (e) => {
       row.classList.remove('tapped')
       if (activeGid) {
         const gu = groupsUI.get(activeGid); if (!gu?.room) return
@@ -3552,9 +3560,89 @@ function attachReactionBar(row: HTMLElement, id: string, canPin = false) {
         record(r, { t: 'react', id, emoji: e })
       }
     })
-    bar.appendChild(btn)
-  }
+  })
+  bar.appendChild(more)
   row.appendChild(bar)
+}
+
+/**
+ * The emoji picker — one popover, reused by every bubble.
+ *
+ * One element and one handler rather than a grid built into each bar: the
+ * transcript can hold hundreds of bubbles, and thirty-two buttons on each of
+ * them is a DOM nobody needs to pay for. It borrows the members-popover's
+ * geometry (open at the pointer, clamped into the viewport) because on a phone
+ * it is nearly as wide as the app and would otherwise open off-screen.
+ */
+let emojiPick: ((e: string) => void) | null = null
+let emojiAnchor: HTMLElement | null = null
+function openEmojiPop(anchor: HTMLElement, pick: (e: string) => void) {
+  const pop = $('emoji-pop')
+  if (!pop.hidden && emojiAnchor === anchor) { closeEmojiPop(); return } // second press closes
+  emojiPick = pick; emojiAnchor = anchor
+  if (!pop.childElementCount) {
+    for (const e of QUICK_EMOJI) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = e
+      b.setAttribute('data-emoji', e)
+      pop.appendChild(b)
+    }
+  }
+  // Anchored to the BUTTON, never to the pointer. The members popover opens at
+  // the pointer because its anchor is a whole sidebar row; this one hangs off a
+  // 30px control, so the button IS the position — and a click carrying no
+  // coordinates (a synthetic one, a keyboard activation) would otherwise report
+  // 0,0 and throw the picker into the corner of the screen.
+  const r = anchor.getBoundingClientRect()
+  pop.hidden = false // measure with the real size, like the members popover
+  const w = Math.min(pop.offsetWidth || 240, window.innerWidth - 16)
+  const h = Math.min(pop.offsetHeight || 200, window.innerHeight - 16)
+  const x = r.left + r.width / 2
+  // Above the button when there is no room below — a bubble near the composer
+  // is exactly where people react, and a picker pinned to the bottom edge would
+  // cover the message it belongs to.
+  const below = r.bottom + 8
+  const y = below + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 8) : below
+  pop.style.left = `${Math.max(8, Math.min(x - w / 2, window.innerWidth - w - 8))}px`
+  pop.style.top = `${y}px`
+}
+function closeEmojiPop() { $('emoji-pop').hidden = true; emojiPick = null; emojiAnchor = null }
+$('emoji-pop').addEventListener('click', (e: any) => {
+  const b = (e.target as HTMLElement).closest('[data-emoji]') as HTMLElement | null
+  if (!b) return
+  e.stopPropagation() // the outside-click closer below must not see this
+  const pick = emojiPick; closeEmojiPop()
+  pick?.(b.getAttribute('data-emoji')!)
+})
+document.addEventListener('click', (e: any) => {
+  if ($('emoji-pop').hidden) return
+  if ($('emoji-pop').contains(e.target) || emojiAnchor?.contains(e.target)) return
+  closeEmojiPop()
+})
+document.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Escape') closeEmojiPop() })
+
+/**
+ * Tap a bubble to show what can be done with it — the same gesture on a phone
+ * and on a desktop (the user's decision, 2026-09-03).
+ *
+ * It replaced hover-on-desktop / tap-on-touch. Two mechanisms for one thing
+ * meant the tap was never discovered by anyone using a mouse, and the bar
+ * appeared under the pointer while somebody was only reading. One bubble is
+ * open at a time, and pressing it again closes it.
+ *
+ * ⚠️ A drag that selects text ends with a `click` on the bubble, so copying a
+ * message would have popped the bar every time. A collapsed selection means a
+ * real press; anything else is somebody reading, and we keep out of the way.
+ */
+function attachReveal(row: HTMLElement, bub: HTMLElement) {
+  row.classList.add('has-act')
+  bub.addEventListener('click', (e: any) => {
+    if (e.target.closest('button')) return // a control inside the bubble (↻ resend, a file action)
+    const sel = window.getSelection()
+    if (sel && !sel.isCollapsed && sel.anchorNode && bub.contains(sel.anchorNode)) return
+    const open = row.classList.contains('tapped')
+    for (const r of $('messages').querySelectorAll('.mrow.tapped')) r.classList.remove('tapped')
+    if (!open) row.classList.add('tapped')
+  })
 }
 
 /**
@@ -4298,7 +4386,9 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
   if (env.id) row.dataset.mid = env.id
   if (au) row.dataset.au = au
   row.appendChild(bub)
-  if (env.id) attachReactionBar(row, env.id)
+  // ⚠️ This bubble had the bar and no way to show it on a phone: hover was the
+  // only reveal, so a file or a voice note could not be reacted to at all.
+  if (env.id) { attachReactionBar(row, env.id); attachReveal(row, bub) }
   box.appendChild(row)
   refreshJump()
 }
@@ -5153,6 +5243,7 @@ async function activateRoom(pub: string) {
   activePub = pub; activeGid = null // a 1:1 takes the screen — no group is active
   if (!sameTarget) clearComposer()
   $('members-cluster').hidden = true; $('members-pop').hidden = true // group-only UI
+  closeEmojiPop() // the transcript is about to be replayed — its anchor is going away
   room.unseen = 0
   $('chat-empty').hidden = true; $('chat-view').hidden = false
   showChatPane(true)

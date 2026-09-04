@@ -1227,6 +1227,64 @@ async function main() {
     // cannot reach: the quote resolves the author against the READER's own
     // contact book, and a correction has to replace text that is already on
     // somebody else's screen.
+    // The bubble's own controls: revealed by PRESSING it — the same gesture on
+    // a mouse as on a finger since 0.5.47 — with the emoji behind one opener.
+    // Both halves are invisible to a unit test: the reveal is a CSS class the
+    // browser has to actually apply, and the picker is a popover positioned
+    // against the viewport.
+    scenario('pressing a message shows what can be done with it')
+    const actTok = `akcje-${Date.now().toString(36)}`
+    await send(A, actTok)
+    await A.waitFor('the message is on screen', seen(actTok), 20_000)
+    const acts = await A.eval<any>(`
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(actTok)}));
+      if (!row) return { found: false };
+      const bar = row.querySelector('.b-react');
+      const before = getComputedStyle(bar).display;
+      row.querySelector('.bubble').click();
+      const after = getComputedStyle(bar).display;
+      return { found: true, before, after, tapped: row.classList.contains('tapped'),
+               emojiButtons: bar.querySelectorAll('button').length,
+               opener: !!bar.querySelector('.b-more'), stamp: row.querySelector('.b-meta').textContent };`)
+    if (!acts.found) throw new Error('the message never rendered')
+    if (acts.before !== 'none') throw new Error(`the bar was visible before the press (display:${acts.before})`)
+    if (acts.after === 'none') throw new Error('pressing the bubble did not reveal the bar')
+    if (!acts.opener) throw new Error('no reaction opener on the bar')
+    // reply + edit + pin + the one opener — the four emoji used to sit here too.
+    if (acts.emojiButtons > 4) throw new Error(`the bar still carries ${acts.emojiButtons} buttons`)
+    // ⚠️ The meta line is the stamp AND the delivery state ("21:27 · wysyłam…"),
+    // so match the head of it, not the whole string.
+    if (/UTC/.test(acts.stamp) || !/^\d\d:\d\d(\s|$)/.test(String(acts.stamp).trim())) {
+      throw new Error(`the stamp is not a local clock time: ${JSON.stringify(acts.stamp)}`)
+    }
+    step('the bar was hidden, the press revealed it, and the stamp is local time')
+
+    // ⚠️ Measure the OPEN picker before picking: the pick closes it, so reading
+    // `hidden` after the click reports "it never opened".
+    const opened = await A.eval<any>(`
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(actTok)}));
+      row.querySelector('.b-more').click();
+      const pop = document.getElementById('emoji-pop');
+      const r = pop.getBoundingClientRect();
+      return { open: !pop.hidden, count: pop.querySelectorAll('[data-emoji]').length,
+               onScreen: r.left >= 0 && r.top >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight,
+               rect: Math.round(r.left) + ',' + Math.round(r.top) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height) };`)
+    if (!opened.open) throw new Error('the opener did not open the picker')
+    if (!opened.onScreen) throw new Error(`the picker opened outside the viewport (${opened.rect})`)
+    if (opened.count < 8) throw new Error(`the picker offers only ${opened.count} emoji`)
+    const picked = await A.eval<any>(`
+      const pop = document.getElementById('emoji-pop');
+      const first = pop.querySelector('[data-emoji]');
+      const emoji = first.getAttribute('data-emoji');
+      first.click();
+      return { closed: pop.hidden, emoji, count: ${opened.count} };`)
+    if (!picked.closed) throw new Error('picking an emoji left the picker open')
+    await B.waitFor('the reaction reached B', `
+      const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(actTok)}));
+      return !!row && !!row.querySelector('.rchip');
+    `, 25_000)
+    step(`the picker opened on screen, ${opened.count} emoji, and ${picked.emoji} reached the other side`)
+
     scenario('a reply carries the message it answers')
     const quoted = `cytat-${Date.now().toString(36)}`
     await send(B, quoted)

@@ -455,7 +455,7 @@ session (`startSession({transport:'mqtt', broker})`, web `?mqtt=1`, CLI
 | `npm run room-sim` | seeded synthetic network: loss, duplication, reorder, staggered joins, a throttled tab |
 | `npm run gui-sim` | the `core.ts` facade the GUI buttons drive, printing a timeline |
 | `npm run eh2-test` / `meet` / `presence-test` / `group-test` / `hem-gk-test` / `ipfs-test` | live against the **real onchato relay** (and, for the last two, a real HEM / the IPFS store) |
-| `npm run browser-test` | two headless **Chromium**, the real bundle, the real relay, driven through the DOM — 36 scenarios |
+| `npm run browser-test` | two headless **Chromium**, the real bundle, the real relay, driven through the DOM — 37 scenarios |
 | `npm run browser-test:ff` | the same scenarios with **Chromium + Firefox** |
 | `npm run mqtt-meet` | the whole engine over an MQTT broker instead of libp2p |
 | `npm run phone-shot` | screenshots at real device metrics (layout truth — computed-style asserts miss clipping) |
@@ -629,9 +629,26 @@ Two more that are easy to get wrong:
   composer off screen — exactly what `--app-h` exists to prevent.
 
 Touch also gets what hover-only affordances cannot give it: `@media
-(pointer:coarse)` keeps the reaction bar permanently visible, gives every target
-a finger-sized minimum, and sets inputs to 16px so iOS does not zoom the page on
-focus.
+(pointer:coarse)` gives every target a finger-sized minimum and sets inputs to
+16px so iOS does not zoom the page on focus.
+
+**A bubble's controls are revealed by PRESSING it, on a mouse exactly as on a
+finger** (`attachReveal`, `.tapped`; the user's decision, 2026-09-03). Hover
+used to do it on desktop, which meant the press was never discovered there and
+the bar kept appearing under a pointer that was only passing over a message.
+Three things this has to keep doing: a drag that selects text ends in a `click`,
+so a non-collapsed selection inside the bubble is left alone (otherwise copying
+a message pops the bar every time); one bubble is open at a time; and **file /
+voice bubbles go through the same helper** — they had the bar and no reveal, so
+on a phone, where there is no hover, a file could not be reacted to at all.
+
+The four quick emoji that used to sit in that bar are behind **one opener** now
+(`.b-more` → `#emoji-pop`, 32 emoji). One popover for the whole transcript, not
+a grid per bubble — hundreds of bubbles × 32 buttons is a DOM nobody needs — and
+it anchors to the BUTTON, never to the pointer: a click carrying no coordinates
+(synthetic, or a keyboard activation) reports 0,0 and would throw the picker
+into the corner of the screen. It flips above the button when there is no room
+below, because the bubbles people react to are the ones next to the composer.
 
 ### Delivery contract — acks, backoff, and the ⚠ marker
 
