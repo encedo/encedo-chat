@@ -115,7 +115,7 @@ export async function notifyRequest(): Promise<Perm> {
  * platform refused — the caller keeps it per conversation so a stale banner can
  * be dismissed when the window comes back.
  *
- * ⚠️ The click handler runs on the web and NOT in the packaged shell: a
+ * WARNING: The click handler runs on the web and NOT in the packaged shell: a
  * libnotify banner with no actions reports nothing back, so there is nothing to
  * listen to. The tray icon is the way back to the window there, which is one of
  * the reasons the tray is part of this change rather than a nicety.
@@ -234,7 +234,7 @@ export const appimageInstall = () => invoke<void>('desk_appimage_install')
 /**
  * What this copy of the app can do about a newer version.
  *
- * ⚠️ Not every install can update itself, and offering it where it cannot is
+ * WARNING: Not every install can update itself, and offering it where it cannot is
  * worse than not offering: the download runs, somebody waits, and it fails at
  * the last step. The updater replaces a self-contained bundle — an AppImage, an
  * installer's .exe, an .app — and a `.deb` belongs to the package manager, not

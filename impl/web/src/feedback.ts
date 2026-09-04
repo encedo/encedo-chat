@@ -1,5 +1,5 @@
 /**
- * The 💬 Feedback form — a bug, an idea, a question, in one step.
+ * The Feedback form — a bug, an idea, a question, in one step.
  *
  * It exists for the demo-day tester who has just seen something odd and has
  * about ten seconds of goodwill to spend on telling us. So: one text box, four
@@ -89,7 +89,7 @@ export function initFeedback(d: FeedbackDeps) {
   document.addEventListener('keydown', (e) => {
     if (!isOpen) return
     if (e.key === 'Escape') close()
-    // Enter is a new line in a text box; Ctrl/⌘+Enter sends, like the composer.
+    // Enter is a new line in a text box; Ctrl/+Enter sends, like the composer.
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void send()
   })
 }

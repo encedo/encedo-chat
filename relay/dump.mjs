@@ -3,7 +3,7 @@
  *
  * Off by default, and off means off: relay.mjs calls `createDump(process.env.DUMP)`,
  * which returns null when the variable is unset or empty, and every call site is
- * `dump?.…` — no directory, no file, no listener, no wrapper, nothing on the hot
+ * `dump?.<call>` — no directory, no file, no listener, no wrapper, nothing on the hot
  * path. The only trace of this module on a node that does not set DUMP is the
  * import.
  *
@@ -12,12 +12,12 @@
  * and every frame byte — so an auditor can check that nothing in it links a
  * person to a conversation or decodes to plaintext. That same completeness is
  * why it must NEVER run on production: the files ARE the metadata the design
- * promises not to keep. When on, the startup banner says so (🧾 DUMP ON), so its
+ * promises not to keep. When on, the startup banner says so (DUMP ON), so its
  * absence from `journalctl -u onchato-relay` is the proof that production ran
  * clean.
  *
  * Two files per day in <dir> (dir 0700, files 0600), one JSON object per line,
- * every record `{ts, type, …}`, peer ids and multiaddrs written IN FULL:
+ * every record `{ts, type, ...}`, peer ids and multiaddrs written IN FULL:
  *
  *   events-YYYY-MM-DD.jsonl   control plane — start/stop, conn.open/conn.close,
  *                             sub/unsub, topic.add/topic.refuse/topic.evict,
@@ -72,7 +72,7 @@ export function createDump(dir) {
   if (!dir) return null
   mkdirSync(dir, { recursive: true, mode: 0o700 })
 
-  // nginx loopback source port → X-Real-IP, captured on the HTTP upgrade. it-ws
+  // nginx loopback source port -> X-Real-IP, captured on the HTTP upgrade. it-ws
   // builds its server with a bare `http.createServer()`, so wrapping the module
   // function is the only way to see the request. Installed once, only when the
   // dump is on, before libp2p creates its listeners (relay.mjs orders it so).
@@ -90,7 +90,7 @@ export function createDump(dir) {
     return srv
   }
 
-  const files = { events: null, payload: null } // name → {day, fd}
+  const files = { events: null, payload: null } // name -> {day, fd}
   const write = (name, rec) => {
     const ts = new Date().toISOString()
     const day = ts.slice(0, 10)
@@ -116,7 +116,7 @@ export function createDump(dir) {
       return (LOOPBACK.has(ip) && ipByPort.get(port)) || ip
     } catch { return null }
   }
-  // Full peer id → ip while at least one connection to it is open, so records
+  // Full peer id -> ip while at least one connection to it is open, so records
   // that only know a peer (sub, msg) still carry the address.
   const ipByPeer = new Map()
 

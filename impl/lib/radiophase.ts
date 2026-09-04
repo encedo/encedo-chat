@@ -15,7 +15,7 @@
  * ## What this module changes — and what it deliberately does not
  *
  * Every periodic PUBLISH aligns to one per-session phase: timers created here
- * fire at `phase + k·period`, so all publishers with the same period (and
+ * fire at `phase + k|period`, so all publishers with the same period (and
  * they all use RADIO_TICK_MS) fire in the same instant — the frames leave in
  * one burst, the radio wakes once per cycle instead of N times. Nothing else
  * moves: same frames, same sizes, same 15 s cadence, nothing new on the wire.
@@ -43,7 +43,7 @@ const radioPhase = Math.random() * RADIO_TICK_MS
  *
  * A phone in a pocket does not need to say "still here" four times a minute.
  * `setRadioProfile('background')` stretches every timer created with
- * `slowable: true` to 4× its period — the watches (contact dots, the
+ * `slowable: true` to 4x its period — the watches (contact dots, the
  * self-topic) and the group keepalives ride it, so an idle backgrounded
  * phone wakes the radio once a minute instead of four times.
  *
@@ -53,7 +53,7 @@ const radioPhase = Math.random() * RADIO_TICK_MS
  * slowdown in (frozen spec), and a phone that flaps quiet/leave on every
  * lost frame is worse than the battery it saves. The watches' 90 s dot TTL
  * tolerates a 60 s cadence as-is; a single lost beacon can blink a dot for
- * under a minute, which is the price of the 4× and accepted (the user's
+ * under a minute, which is the price of the 4x and accepted (the user's
  * decision, 2026-09-02). Background periods are multiples of the base tick,
  * so slowed timers still land ON the shared grid — one wake carries whatever
  * is due.
@@ -71,8 +71,8 @@ export function setRadioProfile(p: RadioProfile) {
 }
 
 /**
- * A repeating timer that fires at `radioPhase + k·periodMs` instead of
- * "creation time + k·periodMs". Drop-in for the publish heartbeats'
+ * A repeating timer that fires at `radioPhase + k|periodMs` instead of
+ * "creation time + k|periodMs". Drop-in for the publish heartbeats'
  * setInterval; returns the stop function. The first fire comes within one
  * period (possibly almost immediately — callers already tolerate that, their
  * announces are nonce-deduped and their keepalives idempotent).

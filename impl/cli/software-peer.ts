@@ -1,5 +1,5 @@
 /**
- * software-peer.ts — shared CLI for a software-identity peer (Bob, Carl, …).
+ * software-peer.ts — shared CLI for a software-identity peer (Bob, Carl, ...).
  * Thin per-profile entrypoints (bob/bob.ts, carl/carl.ts) call this with their
  * own keystore path + name. Key stays in a local file; ECDH via node X25519.
  *
@@ -10,8 +10,8 @@
  *   topic <peer> [--network m] [--date YYYY-MM-DD]  derive the rendezvous topic
  *   join <peer> [--network m] [--date d]            open a live chat
  *
- * Flow: `init` → give the printed pubkey to the peer (imports it into their HEM
- * as a contact) → `add-peer <them> <their_pub>` → `join <them>`.
+ * Flow: `init` -> give the printed pubkey to the peer (imports it into their HEM
+ * as a contact) -> `add-peer <them> <their_pub>` -> `join <them>`.
  */
 
 import { Keystore } from '../bob/keystore.ts'
@@ -38,7 +38,7 @@ export async function softwarePeerCli(ksPath: string, name: string) {
       console.log(`pubkey: ${ks.ownPubB64()}`)
       // Not a DESCR to copy: a contact record now names the OWNING identity's
       // KID, which this keystore does not know. The app builds it on import.
-      console.log(`\n→ add this pubkey as a contact on the peer's side, under the name "${ks.data.handle}"`)
+      console.log(`\n-> add this pubkey as a contact on the peer's side, under the name "${ks.data.handle}"`)
       break
     }
     case 'pubkey':

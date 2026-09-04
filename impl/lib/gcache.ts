@@ -5,7 +5,7 @@
  * Key schedule (identity-agnostic — HEM or software):
  *   base = ECDH(IK, emp_pub)                          // one id.ecdh per session
  *   k_gid = HKDF(base, salt="encedo-chat-group-cache-v1", info=gid) // per group
- *   blob  = iv ‖ AES-256-GCM(k_gid, iv, plaintext)
+ *   blob  = iv || AES-256-GCM(k_gid, iv, plaintext)
  *
  * IK never leaves the HEM: `emp_pub` is a random X25519 public key stored in
  * localStorage, and the HSM computes ECDH(IK_priv, emp_pub). `base` is stable
@@ -23,7 +23,7 @@ async function groupKey(base: Uint8Array, gidHex: string): Promise<CryptoKey> {
   return subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
 }
 
-/** Encrypt a per-group cache blob → base64(iv ‖ ct). */
+/** Encrypt a per-group cache blob -> base64(iv || ct). */
 export async function sealCache(base: Uint8Array, gidHex: string, plaintext: Uint8Array): Promise<string> {
   const key = await groupKey(base, gidHex)
   const iv = randomBytes(12)
@@ -33,7 +33,7 @@ export async function sealCache(base: Uint8Array, gidHex: string, plaintext: Uin
   return b64(out)
 }
 
-/** Decrypt a per-group cache blob (base64 iv ‖ ct), or null if it does not open
+/** Decrypt a per-group cache blob (base64 iv || ct), or null if it does not open
  *  (wrong base / wrong gid / tampered). */
 export async function openCache(base: Uint8Array, gidHex: string, blob: string): Promise<Uint8Array | null> {
   try {

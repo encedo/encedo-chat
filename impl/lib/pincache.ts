@@ -14,7 +14,7 @@
  *
  *   base   = ECDH(IK, emp_pub)                       // one id.ecdh per session
  *   k_room = HKDF(base, salt="encedo-chat-pin-cache-v1", info=roomId)
- *   blob   = iv ‖ AES-256-GCM(k_room, iv, plaintext)
+ *   blob   = iv || AES-256-GCM(k_room, iv, plaintext)
  *
  * `base` is identity-agnostic — a HEM holds IK in the HSM, a software identity
  * holds it in a sealed profile, and both reach the same secret — so pinning
@@ -65,7 +65,7 @@ async function roomKey(base: Uint8Array, roomId: string): Promise<CryptoKey> {
   return subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
 }
 
-/** Seal a room's pin list → base64(iv ‖ ct). */
+/** Seal a room's pin list -> base64(iv || ct). */
 export async function sealPins(base: Uint8Array, roomId: string, pins: Pin[]): Promise<string> {
   const key = await roomKey(base, roomId)
   const iv = randomBytes(12)

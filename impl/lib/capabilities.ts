@@ -177,7 +177,7 @@ export async function probeCapabilities(): Promise<CapabilityReport> {
 /** One line per capability — for the debug log and for a bug report. */
 export function formatReport(r: CapabilityReport): string {
   const line = (c: Capability) =>
-    `${c.ok ? '✓' : c.required ? '✖' : '·'} ${c.id}`
+    `${c.ok ? '[ok]' : c.required ? '[fail]' : '|'} ${c.id}`
     + (c.tries ? ` (took ${c.tries} attempts)` : '')
     + (c.ok ? '' : ` — ${c.note ?? ''}${c.error ? ` [${c.error}]` : ''}`)
   return [`platform: ${r.ua}`, ...r.caps.map(line)].join('\n')

@@ -27,7 +27,7 @@ const { multiaddr: relay } = await onchatoRelay()
 const na = await createPeer()
 const nb = await createPeer()
 await Promise.all([na.dial(multiaddr(relay)), nb.dial(multiaddr(relay))])
-console.log(`dialed onchato relay; topic=${topic.slice(0, 16)}…`)
+console.log(`dialed onchato relay; topic=${topic.slice(0, 16)}...`)
 
 let aSaw = null, bSaw = null
 const met = new Promise((resolve) => {

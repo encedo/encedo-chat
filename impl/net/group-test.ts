@@ -29,7 +29,7 @@ const params = { networkId: 'group-test', dateUTC: new Date().toISOString().slic
 
 const ids = await Promise.all(Array.from({ length: N }, (_, i) => softId('g' + i)))
 const sessions = await Promise.all(ids.map((id) => startSession(id, { relay: RELAY, params })))
-console.log(`${N} software members up on ${RELAY.slice(0, 28)}…`)
+console.log(`${N} software members up on ${RELAY.slice(0, 28)}...`)
 
 // Form the group: member 0 creates it, then everyone's SKD reaches everyone.
 const { gk, pub: gkPub } = await softwareGk()
@@ -40,7 +40,7 @@ for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) if (i !== j) await sessi
 
 const got: { from: string; body: string }[][] = ids.map(() => [])
 const rooms = await Promise.all(sessions.map((s, i) => s.openGroup(gid, { onMessage: (from, env) => got[i].push({ from, body: env.body }) })))
-console.log(`group topic ${rooms[0].topic.slice(0, 16)}… — all ${N} joined`)
+console.log(`group topic ${rooms[0].topic.slice(0, 16)}... — all ${N} joined`)
 
 /** Broadcast from `sender` until every other member has it (mesh forms over a few s). */
 async function reaches(sender: number, marker: string, ms = 45_000): Promise<boolean> {
@@ -58,14 +58,14 @@ async function reaches(sender: number, marker: string, ms = 45_000): Promise<boo
 
 let ok = true
 const m1 = 'hej-' + Date.now().toString(36)
-if (await reaches(0, m1)) console.log(`✔ g0's broadcast reached the other ${N - 1}`)
-else { ok = false; console.log('✖ g0 broadcast did not reach everyone') }
-if (got[0].some((m) => m.body === m1)) { ok = false; console.log('✖ sender received its own echo') }
-else console.log('✔ the sender did not receive its own broadcast')
+if (await reaches(0, m1)) console.log(`[ok] g0's broadcast reached the other ${N - 1}`)
+else { ok = false; console.log('[fail] g0 broadcast did not reach everyone') }
+if (got[0].some((m) => m.body === m1)) { ok = false; console.log('[fail] sender received its own echo') }
+else console.log('[ok] the sender did not receive its own broadcast')
 
 const m2 = 'od-g' + (N - 1) + '-' + Date.now().toString(36)
-if (await reaches(N - 1, m2)) console.log(`✔ g${N - 1}'s broadcast reached the other ${N - 1} (every member can send)`)
-else { ok = false; console.log(`✖ g${N - 1} broadcast did not reach everyone`) }
+if (await reaches(N - 1, m2)) console.log(`[ok] g${N - 1}'s broadcast reached the other ${N - 1} (every member can send)`)
+else { ok = false; console.log(`[fail] g${N - 1} broadcast did not reach everyone`) }
 
 for (const r of rooms) r.stop()
 await Promise.all(sessions.map((s) => s.close()))

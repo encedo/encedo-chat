@@ -3,7 +3,7 @@
  *
  * Two "browser tabs" = two `openConversation()` calls with exactly the options
  * `web/src/app.ts` passes, against the real onchato relay. It exercises the
- * facade the buttons are wired to (open room → EH-2 → sendText both ways →
+ * facade the buttons are wired to (open room -> EH-2 -> sendText both ways ->
  * leave) and prints a timeline, so a slow or half-open handshake shows up as
  * numbers instead of "nic się nie dzieje".
  *
@@ -38,16 +38,16 @@ const open = (me: Identity, peerPub: string, name: 'dev1' | 'dev2') =>
     relay: RELAY,
     params,
     webrtc: false, // browser-only; in Node content stays on GossipSub
-    onSecurity: (peer, state) => log(name, `EH-2 ${state} with ${peer.slice(0, 12)}…`),
+    onSecurity: (peer, state) => log(name, `EH-2 ${state} with ${peer.slice(0, 12)}...`),
     onMessage: (_from, m) => { inbox[name].push(m.body); log(name, `received "${m.body}"`) },
-    onPresence: (peer, ev) => log(name, `presence ${ev} (${peer.slice(0, 12)}…)`),
+    onPresence: (peer, ev) => log(name, `presence ${ev} (${peer.slice(0, 12)}...)`),
   })
 
-log('sim', `mode=EH-2  relay=${RELAY.slice(0, 40)}…`)
+log('sim', `mode=EH-2  relay=${RELAY.slice(0, 40)}...`)
 const c1 = await open(dev1, dev2.pub, 'dev1')
-log('dev1', `room open, topic=${c1.topic.slice(0, 12)}… as ${c1.peerId.slice(0, 12)}…`)
+log('dev1', `room open, topic=${c1.topic.slice(0, 12)}... as ${c1.peerId.slice(0, 12)}...`)
 const c2 = await open(dev2, dev1.pub, 'dev2')
-log('dev2', `room open as ${c2.peerId.slice(0, 12)}…`)
+log('dev2', `room open as ${c2.peerId.slice(0, 12)}...`)
 
 const until = async (cond: () => boolean, ms: number) => {
   const start = Date.now()

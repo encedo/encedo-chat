@@ -2,12 +2,12 @@
  * eh2/handshake.ts — the EH-2 handshake state machines (docs/PROTOCOL.md §6).
  *
  * Interactive, Noise-XX-flavored, 1.5 round-trips, mutually authenticated by
- * MACs over the transcript (no signatures → deniability, §6.4). Output: `SK`
+ * MACs over the transcript (no signatures -> deniability, §6.4). Output: `SK`
  * (32 B) = the ratchet's `RK_0`.
  *
- *   I: initiate()            → msg1 ──────────────▶ respond()            :R
- *   I: initiatorComplete()  ◀────────── msg2 ←──── (R holds SK, sends mac_r)
- *   I: (holds SK)            → msg3 ──────────────▶ responderComplete()  :R
+ *   I: initiate()            -> msg1 --------------respond()            :R
+ *   I: initiatorComplete()  ---------- msg2 <----- (R holds SK, sends mac_r)
+ *   I: (holds SK)            -> msg3 --------------responderComplete()  :R
  *
  * **DH ordering is responder-perspective (§6.3)** — the classic "SK doesn't
  * match" bug. Both sides build:
@@ -24,9 +24,9 @@
  * moves the three frames over whatever transport it has and decides who the
  * peer is (contact-book resolution via `initiator_id`).
  *
- * ⚠️ msg3 gating (§6.2): until `responderComplete()` returns, the initiator is
+ * WARNING: msg3 gating (§6.2): until `responderComplete()` returns, the initiator is
  * UNAUTHENTICATED — R must not accept application or ratchet data from it.
- * ⚠️ PQ: `ss` comes from the injected `Kem`. Stage 2 of the build runs the
+ * WARNING: PQ: `ss` comes from the injected `Kem`. Stage 2 of the build runs the
  * classical schedule alone; ML-KEM-768 plugs in behind this interface (stage 3)
  * without touching the key schedule.
  */
@@ -71,7 +71,7 @@ export interface Kem {
   readonly name: string
   /** Initiator: fresh per-handshake encapsulation keypair (ephemeral, never from the HSM). */
   generate(): Promise<KemKey>
-  /** Responder: encapsulate against the initiator's key → (ct, ss). */
+  /** Responder: encapsulate against the initiator's key -> (ct, ss). */
   encapsulate(pub: Uint8Array): Promise<{ ct: Uint8Array; ss: Uint8Array }>
 }
 
@@ -113,7 +113,7 @@ function wipe(...bufs: Uint8Array[]): void {
 
 function checkSkew(ts: number, now: number, what: string, maxSkewMs: number): void {
   if (Math.abs(now - ts) > maxSkewMs) {
-    throw new HandshakeError(`${what} timestamp outside the ±${maxSkewMs / 60_000} min window (skew ${now - ts} ms)`)
+    throw new HandshakeError(`${what} timestamp outside the +/-${maxSkewMs / 60_000} min window (skew ${now - ts} ms)`)
   }
 }
 
@@ -175,12 +175,12 @@ export async function initiate(opts: {
     ts: opts.now ?? nowMs(),
     initiatorId: await initiatorId(ik.pub),
   })
-  plog('§6.1', `I → msg1: EK_i=${val(ekI.pub)} pq_pub=${val(pq.pub)} initiator_id=${val(await initiatorId(ik.pub))} (${msg1.length} B)`)
+  plog('§6.1', `I -> msg1: EK_i=${val(ekI.pub)} pq_pub=${val(pq.pub)} initiator_id=${val(await initiatorId(ik.pub))} (${msg1.length} B)`)
   return { msg1, state: { ik, peerIkPub, ekI, pq, msg1Bytes: msg1, maxSkewMs: opts.maxSkewMs ?? MAX_SKEW_MS } }
 }
 
 /**
- * I: consume msg2 → derive SK, verify R's MAC (this is where R gets
+ * I: consume msg2 -> derive SK, verify R's MAC (this is where R gets
  * authenticated), emit msg3. After this the initiator may send immediately.
  */
 export async function initiatorComplete(
@@ -193,7 +193,7 @@ export async function initiatorComplete(
 
   // Responder perspective (§6.3), computed from I's side via X25519 commutativity.
   const dh1 = await state.ekI.dh(state.peerIkPub)   // DH(IK_r, EK_i)
-  const dh2 = await state.ik.dh(msg2.ekPub)         // DH(EK_r, IK_i)  ← the HSM call
+  const dh2 = await state.ik.dh(msg2.ekPub)         // DH(EK_r, IK_i)  <- the HSM call
   const dh3 = await state.ekI.dh(msg2.ekPub)        // DH(EK_r, EK_i)
   const ss = await state.pq.decapsulate(msg2.pqCt)
 
@@ -203,7 +203,7 @@ export async function initiatorComplete(
   // prints zeros and looks like a broken DH.
   plog('§6.3', `I ikm (responder perspective): DH(IK_r,EK_i)=${val(dh1)} DH(EK_r,IK_i)=${val(dh2)} DH(EK_r,EK_i)=${val(dh3)} mlkem_ss=${val(ss)}`)
   const sk = await deriveSK(dh1, dh2, dh3, ss, h1)
-  plog('§6.2', `I h1=${val(h1)} → SK=${val(sk)}`)
+  plog('§6.2', `I h1=${val(h1)} -> SK=${val(sk)}`)
 
   const key = await macKey(sk)
   const h2p = await h2Partial(state.msg1Bytes, msg2.ekPub, msg2.pqCt, msg2.ts)
@@ -215,7 +215,7 @@ export async function initiatorComplete(
   plog('§6.2', `I verified mac_r over h2_partial=${val(h2p)} — responder authenticated`)
   const h3 = await hashH3(h2p, msg2.macR)
   const macI = await mac(key, LABEL_I, h3)
-  plog('§6.1', `I → msg3: h3=${val(h3)} mac_i=${val(macI)}`)
+  plog('§6.1', `I -> msg3: h3=${val(h3)} mac_i=${val(macI)}`)
   return {
     msg3: encodeMsg3({ macI }),
     result: { role: 'initiator', sk, ekSelf: state.ekI, ekPeerPub: msg2.ekPub, firstStepIkm: dh3 },
@@ -234,7 +234,7 @@ export interface ResponderState {
 }
 
 /**
- * R: consume msg1 → derive SK, emit msg2 with `mac_r` (this authenticates R to
+ * R: consume msg1 -> derive SK, emit msg2 with `mac_r` (this authenticates R to
  * I). R holds SK here but MUST NOT accept data from I until msg3 verifies.
  *
  * `peerIkPub` is the caller's contact-book resolution of `msg1.initiator_id`;
@@ -265,14 +265,14 @@ export async function respond(opts: {
   const ekR = opts.ek ?? await generateX25519()
   const { ct, ss } = await kem.encapsulate(msg1.pqPub)
 
-  const dh1 = await ik.dh(msg1.ekPub)      // DH(IK_r, EK_i)  ← the HSM call
+  const dh1 = await ik.dh(msg1.ekPub)      // DH(IK_r, EK_i)  <- the HSM call
   const dh2 = await ekR.dh(peerIkPub)      // DH(EK_r, IK_i)
   const dh3 = await ekR.dh(msg1.ekPub)     // DH(EK_r, EK_i)
 
   const h1 = await hashMsg1(opts.msg1)
   plog('§6.3', `R ikm: DH(IK_r,EK_i)=${val(dh1)} DH(EK_r,IK_i)=${val(dh2)} DH(EK_r,EK_i)=${val(dh3)} mlkem_ss=${val(ss)}`)
   const sk = await deriveSK(dh1, dh2, dh3, ss, h1)
-  plog('§6.2', `R h1=${val(h1)} → SK=${val(sk)}`)
+  plog('§6.2', `R h1=${val(h1)} -> SK=${val(sk)}`)
 
   // EK_r_priv is not retained past this point: dh3 already carries everything
   // the first ratchet step needs (§6.2 zeroization, see HandshakeResult).
@@ -281,7 +281,7 @@ export async function respond(opts: {
   const h2p = await h2Partial(opts.msg1, ekR.pub, ct, tsR)
   const macR = await mac(key, LABEL_R, h2p)
 
-  plog('§6.1', `R → msg2: EK_r=${val(ekR.pub)} pq_ct=${val(ct)} mac_r=${val(macR)}`)
+  plog('§6.1', `R -> msg2: EK_r=${val(ekR.pub)} pq_ct=${val(ct)} mac_r=${val(macR)}`)
   return {
     msg2: encodeMsg2({ ekPub: ekR.pub, pqCt: ct, ts: tsR, macR }),
     state: { sk, h3: await hashH3(h2p, macR), ekPeerPub: msg1.ekPub, firstStepIkm: dh3 },

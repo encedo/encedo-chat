@@ -116,7 +116,7 @@ export function patchActivity(kt) {
  * of the patcher: a missing source or an empty copy stops the build rather than
  * shipping somebody else's brand again.
  *
- * ⚠️ The colour is ours too. The adaptive icon draws `ic_launcher_foreground`
+ * WARNING: The colour is ours too. The adaptive icon draws `ic_launcher_foreground`
  * over `@color/ic_launcher_background`, and that colour belongs to whatever
  * icon the template shipped — leaving it makes our mark sit on Tauri's
  * backdrop. It is rewritten where the template defines it, and created only
@@ -155,7 +155,7 @@ function installIcons(from, res) {
   if (!existsSync(from)) throw new Error(`android icons: ${from} is not there — has \`tauri icon\` been run?`)
   // mipmap-*: the launcher set `tauri icon` generates. drawable-*: ours —
   // `ic_stat_onchato`, the status-bar silhouette. The launcher's monochrome
-  // layer keeps the adaptive-icon safe zone (glyph ≈44% of the canvas), and the
+  // layer keeps the adaptive-icon safe zone (glyph ~44% of the canvas), and the
   // status bar draws a resource full-bleed, so reusing it there shipped an icon
   // visibly smaller than every other one in the bar (reported at 0.5.9). The
   // drawables carry the same mark cropped and rescaled to status-bar padding.

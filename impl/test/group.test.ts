@@ -84,7 +84,7 @@ test('a tampered MAC is rejected by that recipient', async () => {
   assert.equal(out, null, 'B (first recipient) rejects the tampered mac')
 })
 
-test('insider-forge: B re-seals under A\'s chain but cannot forge A→C\'s MAC', async () => {
+test('insider-forge: B re-seals under A\'s chain but cannot forge A->C\'s MAC', async () => {
   const g = await makeGroup()
   // B is malicious: it holds A's sending key (distributed), so it can seal a body
   // "as A". It builds a frame addressed to C and MACs it with the only key it can

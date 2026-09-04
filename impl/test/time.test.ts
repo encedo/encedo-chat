@@ -46,7 +46,7 @@ test('the rendezvous day is UTC wherever the machine stands', () => {
   // The load-bearing one (§5.4): both members of a pair derive the topic from
   // this date. If it ever followed the local clock, two people in different
   // zones would sit in different rooms for hours a day and it would present as
-  // a dead relay. Kiritimati is +14 and Niue −11 — a 25-hour spread.
+  // a dead relay. Kiritimati is +14 and Niue 11 — a 25-hour spread.
   for (const tz of ['UTC', 'Europe/Warsaw', 'Pacific/Kiritimati', 'Pacific/Niue']) {
     assert.equal(inTZ(tz, () => utcDateOf(TS)), '2026-07-15', tz)
     assert.equal(inTZ(tz, () => addUTCDays(utcDateOf(TS), 1)), '2026-07-16', tz)

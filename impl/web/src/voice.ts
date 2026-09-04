@@ -65,7 +65,7 @@ const extFor = (mime: string) =>
 /**
  * How long the take really is, in seconds.
  *
- * ⚠️ This has now been wrong in both directions, so the reasoning is written
+ * WARNING: This has now been wrong in both directions, so the reasoning is written
  * down rather than the conclusion.
  *
  * 0.3.14 stamped what `decodeAudioData` answered. 0.3.15 overruled it with the
@@ -129,13 +129,13 @@ export async function startRecording(o: {
    *  screen about it, is the worst version of this. */
   onShort?: (got: number, wanted: number) => void
 }): Promise<Recording> {
-  // ⚠️ `{ audio: true }`, and the constraints that were here in 0.4.3 are gone
+  // WARNING: `{ audio: true }`, and the constraints that were here in 0.4.3 are gone
   // because they made it WORSE. Measured on Chromium, same machine, same
   // microphone, three requests:
   //
   //     { audio: true }                              -> mono, 48 kHz
   //     { channelCount: 1, echoCancellation: false } -> STEREO, 44.1 kHz
-  //     { channelCount: { exact: 1 }, … }            -> STEREO, 44.1 kHz
+  //     { channelCount: { exact: 1 }, ... }            -> STEREO, 44.1 kHz
   //
   // Two findings in that, both counter-intuitive. Asking for mono does not get
   // mono — `exact` does not either. And turning echo cancellation OFF is what
@@ -184,7 +184,7 @@ export async function startRecording(o: {
   const limit = setTimeout(() => o.onLimit?.(), o.maxMs)
   const cleanup = () => { clearInterval(tick); clearTimeout(limit); release() }
 
-  // ⚠️ A timeslice, and 250 ms rather than none — the value it had in 0.3.8,
+  // WARNING: A timeslice, and 250 ms rather than none — the value it had in 0.3.8,
   // which is the build reported as the last one where recording was right.
   //
   // 0.3.11 removed it, reasoning that a two-minute cap makes the single

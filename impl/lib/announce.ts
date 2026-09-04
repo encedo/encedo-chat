@@ -10,7 +10,7 @@ import { subtle, randomBytes, b64, unb64 } from './wc.ts'
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
-const REPLAY_WINDOW_MS = 5 * 60 * 1000   // ±5 min (§5.4)
+const REPLAY_WINDOW_MS = 5 * 60 * 1000   // +/-5 min (§5.4)
 
 const macMessage = (v: number, peer: string, nonce: string, ts: number) => enc.encode(`${v}|${peer}|${nonce}|${ts}`)
 
@@ -40,7 +40,7 @@ export async function verifyAnnounce(data: Uint8Array, macKey: CryptoKey, nowMs 
 /**
  * The dedup set for accepted nonces — bounded, because the replay window is.
  *
- * `verifyAnnounce` refuses any timestamp outside ±5 min, so a nonce seen ten
+ * `verifyAnnounce` refuses any timestamp outside +/-5 min, so a nonce seen ten
  * minutes ago can never be replayed successfully; remembering it forever costs
  * memory for nothing. Every watch used to keep a plain Set that only grew — a
  * session left open for days accumulated one entry per heartbeat per topic.

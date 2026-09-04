@@ -66,7 +66,7 @@ export interface WebrtcProbeResult {
 /**
  * The STUN server this probe dials, when the caller does not name one.
  *
- * ⚠️ It is only a fallback for a caller that has no node list to hand. The app
+ * WARNING: It is only a fallback for a caller that has no node list to hand. The app
  * passes what it actually uses (`lib/ice.ts` derives it from the nodes, because
  * a node runs STUN as part of being a node) — probing a server the app does not
  * use would answer a question nobody asked, which is exactly what this constant
@@ -177,7 +177,7 @@ export async function probeWebrtc(onStage?: (s: ProbeStage) => void, stun = DEFA
         const seen = await gather(pc!, ICE_MS)
         const types = candidateTypes(seen)
         if (!seen.length) throw new Error('ICE nie wyprodukowało ani jednego kandydata')
-        return Object.entries(types).map(([k, v]) => `${v}× ${k}`).join(', ')
+        return Object.entries(types).map(([k, v]) => `${v}x ${k}`).join(', ')
       })
     } else {
       skip('ice', 'platform', 'pominięte — brak poprawnej oferty')
@@ -198,7 +198,7 @@ export async function probeWebrtc(onStage?: (s: ProbeStage) => void, stun = DEFA
       const seen = await gather(p, STUN_MS, (c) => /\btyp\s+srflx\b/.test(c))
       const types = candidateTypes(seen)
       if (!types.srflx) throw new Error(`brak adresu odbitego od ${stun} — sieć albo zapora blokuje STUN`)
-      return `${types.srflx}× srflx`
+      return `${types.srflx}x srflx`
     })
   } finally {
     for (const p of open) { try { p.close() } catch {} }
@@ -282,7 +282,7 @@ async function loopback(RTC: typeof RTCPeerConnection, open: RTCPeerConnection[]
 /** One line per stage — for the log, and for pasting into a bug report. */
 export function formatWebrtcProbe(r: WebrtcProbeResult): string {
   const line = (s: ProbeStage) =>
-    `${s.ok ? '✓' : '✖'} ${s.id} [${s.about}] ${s.ms} ms`
+    `${s.ok ? '[ok]' : '[fail]'} ${s.id} [${s.about}] ${s.ms} ms`
     + (s.detail ? ` — ${s.detail}` : '')
     + (s.error ? ` — ${s.error}` : '')
   return [

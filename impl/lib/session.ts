@@ -21,9 +21,9 @@ import { ratchetFrom, type RatchetOpts } from '../eh2/ratchet.ts'
 import type { HandshakeResult } from '../eh2/handshake.ts'
 
 export interface Session {
-  /** Seal an outgoing plaintext → wire bytes. May advance ratchet state (EH-2). */
+  /** Seal an outgoing plaintext -> wire bytes. May advance ratchet state (EH-2). */
   encrypt(plaintext: Uint8Array): Promise<Uint8Array>
-  /** Open incoming wire bytes → plaintext, or null if not ours / undecryptable. */
+  /** Open incoming wire bytes -> plaintext, or null if not ours / undecryptable. */
   decrypt(data: Uint8Array): Promise<Uint8Array | null>
 }
 

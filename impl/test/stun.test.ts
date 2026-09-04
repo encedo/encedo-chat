@@ -87,7 +87,7 @@ test('a source that asks too fast is dropped, and recovers on its own', () => {
   for (let i = 0; i < 5; i++) assert.ok(gate.allow('203.0.113.9'), `burst ${i}`)
   assert.equal(gate.allow('203.0.113.9'), false, 'the sixth in the same instant is dropped')
   assert.ok(gate.allow('198.51.100.1'), 'a different source has its own bucket')
-  t += 500 // half a second → five more tokens
+  t += 500 // half a second -> five more tokens
   assert.ok(gate.allow('203.0.113.9'))
 })
 

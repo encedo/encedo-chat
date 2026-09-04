@@ -68,7 +68,7 @@ const LOG = new Uint8Array(256)
 }
 const mul = (a: number, b: number) => (a === 0 || b === 0 ? 0 : EXP[LOG[a] + LOG[b]])
 
-/** Generator polynomial for `n` EC codewords: ∏ (x - α^i). */
+/** Generator polynomial for `n` EC codewords: (x - α^i). */
 function generator(n: number): Uint8Array {
   let g = new Uint8Array([1])
   for (let i = 0; i < n; i++) {

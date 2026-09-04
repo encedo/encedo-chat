@@ -242,7 +242,7 @@ test('the marker is written at creation and rewritten on every membership change
   assert.equal(born.name, 'Zespół')
   assert.equal(hem.calls.updateKey, 0, 'creation needs no update')
 
-  // 2. Membership change → exactly one rewrite, carrying the NEW roster.
+  // 2. Membership change -> exactly one rewrite, carrying the NEW roster.
   await A.mgr.rekey(gid, [{ pub: A.id.pub }, { pub: B.id.pub }, { pub: C.id.pub }])
   assert.equal(await A.mgr.writeMarker(gid, 'Zespół'), true)
   assert.equal(hem.calls.updateKey, 1, 'one HSM call per change, not per member')

@@ -6,7 +6,7 @@
  * group list on any device holding the same HEM, without a byte of group state
  * having been stored anywhere on the network.
  *
- *     ETSEIC:chan1:<owner hint>:<admin hint>:<name ≤16>:<roster blob>
+ *     ETSEIC:chan1:<owner hint>:<admin hint>:<name <=16>:<roster blob>
  *
  * What it deliberately does NOT hold: `group_secret` (the topic seed) and
  * sender keys (content). Those are client-side and forward-secret; a HEM dump
@@ -123,7 +123,7 @@ export interface MarkerFields {
    * what decides. On a group we administer it equals `ownerKid`.
    */
   adminKid: string
-  /** Display label, ≤16 characters. */
+  /** Display label, <=16 characters. */
   name: string
   /** 4-byte KID hints (8 hex chars), one per member, in roster order. Empty = no blob. */
   hints: string[]

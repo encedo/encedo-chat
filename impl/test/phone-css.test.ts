@@ -4,8 +4,8 @@
  * This exists because of a bug that took three wrong guesses to find. The rule
  * collapsing the header badges to glyphs was written for phones and landed in
  * `@media (max-height:560px)` — the SHORT-screen block, not the phone block
- * (`max-width:900px, max-height:560px`). So it fired on a 360×545 viewport and
- * not on 360×641: the same phone, two browsers, different toolbar heights,
+ * (`max-width:900px, max-height:560px`). So it fired on a 360x545 viewport and
+ * not on 360x641: the same phone, two browsers, different toolbar heights,
  * opposite results. It looked like a browser difference, a cache problem and a
  * desktop-mode setting before it turned out to be a stylesheet nesting mistake.
  *
@@ -14,8 +14,8 @@
  * the stylesheet and evaluating the media conditions against real viewport
  * sizes is exact, needs no browser, and runs in milliseconds.
  *
- * The sizes are measured, not invented: 360×545 is Brave on the reporter's
- * Android 15 phone, 360×641 is Chrome on the same device.
+ * The sizes are measured, not invented: 360x545 is Brave on the reporter's
+ * Android 15 phone, 360x641 is Chrome on the same device.
  */
 
 import { test } from 'node:test'

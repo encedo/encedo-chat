@@ -6,7 +6,7 @@ import { nonceCache } from '../lib/announce.ts'
  * The dedup set must stay BOUNDED. Every watch keeps one, a heartbeat adds an
  * entry every 15 s per topic, and a session left open for days used to grow a
  * plain Set without limit — found in the 2026-08-30 audit. The cache may
- * remember a nonce for longer than the ±5 min replay window (pruning is
+ * remember a nonce for longer than the +/-5 min replay window (pruning is
  * amortized), but it must never remember the whole session.
  */
 test('nonce cache forgets what the replay window can no longer use', () => {

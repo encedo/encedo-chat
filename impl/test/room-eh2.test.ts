@@ -109,7 +109,7 @@ async function rooms(opts: {
   const ss = new Uint8Array(32).fill(0x5e)
   const macKey = await announceMacKey(ss, P)
   const [ikA, ikB] = [await generateX25519(), await generateX25519()]
-  // ids chosen so 'peer-a' < 'peer-b' → A is the initiator
+  // ids chosen so 'peer-a' < 'peer-b' -> A is the initiator
   const nodeA = net.node('peer-a')
   const nodeB = net.node('peer-b')
   const states: string[] = []
@@ -248,7 +248,7 @@ test('a knock reaches a peer that is there, and is never re-sent at one that is 
 
   // The contract that makes it honest: with the peer unreachable, a knock is
   // simply lost — no retry queue that fires it minutes later at somebody who
-  // walked away, and no ⚠ for the sender to interpret.
+  // walked away, and no WARNING: for the sender to interpret.
   deaf = true
   A.sendKnock()
   // Long enough for the retry schedule above to have fired twice and given up,
@@ -263,7 +263,7 @@ test('content typed before the handshake completes is queued, not lost', async (
   const got: string[] = []
   const { A, B } = await rooms({ collect: got })
   t.after(() => { A.stop(); B.stop() })
-  A.sendText('wysłane zanim uzgodniliśmy klucz') // no session yet → queued
+  A.sendText('wysłane zanim uzgodniliśmy klucz') // no session yet -> queued
   assert.deepEqual(A.secured(), [])
 
   await until(() => got.length === 1, 8000)
@@ -455,11 +455,11 @@ test('content that goes unconfirmed on a direct channel falls back to the relay'
 test('a secured peer whose acks never arrive gets the message marked resend-able', async (t) => {
   // This REPLACES the old "never report an ack-less peer (old client)" test.
   // That guess is what hung the bubble: a phone asleep for the whole room
-  // session had acked nothing YET, fell through the guard, and left "wysyłam…"
-  // for ever with no ↻ (reported live: desktop → dozing Android). EH-2 has
+  // session had acked nothing YET, fell through the guard, and left "wysyłam..."
+  // for ever with no (retry) (reported live: desktop -> dozing Android). EH-2 has
   // been mandatory since 2026-07-30, so a peer we share a SESSION with is a
   // current build that acks — its silence is loss, not antiquity, and it
-  // deserves the ⚠+↻ that lets the send be retried when the phone wakes.
+  // deserves the WARNING:+(retry) that lets the send be retried when the phone wakes.
   const got: string[] = []
   const undelivered: string[] = []
   const { A, B } = await rooms({
@@ -478,9 +478,9 @@ test('a secured peer whose acks never arrive gets the message marked resend-able
 })
 
 test('a peer that is present but never handshakes does not swallow the message', async (t) => {
-  // Reported live 2026-09-03 (phone → macMini1): both sides in the room, the
-  // badge on 🤝 Securing…, and a message sat on "wysyłam…" for 72 minutes with
-  // no ⚠ and no ↻ to retry it. With no session and no ack ever received, the
+  // Reported live 2026-09-03 (phone -> macMini1): both sides in the room, the
+  // badge on Securing..., and a message sat on "wysyłam..." for 72 minutes with
+  // no WARNING: and no (retry) to retry it. With no session and no ack ever received, the
   // give-up path judged there was nobody who "ought to" confirm and said
   // nothing at all — while `emitContent` had been parking every copy in the
   // pre-handshake queue. Announcing IS the peer being there; the message must
@@ -506,7 +506,7 @@ test('an outage longer than the old budget does not kill a message on a live ses
   // Straight from a two-browser run: the relay went quiet for 9.4 s while both
   // peers were alive and announcing. The old budget (one re-send at 1.5 s, one
   // at 4 s, then 4 s to judge = 8.5 s) ran out first, so a healthy conversation
-  // stamped the message ⚠ — and seconds later the peers were chatting again.
+  // stamped the message WARNING: — and seconds later the peers were chatting again.
   // Scaled down here: the outage outlasts what the old schedule would have
   // allowed (100 + 200 + 400 = 700 ms) but not the backoff, which keeps going
   // while the peer is still present.
@@ -555,7 +555,7 @@ test('a message given up on can be sent again by hand', async (t) => {
   await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
 
   // One delivered message first: a peer is only judged once we know it acks at
-  // all, so without this the loss below is treated as "old client", not ⚠.
+  // all, so without this the loss below is treated as "old client", not WARNING:.
   A.sendText('pierwsza')
   await until(() => delivered.length === 1, 5000)
 
@@ -574,9 +574,9 @@ test('a message given up on can be sent again by hand', async (t) => {
   assert.equal(A.resend('nie-było-takiej'), false, 'nothing to resend → false, not a throw')
 })
 
-test('a confirmation that arrives after we gave up corrects the ⚠', async (t) => {
+test('a confirmation that arrives after we gave up corrects the undelivered mark', async (t) => {
   // The peer was asleep, not gone: it answers once it wakes. Ignoring that ack
-  // (which is what the code used to do) leaves a ⚠ on a message that arrived —
+  // (which is what the code used to do) leaves a WARNING: on a message that arrived —
   // the user is told a lie that no retry will ever clear.
   const got: string[] = []
   const lost: string[] = []
@@ -701,7 +701,7 @@ test('a session is replaced on a timer, without the conversation noticing (§7.3
 test('a second tab on the same identity is recognised, not handshaked with forever', async (t) => {
   // Reported from a live session: a second browser tab logged into the same
   // account joined the room, and the two tabs tried to handshake with each other
-  // for as long as they were open — badge flickering 🔐/⚠, conversation dead,
+  // for as long as they were open — badge flickering /WARNING:, conversation dead,
   // and it kept going after the extra tab was closed. They cannot succeed: each
   // expects the CONTACT's identity key and is offered its own. What they can do
   // is notice, and stop.
@@ -721,7 +721,7 @@ test('a second tab on the same identity is recognised, not handshaked with forev
   await new Promise((r) => setTimeout(r, 2_500))
   assert.equal(atTab(), settled, 'no further attempts once the peer is known to be foreign')
 
-  // …and the real conversation is untouched by any of it.
+  // ...and the real conversation is untouched by any of it.
   A.sendText('mimo drugiej zakładki')
   await until(() => got.includes('mimo drugiej zakładki'), 8000)
 })

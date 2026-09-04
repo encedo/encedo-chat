@@ -37,7 +37,7 @@ test('the author travels as a key hint, not a name', () => {
   assert.equal(q.au, '3a7f1c02')
   assert.equal(q.au, pubHint(pub))     // the same hint a mention of them would carry
   assert.ok(!JSON.stringify(q).includes('name'))
-  assert.equal(makeQuote('mid1', 'x').au, undefined) // author unknown → no claim about one
+  assert.equal(makeQuote('mid1', 'x').au, undefined) // author unknown -> no claim about one
 })
 
 test('isQuoteRef refuses what could not be rendered', () => {

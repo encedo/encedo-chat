@@ -54,7 +54,7 @@ test('the report names every stage and says which half failed', async () => {
   const text = formatWebrtcProbe(await probeWebrtc())
   assert.match(text, /platforma NIE UMIE/)
   for (const id of ['construct', 'datachannel', 'sdp', 'ice', 'loopback', 'stun']) {
-    assert.match(text, new RegExp(`✖ ${id} `))
+    assert.ok(text.includes(`[fail] ${id} `), text) // a literal, not a regex: [fail] is a character class
   }
 })
 

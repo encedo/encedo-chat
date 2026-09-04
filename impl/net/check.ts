@@ -15,7 +15,7 @@ try {
   const conn = await dial(node, addr)
   const remote = conn.remotePeer.toString()
   console.log('CONNECTED to:', remote)
-  console.log('matches expected relay PeerId:', remote === expected ? 'YES ✓' : `NO ✗ (expected ${expected})`)
+  console.log('matches expected relay PeerId:', remote === expected ? 'YES [ok]' : `NO [fail] (expected ${expected})`)
 } catch (e) {
   console.error('DIAL FAILED:', e?.message ?? e)
 } finally {

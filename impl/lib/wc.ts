@@ -7,14 +7,14 @@
 
 export const subtle = globalThis.crypto.subtle
 
-/** HKDF-SHA256 → raw bytes. */
+/** HKDF-SHA256 -> raw bytes. */
 export async function hkdfBits(ikm: Uint8Array, salt: Uint8Array, info: Uint8Array, len: number): Promise<Uint8Array> {
   const base = await subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits'])
   const bits = await subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt, info }, base, len * 8)
   return new Uint8Array(bits)
 }
 
-/** SHA-256 → 32 raw bytes. */
+/** SHA-256 -> 32 raw bytes. */
 export async function sha256(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await subtle.digest('SHA-256', data))
 }

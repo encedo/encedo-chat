@@ -48,7 +48,7 @@ test('snapshot -> JSON -> restore keeps the full group state (send + all receive
   assert.deepEqual(restored, [gid])
   assert.equal(await mA2.session(gid)!.topic(), await mB.session(gid)!.topic())
 
-  // 1) A keeps sending from where it left off → B opens it (send counter continued,
+  // 1) A keeps sending from where it left off -> B opens it (send counter continued,
   //    no reuse of a spent counter).
   assert.deepEqual((await mB.session(gid)!.receive(await mA2.session(gid)!.send(body('a3'))))?.pt, body('a3'))
   // 2) A still opens NEW messages from BOTH other members with no re-distribution —

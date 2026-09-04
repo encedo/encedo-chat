@@ -48,7 +48,7 @@ cd /opt/github/encedo-chat && git pull                 # the clone the relay run
 sudo cp infra/stun/onchato-stun.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now onchato-stun
 sudo ufw allow 3478/udp
-journalctl -u onchato-stun -n 5 --no-pager            # expect ✓ STUN udp4 / udp6
+journalctl -u onchato-stun -n 5 --no-pager            # expect [ok] STUN udp4 / udp6
 ```
 
 Nothing proxies this: nginx speaks TCP, STUN is UDP, so 3478/udp is the one

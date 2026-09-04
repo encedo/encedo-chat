@@ -5,9 +5,9 @@
  * computed here — this layer only turns the three handshake frames into bytes
  * and back, and derives the transcript hashes those bytes feed.
  *
- *   I → R  msg1 { version, ek_i_pub, pq_pub, timestamp, initiator_id }
- *   R → I  msg2 { version, ek_r_pub, pq_ct,  timestamp, mac_r }
- *   I → R  msg3 { version, mac_i }
+ *   I -> R  msg1 { version, ek_i_pub, pq_pub, timestamp, initiator_id }
+ *   R -> I  msg2 { version, ek_r_pub, pq_ct,  timestamp, mac_r }
+ *   I -> R  msg3 { version, mac_i }
  *
  * **Canonical and deterministic by construction** — fixed field order, fixed
  * widths, explicit lengths, no optional fields, no trailing bytes accepted.
@@ -56,7 +56,7 @@ export interface Msg1 {
   ekPub: Uint8Array
   /** ML-KEM-768 encapsulation key (initiator's ephemeral PQ public key). */
   pqPub: Uint8Array
-  /** Unix epoch **ms**, UTC (replay window ±5 min, §6.4). */
+  /** Unix epoch **ms**, UTC (replay window +/-5 min, §6.4). */
   ts: number
   /** SHA-256(IK_i_pub)[0:8] — non-security hint so R can resolve the contact (§6.1). */
   initiatorId: Uint8Array

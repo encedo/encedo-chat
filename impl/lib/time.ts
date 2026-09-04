@@ -53,13 +53,13 @@ export const utcDateOf = (ts: number): string => new Date(ts).toISOString().slic
 export const addUTCDays = (date: string, days: number): string =>
   new Date(Date.parse(date + 'T00:00:00Z') + days * 86_400_000).toISOString().slice(0, 10)
 
-/** ms from `ts` until the next UTC midnight (0 < n ≤ 86_400_000). */
+/** ms from `ts` until the next UTC midnight (0 < n <= 86_400_000). */
 export const msToNextUTCMidnight = (ts: number): number => {
   const d = new Date(ts)
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1) - ts
 }
 
-/** ms since the previous UTC midnight (0 ≤ n < 86_400_000). */
+/** ms since the previous UTC midnight (0 <= n < 86_400_000). */
 export const msSincePrevUTCMidnight = (ts: number): number => {
   const d = new Date(ts)
   return ts - Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate())

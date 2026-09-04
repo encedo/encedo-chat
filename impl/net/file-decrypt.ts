@@ -10,8 +10,8 @@
  * original file recovered. Then run it again with `--no-key` and watch the same
  * blob stay opaque.
  *
- *   # ?debug=1 in the app logs one line per file: "file evidence · {…}"
- *   node net/file-decrypt.ts '{"cid":"Qm…","key":"…","chunk":4194304,"chunks":2,"size":5242880,"alg":"A256GCM-chunked-v1","name":"raport.pdf"}'
+ *   # ?debug=1 in the app logs one line per file: "file evidence | {...}"
+ *   node net/file-decrypt.ts '{"cid":"Qm...","key":"...","chunk":4194304,"chunks":2,"size":5242880,"alg":"A256GCM-chunked-v1","name":"raport.pdf"}'
  *   node net/file-decrypt.ts '<same json>' --no-key      # the negative control
  *
  *   --out <path>       where to write the plaintext (default: a fresh temp dir,
@@ -50,7 +50,7 @@ const url = gateway ? `${gateway.replace(/\/$/, '')}/ipfs/${ev.cid}` : `${origin
 
 console.log(`cid       ${ev.cid}`)
 console.log(`source    ${url}`)
-console.log(`manifest  ${ev.chunks} × ${ev.chunk} B, ${ev.size} B plaintext, ${ev.alg}`)
+console.log(`manifest  ${ev.chunks} x ${ev.chunk} B, ${ev.size} B plaintext, ${ev.alg}`)
 
 const res = await fetch(url)
 if (res.status === 404 || res.status === 410) {
@@ -63,7 +63,7 @@ const cipher = new Uint8Array(await res.arrayBuffer())
 // The tag is 16 B per chunk, so ciphertext is always longer than plaintext by
 // exactly that much. Stating it here makes a truncated fetch obvious before the
 // AEAD reports it as something that reads like a wrong key.
-console.log(`\nfetched   ${cipher.length} B of ciphertext (${ev.size} B plaintext + ${ev.chunks} × 16 B tags)`)
+console.log(`\nfetched   ${cipher.length} B of ciphertext (${ev.size} B plaintext + ${ev.chunks} x 16 B tags)`)
 console.log(`first 32  ${Buffer.from(cipher.subarray(0, 32)).toString('hex')}`)
 
 if (has('--no-key')) {
@@ -111,7 +111,7 @@ const out = destination()
 // stack trace about an unwritable path would read as if the crypto had failed.
 try { writeFileSync(out, plain) }
 catch (e: any) { console.error(`\ndecrypted ${plain.length} B but could not write ${out}: ${e?.message ?? e}`); process.exit(1) }
-console.log(`\nrecovered ${plain.length} B → ${out}`)
+console.log(`\nrecovered ${plain.length} B -> ${out}`)
 
 // The negative result matters as much as the positive one: the ciphertext was
 // in hand the whole time and stayed useless until the key arrived from the

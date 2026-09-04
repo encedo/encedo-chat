@@ -366,7 +366,7 @@
   .b-reactions:empty{display:none}
   .rchip{font-size:12px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1px 6px;line-height:1.35}
   .typing{font-size:12px;color:var(--muted);font-style:italic;min-height:16px;padding:0 20px 4px}
-  /* "Replying to …" sits between the transcript and the composer, above the
+  /* "Replying to ..." sits between the transcript and the composer, above the
      border the composer already draws — a strip, not a modal: it must be
      dismissable with one thumb and never cover the message it quotes. */
   .reply-bar{display:flex;align-items:center;gap:8px;padding:8px 20px 0}
@@ -596,7 +596,7 @@
   .mention-pop .ga{min-width:22px;height:20px;flex-shrink:0;padding:0 5px;border-radius:7px;display:grid;place-items:center;
     font-size:10px;font-weight:700;color:var(--accent);background:var(--accent-soft)}
   @media (pointer:coarse){.b-text .lnk{padding:2px 8px}}
-  /* Inline row actions (rename/keys/members + the delete ×). Hidden until the
+  /* Inline row actions (rename/keys/members + the delete x). Hidden until the
      row is hovered on a mouse. Touch has no hover, and the old rule told HALF
      the story: it kept the pencils permanently lit while the delete × had no
      touch rule at all — rename reachable, delete IMPOSSIBLE on a phone, and a
@@ -707,7 +707,7 @@
   .drawer.open{transform:translateX(0)}
   .drawer h2{margin:0 0 4px;font-size:16px;color:var(--text)}
   .d-sub{font-size:12px;color:var(--muted);margin-bottom:18px}
-  /* Pinned while the drawer scrolls, so ✕ is always in reach. The negative
+  /* Pinned while the drawer scrolls, so [fail] is always in reach. The negative
      margins stretch it over the drawer's top padding (20px + the inset) — with
      top:0 alone the list would show through that strip above the header.
      ⚠️ The sticky offset is measured from the scroll container's CONTENT edge,
@@ -775,7 +775,7 @@
     .messages{padding:12px}
     .composer{padding:10px 12px calc(10px + env(safe-area-inset-bottom))}
     .reply-bar{padding:8px 12px 0}
-    /* ⚠️ ONLY the bottom strip. `.add-row` was in this rule too — the button
+    /* WARNING: ONLY the bottom strip. `.add-row` was in this rule too — the button
        under the tabs, at the TOP of the sidebar, carrying the phone's BOTTOM
        safe-area inset as padding. In a browser tab that inset is 0 and nothing
        showed; in the packaged APK the webview is full-screen, so it resolved to
@@ -1044,7 +1044,7 @@
             <button class="clip" id="btn-voice" hidden title="Nagraj głosówkę" data-i18n-title="Nagraj głosówkę" aria-label="Nagraj głosówkę"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1"/><path d="M12 18v4"/></svg></button>
             <button class="clip" id="btn-attach" title="Dołącz plik" data-i18n-title="Dołącz plik" aria-label="Dołącz plik">📎</button>
           </div>
-          <!-- Icon only, and a real SVG, not a glyph (the ⏻/✏ tofu rule). No
+          <!-- Icon only, and a real SVG, not a glyph (the /tofu rule). No
                data-i18n: applyDom writes textContent and would replace the SVG
                with words on a language switch — the label lives in the title. -->
           <button class="btn-send" id="send" title="Wyślij (Enter)" data-i18n-title="Wyślij (Enter)" aria-label="Wyślij"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9 22 2"/></svg></button></div>

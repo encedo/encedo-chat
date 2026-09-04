@@ -41,7 +41,7 @@ test('background stretches slowable timers only, and coming back re-arms', async
     stopS(); stopF()
     // RELATIVE margin, not absolute counts: the parallel suite stalls the
     // loop and shifts individual fires, but a stall slows both timers alike —
-    // the 4× ratio is what the feature promises, so the ratio is what the
+    // the 4x ratio is what the feature promises, so the ratio is what the
     // test pins (with slack for one boundary fire either way).
     assert.ok(fixedInBg >= 6, `fixed fired only ${fixedInBg}×`)
     assert.ok(slowInBg <= fixedInBg / 2, `slowable ${slowInBg}× vs fixed ${fixedInBg}× — not stretched`)

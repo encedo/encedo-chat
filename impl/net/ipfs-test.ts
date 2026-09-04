@@ -31,10 +31,10 @@ const CHUNK = 256 // small, so a modest payload still spans several chunks
 
 let pass = 0, fail = 0
 const ok = (c: boolean, msg: string, detail = '') => {
-  if (c) { pass++; console.log(`  ✔ ${msg}${detail ? ` — ${detail}` : ''}`) }
-  else { fail++; console.log(`  ✖ ${msg}${detail ? ` — ${detail}` : ''}`) }
+  if (c) { pass++; console.log(`  [ok] ${msg}${detail ? ` — ${detail}` : ''}`) }
+  else { fail++; console.log(`  [fail] ${msg}${detail ? ` — ${detail}` : ''}`) }
 }
-const step = (s: string) => console.log(`\n▸ ${s}`)
+const step = (s: string) => console.log(`\n${s}`)
 
 /**
  * When aimed at the RPC we speak Kubo's API directly; when aimed at an origin we
@@ -56,7 +56,7 @@ try {
   const plain = randomBytes(2000)
   const key = newFileKey()
   const { manifest, cipher } = await encryptBytes(key, plain, CHUNK)
-  ok(manifest.chunks === Math.ceil(2000 / CHUNK), 'chunked as planned', `${manifest.chunks} × ${CHUNK} B`)
+  ok(manifest.chunks === Math.ceil(2000 / CHUNK), 'chunked as planned', `${manifest.chunks} x ${CHUNK} B`)
   ok(!Buffer.from(cipher).includes(Buffer.from(plain.subarray(0, 16))),
     'the blob carries no plaintext the store could read')
 
@@ -87,7 +87,7 @@ try {
   }
 } catch (e: any) {
   fail++
-  console.log(`\n✖ aborted: ${e?.message ?? e}`)
+  console.log(`\n[fail] aborted: ${e?.message ?? e}`)
 }
 
 console.log(`\n${fail ? 'FAIL' : 'PASS'} — ${pass} ok, ${fail} failed`)

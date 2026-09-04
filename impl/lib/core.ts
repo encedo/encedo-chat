@@ -3,7 +3,7 @@
  * consume, so the UIs stay pure UI. Consolidates what used to be duplicated in
  * app.ts / chat-session.ts / bob / alice / ec:
  *   - Identity (HEM or software), the ECDH holder,
- *   - deriveRoom: ss = ECDH(IK_a, IK_b) → topic + interim keys,
+ *   - deriveRoom: ss = ECDH(IK_a, IK_b) -> topic + interim keys,
  *   - Conversation: transport (peer + relay dial) + join + the typing/away/leave
  *     state machine, behind sendText / noteActivity / leave.
  *
@@ -33,7 +33,7 @@ import { b64, unb64 } from './wc.ts'
 export interface Identity {
   handle: string
   pub: string // base64
-  ecdh(peerPubB64: string, peerKid?: string): Promise<Uint8Array> // raw 32-byte shared secret; peerKid → in-HSM two-KID ECDH
+  ecdh(peerPubB64: string, peerKid?: string): Promise<Uint8Array> // raw 32-byte shared secret; peerKid -> in-HSM two-KID ECDH
 }
 export type RoomParams = RvParams
 /** A chat peer: raw pubkey, plus an in-HSM `kid` when it's a HEM (imported) contact. */
@@ -45,8 +45,8 @@ export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: stri
     handle,
     pub,
     async ecdh(peerPubB64: string, peerKid?: string) {
-      const t = await hem.authorizePassword(null, `keymgmt:use:${kid}`) // cached derived key → no re-prompt
-      // HEM contact (imported → has a kid): two-KID ECDH, both operands in-device.
+      const t = await hem.authorizePassword(null, `keymgmt:use:${kid}`) // cached derived key -> no re-prompt
+      // HEM contact (imported -> has a kid): two-KID ECDH, both operands in-device.
       // Local / one-off contact (no kid): raw peer pubkey.
       return peerKid ? hem.ecdhKid(t, kid, peerKid) : hem.ecdh(t, kid, peerPubB64)
     },
@@ -67,7 +67,7 @@ export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: stri
  *   - roster MAC: one `ecdh` per member, memoised by the group engine and
  *     epoch-independent, so a membership change costs one call per NEW member
  *     and nothing at all for everyone already there.
- * The tokens are scoped per KID as the HEM requires; `authorizePassword(null,…)`
+ * The tokens are scoped per KID as the HEM requires; `authorizePassword(null,...)`
  * reuses the cached password-derived key, so this is not a re-prompt per call.
  */
 export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
@@ -283,7 +283,7 @@ export function hemContactBook(hem: any, ownerKid: string): ContactBook {
       const keys: any[] = await hem.searchKeys(listTok, peerSearchPrefix(ownerKid))
       const out: Contact[] = []
       // one getPubKey per contact — current FW's api/search doesn't return pubkeys.
-      // TODO(newer FW): api/search returns the public keys directly → drop this loop
+      // TODO(newer FW): api/search returns the public keys directly -> drop this loop
       // and read `pub` straight off the search entry (one call for the whole list).
       for (const k of keys) {
         out.push({ name: parsePeerDescr(k.description)?.name || '(?)', pub: await readPub(k.kid), kid: k.kid, source: 'hem' })
@@ -353,7 +353,7 @@ export interface ContactManager {
 
 /**
  * Merge a permanent (HEM) and a local book into one: `list()` concatenates both,
- * `add(…, persistent)` routes (HEM vs local), `remove(c)` routes by `c.source`.
+ * `add(..., persistent)` routes (HEM vs local), `remove(c)` routes by `c.source`.
  */
 export function mergedContactBook(hem: ContactBook, local: ContactBook): ContactManager {
   return {
@@ -511,8 +511,8 @@ export interface Conversation {
   /** Send a file's metadata — CID, key, manifest. The bytes were encrypted and
    *  uploaded before this; the store never sees any of these fields. */
   sendFile(f: FileMeta): string
-  noteActivity(): void // UI calls on user input → drives "typing" + resets "away"
-  noteAway(): void // UI calls on blur/tab-hidden → "away" now
+  noteActivity(): void // UI calls on user input -> drives "typing" + resets "away"
+  noteAway(): void // UI calls on blur/tab-hidden -> "away" now
   noteBack(): void // UI calls when the window comes back into view — "I'm back" without pretending to type
   refresh(): void | Promise<void> // UI calls when the tab becomes visible again (throttled/frozen)
   who(): string[]
@@ -580,7 +580,7 @@ export interface ClientSession {
    * hangs up and re-dials immediately.
    */
   setRelays(list: string[]): void
-  /** A read-only transport snapshot for the Network tab (relay, link, topics…). */
+  /** A read-only transport snapshot for the Network tab (relay, link, topics...). */
   netStatus(): NetStatus
   /** Stop every room and the transport. */
   close(): Promise<void>
@@ -708,7 +708,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     if (viaMqtt) return node.reconnect()
     const connectedTo = await failoverDial(candidates, (addr, signal) => dial(node, addr, { signal }))
     if (connectedTo !== activeRelay) {
-      log(`failover: connecting via ${connectedTo.slice(0, 46)}…`)
+      log(`failover: connecting via ${connectedTo.slice(0, 46)}...`)
       activeRelay = connectedTo
       opts.onRelay?.(connectedTo)
     }
@@ -729,7 +729,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     }
   }
   const self = node.peerId.toString()
-  log(`session up over ${viaMqtt ? 'MQTT' : 'libp2p'} in ${Date.now() - dialT0} ms as ${self.slice(0, 12)}…`)
+  log(`session up over ${viaMqtt ? 'MQTT' : 'libp2p'} in ${Date.now() - dialT0} ms as ${self.slice(0, 12)}...`)
 
   /** Every room open on this transport — refreshed, flushed and stopped together. */
   interface OpenRoom { refresh(): void; flushPending(): void; stop(): void; sendPresence(s: any): void }
@@ -872,7 +872,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
         onLog: opts.onLog,
       })
       presence.set(peer.pub, { peer, watch })
-    } catch (e: any) { log(`presence watch for ${peer.pub.slice(0, 12)}… failed: ${e?.message ?? e}`) }
+    } catch (e: any) { log(`presence watch for ${peer.pub.slice(0, 12)}... failed: ${e?.message ?? e}`) }
   }
   const stopWatch = (pub: string) => { presence.get(pub)?.watch.stop(); presence.delete(pub); upgradeDate.delete(pub) }
 
@@ -918,7 +918,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
         offsetMs: selfOffsetMs,
         onTakenOver: (byPeer) => {
           void (async () => {
-            await shutdown(`a second window of this identity appeared (${byPeer.slice(0, 12)}…)`)
+            await shutdown(`a second window of this identity appeared (${byPeer.slice(0, 12)}...)`)
             opts.onSessionTakenOver?.(byPeer)
           })()
         },
@@ -1011,7 +1011,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     groups,
     async openGroup(gidHex: string, handlers: GroupRoomOpts) {
       const gs = groups.session(gidHex)
-      if (!gs) throw new Error(`openGroup: unknown group ${gidHex.slice(0, 12)}…`)
+      if (!gs) throw new Error(`openGroup: unknown group ${gidHex.slice(0, 12)}...`)
       return joinGroup(node, gs, handlers)
     },
     async refresh() {
@@ -1054,12 +1054,12 @@ async function openRoom(
   // handshake completes, not (only) when presence says the peer joined.
   let plane: WebRTCPlane | null = null
   const onSecurity: Eh2Options['onState'] = (p, state) => {
-    log(`security: ${state} with ${p.slice(0, 12)}…`)
+    log(`security: ${state} with ${p.slice(0, 12)}...`)
     opts.onSecurity?.(p, state)
     if (state === 'established') plane?.onPeer(p)
   }
   const { topic, keys } = await deriveRoom(id, peer, params, { onState: onSecurity, ss: opts.ss })
-  log(`room derived: topic ${topic.slice(0, 16)}…`)
+  log(`room derived: topic ${topic.slice(0, 16)}...`)
 
   const room = joinChat(node, topic, keys, {
     onMessage: opts.onMessage,
@@ -1078,7 +1078,7 @@ async function openRoom(
     onGroupSkd: opts.onGroupSkd,
     onGroupSkdReq: opts.onGroupSkdReq,
     // The peer reloaded: rebind the data plane onto the PeerId that is alive.
-    onPeerReplaced: (old, now) => { log(`peer ${old.slice(0, 12)}… is now ${now.slice(0, 12)}… — rebinding the data plane`); plane?.onPeer(now) },
+    onPeerReplaced: (old, now) => { log(`peer ${old.slice(0, 12)}... is now ${now.slice(0, 12)}... — rebinding the data plane`); plane?.onPeer(now) },
     heartbeatMs: opts.heartbeatMs,
     onLog: opts.onLog,
     onDelivered: (mid, ms) => { log(`delivered ${mid} in ${ms} ms`); opts.onDelivered?.(mid, ms) },
@@ -1089,7 +1089,7 @@ async function openRoom(
     // dead — `getConnections()` still reports a connection nothing has tried to
     // write to, which is why an offline tab used to look perfectly healthy.
     onIsolated: host.onIsolated,
-    onForeign: (p) => { log(`foreign peer in the room: ${p.slice(0, 12)}… — its handshake does not verify`); opts.onForeign?.(p) },
+    onForeign: (p) => { log(`foreign peer in the room: ${p.slice(0, 12)}... — its handshake does not verify`); opts.onForeign?.(p) },
   })
   // Feature-detect the webview's WebRTC: WebKitGTK (the Tauri shell on Linux) ships
   // without RTCPeerConnection, so attaching the plane would throw `new
@@ -1117,7 +1117,7 @@ async function openRoom(
   // presence, without the typing notice. Reported live — coming back from the
   // tray left the peer seeing "away" until the first keystroke, because the
   // only road out of `away` ran through noteActivity, which also says
-  // "pisze…" about somebody who has not touched a key.
+  // "pisze..." about somebody who has not touched a key.
   const noteBack = () => { if (away) { away = false; room.sendPresence('active') } armAway() }
 
   return {
@@ -1147,7 +1147,7 @@ async function openRoom(
     who: () => room.who(),
     secured: () => room.secured(),
     leave: async () => {
-      log(`leaving room ${topic.slice(0, 12)}…`)
+      log(`leaving room ${topic.slice(0, 12)}...`)
       clearTimeout(tT); clearTimeout(aT)
       unregister()
       try { room.sendPresence('leave') } catch {}

@@ -8,7 +8,7 @@
  * client's arrival costs the relay, churned open+close as fast as possible.
  *
  * The question it answers: a relay is a single Node process. Does giving it a
- * second core raise this number, or is it single-core-bound (→ scale by running
+ * second core raise this number, or is it single-core-bound (-> scale by running
  * more processes / sharding, not by adding vCPU)? Pin the relay with `taskset`
  * to 1 core vs 2 and compare the rate here against the relay's own CPU%.
  */
@@ -16,7 +16,7 @@
 import { createPeer, dial } from './peer.ts'
 
 const RELAY = process.env.RELAY
-if (!RELAY) { console.error('set RELAY=/ip4/…/ws/p2p/<id>'); process.exit(2) }
+if (!RELAY) { console.error('set RELAY=/ip4/.../ws/p2p/<id>'); process.exit(2) }
 const SECONDS = Number(process.argv[2] ?? 15)
 const CONC = Number(process.argv[3] ?? 24)
 
@@ -43,5 +43,5 @@ console.log(`relay-hsrate — ${CONC} concurrent, ${SECONDS}s, full libp2p hands
 const t0 = Date.now()
 await Promise.all(Array.from({ length: CONC }, worker))
 const secs = (Date.now() - t0) / 1000
-console.log(`${ok} handshakes in ${secs.toFixed(1)}s → ${Math.round(ok / secs)}/s   (fail ${fail}, latency p50/p95 ${Math.round(pct(lat, 0.5))}/${Math.round(pct(lat, 0.95))} ms)`)
+console.log(`${ok} handshakes in ${secs.toFixed(1)}s -> ${Math.round(ok / secs)}/s   (fail ${fail}, latency p50/p95 ${Math.round(pct(lat, 0.5))}/${Math.round(pct(lat, 0.95))} ms)`)
 process.exit(0)

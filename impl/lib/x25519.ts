@@ -34,7 +34,7 @@ const PKCS8_X25519 = new Uint8Array([
 const BASEPOINT = new Uint8Array(32); BASEPOINT[0] = 9
 
 /**
- * Build a `Dh` from raw private-key bytes. For known-answer tests (fixed keys →
+ * Build a `Dh` from raw private-key bytes. For known-answer tests (fixed keys ->
  * reproducible SK) and for keystores that hold a raw scalar. The public key is
  * recovered as X25519(priv, basepoint) — WebCrypto cannot export it from a
  * private key directly.

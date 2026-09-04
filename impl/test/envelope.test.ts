@@ -36,13 +36,13 @@ test('every envelope carries v / id / ts / seq', () => {
 
 test('unknown type decodes (forward-compat); bad shape / version / garbage drop', () => {
   const unknown = decodeEnvelope(te.encode(JSON.stringify({ v: 1, t: 'future', id: 'x', ts: 1, seq: 1, foo: 42 }))) as any
-  assert.equal(unknown?.t, 'future') // valid base, unknown type → carried
+  assert.equal(unknown?.t, 'future') // valid base, unknown type -> carried
   assert.equal(decodeEnvelope(te.encode(JSON.stringify({ v: 1, t: 'msg', id: 'x', ts: 1, seq: 1 }))), null) // msg missing body
   assert.equal(decodeEnvelope(te.encode(JSON.stringify({ v: 2, t: 'msg', id: 'x', ts: 1, seq: 1, body: 'a', format: 'plain' }))), null) // wrong version
   assert.equal(decodeEnvelope(te.encode('nonsense')), null)
 })
 
-test('full pipe: envelope → encode → decode (crypto-agnostic — the Session seals opaque bytes)', async () => {
+test('full pipe: envelope -> encode -> decode (crypto-agnostic — the Session seals opaque bytes)', async () => {
   const pt = encodeEnvelope(envMsg(9, 'end to end'))
   assert.notEqual(pt, null)
   const d = decodeEnvelope(pt!) as any

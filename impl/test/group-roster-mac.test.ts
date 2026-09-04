@@ -62,7 +62,7 @@ test('an SKD whose gid does not match its GK is rejected (binding)', async () =>
 test('same-epoch key redistribution needs NO roster MAC', async () => {
   const { A, B, gid, skdB } = await setup()
   await B.mgr.applySkd(A.id.pub, skdB) // B is now at epoch 0
-  const aSame = (await A.mgr.skdFor(gid))! // no recipient named → no rmac
+  const aSame = (await A.mgr.skdFor(gid))! // no recipient named -> no rmac
   assert.equal(aSame.rmac, undefined)
-  await B.mgr.applySkd(A.id.pub, aSame) // same epoch, key-only → must not throw
+  await B.mgr.applySkd(A.id.pub, aSame) // same epoch, key-only -> must not throw
 })

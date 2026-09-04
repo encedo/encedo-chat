@@ -55,7 +55,7 @@ test('a different identity secret does not verify either', async () => {
 })
 
 /**
- * ⚠️ The case that decides whether this can ship. Every book in the wild is
+ * WARNING: The case that decides whether this can ship. Every book in the wild is
  * unsigned, and refusing them would lock people out of their own contacts to
  * introduce a security feature — a worse outcome than the risk being closed. So
  * an unsigned book is read, and signed on the next write.

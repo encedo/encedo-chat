@@ -51,7 +51,7 @@ function trimTrailing(s: string): string {
     const c = s[end - 1]
     if ('.,;:!?'.includes(c)) { end--; continue }
     // A closing bracket is only sentence punctuation if it closes something the
-    // URL never opened. `…/X_(Y)` is balanced and keeps its bracket; `(…/x)` is
+    // URL never opened. `.../X_(Y)` is balanced and keeps its bracket; `(.../x)` is
     // not, and gives it back to the sentence.
     if (c === ')' || c === ']' || c === '}') {
       const open = { ')': '(', ']': '[', '}': '{' }[c]!

@@ -7,11 +7,11 @@
  *
  *   node relay.mjs --pass <secret> --port 9001 [--host bs1.onchato.com] [--peers <ma>...]
  *                  [--max-topics 250] [--idle-ttl 120]
- *   DUMP=<dir> node relay.mjs …   — debug/audit: every observable action to JSONL
+ *   DUMP=<dir> node relay.mjs ...   — debug/audit: every observable action to JSONL
  *                                  (dump.mjs). NEVER on production.
  *
- * ⚠️ --pass is the Ed25519 seed → the relay's PeerId. Production MUST keep
- *    --pass bs1.onchato.com so the PeerId stays 12D3KooWP6Sp…cDmp — clients
+ * WARNING: --pass is the Ed25519 seed -> the relay's PeerId. Production MUST keep
+ *    --pass bs1.onchato.com so the PeerId stays 12D3KooWP6Sp...cDmp — clients
  *    carry that multiaddr hardcoded; change the pass and every client breaks.
  */
 
@@ -65,8 +65,8 @@ const IDLE_TTL = parseInt(get('--idle-ttl', '120')) * 1000
 // editing this file (a local edit conflicts on every git pull). Default sized for
 // 512 clients + inter-relay headroom; a load test passes e.g. --max-connections 50000.
 const MAX_CONNS = parseInt(get('--max-connections', '520'))
-// DUMP=<dir> → full JSONL trace of everything the relay observes (see dump.mjs).
-// Null when unset — every use below is `dump?.…`, so production runs no dump
+// DUMP=<dir> -> full JSONL trace of everything the relay observes (see dump.mjs).
+// Null when unset — every use below is `dump?.<call>`, so production runs no dump
 // code at all. Created BEFORE the node: its X-Real-IP capture wraps
 // http.createServer, which libp2p calls when it opens the WebSocket listener.
 const dump = createDump(process.env.DUMP)
@@ -75,11 +75,11 @@ const seed    = createHash('sha256').update(PASS).digest()
 const privKey = await generateKeyPairFromSeed('Ed25519', seed)
 const peerId  = peerIdFromPrivateKey(privKey)
 
-console.log(`\n🔑 Pass: "${PASS}" → PeerId: ${peerId.toString()}`)
+console.log(`\nPass: "${PASS}" -> PeerId: ${peerId.toString()}`)
 
 const relay = await createLibp2p({
   privateKey: privKey,
-  // IPv4 on PORT for the nginx path (0.0.0.0 — unchanged, nginx→127.0.0.1:PORT).
+  // IPv4 on PORT for the nginx path (0.0.0.0 — unchanged, nginx->127.0.0.1:PORT).
   // Optionally ALSO listen on IPv6 on a SEPARATE V6PORT for inter-relay peering
   // over a provider's private network — never on PORT itself (`::` + 0.0.0.0 on
   // one port collides when bindv6only=0). nginx is NOT on this path: a peer dials
@@ -87,7 +87,7 @@ const relay = await createLibp2p({
   addresses: { listen: [`/ip4/0.0.0.0/tcp/${PORT}/ws`, ...(V6PORT ? [`/ip6/${V6HOST}/tcp/${V6PORT}/ws`] : [])] },
   // Keep any ws/wss multiaddr INCLUDING the `/http-path/%2Frelay/` form the
   // production nodes advertise (WSS via nginx). The default `all` filter rejects
-  // http-path when DIALING, so `--peers /dns4/bs1…/wss/http-path/…` failed with
+  // http-path when DIALING, so `--peers /dns4/bs1.../wss/http-path/...` failed with
   // NoValidAddressesError — the relays never connected and the mesh never bridged.
   // Same fix as the client's net/peer.ts.
   transports: [webSockets({ filter: (addrs) => addrs.filter((ma) => /\/(wss?)(\/|$)/.test(ma.toString())) })],
@@ -125,7 +125,7 @@ const relay = await createLibp2p({
       maxMessageSize: 65536,  // 64 KB — enough for encrypted text, prevents flood abuse
       historyLength: 2,       // keep last 2 windows (~2 min) instead of default 5
       historyGossip: 1,       // advertise only last window in gossip announcements
-      // ⚠️ Turn OFF the IP-colocation penalty. GossipSub's default punishes
+      // WARNING: Turn OFF the IP-colocation penalty. GossipSub's default punishes
       // peers sharing an IP (-5 per peer above 10, squared) because in a public
       // blockchain mesh that pattern means a sybil. Here it means a household,
       // an office or a VPN — normal users. Worse: a peer whose score is not
@@ -176,16 +176,16 @@ relay.services.pubsub.addEventListener('subscription-change', (evt) => {
 })
 
 relay.services.pubsub.addEventListener('message', (evt) => {
-  lastSeen.set(evt.detail.topic, Date.now()) // heartbeat announces count → live rooms stay
+  lastSeen.set(evt.detail.topic, Date.now()) // heartbeat announces count -> live rooms stay
   // Metadata only. The payload is ciphertext (and with EH-2 it is binary, so
   // decoding it printed garbage anyway) — logging it just parked user metadata
   // in journald for no operational benefit.
   const from = evt.detail.from.toString().slice(0, 12)
-  console.log(`[msg:${evt.detail.topic.slice(0, 12)}…] ${from}… ${evt.detail.data.length} B`)
+  console.log(`[msg:${evt.detail.topic.slice(0, 12)}...] ${from}... ${evt.detail.data.length} B`)
 })
 
-// evict abandoned topics: no activity (not even a heartbeat) for IDLE_TTL → all
-// clients gone → free the slot so the cap counts live rooms, not historical ones.
+// evict abandoned topics: no activity (not even a heartbeat) for IDLE_TTL -> all
+// clients gone -> free the slot so the cap counts live rooms, not historical ones.
 setInterval(() => {
   const now = Date.now()
   for (const topic of relay.services.pubsub.getTopics()) {
@@ -200,7 +200,7 @@ setInterval(() => {
 
 relay.addEventListener('peer:connect', (evt) => console.log('[+]', evt.detail.toString().slice(0, 16) + '...'))
 relay.addEventListener('peer:disconnect', (evt) => console.log('[-]', evt.detail.toString().slice(0, 16) + '...'))
-// connections, subscriptions, every frame, reservations, start/stop → JSONL
+// connections, subscriptions, every frame, reservations, start/stop -> JSONL
 dump?.attach(relay, { flags: args })
 
 // Keep the inter-relay links UP. A one-shot dial is a lottery — it can time out
@@ -214,30 +214,30 @@ if (PEERS.length > 0) {
     const pid = ma.getPeerId()
     const ensure = async () => {
       if (pid && relay.getConnections().some((c) => c.remotePeer.toString() === pid)) return
-      try { await relay.dial(ma); console.log(`  ✓ ${addr.slice(0, 60)}`) }
-      catch (e) { console.log(`  ✗ ${addr.slice(0, 50)}… (${e.message}) — ponawiam`) }
+      try { await relay.dial(ma); console.log(`  [ok] ${addr.slice(0, 60)}`) }
+      catch (e) { console.log(`  [fail] ${addr.slice(0, 50)}... (${e.message}) — ponawiam`) }
     }
     await ensure()
     setInterval(() => { void ensure() }, 10_000)
   }
 }
 
-console.log(`\n✅ Relay uruchomiony na porcie ${PORT}`)
+console.log(`\n[ok] Relay uruchomiony na porcie ${PORT}`)
 // Print the topic budget: it is the setting that decides whether a room forms
 // at all, and after a deploy it is the one line that proves which build is up.
-console.log(`📦 Tematy: limit ${MAX_TOPICS} równoczesnych, eviction po ${IDLE_TTL / 1000}s ciszy (sweep ${SWEEP_MS / 1000}s)`)
-console.log(`🔌 Połączenia: limit ${MAX_CONNS}`)
+console.log(`Tematy: limit ${MAX_TOPICS} równoczesnych, eviction po ${IDLE_TTL / 1000}s ciszy (sweep ${SWEEP_MS / 1000}s)`)
+console.log(`Połączenia: limit ${MAX_CONNS}`)
 // Loud on purpose: this line's ABSENCE from the journal is what proves a node
 // ran without the dump. Nothing is printed when DUMP is unset.
-if (dump) console.log(`🧾 DUMP ON → ${dump.dir}  (events-*.jsonl + payload-*.jsonl, pełne peer id, IP z X-Real-IP — NIE na produkcji)`)
+if (dump) console.log(`DUMP ON -> ${dump.dir}  (events-*.jsonl + payload-*.jsonl, pełne peer id, IP z X-Real-IP — NIE na produkcji)`)
 if (HOST) {
-  console.log(`📋 Adres produkcyjny (WSS przez nginx):`)
+  console.log(`Adres produkcyjny (WSS przez nginx):`)
   console.log(`   /dns4/${HOST}/tcp/443/wss/http-path/%2Frelay/p2p/${peerId.toString()}`)
 }
-console.log(`📋 Adres lokalny (WS bezpośredni):`)
+console.log(`Adres lokalny (WS bezpośredni):`)
 console.log(`   /ip4/127.0.0.1/tcp/${PORT}/ws/p2p/${peerId.toString()}`)
 if (V6PORT) {
-  console.log(`📋 Adres IPv6 dla peerów (--peers na drugim relay, wstaw ten host IPv6):`)
+  console.log(`Adres IPv6 dla peerów (--peers na drugim relay, wstaw ten host IPv6):`)
   console.log(`   /ip6/<ten-host-ipv6>/tcp/${V6PORT}/ws/p2p/${peerId.toString()}`)
 }
 console.log('')

@@ -1,7 +1,7 @@
 /**
  * crypto-bench.ts — the engine-cost numbers `performance.md` cites, made
- * reproducible. The originals (2026-07-31: 20 handshakes ≈ 66 ms, 1000 sealed
- * round trips ≈ 417 ms) were measured with an ad-hoc script that never got
+ * reproducible. The originals (2026-07-31: 20 handshakes ~ 66 ms, 1000 sealed
+ * round trips ~ 417 ms) were measured with an ad-hoc script that never got
  * checked in — so the table was uncheckable and CLAUDE.md quoted numbers nobody
  * could re-derive. This is that script, versioned.
  *
@@ -54,8 +54,8 @@ async function main() {
   const rtMs = ms(process.hrtime.bigint() - t0)
 
   console.log(`crypto-bench — ${process.arch}, node ${process.version}`)
-  console.log(`  ${HANDSHAKES} full EH-2 handshakes, both sides: ${hsMs.toFixed(0)} ms  → ${(hsMs / HANDSHAKES).toFixed(2)} ms each`)
-  console.log(`  ${ROUNDTRIPS} sealed round trips (one ratchet): ${rtMs.toFixed(0)} ms  → ${(rtMs / ROUNDTRIPS).toFixed(3)} ms/msg`)
+  console.log(`  ${HANDSHAKES} full EH-2 handshakes, both sides: ${hsMs.toFixed(0)} ms  -> ${(hsMs / HANDSHAKES).toFixed(2)} ms each`)
+  console.log(`  ${ROUNDTRIPS} sealed round trips (one ratchet): ${rtMs.toFixed(0)} ms  -> ${(rtMs / ROUNDTRIPS).toFixed(3)} ms/msg`)
 }
 
 main().catch((e) => { console.error(e); process.exit(1) })

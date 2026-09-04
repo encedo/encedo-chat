@@ -114,9 +114,9 @@ test('the CRC rejects a set that resolved to the wrong key', async () => {
   const collided = m.hints.slice()
   const forged = { ...m, hints: collided }
   const local = [members[0], members[1], impostor].map((pub) => ({ pub }))
-  // The impostor cannot answer member[2]'s hint, so this fails on resolution…
+  // The impostor cannot answer member[2]'s hint, so this fails on resolution...
   assert.equal(await resolveRoster(forged, local), null)
-  // …and a doctored CRC over a genuinely different set fails the check too.
+  // ...and a doctored CRC over a genuinely different set fails the check too.
   const wrongCrc = { ...m, crc: (m.crc ^ 0xffff) >>> 0 }
   assert.equal(await resolveRoster(wrongCrc, members.map((pub) => ({ pub }))), null, 'CRC mismatch is a refusal, not a warning')
 })

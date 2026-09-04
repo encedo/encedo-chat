@@ -70,10 +70,10 @@ function ask(msg: Buffer, ms = 2500): Promise<Buffer | null> {
 const req = request()
 const t0 = Date.now()
 const answer = await ask(req)
-if (!answer) { console.error(`✗ ${host}:${port} — no answer in 2.5 s (blocked, or the service is down)`); process.exit(1) }
+if (!answer) { console.error(`[fail] ${host}:${port} — no answer in 2.5 s (blocked, or the service is down)`); process.exit(1) }
 const addr = reflexive(answer, req.subarray(8, 20))
-if (!addr) { console.error(`✗ ${host}:${port} answered ${answer.length} B but not a Binding Success we can read`); process.exit(1) }
-console.log(`✓ ${host}:${port} → you look like ${addr}  (${Date.now() - t0} ms, ${answer.length} B)`)
+if (!addr) { console.error(`[fail] ${host}:${port} answered ${answer.length} B but not a Binding Success we can read`); process.exit(1) }
+console.log(`[ok] ${host}:${port} -> you look like ${addr}  (${Date.now() - t0} ms, ${answer.length} B)`)
 
 if (alsoBad) {
   const cases: Array<[string, Buffer]> = [
@@ -88,10 +88,10 @@ if (alsoBad) {
   let bad = 0
   for (const [what, msg] of cases) {
     const got = await ask(msg, 1200)
-    if (got) { console.error(`  ✗ ANSWERED: ${what} (${got.length} B)`); bad++ }
-    else console.log(`  ✓ ignored: ${what}`)
+    if (got) { console.error(`  [fail] ANSWERED: ${what} (${got.length} B)`); bad++ }
+    else console.log(`  [ok] ignored: ${what}`)
   }
   if (bad) { console.error(`\n${bad} datagram(s) that must be dropped got a reply — this is a reflector`); process.exit(1) }
-  console.log('\n✓ everything that is not a Binding Request was dropped')
+  console.log('\n[ok] everything that is not a Binding Request was dropped')
 }
 process.exit(0)

@@ -69,8 +69,8 @@ async function serviceProbe(): Promise<string> {
     })
     const ms = now() - t0
     A.stop(); B.stop(); await nA.stop(); await nB.stop()
-    return met ? `✔ a real pair met in ${ms} ms (relay still serving)` : `✖ a real pair could NOT meet within 25 s (relay degraded)`
-  } catch (e: any) { return `✖ probe failed: ${e?.message ?? e}` }
+    return met ? `[ok] a real pair met in ${ms} ms (relay still serving)` : `[fail] a real pair could NOT meet within 25 s (relay degraded)`
+  } catch (e: any) { return `[fail] probe failed: ${e?.message ?? e}` }
 }
 
 async function hold() {
@@ -104,7 +104,7 @@ async function hold() {
       let note = ''
       // If a big fraction is failing, the server is refusing — the interesting
       // number is where that began, so record it and ease off.
-      if (failed > 50 && failed > attempted * 0.15) { note = '← refusing'; stop = true }
+      if (failed > 50 && failed > attempted * 0.15) { note = '<- refusing'; stop = true }
       console.log(
         `${String(attempted).padStart(9)}${String(liveNow).padStart(6)}${String(failed).padStart(8)}`
         + `${(Math.round(pct(recent, 0.5)) + '/' + Math.round(pct(recent, 0.95))).padStart(15)}`
@@ -117,9 +117,9 @@ async function hold() {
 
   const live = open.filter((w) => w.readyState === 1).length
   console.log(`\npeak: ${live} sockets held open (of ${attempted} attempted)`)
-  if (fails.size) for (const [why, n] of [...fails.entries()].sort((a, b) => b[1] - a[1])) console.log(`  ✖ ${n}× ${why}`)
+  if (fails.size) for (const [why, n] of [...fails.entries()].sort((a, b) => b[1] - a[1])) console.log(`  [fail] ${n}x ${why}`)
   console.log('\nfinal service probe: ' + (await serviceProbe()))
-  console.log('holding 8s, then releasing…')
+  console.log('holding 8s, then releasing...')
   await new Promise((r) => setTimeout(r, 8_000))
   for (const w of open) { try { w.close() } catch {} }
 }
@@ -143,14 +143,14 @@ async function churn() {
   const t0 = now()
   await Promise.all(Array.from({ length: CONC }, worker))
   const secs = (now() - t0) / 1000
-  console.log(`completed ${opened} full connect+close in ${secs.toFixed(1)}s → ${Math.round(opened / secs)}/s sustained`)
+  console.log(`completed ${opened} full connect+close in ${secs.toFixed(1)}s -> ${Math.round(opened / secs)}/s sustained`)
   console.log(`failures: ${failed}   connect latency p50/p95: ${Math.round(pct(lat, 0.5))}/${Math.round(pct(lat, 0.95))} ms`)
-  if (fails.size) for (const [why, n] of [...fails.entries()].sort((a, b) => b[1] - a[1])) console.log(`  ✖ ${n}× ${why}`)
+  if (fails.size) for (const [why, n] of [...fails.entries()].sort((a, b) => b[1] - a[1])) console.log(`  [fail] ${n}x ${why}`)
   console.log('\nservice probe after the churn: ' + (await serviceProbe()))
 }
 
 if (MODE === 'hold') await hold()
 else if (MODE === 'churn') await churn()
-else { console.error('usage: relay-flood.ts <hold|churn> …'); process.exit(2) }
+else { console.error('usage: relay-flood.ts <hold|churn> ...'); process.exit(2) }
 console.log('\ndone')
 process.exit(0)

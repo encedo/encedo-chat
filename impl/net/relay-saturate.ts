@@ -2,7 +2,7 @@
  * relay-saturate.ts — how many clients can the relay hold AT ONCE?
  *
  *   node net/relay-saturate.ts [max] [per-second]     # default: 600 clients, 4/s
- *   RELAY=/ip4/… node net/relay-saturate.ts 200 20
+ *   RELAY=/ip4/... node net/relay-saturate.ts 200 20
  *
  * The static counterpart to `relay-load.ts`. That one asks "what happens when
  * everyone calls at the same moment"; this one asks "how many can be on the line
@@ -32,7 +32,7 @@ const nodes: any[] = []
 const failures = new Map<string, number>()
 let refused = 0
 
-console.log(`relay-saturate — ${RELAY.slice(0, 52)}…`)
+console.log(`relay-saturate — ${RELAY.slice(0, 52)}...`)
 console.log(`target ${MAX} clients at ${PER_SEC}/s, then hold ${HOLD_MS / 1000}s\n`)
 console.log('opened  live  refused   rss    elapsed')
 
@@ -63,9 +63,9 @@ for (let i = 0; i < MAX; i++) {
 
 const peak = nodes.filter((n) => n.getConnections().length > 0).length
 console.log(`\npeak live connections: ${peak} (of ${nodes.length} opened, ${refused} refused)`)
-if (failures.size) for (const [why, n] of failures) console.log(`  ✖ ${n}× ${why}`)
+if (failures.size) for (const [why, n] of failures) console.log(`  [fail] ${n}x ${why}`)
 
-console.log(`holding ${HOLD_MS / 1000}s to see whether the relay prunes…`)
+console.log(`holding ${HOLD_MS / 1000}s to see whether the relay prunes...`)
 await new Promise((r) => setTimeout(r, HOLD_MS))
 const held = nodes.filter((n) => n.getConnections().length > 0).length
 console.log(`still live after the hold: ${held}${held < peak ? `  (${peak - held} were dropped)` : '  (none dropped)'}`)

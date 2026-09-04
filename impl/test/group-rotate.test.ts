@@ -1,6 +1,6 @@
 /**
  * Epoch rotation on a membership change (`GroupManager.rekey`, §8). A membership
- * change mints a new epoch: a new group_secret (→ a new topic) and fresh sending
+ * change mints a new epoch: a new group_secret (-> a new topic) and fresh sending
  * keys. The removed member, stuck at the old epoch, can neither find the new topic
  * nor open new messages; a newcomer joins at the new epoch and reads from there.
  */
@@ -49,7 +49,7 @@ test('removing a member rotates the epoch + topic and locks it out', async () =>
   assert.equal(await B.mgr.session(gid)!.topic(), newTopic)
   assert.equal(await C.mgr.session(gid)!.topic(), oldTopic, 'C is stuck on the old topic (never got the new secret)')
 
-  // A broadcasts at the new epoch: B reads it, C cannot (wrong epoch → MAC fails).
+  // A broadcasts at the new epoch: B reads it, C cannot (wrong epoch -> MAC fails).
   const frame = await A.mgr.session(gid)!.send(body('after removal'))
   assert.deepEqual((await B.mgr.session(gid)!.receive(frame))?.pt, body('after removal'))
   assert.equal(await C.mgr.session(gid)!.receive(frame), null, 'the removed member cannot open the new-epoch message')

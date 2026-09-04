@@ -38,7 +38,7 @@ export interface PresenceWatch {
    * Tear the watch down. `unsubscribe` defaults to true (full teardown); pass
    * FALSE to hand the topic OFF to a room being opened on it — the subscription
    * (and its warm GossipSub mesh) stays, so the room reuses it instead of the
-   * node leaving and re-grafting, which stalled the presence→conversation upgrade.
+   * node leaving and re-grafting, which stalled the presence->conversation upgrade.
    */
   stop(unsubscribe?: boolean): void
 }
@@ -47,7 +47,7 @@ export interface PresenceOpts {
   heartbeatMs?: number
   onOnline: () => void
   onOffline: () => void
-  /** An EH-2 frame arrived on the topic → the contact wants to talk; upgrade. */
+  /** An EH-2 frame arrived on the topic -> the contact wants to talk; upgrade. */
   onIncomingHandshake: (frame: Uint8Array, from: string) => void
   onLog?: (msg: string, level?: 'info' | 'debug') => void
 }
@@ -79,7 +79,7 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
     if (seenNonces.has(res.nonce!)) return
     seenNonces.add(res.nonce!)
     lastSeen = nowMs()
-    if (!online) { online = true; log(`contact online on ${topic.slice(0, 12)}…`); opts.onOnline() }
+    if (!online) { online = true; log(`contact online on ${topic.slice(0, 12)}...`); opts.onOnline() }
   }
 
   node.services.pubsub.addEventListener('message', handler)
@@ -104,7 +104,7 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
   // on the receiving side tolerates that as-is (rooms do NOT slow; see there).
   const stopHb = alignedTimer(() => void announce(), heartbeatMs, { slowable: true })
   const sweep = setInterval(() => {
-    if (online && nowMs() - lastSeen > ttlMs) { online = false; log(`contact silent on ${topic.slice(0, 12)}… → offline`); opts.onOffline() }
+    if (online && nowMs() - lastSeen > ttlMs) { online = false; log(`contact silent on ${topic.slice(0, 12)}... -> offline`); opts.onOffline() }
   }, Math.min(heartbeatMs, 15_000))
   ;(sweep as any).unref?.()
 
@@ -161,7 +161,7 @@ export function nextRotationAfter(now: number, offsetMs: number): number {
 
 /**
  * Which day-topics should be LIVE for this pair at `now`. Normally just the
- * current rendezvous day; within ±`overlapMs` of the pair's rotation instant
+ * current rendezvous day; within +/-`overlapMs` of the pair's rotation instant
  * (`midnight + offset`), that day AND the adjacent one, so the two members cross
  * together on a shared topic. Pure and deterministic. `[0]` is always the
  * current rendezvous day (the primary the room hands off to). With `offsetMs=0`
@@ -178,13 +178,13 @@ export function activeDatesForOffset(now: number, offsetMs: number, cfg: Rotatio
 }
 
 export interface RotatingPresenceOpts extends RotationConfig {
-  /** Seconds-of-day×1000 at which THIS pair rotates (`rotationOffsetSec`×1000).
+  /** Seconds-of-dayx1000 at which THIS pair rotates (`rotationOffsetSec`x1000).
    *  Default 0 = rotate at 00:00 UTC. Both members pass the same value. */
   offsetMs?: number
   heartbeatMs?: number
   onOnline: () => void
   onOffline: () => void
-  /** An EH-2 frame arrived on `dateUTC`'s topic → upgrade the conversation ON
+  /** An EH-2 frame arrived on `dateUTC`'s topic -> upgrade the conversation ON
    *  THAT DATE, so the room lands on the exact topic the handshake is using. */
   onIncomingHandshake: (frame: Uint8Array, from: string, dateUTC: string) => void
   onLog?: (msg: string, level?: 'info' | 'debug') => void

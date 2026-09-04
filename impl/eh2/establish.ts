@@ -8,11 +8,11 @@
  * what to send in reply, and `session` resolves when the conversation is safe
  * to use.
  *
- *   I: startHandshake({role:'initiator'})  → initial [msg1]
- *      feed(msg2) → msg3, session resolves (R authenticated by mac_r)
- *   R: startHandshake({role:'responder'})  → initial []
- *      feed(msg1) → msg2 (SK exists, but I is NOT yet authenticated)
- *      feed(msg3) → null, session resolves
+ *   I: startHandshake({role:'initiator'})  -> initial [msg1]
+ *      feed(msg2) -> msg3, session resolves (R authenticated by mac_r)
+ *   R: startHandshake({role:'responder'})  -> initial []
+ *      feed(msg1) -> msg2 (SK exists, but I is NOT yet authenticated)
+ *      feed(msg3) -> null, session resolves
  *
  * **The gate (§6.2):** on the responder the `session` promise is what enforces
  * "no application data from I until mac_i verifies" — it simply does not exist
@@ -37,7 +37,7 @@ import { T_MSG1, T_MSG2, T_MSG3 } from './wire.ts'
 export interface Eh2Handshake {
   /** Frames to put on the wire immediately (initiator: msg1; responder: none). */
   readonly initial: Uint8Array[]
-  /** Feed one inbound handshake frame → a frame to send back, or null. */
+  /** Feed one inbound handshake frame -> a frame to send back, or null. */
   feed(frame: Uint8Array): Promise<Uint8Array | null>
   /** Resolves with the live Session once the handshake completes. */
   readonly session: Promise<Session>
@@ -89,7 +89,7 @@ export async function startHandshake(opts: StartOpts): Promise<Eh2Handshake> {
         try {
           const { msg3, result } = await initiatorComplete(state, frame, { now: now?.() })
           state = null
-          authenticated = true // mac_r verified → R holds IK_r_priv
+          authenticated = true // mac_r verified -> R holds IK_r_priv
           resolve(await toSession(result))
           return msg3
         } catch (e) {

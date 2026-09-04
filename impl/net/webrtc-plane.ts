@@ -74,7 +74,7 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: WebRTCPlan
     if (link && linkPeer === peer) return
     attempt = 0
     if (link) {
-      opts.onState?.(`rebind ${linkPeer?.slice(0, 12)}… → ${peer.slice(0, 12)}…`)
+      opts.onState?.(`rebind ${linkPeer?.slice(0, 12)}... -> ${peer.slice(0, 12)}...`)
       try { link.close() } catch {}
       room.setContentSend(null) // the old channel is gone; relay until the new one proves itself
       // A new PeerId is a new peer instance, so it gets a clean slate: the ban
@@ -138,7 +138,7 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: WebRTCPlan
       // version of this code that just returned left no trace of it at all —
       // a session stuck on the relay with nothing in the log to explain why.
       if (env.to !== self) {
-        opts.onState?.(`signal for ${env.to.slice(0, 12)}…, we are ${self.slice(0, 12)}… — dropped`)
+        opts.onState?.(`signal for ${env.to.slice(0, 12)}..., we are ${self.slice(0, 12)}... — dropped`)
         return
       }
       if (linkPeer !== from) onPeer(from) // first signal, or the peer came back under a new PeerId

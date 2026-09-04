@@ -16,7 +16,7 @@
  * dropped without a word.
  *
  * The test: churn peers from one IP, then check whether the relay still takes
- * a fresh peer's subscription. Broken relay → NO. Fixed relay → YES.
+ * a fresh peer's subscription. Broken relay -> NO. Fixed relay -> YES.
  */
 
 import { multiaddr } from '@multiformats/multiaddr'

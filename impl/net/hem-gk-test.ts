@@ -20,17 +20,17 @@
  *
  * It creates its own throwaway key, cleans it up, and touches nothing else.
  *
- *   HEM_PASS=… node net/hem-gk-test.ts --hsm https://my.ence.do [--keep]
+ *   HEM_PASS=... node net/hem-gk-test.ts --hsm https://my.ence.do [--keep]
  *
  * The password comes from the environment, never an argument — arguments are
  * visible to every process on the box via /proc.
  *
- * ── TODO, firmware ≥ 2026-08-10: cover `ecdhDerive` (HKDF in the device) ──
+ * -- TODO, firmware >= 2026-08-10: cover `ecdhDerive` (HKDF in the device) --
  *
  * The new firmware adds
  *   `ecdhDerive(token, kid, peerPub, salt, info, len)
  *      = HKDF-SHA256(ikm = X25519(priv[kid], peerPub), salt, info, len)`
- * under the SAME `keymgmt:use:<kid>` scope (salt ≤64 B, info ≤128 B, len ≤64 B).
+ * under the SAME `keymgmt:use:<kid>` scope (salt <=64 B, info <=128 B, len <=64 B).
  * It is what closes the gap this whole spike works around: today the pair secret
  * `ss` transits client RAM because the HKDF happens here, not in the device.
  *
@@ -55,15 +55,15 @@ const args = process.argv.slice(2)
 const hsm = args[args.indexOf('--hsm') + 1]
 const keep = args.includes('--keep')
 const pass = process.env.HEM_PASS
-if (!hsm || args.indexOf('--hsm') < 0) { console.error('usage: HEM_PASS=… node net/hem-gk-test.ts --hsm <url> [--keep]'); process.exit(2) }
+if (!hsm || args.indexOf('--hsm') < 0) { console.error('usage: HEM_PASS=... node net/hem-gk-test.ts --hsm <url> [--keep]'); process.exit(2) }
 if (!pass) { console.error('set HEM_PASS in the environment (not as an argument)'); process.exit(2) }
 
 let pass_ = 0, fail_ = 0
 const ok = (cond: boolean, msg: string, detail = '') => {
-  if (cond) { pass_++; console.log(`  ✔ ${msg}${detail ? ` — ${detail}` : ''}`) }
-  else { fail_++; console.log(`  ✖ ${msg}${detail ? ` — ${detail}` : ''}`) }
+  if (cond) { pass_++; console.log(`  [ok] ${msg}${detail ? ` — ${detail}` : ''}`) }
+  else { fail_++; console.log(`  [fail] ${msg}${detail ? ` — ${detail}` : ''}`) }
 }
-const step = (s: string) => console.log(`\n▸ ${s}`)
+const step = (s: string) => console.log(`\n${s}`)
 const hex = (u: Uint8Array) => [...u].map((x) => x.toString(16).padStart(2, '0')).join('')
 const dec = new TextDecoder()
 
@@ -145,17 +145,17 @@ try {
   }
 } catch (e: any) {
   fail_++
-  console.log(`\n✖ aborted: ${e?.message ?? e}`)
+  console.log(`\n[fail] aborted: ${e?.message ?? e}`)
 } finally {
   if (gkKid && !keep) {
     try {
       const del = await hem.authorizePassword(pass, 'keymgmt:del')
       await hem.deleteKey(del, gkKid)
-      console.log(`\n· cleaned up the test key ${gkKid}`)
+      console.log(`\n| cleaned up the test key ${gkKid}`)
     } catch (e: any) {
       console.log(`\n! could not delete the test key ${gkKid}: ${e?.message ?? e} — remove it by hand`)
     }
-  } else if (gkKid) console.log(`\n· kept the test key ${gkKid} (--keep)`)
+  } else if (gkKid) console.log(`\n| kept the test key ${gkKid} (--keep)`)
 }
 
 console.log(`\n${fail_ ? 'FAIL' : 'PASS'} — ${pass_} ok, ${fail_} failed`)

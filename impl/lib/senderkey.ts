@@ -9,11 +9,11 @@
  *
  *   MK_n        = HKDF(chain_n, "encedo-group-msg")
  *   chain_{n+1} = HKDF(chain_n, "encedo-group-chain")
- *   nonce       = HKDF(MK_n, "encedo-aead-nonce")           // MK is single-use → n not needed
+ *   nonce       = HKDF(MK_n, "encedo-aead-nonce")           // MK is single-use -> n not needed
  *   ct          = AES-256-GCM(MK_n, nonce, plaintext, aad = header)
  *
  * Authentication is a per-recipient HMAC, NOT a signature (deniability, S3
- * removed): the pairwise key `mk_ij = HKDF(ECDH(IK_i,IK_j), …)` is derived by the
+ * removed): the pairwise key `mk_ij = HKDF(ECDH(IK_i,IK_j), ...)` is derived by the
  * caller (it needs the identities) — this module only applies/verifies the HMAC
  * over `header || ct`. The AEAD tag protects the body under the chain key; the
  * HMAC is what stops an INSIDER (who holds the sender's chain, so could re-seal a
@@ -52,7 +52,7 @@ async function aeadOpen(mk: Uint8Array, header: Uint8Array, ct: Uint8Array): Pro
 }
 
 // ---------------------------------------------------------------------------
-// per-recipient MAC (the caller supplies mk_ij = HKDF(ECDH(IK_i,IK_j), …))
+// per-recipient MAC (the caller supplies mk_ij = HKDF(ECDH(IK_i,IK_j), ...))
 // ---------------------------------------------------------------------------
 
 async function hmacKey(macKey: Uint8Array): Promise<CryptoKey> {
@@ -133,7 +133,7 @@ export class SenderReceiver {
       if (pt) { stashed.mk.fill(0); this.skipped.delete(n) }
       return pt
     }
-    if (n < this.n) return null // already passed and not stashed → replay
+    if (n < this.n) return null // already passed and not stashed -> replay
 
     if (n - this.n > this.maxSkip) throw new Error(`senderkey: skip of ${n - this.n} over the ${this.maxSkip} bound`)
 

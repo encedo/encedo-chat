@@ -23,7 +23,7 @@ test('failoverDial: a dead primary falls through to the next live node', async (
   assert.deepEqual(tried, ['dead', 'live'])
 })
 
-test('failoverDial: every candidate down → throws the LAST error', async () => {
+test('failoverDial: every candidate down -> throws the LAST error', async () => {
   await assert.rejects(
     failoverDial(['x', 'y'], async (addr) => { throw new Error(`down:${addr}`) }),
     /down:y/,

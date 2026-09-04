@@ -1,7 +1,7 @@
 /**
  * chat-session.ts — interactive IRC-style chat UI. Pure front-end over the core
  * facade: opens a Conversation (lib/core.ts) and renders its events; feeds user
- * intent (input → noteActivity / sendText, Ctrl+C & /quit → leave). Shared by the
+ * intent (input -> noteActivity / sendText, Ctrl+C & /quit -> leave). Shared by the
  * bob / alice / ec CLIs. Timestamps in UTC.
  */
 
@@ -10,7 +10,7 @@ import { startRepl } from './repl.ts'
 import { nowMs, utcHHMM } from '../lib/time.ts'
 
 const C = { peer: '\x1b[36m', me: '\x1b[33m', sys: '\x1b[90m', warn: '\x1b[31m', reset: '\x1b[0m' }
-const short = (id: string) => id.slice(0, 10) + '…'
+const short = (id: string) => id.slice(0, 10) + '...'
 const time = (ts: number) => `${C.sys}${utcHHMM(ts)}${C.reset}`
 
 export async function runChatSession(
@@ -19,7 +19,7 @@ export async function runChatSession(
   /** Broker URL to use the MQTT fall-back transport instead of the libp2p relay. */
   mqtt: string | null = null,
 ) {
-  console.log(`${C.sys}— connecting via relay…${C.reset}`)
+  console.log(`${C.sys}— connecting via relay...${C.reset}`)
 
   let conv: Awaited<ReturnType<typeof openConversation>> | null = null
   let lastRecvId: string | null = null
@@ -27,9 +27,9 @@ export async function runChatSession(
   let leaving = false
 
   const shutdown = async () => {
-    if (leaving) process.exit(0) // second Ctrl+C → hard exit
+    if (leaving) process.exit(0) // second Ctrl+C -> hard exit
     leaving = true
-    ui.print(`${C.sys}— logging out…${C.reset}`)
+    ui.print(`${C.sys}— logging out...${C.reset}`)
     const wd = setTimeout(() => process.exit(0), 2_000)
     ;(wd as any).unref?.()
     try { await conv?.leave() } catch {}
@@ -71,17 +71,17 @@ export async function runChatSession(
       onMessage: (_from, m, meta) => {
         lastRecvId = m.id; peerTyping = false
         // A terminal cannot re-thread what it has already printed, so it says so
-        // instead: the timestamp is the sender's, and ⏱ marks the jump backwards.
-        const late = meta.outOfOrder ? `${C.warn} ⏱ spóźniona${C.reset}` : ''
+        // instead: the timestamp is the sender's, and marks the jump backwards.
+        const late = meta.outOfOrder ? `${C.warn} spóźniona${C.reset}` : ''
         if (m.body.startsWith('ACTION ')) ui.print(`${time(m.ts)} ${C.peer}* ${peerName} ${m.body.slice(7)}${C.reset}${late}`)
         else ui.print(`${time(m.ts)} ${C.peer}[${peerName}]${C.reset} ${m.body}${late}`)
       },
       onTyping: (_from, state) => {
-        if (state === 'start' && !peerTyping) { peerTyping = true; ui.print(`${C.sys}* ${peerName} is typing…${C.reset}`) }
+        if (state === 'start' && !peerTyping) { peerTyping = true; ui.print(`${C.sys}* ${peerName} is typing...${C.reset}`) }
         if (state === 'stop') peerTyping = false
       },
       onReaction: (_from, r) => ui.print(`${time(r.ts)} ${C.peer}* ${peerName} reacted ${r.emoji}${C.reset}`),
-      onFile: (_from, f) => ui.print(`${time(f.ts)} ${C.peer}* ${peerName} shared a file: ${f.name} (${f.cid.slice(0, 12)}…) — interim: fetch TODO${C.reset}`),
+      onFile: (_from, f) => ui.print(`${time(f.ts)} ${C.peer}* ${peerName} shared a file: ${f.name} (${f.cid.slice(0, 12)}...) — interim: fetch TODO${C.reset}`),
       onPresence: (peer, ev) => {
         const what = ev === 'join' ? 'is in the room' : ev === 'active' ? 'is back' : ev === 'away' ? 'is away'
           : ev === 'quiet' ? 'has gone quiet — no heartbeat' : 'left'
@@ -96,12 +96,12 @@ export async function runChatSession(
       },
       onLink: (state) => ui.print(
         state === 'online' ? `${C.sys}— relay connection is back${C.reset}`
-          : state === 'reconnecting' ? `${C.warn}— lost the relay, reconnecting…${C.reset}`
+          : state === 'reconnecting' ? `${C.warn}— lost the relay, reconnecting...${C.reset}`
           : `${C.warn}— no connection to the relay${C.reset}`,
       ),
     })
-    ui.print(`${C.sys}— room open (topic ${conv.topic.slice(0, 12)}…) as ${short(conv.peerId)}. Type to chat.  /who  /me <a>  /react <emoji>  /quit${C.reset}`)
-    ui.print(`${C.sys}— waiting for ${peerName} to join…${C.reset}`)
+    ui.print(`${C.sys}— room open (topic ${conv.topic.slice(0, 12)}...) as ${short(conv.peerId)}. Type to chat.  /who  /me <a>  /react <emoji>  /quit${C.reset}`)
+    ui.print(`${C.sys}— waiting for ${peerName} to join...${C.reset}`)
   } catch (e: any) {
     ui.print(`${C.warn}connection failed: ${e?.message ?? e}${C.reset}`)
     process.exit(1)

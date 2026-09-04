@@ -80,10 +80,10 @@ by it (`sudo chgrp -R www-data /opt/github/encedo-chat && sudo chmod -R g+rX` if
 running process's memory. Startup prints exactly four things worth reading:
 
 ```
-🔑 Pass: "bs1.onchato.com" → PeerId: 12D3KooWP6Sp…cDmp   ← unchanged, or every client breaks
-✅ Relay uruchomiony na porcie 9001
-🔌 Połączenia: limit 520                                  ← proves --max-connections took
-📦 Tematy: limit 250 równoczesnych, eviction po 120s ciszy (sweep 30s)
+Pass: "bs1.onchato.com" -> PeerId: 12D3KooWP6Sp...cDmp   <- unchanged, or every client breaks
+[ok] Relay uruchomiony na porcie 9001
+Połączenia: limit 520                                    <- proves --max-connections took
+Tematy: limit 250 równoczesnych, eviction po 120s ciszy (sweep 30s)
 ```
 
 If that does not match the build you expect, walk these in order — each rules
@@ -407,7 +407,7 @@ trivial few-hundred-socket DoS into a real bandwidth problem.
 `DUMP=<dir>` makes the relay write **everything it can observe** to JSONL files
 in `<dir>` (`dump.mjs`). Unset or empty = off, and off means off: no directory,
 no file, no listener, no wrapper — every call site is `dump?.…`. When it is on,
-the startup banner prints `🧾 DUMP ON → <dir>`, so **the absence of that line in
+the startup banner prints `DUMP ON -> <dir>`, so **the absence of that line in
 `journalctl -u onchato-relay` is the proof a node ran without it.**
 
 Two purposes. Debugging (what did the relay actually see when a room "did not
@@ -470,11 +470,11 @@ Environment=DUMP=/var/lib/onchato/relay-dump
 ```
 ```bash
 sudo systemctl restart onchato-relay
-sudo journalctl -u onchato-relay -n 20 | grep '🧾'        # must show DUMP ON → …
+sudo journalctl -u onchato-relay -n 20 | grep 'DUMP ON'   # must show DUMP ON -> ...
 ```
 
 Off again: `sudo systemctl revert onchato-relay && sudo systemctl restart
-onchato-relay`, confirm the `🧾` line is gone, then delete the files
+onchato-relay`, confirm the `DUMP ON` line is gone, then delete the files
 (`sudo shred -u /var/lib/onchato/relay-dump/*.jsonl`).
 
 ### Reading it

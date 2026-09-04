@@ -71,7 +71,7 @@ test('an offer nobody answers is made again, then given up', async () => {
   // Signalling rides GossipSub and is fire-and-forget: nothing here used to
   // retry, so one lost offer meant the relay for the rest of the conversation.
   //
-  // ⚠️ This used to `await tick(140)` and assert 3 — the documented flake
+  // WARNING: This used to `await tick(140)` and assert 3 — the documented flake
   // shape (CLAUDE.md): three 40 ms timers fire sequentially, so a full-suite
   // event-loop stall between any two of them pushes the third past a fixed
   // wall-clock deadline. Wait on the CONDITION, then prove "given up" with a
@@ -82,7 +82,7 @@ test('an offer nobody answers is made again, then given up', async () => {
     makeLink, attemptMs: 40, onState: (s) => states.push(s),
   })
 
-  plane.onPeer('peer-z') // we are the lower id → we offer
+  plane.onPeer('peer-z') // we are the lower id -> we offer
   const deadline = Date.now() + 5_000
   while (links.length < 3 && Date.now() < deadline) await tick(10)
   assert.equal(links.length, 3, 'the offer is made three times in all')

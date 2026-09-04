@@ -175,18 +175,18 @@ multiaddr's `%2F` has to be written `%%2F` there. Everywhere else (a shell,
 **Read the log before going on.** Six lines matter:
 
 ```
-🔑 Pass: "bs4.onchato.com" → PeerId: 12D3KooWNanm…CGKo   ← MUST equal the PeerId from step 0
-  ✓ /dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay…   ← mesh to bs1 is up
-  ✓ /dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay…   ← mesh to bs2 is up
-  ✓ /dns4/bs3.onchato.com/tcp/443/wss/http-path/%2Frelay…   ← mesh to bs3 is up
-✅ Relay uruchomiony na porcie 9001
-📦 Tematy: limit 250 równoczesnych, eviction po 120s ciszy (sweep 30s)
+Pass: "bs4.onchato.com" -> PeerId: 12D3KooWNanm...CGKo   <- MUST equal the PeerId from step 0
+  [ok] /dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay...   <- mesh to bs1 is up
+  [ok] /dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay...   <- mesh to bs2 is up
+  [ok] /dns4/bs3.onchato.com/tcp/443/wss/http-path/%2Frelay...   <- mesh to bs3 is up
+[ok] Relay uruchomiony na porcie 9001
+Tematy: limit 250 równoczesnych, eviction po 120s ciszy (sweep 30s)
 ```
 
 A different PeerId means the pass is wrong; fix the unit now, because an
 address published with the wrong id fails for every client that ever caches
-it. A `✗ … ponawiam` line is retried every 10 s (see Troubleshooting if it
-never turns into `✓`). Nothing reaches the node from outside yet — that is
+it. A `[fail] ... ponawiam` line is retried every 10 s (see Troubleshooting if it
+never turns into `[ok]`). Nothing reaches the node from outside yet — that is
 the next two steps.
 
 ## 4b. STUN
@@ -203,7 +203,7 @@ sudo systemctl enable --now onchato-stun
 journalctl -u onchato-stun -n 5 --no-pager
 ```
 
-Two lines say it worked — `✓ STUN udp4 0.0.0.0:3478` and `✓ STUN udp6 [::]:3478`.
+Two lines say it worked — `[ok] STUN udp4 0.0.0.0:3478` and `[ok] STUN udp6 [::]:3478`.
 The IPv6 one is best-effort: a host without IPv6 logs an error for it and keeps
 serving IPv4 (the v4 socket failing, by contrast, exits — that one is not
 optional).
@@ -294,10 +294,10 @@ the repo checkout on the laptop:
 cd encedo-chat/relay
 node relay.mjs --port 9379 --pass laptop \
   --peers /dns4/$HOST/tcp/443/wss/http-path/%2Frelay/p2p/<PeerId from step 0>
-# expect:  ✓ /dns4/bs4.onchato.com/tcp/443/wss/http-path/%2Frelay…   then Ctrl+C
+# expect:  [ok] /dns4/bs4.onchato.com/tcp/443/wss/http-path/%2Frelay...   then Ctrl+C
 ```
 
-A `✓` means the whole path works: TLS, the `/relay` upgrade, the Noise
+An `[ok]` means the whole path works: TLS, the `/relay` upgrade, the Noise
 handshake, and that the node really holds the PeerId you published. The full
 proof — two browsers on two different nodes meeting in a room — is the
 harness (`impl/`, needs the dev setup; write the log to a file, never pipe it
@@ -360,7 +360,7 @@ relay, and there is no web on this box anyway):
 ```bash
 cd /opt/github/encedo-chat && sudo git pull && cd relay && sudo npm ci
 sudo systemctl restart onchato-relay
-sudo journalctl -u onchato-relay -n 15 --no-pager      # PeerId unchanged, ✓ ✓, budget line
+sudo journalctl -u onchato-relay -n 15 --no-pager      # PeerId unchanged, both [ok] lines, budget line
 ```
 
 README → "Did it actually take?" is the checklist when the log looks like the
@@ -382,7 +382,7 @@ sudo certbot certificates
 every observable action (connections with the real client IP from nginx's
 `X-Real-IP`, subscriptions, every forwarded frame, reservations) to JSONL.
 It is switched on with a systemd drop-in, never by editing the unit, and the
-banner line `🧾 DUMP ON` is the proof it is running. **Never leave it on a
+banner line `DUMP ON` is the proof it is running. **Never leave it on a
 production node** — the files are precisely the metadata the design promises
 not to keep. On/off/reading: [`README.md` → Dump](README.md#dump-debug--audit--dumpdir-never-on-production).
 
@@ -408,7 +408,7 @@ trying it — the failover survives that, but it costs them a dial each start.
 | `/health` answers, the `101` check gives `502` | the relay is not listening on 9001: `systemctl status onchato-relay`, `ss -ltnp \| grep 9001` |
 | `/health` answers with bs1's certificate or `bs1 ok` | you are talking to bs1 — the wildcard CNAME; see the first row |
 | log: PeerId differs from step 0 | `--pass` differs from the hostname you computed for — compare `systemctl cat onchato-relay` letter by letter |
-| log: `✗ /dns4/bs1… (…) — ponawiam` forever | the VM cannot reach that node on 443 (`curl -s https://bs1.onchato.com/health`), or the PeerId in the address is not the one that node runs (`journalctl` on *that* node prints it). A wrong id looks like a broken network: libp2p refuses the connection after the handshake |
+| log: `[fail] /dns4/bs1... (...) — ponawiam` forever | the VM cannot reach that node on 443 (`curl -s https://bs1.onchato.com/health`), or the PeerId in the address is not the one that node runs (`journalctl` on *that* node prints it). A wrong id looks like a broken network: libp2p refuses the connection after the handshake |
 | `EACCES` in the log, service restarting | `www-data` cannot read the clone — `sudo chmod -R o+rX /opt/github/encedo-chat` |
 | `EADDRINUSE :9001` | a previous relay process still holds the port — `ss -ltnp \| grep 9001`, kill it, restart the unit |
 | clients connect but rooms never form | the topic budget, not the network — README → Tunables and "The relay can be healthy and still ignore you" in the root `CLAUDE.md` |

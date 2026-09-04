@@ -109,13 +109,13 @@ const server = createServer(async (req, res) => {
   const id = randomBytes(6).toString('hex')
   const line = JSON.stringify({ id, ts: new Date().toISOString(), ...rec })
   try { await append(line) } catch (e) {
-    console.error(`✗ append failed: ${e?.message ?? e}`)
+    console.error(`[fail] append failed: ${e?.message ?? e}`)
     send(res, 500, { ok: false, error: 'not stored' }); return
   }
-  console.log(`✓ ${id} [${rec.kind}] ${rec.app.version ?? '?'} ${rec.text.length} chars${rec.contact ? ' +contact' : ''}`)
+  console.log(`[ok] ${id} [${rec.kind}] ${rec.app.version ?? '?'} ${rec.text.length} chars${rec.contact ? ' +contact' : ''}`)
   send(res, 200, { ok: true, id })
 })
 
 server.listen(PORT, HOST, () => {
-  console.log(`📮 onchato feedback on http://${HOST}:${PORT}/feedback → ${FILE}`)
+  console.log(`onchato feedback on http://${HOST}:${PORT}/feedback -> ${FILE}`)
 })

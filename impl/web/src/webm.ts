@@ -25,9 +25,9 @@
  *
  * Two cases, and only two, are touched:
  *
- * 1. `Duration` already exists → its float is overwritten IN PLACE. Not one
+ * 1. `Duration` already exists -> its float is overwritten IN PLACE. Not one
  *    byte moves, so nothing that points into the file can be wrong afterwards.
- * 2. `Duration` is missing AND the file has no `SeekHead` and no `Cues` → the
+ * 2. `Duration` is missing AND the file has no `SeekHead` and no `Cues` -> the
  *    element is inserted into `Info`, growing it. Nothing in such a file stores
  *    an offset, so there is nothing to keep in step.
  *
@@ -47,7 +47,7 @@ const ID_CLUSTER = 0x1f43b675
 const ID_CUES = 0x1c53bb6b
 
 /** EBML's default, and what every `MediaRecorder` we have seen writes: one tick
- *  is a nanosecond × this, i.e. a millisecond. `Duration` counts those ticks. */
+ *  is a nanosecond x this, i.e. a millisecond. `Duration` counts those ticks. */
 const DEFAULT_TIMECODE_SCALE = 1_000_000
 
 interface Elem { id: number; start: number; content: number; size: number; end: number; unknown: boolean }

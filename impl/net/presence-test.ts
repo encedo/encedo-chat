@@ -37,7 +37,7 @@ const gotByB: string[] = []
 await sA.watchContacts([{ pub: B.pub }], { onOnline: () => { aSeesB = true } })
 await sB.watchContacts([{ pub: A.pub }], {
   onOnline: () => { bSeesA = true },
-  onWantsConversation: async () => { // A started talking → upgrade B to a full room
+  onWantsConversation: async () => { // A started talking -> upgrade B to a full room
     bWants = true
     const conv = await sB.open({ pub: A.pub }, { params, onMessage: (_f, m) => gotByB.push(m.body) })
     void conv
@@ -46,7 +46,7 @@ await sB.watchContacts([{ pub: A.pub }], {
 
 const t0 = Date.now()
 await until(() => aSeesB && bSeesA, 40_000, 'both see each other ONLINE via presence only')
-console.log(`✔ both online via presence layer in ${Date.now() - t0} ms — no handshake, no room`)
+console.log(`[ok] both online via presence layer in ${Date.now() - t0} ms — no handshake, no room`)
 
 // A upgrades: opens the conversation and sends. B should be pulled up by the
 // incoming EH-2 frame and receive the message.
@@ -54,9 +54,9 @@ const convA = await sA.open({ pub: B.pub }, { params, onSecurity: () => {} })
 await new Promise((r) => setTimeout(r, 500))
 convA.sendText('cześć z presencji')
 await until(() => bWants, 30_000, 'B was pulled into a conversation by A\'s handshake')
-console.log('✔ B auto-upgraded to a conversation from the incoming EH-2 frame')
+console.log('[ok] B auto-upgraded to a conversation from the incoming EH-2 frame')
 await until(() => gotByB.includes('cześć z presencji'), 40_000, 'the message arrived after the upgrade')
-console.log(`✔ message delivered end to end: "${gotByB[0]}"`)
+console.log(`[ok] message delivered end to end: "${gotByB[0]}"`)
 
 await sA.close(); await sB.close()
 console.log('\nPASS — presence-only visibility, then upgrade-on-send')

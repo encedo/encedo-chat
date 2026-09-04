@@ -83,7 +83,7 @@ export interface Bundle {
   /** The identity key state is keyed by, carried so a reader can check that the
    *  keys inside really belong to the identity inside. */
   kid: string
-  /** When the export was made (UTC ms), for the "this file is from …" line. */
+  /** When the export was made (UTC ms), for the "this file is from ..." line. */
   made: number
   keys: Record<string, string>
 }

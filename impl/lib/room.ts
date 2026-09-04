@@ -6,9 +6,9 @@
  *   data plane   (settable):    message content — GossipSub by default, or a
  *                               direct WebRTC DataChannel once it's up (§13).
  *
- * Outgoing content: envelope → encode → seal → contentSend (WebRTC or GossipSub).
+ * Outgoing content: envelope -> encode -> seal -> contentSend (WebRTC or GossipSub).
  * Signaling (t:'rtc') + Announce always ride GossipSub.
- * Incoming (from GossipSub OR the DataChannel): decrypt → decode → dispatch;
+ * Incoming (from GossipSub OR the DataChannel): decrypt -> decode -> dispatch;
  * t:'rtc' routes to onSignal, everything else to the UI callbacks.
  */
 
@@ -117,7 +117,7 @@ export interface ChatOpts {
   /** Gave up after retrying: the peer very likely never got it. */
   onUndelivered?: (id: string) => void
   /**
-   * A message already marked ⚠ turns out to have arrived after all — the
+   * A message already marked undelivered turns out to have arrived after all — the
    * confirmation came back once the peer woke up. `ms` is how long it took,
    * counted from the first send, so the UI can say how late it was.
    */
@@ -133,7 +133,7 @@ export interface ChatOpts {
   firstAnnounceMs?: number
   /** Delays before each re-send of unconfirmed content (tests shorten these). */
   retryMs?: number[]
-  /** After the last re-send, how long to wait for a confirmation before ⚠. */
+  /** After the last re-send, how long to wait for a confirmation before calling it undelivered. */
   giveUpMs?: number
   /** Hard cap on how long one message may keep being re-sent, however present the peer looks. */
   maxInflightMs?: number
@@ -148,7 +148,7 @@ export interface ChatOpts {
 export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {}) {
   const log = opts.onLog ?? (() => {})
   const dbg = (m: string) => log(m, 'debug')
-  const short = (s: string) => s.slice(0, 12) + '…'
+  const short = (s: string) => s.slice(0, 12) + '...'
   const onMessage = opts.onMessage ?? (() => {})
   const onTyping = opts.onTyping ?? (() => {})
   const onPresence = opts.onPresence ?? (() => {})
@@ -224,13 +224,13 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    * The first budget here (1.5 s + 4 s, then 4 s to judge) was shorter than the
    * outages this transport actually produces. A hidden tab's throttled timers,
    * or a GossipSub mesh re-grafting, go quiet for ~10 s — long enough to burn
-   * every re-send — and a healthy conversation was stamping messages ⚠ while
+   * every re-send — and a healthy conversation was stamping messages undelivered while
    * the peer was merely mid-gap, answering again seconds later. So the backoff
    * now runs for as long as the peer is still announcing itself; only a peer
    * that has genuinely gone quiet, or the hard cap, ends it.
    */
   const RETRIES = opts.retryMs ?? [1_500, 4_000, 8_000, 15_000, 15_000] // delays before each RE-send
-  const GIVE_UP_MS = opts.giveUpMs ?? 8_000       // …then this long for the confirmation to arrive
+  const GIVE_UP_MS = opts.giveUpMs ?? 8_000       // ...then this long for the confirmation to arrive
   const MAX_INFLIGHT_MS = opts.maxInflightMs ?? 60_000 // hard cap, however present the peer looks
   /** Re-sending is pointless with nobody in the room to receive it. */
   const peerPresent = () => lastSeen.size > 0
@@ -244,7 +244,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const pending = new Map<string, Pending>()
 
   /**
-   * Content we gave up on, kept so the user can send it again by hand (the ↻ in
+   * Content we gave up on, kept so the user can send it again by hand (the retry control in
    * the UI). The envelope is reused verbatim — same id, same seq — so a peer
    * that did get the first copy silently dedups it, and an ack lands on the
    * marker the user is already looking at.
@@ -284,7 +284,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       p.timer = setTimeout(() => {
         if (!pending.has(id)) return
         pending.delete(id)
-        // Mark ⚠+↻ whenever somebody is ANNOUNCING in this room and the
+        // Mark it undelivered - the alert and its retry control - whenever somebody is ANNOUNCING in this room and the
         // message is still unconfirmed. Presence is the whole condition now,
         // and the two narrower ones it replaced are worth remembering because
         // each was added to stop a different lie:
@@ -295,7 +295,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         //    a handshake and cannot be in a conversation — the class is gone,
         //    and the guard now only hides real failures. (The `acking` set it
         //    was tracked in went with it: nothing read it any more.)
-        //  - `sessions` was added after "desktop → dozing Android hung for
+        //  - `sessions` was added after "desktop -> dozing Android hung for
         //    minutes": a phone asleep for the whole room session had acked
         //    nothing yet and fell through the first clause.
         //
@@ -303,12 +303,12 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         // the peer is here, announcing, and the HANDSHAKE never completed —
         // so there is no session, no ack, and `emitContent` has been parking
         // the message in `queued` all along. That left the bubble on
-        // "wysyłam…" with no ↻, for as long as the room stayed open (reported
-        // live 2026-09-03, phone → macMini1: 72 minutes and 🤝 Securing…).
+        // "wysyłam..." with nothing to retry it with, for as long as the room stayed open (reported
+        // live 2026-09-03, phone -> macMini1: 72 minutes and Securing...).
         // Sending into an EMPTY room is still silent — nobody is there to
         // deliver to, and the budget stopped for that reason.
         if (peerPresent()) {
-          log(`no confirmation for message ${id} after ${p.tries + 1} sends over ${Math.round((nowMs() - p.sentAt) / 1000)}s → marking undelivered`)
+          log(`no confirmation for message ${id} after ${p.tries + 1} sends over ${Math.round((nowMs() - p.sentAt) / 1000)}s -> marking undelivered`)
           keepForResend(id, p.bytes, p.sentAt)
           onUndelivered(id)
         }
@@ -319,7 +319,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     p.timer = setTimeout(() => {
       if (!pending.has(id)) return
       p.tries++
-      dbg(`no ack for ${id} in ${delay} ms → re-sending (try ${p.tries + 1})`)
+      dbg(`no ack for ${id} in ${delay} ms -> re-sending (try ${p.tries + 1})`)
       // Only the DIRECT path loses its turn. A frame dropped on GossipSub is
       // ordinary (it is fire-and-forget, and that is what the retry is for) —
       // banning WebRTC for the rest of the conversation because the relay
@@ -416,7 +416,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         }
         // A confirmation for something we already gave up on. It happens: the
         // peer was asleep, or in a tunnel, and answered after the budget ran
-        // out. Dropping it here (which is what this code used to do) left a ⚠
+        // out. Dropping it here (which is what this code used to do) left an undelivered mark
         // on a message that HAD arrived — the worst of the two possible lies.
         const sentAt = firstSentAt.get(a.ref)
         if (sentAt !== undefined) {
@@ -428,7 +428,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         }
         break
       }
-      default: break // unknown type → ignore (forward-compat)
+      default: break // unknown type -> ignore (forward-compat)
     }
   }
 
@@ -492,7 +492,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    * DH chain matters (post-compromise security), and it is the hard stop on a
    * stolen unlocked device: the ratchet itself never touches the HSM, so an
    * attacker holding the machine can read a live session indefinitely — until
-   * the forced re-handshake, which needs `ecdh(IK, ·)` inside the HSM they do
+   * the forced re-handshake, which needs `ecdh(IK, |)` inside the HSM they do
    * not have (§9.3). The self-topic takeover in §9.1 is coordination between
    * honest clients; THIS is the control.
    *
@@ -550,7 +550,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   const retireOtherPeers = (keep: string) => {
     for (const old of [...sessions.keys()]) {
       if (old === keep) continue
-      // …but only if that PeerId has actually stopped answering. A reloaded tab
+      // ...but only if that PeerId has actually stopped answering. A reloaded tab
       // goes silent the instant it reloads, so this fires within a heartbeat.
       // A SECOND tab of the same identity does not: it keeps announcing, and
       // retiring it would hand the whole conversation to whichever window
@@ -562,7 +562,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         dbg(`${short(old)} still announcing (${Math.round(silence / 1000)}s ago) — keeping its session alongside ${short(keep)}`)
         continue
       }
-      log(`${short(old)} came back as ${short(keep)} → retiring the old session (reload or transport restart)`)
+      log(`${short(old)} came back as ${short(keep)} -> retiring the old session (reload or transport restart)`)
       forgetPeer(old)
       lastSeen.delete(old)
       onPeerReplaced(old, keep)
@@ -580,7 +580,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       const h = await startHandshake({ role, ik: eh2.ik, peerIkPub: eh2.peerIkPub, ratchet: eh2.ratchet })
       if (handshakes.get(peer) !== attempt) return null // superseded while we generated keys
       attempt.h = h
-      log(`EH-2 ${role} attempt → ${short(peer)}`)
+      log(`EH-2 ${role} attempt -> ${short(peer)}`)
       eh2.onState?.(peer, 'handshaking')
       h.session.then(
         (s) => {
@@ -591,7 +591,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
           stuck.delete(p)
           const old = sessions.get(p)
           if (old) previous.set(p, { session: old, until: nowMs() + PREVIOUS_GRACE_MS })
-          forgetStream(p) // new ratchet ⇒ new stream: its `seq` starts from 1 again
+          forgetStream(p) // new ratchet new stream: its `seq` starts from 1 again
           failedAttempts.delete(p) // a success wipes the record — those failures were crossfire
           backoffUntil.delete(p)
           everEstablished.add(p)
@@ -660,7 +660,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    * verify perfectly and each tab takes the other for the contact — but the
    * handshake can never succeed, because each side expects the CONTACT's
    * identity key and is offered its own. With no backoff the two tabs retried
-   * each other for as long as they were open: a badge flickering 🔐/⚠, a
+   * each other for as long as they were open: a badge flickering between secure and failed, a
    * conversation that had stopped working, and — because the retry timer does
    * not care whether anyone is listening — flapping that outlived the tab.
    *
@@ -767,7 +767,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     // next Announce brings them back.
     if (!lastSeen.has(peer)) { dbg(`not handshaking ${short(peer)}: it is not announcing`); return }
     // Whoever is in a room initiates on discovery — we do NOT wait for the lower
-    // id. That wait deadlocked the presence→conversation upgrade: the peer we
+    // id. That wait deadlocked the presence->conversation upgrade: the peer we
     // want may only be in the light presence layer (announcing, but not in a
     // room), so it will never initiate, and if it held the lower id nobody
     // would. Both initiating is fine — a crossed pair of msg1s is resolved by
@@ -834,9 +834,9 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       // it while waiting). Restarting here would be a bug with a very visible
       // symptom: the initiator completes against our first msg2, we would have
       // moved to a new EK_r, and its msg3 would fail mac_i — the pair loops
-      // "established → handshaking" forever. Answer with the SAME msg2 instead.
+      // "established -> handshaking" forever. Answer with the SAME msg2 instead.
       if (attempt?.role === 'responder' && sameBytes(attempt.msg1, data)) {
-        dbg(`msg1 repeat from ${short(from)} → re-sending the same msg2`)
+        dbg(`msg1 repeat from ${short(from)} -> re-sending the same msg2`)
         if (attempt.reply) gossip(attempt.reply)
         return
       }
@@ -916,7 +916,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     }
     if (from !== self) {
       const env = decodeEnvelope(pt)
-      dbg(`← content ${data.length} B from ${short(from)} → ${env ? (env as any).t : 'undecodable'}`)
+      dbg(`<- content ${data.length} B from ${short(from)} -> ${env ? (env as any).t : 'undecodable'}`)
       if (env) dispatch(from, env)
     }
     return true
@@ -926,12 +926,12 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     if (evt.detail.topic !== topic) return
     const from = evt.detail.from.toString()
     if (eh2 && isHandshakeFrame(evt.detail.data)) {
-      dbg(`← msg${evt.detail.data[0]} from ${short(from)} (${evt.detail.data.length} B)`)
+      dbg(`<- msg${evt.detail.data[0]} from ${short(from)} (${evt.detail.data.length} B)`)
       await onHandshakeFrame(evt.detail.data, from)
       return
     }
     if (await processSealed(evt.detail.data, from)) return
-    // not sealed → authenticated Announce (presence/discovery, §5.5)
+    // not sealed -> authenticated Announce (presence/discovery, §5.5)
     const res = await verifyAnnounce(evt.detail.data, keys.macKey)
     if (!res.ok) { noteUndecodable(from, evt.detail.data.length); return }
     if (res.peer === self) return
@@ -940,12 +940,12 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     // Announces are the one thing that keeps flowing when content stops, so say
     // so: "the transport is alive but nothing decrypts" and "the transport is
     // gone" are different failures, and they used to produce the same log.
-    dbg(`← announce from ${short(res.peer!)}`)
+    dbg(`<- announce from ${short(res.peer!)}`)
     touch(res.peer!)
   }
   node.services.pubsub.addEventListener('message', handler)
   node.services.pubsub.subscribe(topic)
-  log(`joined topic ${topic.slice(0, 12)}… as ${short(self)} (${eh2 ? 'EH-2' : 'interim key'})`)
+  log(`joined topic ${topic.slice(0, 12)}... as ${short(self)} (${eh2 ? 'EH-2' : 'interim key'})`)
 
   const gossip = (bytes: Uint8Array) => { node.services.pubsub.publish(topic, bytes).catch(() => {}) }
 
@@ -1009,8 +1009,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     try { meshReady = node.services.pubsub.getSubscribers(topic).length > 0 } catch {}
     if (meshReady || nowMs() - startedAt >= firstAnnounceMs) {
       log(meshReady
-        ? `relay joined the topic after ${nowMs() - startedAt} ms → announcing`
-        : `no subscriber report after ${firstAnnounceMs} ms → announcing anyway`)
+        ? `relay joined the topic after ${nowMs() - startedAt} ms -> announcing`
+        : `no subscriber report after ${firstAnnounceMs} ms -> announcing anyway`)
       announceFirst()
     }
   }, Math.max(10, Math.min(50, firstAnnounceMs)))
@@ -1032,14 +1032,14 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       if (silent > ttlMs) {
         lastSeen.delete(peer)
         quiet.delete(peer)
-        log(`no Announce from ${short(peer)} for ${Math.round(silent / 1000)}s → presence off (ratchet kept)`)
+        log(`no Announce from ${short(peer)} for ${Math.round(silent / 1000)}s -> presence off (ratchet kept)`)
         onPresence(peer, 'leave')
       } else if (silent > quietMs && !quiet.has(peer)) {
         // Between "answering" and "gone" there is a minute and a half of a green
         // badge and no messages. Name that gap while it is happening instead of
         // letting the user work it out from the silence.
         quiet.add(peer)
-        log(`no Announce from ${short(peer)} for ${Math.round(silent / 1000)}s → going quiet`)
+        log(`no Announce from ${short(peer)} for ${Math.round(silent / 1000)}s -> going quiet`)
         onPresence(peer, 'quiet')
       }
     }
@@ -1055,7 +1055,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       if (alive.length) {
         for (const peer of [...sessions.keys()]) {
           if (alive.includes(peer)) continue
-          log(`${short(peer)} stopped announcing and another session is live → retiring it`)
+          log(`${short(peer)} stopped announcing and another session is live -> retiring it`)
           forgetPeer(peer)
           lastSeen.delete(peer)
           onPeerReplaced(peer, alive[alive.length - 1])
@@ -1072,7 +1072,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       if (now - at < lifetimeMs || !sessions.has(peer)) continue
       if (handshakes.has(peer) || !lastSeen.has(peer)) continue
       if (!(self < peer)) continue
-      log(`session with ${short(peer)} is ${Math.round((now - at) / 60_000)} min old → forcing a fresh EH-2 (§7.3)`)
+      log(`session with ${short(peer)} is ${Math.round((now - at) / 60_000)} min old -> forcing a fresh EH-2 (§7.3)`)
       establishedAt.set(peer, now) // do not fire again while this attempt runs
       void beginHandshake(peer, 'initiator')
     }
@@ -1091,12 +1091,12 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    */
   const emitContent = async (bytes: Uint8Array) => {
     if (!sessions.size) {
-      if (queued.length < maxQueued) { queued.push(bytes); dbg(`no session yet → queued (${queued.length})`) }
+      if (queued.length < maxQueued) { queued.push(bytes); dbg(`no session yet -> queued (${queued.length})`) }
       else log('queue full — dropping outgoing frame')
       return
     }
     for (const s of sessions.values()) {
-      try { const sealed = await s.encrypt(bytes); dbg(`→ content ${sealed.length} B via ${contentSend === gossipContent ? 'relay' : 'WebRTC'}`); contentSend(sealed) }
+      try { const sealed = await s.encrypt(bytes); dbg(`-> content ${sealed.length} B via ${contentSend === gossipContent ? 'relay' : 'WebRTC'}`); contentSend(sealed) }
       catch (e: any) { log(`send failed: ${e?.message ?? e}`) }
     }
   }
@@ -1110,10 +1110,10 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       const bytes = encodeEnvelope(e)
       void emitContent(bytes)
       trackDelivery(e.id, bytes) // resend until the peer confirms, then mark it
-      return e.id // the UI keys its ✓ / ⚠ off this
+      return e.id // the UI keys its delivered / undelivered marks off this
     },
     /**
-     * Send a given-up message again, by hand. Keeps the original id, so the ✓/⚠
+     * Send a given-up message again, by hand. Keeps the original id, so the delivered/undelivered mark
      * marker the user is looking at is the one that updates. Returns false if
      * there is nothing to resend (unknown id) or a try is already in flight.
      */
@@ -1137,7 +1137,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     /**
      * Correct a message already sent. Tracked exactly like the message was, so
      * the UI can say "they still see the old text" instead of assuming — the
-     * returned id is the one the ✓ / ⚠ hangs off, not the id being corrected.
+     * returned id is the one the delivered / undelivered mark hangs off, not the id being corrected.
      */
     sendEdit: (to: string, body: string) => {
       const e = envEdit(seq++, to, body)

@@ -1,7 +1,7 @@
 /**
  * browser-test.ts — drive the REAL web app in two headless browsers.
  *
- *   node net/browser-test.ts                        # Chromium ×2
+ *   node net/browser-test.ts                        # Chromium x2
  *   BROWSERS=chromium,firefox node net/browser-test.ts
  *   APP_URL=http://localhost:3000/?eh2=1 node net/browser-test.ts
  *
@@ -17,7 +17,7 @@
  * and no dependency is needed — Node 24 has WebSocket built in, and both
  * browsers are already on the machine.
  *
- * The mixed pair is the point: Chromium↔Chromium says nothing about ICE between
+ * The mixed pair is the point: ChromiumChromium says nothing about ICE between
  * two different implementations, and a real session between them is exactly
  * where "connected, but over the relay" was first noticed.
  *
@@ -25,7 +25,7 @@
  * BOTH sides, messages arriving each way, the delivery mark appearing (so the
  * ack path is exercised in a browser too), and the transport badge flipping to
  * WebRTC Direct. On failure it prints each browser's own console trace — the
- * `[ec …]` narration — which is usually enough to see where it stopped.
+ * `[ec ...]` narration — which is usually enough to see where it stopped.
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
@@ -48,7 +48,7 @@ const APP_URL = process.env.APP_URL ?? `http://127.0.0.1:${LOCAL_PORT}/?eh2=1&de
 const SERVE_LOCAL = !process.env.APP_URL
 
 const MIME: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.map': 'application/json' }
-/** The node the local `/f` proxy forwards to. Absent → the file scenario is skipped. */
+/** The node the local `/f` proxy forwards to. Absent -> the file scenario is skipped. */
 const IPFS_RPC = process.env.IPFS_RPC ?? ''
 const collect = (req: any): Promise<Buffer[]> => new Promise((resolve, reject) => {
   const parts: Buffer[] = []
@@ -229,7 +229,7 @@ class Browser extends Page {
   }
 
   /**
-   * Chromium announces its endpoint on stderr ("DevTools listening on ws://…").
+   * Chromium announces its endpoint on stderr ("DevTools listening on ws://...").
    * Read it from there rather than from DevToolsActivePort in the profile dir:
    * a snap-confined Chromium does not write that file where we asked it to,
    * and a fixed port would happily attach us to a LEFTOVER browser from an
@@ -356,7 +356,7 @@ class Browser extends Page {
   async stop() {
     // ASK the browser to quit before signalling it. `proc.kill()` cannot be
     // relied on: a snap-confined Chromium refuses signals from a confined
-    // parent with EPERM, and the old `try { … } catch {}` turned that refusal
+    // parent with EPERM, and the old `try { ... } catch {}` turned that refusal
     // into silence — every run leaked a whole browser tree (two browsers, their
     // zygotes and renderers, well over half a gigabyte) that outlived the
     // harness, until enough runs had accumulated to take the machine down.
@@ -371,10 +371,10 @@ class Browser extends Page {
     try { this.ws?.close() } catch {}
     if (!quit) {
       try { this.proc.kill('SIGKILL') } catch (e: any) {
-        console.log(`⚠ ${this.name}: cannot signal Chromium (${e?.code ?? e})`)
+        console.log(`WARNING: ${this.name}: cannot signal Chromium (${e?.code ?? e})`)
       }
       if (!(await this.exited(2_000))) {
-        console.log(`⚠ ${this.name}: Chromium (pid ${this.proc.pid}) is STILL RUNNING — kill it by hand,`
+        console.log(`WARNING: ${this.name}: Chromium (pid ${this.proc.pid}) is STILL RUNNING — kill it by hand,`
           + ' leaked browsers from repeated runs are what exhausts this machine')
       }
     }
@@ -400,11 +400,11 @@ class Browser extends Page {
  *
  *  - **The profile must live somewhere the snap can see.** Ubuntu's Firefox is a
  *    snap, and snap confinement hides dot-directories in $HOME, so a profile
- *    under `~/.cache/…` is silently unusable — Firefox falls back to the user's
+ *    under `~/.cache/...` is silently unusable — Firefox falls back to the user's
  *    real profile, hits its lock, and prints "Firefox is already running".
  *    `~/snap/firefox/common` is inside the sandbox and works.
  *  - **BiDi returns structured values, not JSON.** `script.evaluate` answers with
- *    a RemoteValue tree ({type:'number', value:…}, objects as entry lists), so
+ *    a RemoteValue tree ({type:'number', value:...}, objects as entry lists), so
  *    everything has to be turned back into plain data — see `plain()`.
  */
 class Firefox extends Page {
@@ -450,7 +450,7 @@ class Firefox extends Page {
     }
   }
 
-  /** Firefox prints `WebDriver BiDi listening on ws://…` on stderr. */
+  /** Firefox prints `WebDriver BiDi listening on ws://...` on stderr. */
   private async discover(): Promise<string> {
     return new Promise((resolve, reject) => {
       let buf = ''
@@ -518,10 +518,10 @@ class Firefox extends Page {
     try { this.ws?.close() } catch {}
     if (!quit) {
       try { this.proc.kill('SIGKILL') } catch (e: any) {
-        console.log(`⚠ ${this.name}: cannot signal Firefox (${e?.code ?? e})`)
+        console.log(`WARNING: ${this.name}: cannot signal Firefox (${e?.code ?? e})`)
       }
       if (!(await this.exited(3_000))) {
-        console.log(`⚠ ${this.name}: Firefox (pid ${this.proc.pid}) is STILL RUNNING — kill it by hand,`
+        console.log(`WARNING: ${this.name}: Firefox (pid ${this.proc.pid}) is STILL RUNNING — kill it by hand,`
           + ' leaked browsers from repeated runs are what exhausts this machine')
       }
     }
@@ -537,7 +537,7 @@ class Firefox extends Page {
   }
 }
 
-/** BiDi RemoteValue → plain JS. Objects arrive as entry lists, arrays as lists. */
+/** BiDi RemoteValue -> plain JS. Objects arrive as entry lists, arrays as lists. */
 function plain(v: any): any {
   if (!v || typeof v !== 'object') return v
   switch (v.type) {
@@ -549,8 +549,8 @@ function plain(v: any): any {
   }
 }
 
-const step = (msg: string) => console.log(`• ${msg}`)
-const scenario = (name: string) => console.log(`\n▸ ${name}`)
+const step = (msg: string) => console.log(`  - ${msg}`)
+const scenario = (name: string) => console.log(`\n== ${name}`)
 
 // The badge reads "Secure" now, not "EH-2 + ratchet" — plain language in the UI,
 // the scheme in the tooltip. Assert on the CLASS as well, because `direct` is
@@ -559,7 +559,7 @@ const scenario = (name: string) => console.log(`\n▸ ${name}`)
 // Every EH-2 wait below is 90 s, not 45: this is a LIVE relay and a real
 // GossipSub mesh, so the number is a network budget, not a product promise.
 //
-// ⚠ It was widened after "switching to another contact and back" flaked, and
+// WARNING: It was widened after "switching to another contact and back" flaked, and
 // widening did NOT fix that one — the console says why, and it is worth knowing
 // before anybody widens it again: after the network-cut scenario the peer comes
 // back under a NEW PeerId, and the initiator keeps attempting the old one while
@@ -733,10 +733,10 @@ async function openContact(b: Page, name: string) {
 async function roundTrip(A: Page, B: Page, tag: string) {
   const a = `A-${tag}-${Date.now().toString(36)}`
   await send(A, a)
-  await B.waitFor(`A→B (${tag})`, seen(a), 25_000)
+  await B.waitFor(`A->B (${tag})`, seen(a), 25_000)
   const b = `B-${tag}-${Date.now().toString(36)}`
   await send(B, b)
-  await A.waitFor(`B→A (${tag})`, seen(b), 25_000)
+  await A.waitFor(`B->A (${tag})`, seen(b), 25_000)
 }
 
 async function main() {
@@ -749,20 +749,20 @@ async function main() {
     step(`launching ${PAIR[0]} + ${PAIR[1] ?? PAIR[0]} on ${APP_URL}`)
     await Promise.all([A.start(APP_URL), B.start(APP_URL)])
 
-    if (process.env.SHOT_LOGIN) { // capture the login node list (collapsed → expanded)
+    if (process.env.SHOT_LOGIN) { // capture the login node list (collapsed -> expanded)
       await A.resize(460, 760)
       await A.waitFor('login form', `return !!document.getElementById('go-soft')`)
       await A.eval(`localStorage.setItem('ec-nodes', JSON.stringify([
-        {name:'bs1.onchato.com', addr:'/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgc…', enabled:true},
+        {name:'bs1.onchato.com', addr:'/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgc...', enabled:true},
         {name:'bs2.onchato.com', addr:'/dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y', enabled:true},
-        {name:'vm-prywatna', addr:'/dns4/vm.local/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWXyZ789…', enabled:false}
+        {name:'vm-prywatna', addr:'/dns4/vm.local/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWXyZ789...', enabled:false}
       ])); return 1`)
       await A.reload(APP_URL)
       await A.waitFor('login form', `return !!document.getElementById('go-soft')`)
       await A.eval(`document.getElementById('nodes-toggle').click(); return 1`)
       await sleep(350)
       await A.screenshot(`${process.env.SHOT_DIR ?? '/tmp'}/login-nodes.png`)
-      step(`screenshot → ${process.env.SHOT_DIR ?? '/tmp'}/login-nodes.png`)
+      step(`screenshot -> ${process.env.SHOT_DIR ?? '/tmp'}/login-nodes.png`)
       await A.eval(`localStorage.removeItem('ec-nodes'); return 1`) // don't leak demo nodes into the run
       await A.reload(APP_URL)
     }
@@ -799,14 +799,14 @@ async function main() {
     // exactly what it did when the namespace moved.
     const idA = await hemKid(new Uint8Array(Buffer.from(pubA, 'base64')))
     const idB = await hemKid(new Uint8Array(Buffer.from(pubB, 'base64')))
-    step(`identities ready — A ${pubA.slice(0, 12)}… (${idA.slice(0, 8)})  B ${pubB.slice(0, 12)}… (${idB.slice(0, 8)})`)
+    step(`identities ready — A ${pubA.slice(0, 12)}... (${idA.slice(0, 8)})  B ${pubB.slice(0, 12)}... (${idB.slice(0, 8)})`)
 
     // A also gets a second, unreachable contact — the "switch away and back" test
     // needs somewhere to switch TO.
     const ghostPub = Buffer.from(Array.from({ length: 32 }, (_, i) => (i * 7 + 13) & 0xff)).toString('base64')
     await A.eval(`localStorage.setItem('ec-local-contacts-${idA}', ${JSON.stringify(JSON.stringify([{ name: 'sim-b', pub: pubB }, { name: 'ghost', pub: ghostPub }]))}); return 1`)
     await B.eval(`localStorage.setItem('ec-local-contacts-${idB}', ${JSON.stringify(JSON.stringify([{ name: 'sim-a', pub: pubA }]))}); return 1`)
-    // ⚠️ The shipped default is relay-only since 0.5.48 (app.ts TRANSPORT_KEY),
+    // WARNING: The shipped default is relay-only since 0.5.48 (app.ts TRANSPORT_KEY),
     // and this harness is the ONLY thing that covers the direct plane at all —
     // Node has no RTCPeerConnection. So both browsers opt into `auto` here, the
     // way a user does in Settings; without it the WebRTC scenarios would pass by
@@ -830,9 +830,9 @@ async function main() {
       await A.waitFor('A Network tab shows failover to the working node', `
         const p = document.getElementById('pane-network');
         const t = p ? p.textContent : '';
-        return t.includes('failover') && /●\\s*dobry/.test(t) && /○\\s*martwy/.test(t);
+        return t.includes('failover') && /\\s*dobry/.test(t) && /\\s*martwy/.test(t);
       `, 15_000)
-      step('A is on the fallback node (Network tab: failover, ● dobry / ○ martwy) — 3b end-to-end OK')
+      step('A is on the fallback node (Network tab: failover, dobry / martwy) — 3b end-to-end OK')
       await A.eval(`document.getElementById('tab-contacts').click(); return 1`) // back to the chat
     }
 
@@ -842,7 +842,7 @@ async function main() {
     await roundTrip(A, B, 'first')
     await A.waitFor('delivery mark on A', `return document.getElementById('messages').textContent.includes('dostarczone')`, 20_000)
     await B.waitFor('delivery mark on B', `return document.getElementById('messages').textContent.includes('dostarczone')`, 20_000)
-    step('both sides show ✓ dostarczone (ack path works in a browser)')
+    step('both sides show [ok] dostarczone (ack path works in a browser)')
 
     // ---- links: found, but not clickable text -------------------------------
     // The security properties are the point, not the decoration. The URL must
@@ -1259,14 +1259,14 @@ async function main() {
     if (!acts.opener) throw new Error('no reaction opener on the bar')
     // reply + edit + pin + the one opener — the four emoji used to sit here too.
     if (acts.emojiButtons > 4) throw new Error(`the bar still carries ${acts.emojiButtons} buttons`)
-    // ⚠️ The meta line is the stamp AND the delivery state ("21:27 · wysyłam…"),
+    // WARNING: The meta line is the stamp AND the delivery state ("21:27 | wysyłam..."),
     // so match the head of it, not the whole string.
     if (/UTC/.test(acts.stamp) || !/^\d\d:\d\d(\s|$)/.test(String(acts.stamp).trim())) {
       throw new Error(`the stamp is not a local clock time: ${JSON.stringify(acts.stamp)}`)
     }
     step('the bar was hidden, the press revealed it, and the stamp is local time')
 
-    // ⚠️ Measure the OPEN picker before picking: the pick closes it, so reading
+    // WARNING: Measure the OPEN picker before picking: the pick closes it, so reading
     // `hidden` after the click reports "it never opened".
     const opened = await A.eval<any>(`
       const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(actTok)}));
@@ -1347,7 +1347,7 @@ async function main() {
     if (!marked) throw new Error('the corrected bubble on B carries no "edytowano" mark')
     step('the old text is gone on the other side, and the bubble says it was edited')
     // The point of doing this in a 1:1 at all: the sender is TOLD. A correction
-    // that never arrived stays "wysyłam poprawkę…" and then goes red — so the
+    // that never arrived stays "wysyłam poprawkę..." and then goes red — so the
     // absence of both is what proves this one landed.
     await A.waitFor('A is told the correction arrived', `
       const row = [...document.querySelectorAll('#messages .mrow')].find((r) => r.textContent.includes(${JSON.stringify(fixed)}));
@@ -1470,7 +1470,7 @@ async function main() {
     await A.waitFor('A is told what it can honestly be told', `
       return document.getElementById('messages').textContent.includes('Puknięcie wysłane do pokoju')`, 10_000)
     // It said "sent into the room" and nothing about delivery, because nothing
-    // acknowledges a knock — the absence of a ✓ here is the assertion.
+    // acknowledges a knock — the absence of a [ok] here is the assertion.
     const knockClaim = await A.eval<boolean>(`
       const rows = [...document.querySelectorAll('#messages .sysline')].map((r) => r.textContent);
       return rows.some((t) => t.includes('Puknięcie wysłane')) && !rows.some((t) => t.includes('dostarczone'))`)
@@ -1507,7 +1507,7 @@ async function main() {
         direct = true
       } catch { /* reported at the end */ }
     }
-    step(direct ? 'transport upgraded to WebRTC Direct' : '⚠ still on relay — WebRTC did not come up')
+    step(direct ? 'transport upgraded to WebRTC Direct' : 'WARNING: still on relay — WebRTC did not come up')
     await roundTrip(A, B, 'after-upgrade')
     step('messages still flow after the transport decision')
 
@@ -1566,7 +1566,7 @@ async function main() {
       try { await B.waitFor('content over the direct channel', seen(direktMsg), 15_000) } catch { survived = false }
       step(survived
         ? 'the relay is gone and messages still flow — content is genuinely P2P'
-        : '⚠ content stopped with the relay (was the direct channel up?)')
+        : 'WARNING: content stopped with the relay (was the direct channel up?)')
 
       await B.offline(false)
       await B.waitFor('B is back on its feet',
@@ -1577,13 +1577,13 @@ async function main() {
       // (test/room-eh2.test.ts) — reproducing a relay-only outage in a browser
       // would mean tearing down a working DataChannel to prove a point.
     } else {
-      step('⚠ skipped — this driver cannot cut the network (BiDi has no equivalent)')
+      step('WARNING: skipped — this driver cannot cut the network (BiDi has no equivalent)')
     }
 
     scenario('switching to another contact and back')
     await openContact(A, 'ghost')          // a peer that will never answer
     await sleep(2_000)
-    await openContact(A, 'sim-b')          // …and back to the real conversation
+    await openContact(A, 'sim-b')          // ...and back to the real conversation
     await A.waitFor('EH-2 after switching back', BADGE_GREEN, 90_000)
     await roundTrip(A, B, 'after-switch')
     step('the original conversation resumed after switching away')
@@ -1604,7 +1604,7 @@ async function main() {
     `, 25_000)
     const stillAway = await A.eval<string>(`return document.getElementById('peer-name').textContent`)
     const leaked = await A.eval<boolean>(`return document.getElementById('messages').textContent.includes(${JSON.stringify(bgTok)})`)
-    if (stillAway !== away) throw new Error(`view was yanked to another conversation (${away} → ${stillAway})`)
+    if (stillAway !== away) throw new Error(`view was yanked to another conversation (${away} -> ${stillAway})`)
     if (leaked) throw new Error('a background message rendered into the foreground transcript')
     step('message landed in the background — unread dot lit, view unmoved')
     await openContact(A, 'sim-b')           // now go read it
@@ -1623,15 +1623,15 @@ async function main() {
     // flipping to Relay while the other stayed on WebRTC — so messages stopped
     // until the ratchet came back N seconds later. Returning to a room that is
     // ALREADY open must just show it.
-    await B.resize(390, 780) // phone width → mobile one-pane layout
+    await B.resize(390, 780) // phone width -> mobile one-pane layout
     await B.waitFor('the back arrow', `return document.getElementById('btn-back').getBoundingClientRect().height > 0`, 8_000)
     const peerIdBefore = await B.eval<string>(`return document.getElementById('sess-peerid').textContent`)
     await B.eval(`document.getElementById('btn-back').click(); return 1`)   // to the peer list
     await sleep(1_000)
-    await openContact(B, 'sim-a')                                          // tap the contact → back to the room
+    await openContact(B, 'sim-a')                                          // tap the contact -> back to the room
     await sleep(1_500)
     const peerIdAfter = await B.eval<string>(`return document.getElementById('sess-peerid').textContent`)
-    if (peerIdBefore !== peerIdAfter) throw new Error(`returning rebuilt the session (peerId ${peerIdBefore} → ${peerIdAfter})`)
+    if (peerIdBefore !== peerIdAfter) throw new Error(`returning rebuilt the session (peerId ${peerIdBefore} -> ${peerIdAfter})`)
     if (!(await B.eval(BADGE_GREEN))) throw new Error('EH-2 badge dropped on return — the room was torn down')
     const t0 = Date.now()
     await roundTrip(A, B, 'after-return')
@@ -1672,7 +1672,7 @@ async function main() {
     await B.waitFor('the filler arrived', seen('wypełniacz 14'), 40_000)
     // Both layouts, because the narrow one has its own rules and it is the one
     // that was broken: under 860px the chat panel grew with the transcript, so
-    // the messages box never overflowed. Nothing scrolled inside it, the ⬇
+    // the messages box never overflowed. Nothing scrolled inside it, the 
     // button could never appear, and the whole page scrolled instead — two
     // browser windows side by side are enough to land in that layout.
     for (const [w, h, label] of [[780, 620, 'narrow'], [1200, 800, 'wide']] as const) {
@@ -1685,7 +1685,7 @@ async function main() {
           + ', chat panel ' + document.querySelector('.chat').clientHeight + 'px)');
         m.scrollTop = 0; m.dispatchEvent(new Event('scroll')); return 1;
       `)
-      await B.waitFor(`the ⬇ button (${label})`, `return document.getElementById('to-bottom').hidden === false`, 10_000)
+      await B.waitFor(`the button (${label})`, `return document.getElementById('to-bottom').hidden === false`, 10_000)
       const tail = `ogon-${label}-${Date.now().toString(36)}`
       await send(A, tail)
       await B.waitFor(`an unread count (${label})`, `return document.getElementById('unread').hidden === false`, 25_000)
@@ -1711,7 +1711,7 @@ async function main() {
         return m.scrollHeight - m.scrollTop - m.clientHeight < 80 && document.getElementById('to-bottom').hidden;
       `, 10_000)
       if (!(await B.eval<boolean>(seen(tail)))) throw new Error(`the newest message is missing (${label})`)
-      step(`${label} layout: the view stays put, counts what arrived, and ⬇ returns to it`)
+      step(`${label} layout: the view stays put, counts what arrived, and returns to it`)
     }
 
     scenario('the phone layout')
@@ -1771,7 +1771,7 @@ async function main() {
 
     scenario('a group: create, invite over 1:1, and a broadcast reaches the member')
     // A makes a group with sim-b. The Sender-Key Distribution rides the existing
-    // A↔B 1:1 ratchet; B joins and hands its own key back; then A's broadcast on
+    // AB 1:1 ratchet; B joins and hands its own key back; then A's broadcast on
     // the group topic reaches B (§8, all-ECDH, deniable).
     await A.eval(`document.getElementById('tab-groups').click(); document.getElementById('btn-new-group').click(); return 1`)
     await A.waitFor('the new-group modal', `return document.getElementById('group-modal').classList.contains('open')`, 6_000)
@@ -1798,7 +1798,7 @@ async function main() {
     }
     if (!groupDelivered) throw new Error('group broadcast did not reach the member')
     step('a broadcast on the group topic reached the member (with the sender label)')
-    // A group broadcast has no acks — it must read "wysłano", never hang on "wysyłam…".
+    // A group broadcast has no acks — it must read "wysłano", never hang on "wysyłam...".
     const groupSent = await A.eval<boolean>(`return document.getElementById('messages').textContent.includes('wysłano') && !document.getElementById('messages').textContent.includes('wysyłam')`)
     if (!groupSent) throw new Error('a group message should show "wysłano", not hang on "wysyłam"')
     step('a sent group message reads "wysłano" (no perpetual "wysyłam")')
@@ -1807,7 +1807,7 @@ async function main() {
     // is therefore absent here — not present and failing quietly.
     const groupEdit = await A.eval<boolean>(`
       return [...document.querySelectorAll('#messages .mrow.out')].some((r) => !!r.querySelector('.b-edit'))`)
-    if (groupEdit) throw new Error('a group message offers ✏ — editing cannot be honest without acks')
+    if (groupEdit) throw new Error('a group message offers — editing cannot be honest without acks')
     step('no edit control on a group message (no acks to prove a correction landed)')
 
     // ---- mentions -----------------------------------------------------------
@@ -1874,13 +1874,13 @@ async function main() {
       await A.eval(`document.getElementById('members-pop').hidden = true; document.getElementById('tab-network').click(); return 1`)
       await sleep(2700) // let a refresh tick populate the status
       await A.screenshot(`${dir}/network-view.png`)
-      step(`screenshots → ${dir}/{group-view,network-view}.png`)
+      step(`screenshots -> ${dir}/{group-view,network-view}.png`)
     }
 
     scenario('group membership: admin removes a member (locked out), then re-adds (rejoins)')
     // A is the admin (roster[0], the creator). Removing sim-b rekeys the group to a
     // NEW topic and does NOT send B the new SKD, so B stays on the old topic and
-    // stops receiving. Re-adding gives B a newer epoch → it rejoins and receives again.
+    // stops receiving. Re-adding gives B a newer epoch -> it rejoins and receives again.
 
     // --- remove ---
     await A.eval(`document.getElementById('members-cluster').click(); return 1`)
@@ -2149,7 +2149,7 @@ async function main() {
     // The whole point of routing through this window rather than adding the
     // contact directly: a pasted link gets the same fingerprint check a clicked
     // one does. If these ever differ, the paste path has become the soft way in.
-    if (pasted.fp !== share.fp) throw new Error(`a pasted link produced a different fingerprint: ${share.fp} → ${pasted.fp}`)
+    if (pasted.fp !== share.fp) throw new Error(`a pasted link produced a different fingerprint: ${share.fp} -> ${pasted.fp}`)
     if (pasted.name !== 'wklejony') throw new Error(`the typed name lost to the sender's: ${pasted.name}`)
     if (pasted.addOpen) throw new Error('the add window stayed open behind the import window')
     if (!pasted.stores.includes('none')) throw new Error('an imported invite still cannot be kept ephemerally')
@@ -2177,7 +2177,7 @@ async function main() {
       name: document.getElementById('import-name').value,
       url: location.href,
     }`)
-    if (imp.fp !== share.fp) throw new Error(`fingerprint changed in transit: ${share.fp} → ${imp.fp}`)
+    if (imp.fp !== share.fp) throw new Error(`fingerprint changed in transit: ${share.fp} -> ${imp.fp}`)
     // Read once, then dropped: a public key left in the address bar outlives the
     // dialog, survives into history, and re-asks on every reload.
     if (imp.url.includes('#i=')) throw new Error('the invite stayed in the address bar')
@@ -2314,7 +2314,7 @@ async function main() {
     // a wrong source password refused first, because the password is what stops
     // a copy from laundering a tampered book into a freshly-signed one.
     const createProfile = async (profName: string, copyFrom?: string, copyPass?: string, pass = SOFT_PASS) => {
-      // ⚠️ The post-wipeout reload parses the DOM long before the 1.3 MB bundle
+      // WARNING: The post-wipeout reload parses the DOM long before the 1.3 MB bundle
       // finishes executing — `go-soft` exists while its listener does not yet,
       // and a click in that window lands on a deaf button (found the hard way:
       // readyState was "interactive" at the timeout). 'complete' guarantees the

@@ -6,8 +6,8 @@ import { join } from 'node:path'
 /**
  * The catalogue's own header says a duplicate key is not a syntax error and
  * that the later one silently wins. It was right, and nothing was checking:
- * `'Pobieram…'` sat in the table twice, translated once as "Downloading…" and
- * once as "Fetching…", and the English build had been showing the second for as
+ * `'Pobieram...'` sat in the table twice, translated once as "Downloading..." and
+ * once as "Fetching...", and the English build had been showing the second for as
  * long as both existed. Nobody can see that by reading — the file is 450 lines
  * of near-identical shape — so it is checked here instead.
  */
@@ -48,7 +48,7 @@ for (const locale of ['pl', 'en']) {
  * bare Polish sitting next to translated siblings in the same expression, on the
  * sign-in button.
  *
- * So this reads the call sites, not the catalogue: every literal inside a `tr(…)`
+ * So this reads the call sites, not the catalogue: every literal inside a `tr(...)`
  * and every `data-i18n*` in the markup has to be answerable in English.
  */
 const HTML = readFileSync(join(import.meta.dirname, '..', 'web', 'index.html'), 'utf8')
@@ -58,7 +58,7 @@ const DESK = readFileSync(join(import.meta.dirname, '..', 'web', 'src', 'desktop
 /** Symbols, emoji and the two language names: nothing to translate. */
 const NOT_WORDS = /^[\s\p{P}\p{S}\d]*$/u
 const EXEMPT = new Set(['English', 'Polski'])
-/** `tr(mode === 'export' ? … : …)` puts a MODE FLAG inside the call, and the
+/** `tr(mode === 'export' ? ... : ...)` puts a MODE FLAG inside the call, and the
  *  scanner cannot tell it from a caption. Every real caption is capitalised, or
  *  has a space, or carries a Polish character; a bare lowercase token is a flag. */
 const LOOKS_LIKE_A_FLAG = /^[a-z][a-z0-9-]*$/

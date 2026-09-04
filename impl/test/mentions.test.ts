@@ -105,7 +105,7 @@ test('what the picker pointed at settles a tie its name cannot', () => {
   const twins = [{ pub: ALA, name: 'Ala' }, { pub: BOB, name: 'Ala' }]
   const picked = new Map([['ala', BOB]])
   assert.equal(closeMentions('@Ala halo', twins, picked), '@Ala#ff001122 halo')
-  // …and it settles nothing else: an unpicked name is still resolved from the
+  // ...and it settles nothing else: an unpicked name is still resolved from the
   // roster, or left alone.
   assert.equal(closeMentions('@Ala halo', twins, new Map([['bob', BOB]])), '@Ala halo')
 })

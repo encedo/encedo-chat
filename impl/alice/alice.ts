@@ -10,8 +10,8 @@
  *
  * Password: --password <pw>, or HEM_PASSWORD env, or interactive prompt (masked).
  *
- * Flow: register → give printed pubkey to Bob (`bob add-peer alice <pub>`);
- *       take Bob's pubkey → `topic bob --peer-pub <bob_pub>`.
+ * Flow: register -> give printed pubkey to Bob (`bob add-peer alice <pub>`);
+ *       take Bob's pubkey -> `topic bob --peer-pub <bob_pub>`.
  *       Compare with `bob topic alice` — the two topics MUST be identical.
  */
 
@@ -63,14 +63,14 @@ switch (cmd) {
     const descr = buildSelfDescr(handle)
     const genToken = await hem.authorizePassword(pw, 'keymgmt:gen')
     const { kid } = await hem.createKeyPair(genToken, selfLabel(handle), 'CURVE25519', encodeDescr(descr))
-    const useToken = await hem.authorizePassword(null, `keymgmt:use:${kid}`)   // null → reuse cached pw-derived key
+    const useToken = await hem.authorizePassword(null, `keymgmt:use:${kid}`)   // null -> reuse cached pw-derived key
     const { pubkey } = await hem.getPubKey(useToken, kid)
     writeFileSync(LOCAL, JSON.stringify({ handle, hsmUrl, kid, pub: pubkey }, null, 2) + '\n')
     console.log(`Alice registered — handle "${handle}"`)
     console.log(`DESCR:  ${descr}`)
     console.log(`kid:    ${kid}`)
     console.log(`pubkey: ${pubkey}`)
-    console.log(`\n→ give this pubkey to Bob:  node bob/bob.ts add-peer ${handle} ${pubkey}`)
+    console.log(`\n-> give this pubkey to Bob:  node bob/bob.ts add-peer ${handle} ${pubkey}`)
     break
   }
   case 'pubkey':
@@ -115,7 +115,7 @@ switch (cmd) {
     const pw = await getPassword()
     const id = await hemIdentity(hsmUrl, pw, 'alice')
     const { multiaddr: relay } = await onchatoRelay()
-    console.log(`[alice] connecting via onchato relay (identity in HEM)…`)
+    console.log(`[alice] connecting via onchato relay (identity in HEM)...`)
     await runChatSession(id, peerPub, id.handle, peer, relay, pr)
     break
   }

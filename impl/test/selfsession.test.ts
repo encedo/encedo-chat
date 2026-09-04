@@ -154,11 +154,11 @@ test('rotating: windows on opposite sides of the identity\'s instant still see e
   const net = hub()
   const macKey = await key()
   const taken: string[] = []
-  // w1's clock is 10 min before the identity's rollover (guard → both days live); it settles alone.
+  // w1's clock is 10 min before the identity's rollover (guard -> both days live); it settles alone.
   const w1 = rotatingWindow(net, 'w1', macKey, taken, () => BOUNDARY - 10 * 60_000)
   await sleep(300)
   assert.equal(taken.length, 0, 'a lone window is left alone')
-  // w2 opens 5 min after the rollover (guard → both days live) — the overlap is where they meet.
+  // w2 opens 5 min after the rollover (guard -> both days live) — the overlap is where they meet.
   const w2 = rotatingWindow(net, 'w2', macKey, taken, () => BOUNDARY + 5 * 60_000)
   await sleep(500)
   try {

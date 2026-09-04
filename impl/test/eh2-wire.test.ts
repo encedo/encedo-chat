@@ -2,7 +2,7 @@
  * EH-2 stage 1 — wire format + transcript (docs/PROTOCOL.md §6.1–6.2).
  *
  * What matters here is CANONICALITY: the same frame must always produce the
- * same bytes (h1 hashes those bytes → SK depends on them), and anything that is
+ * same bytes (h1 hashes those bytes -> SK depends on them), and anything that is
  * not exactly a well-formed frame must be rejected rather than half-parsed.
  */
 

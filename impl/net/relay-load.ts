@@ -103,9 +103,9 @@ async function runPair(day: string, index: number): Promise<{ result: PairResult
 
     const t2 = Date.now()
     A.sendText(`load-${index}-a`)
-    if (!(await until(() => got.length > 0, deadline))) { r.why = 'A→B never arrived'; return { result: r, stop } }
+    if (!(await until(() => got.length > 0, deadline))) { r.why = 'A->B never arrived'; return { result: r, stop } }
     B.sendText(`load-${index}-b`)
-    if (!(await until(() => back.length > 0, deadline))) { r.why = 'B→A never arrived'; return { result: r, stop } }
+    if (!(await until(() => back.length > 0, deadline))) { r.why = 'B->A never arrived'; return { result: r, stop } }
     r.rtMs = Date.now() - t2
     r.ok = true
     return { result: r, stop }
@@ -118,7 +118,7 @@ async function runPair(day: string, index: number): Promise<{ result: PairResult
 const rssMb = () => Math.round(memoryUsage().rss / 1024 / 1024)
 const day = new Date().toISOString().slice(0, 10)
 
-console.log(`relay-load — ${RELAY.slice(0, 48)}…`)
+console.log(`relay-load — ${RELAY.slice(0, 48)}...`)
 console.log(`waves (pairs): ${PLAN.join(', ')}   timeout ${PAIR_TIMEOUT_MS / 1000}s per pair\n`)
 console.log('pairs  clients  ok      dial p50/p95   discover p50/p95   handshake p50/p95   round-trip p50   rss   cpu%')
 
@@ -147,7 +147,7 @@ for (const pairs of PLAN) {
     + `${ms(pct(rt, 0.5)).padStart(17)}`
     + `${(rssMb() + 'M').padStart(7)}${String(cpuPct).padStart(6)}`,
   )
-  for (const bad of results.filter((r) => !r.ok)) console.log(`         ✖ ${bad.why}`)
+  for (const bad of results.filter((r) => !r.ok)) console.log(`         [fail] ${bad.why}`)
 
   for (const s of started) await s.stop()
   await new Promise((r) => setTimeout(r, 3_000)) // let the relay see them leave

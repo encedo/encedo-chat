@@ -5,7 +5,7 @@
  *   node net/eh2-chat-test.ts
  *
  * Same shape as chat-test.ts, one difference that is the whole point: no shared
- * static key. Content is readable only after msg1→msg2→msg3 have crossed the
+ * static key. Content is readable only after msg1->msg2->msg3 have crossed the
  * real network and both sides hold a ratchet.
  */
 
@@ -29,9 +29,9 @@ const { multiaddr: relay } = await onchatoRelay()
 const na = await createPeer()
 const nb = await createPeer()
 await Promise.all([na.dial(multiaddr(relay)), nb.dial(multiaddr(relay))])
-console.log(`dialed onchato relay; topic=${topic.slice(0, 14)}…  sending "${SECRET}" under EH-2`)
+console.log(`dialed onchato relay; topic=${topic.slice(0, 14)}...  sending "${SECRET}" under EH-2`)
 
-const state = (who: string) => (peer: string, s: string) => console.log(`  ${who}: EH-2 ${s} with ${peer.slice(0, 12)}…`)
+const state = (who: string) => (peer: string, s: string) => console.log(`  ${who}: EH-2 ${s} with ${peer.slice(0, 12)}...`)
 
 let ra: any, rb: any
 const received = new Promise<string>((resolve) => {

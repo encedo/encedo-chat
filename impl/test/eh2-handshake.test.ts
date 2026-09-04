@@ -129,12 +129,12 @@ test('an impostor cannot complete: wrong long-term key on either side', async ()
   const [ikI, ikR, mallory] = [await generateX25519(), await generateX25519(), await generateX25519()]
   const kem = toyKem()
 
-  // I thinks it is talking to Mallory's key, R answers with its own → no shared SK
+  // I thinks it is talking to Mallory's key, R answers with its own -> no shared SK
   const i1 = await initiate({ ik: ikI, peerIkPub: mallory.pub, kem, now: NOW })
   const r1 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW })
   await assert.rejects(() => initiatorComplete(i1.state, r1.msg2, { now: NOW }), /mac_r/)
 
-  // R resolves the wrong contact for initiator_id → caught before any DH
+  // R resolves the wrong contact for initiator_id -> caught before any DH
   const i2 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
   await assert.rejects(
     () => respond({ ik: ikR, peerIkPub: mallory.pub, msg1: i2.msg1, kem, now: NOW }),
@@ -149,7 +149,7 @@ test('an impostor cannot complete: wrong long-term key on either side', async ()
   )
 })
 
-test('timestamps outside the ±5 min window are refused (§6.4 replay)', async () => {
+test('timestamps outside the +/-5 min window are refused (§6.4 replay)', async () => {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
   const kem = toyKem()
   const i1 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })

@@ -45,7 +45,7 @@ async function waitCircuit(node, ms = 25_000) {
 const role = process.argv[2]
 const node = await mkNode()
 const ok = await waitCircuit(node)
-console.log(`node ${node.peerId.toString().slice(0, 12)}… reservation=${ok}`)
+console.log(`node ${node.peerId.toString().slice(0, 12)}... reservation=${ok}`)
 
 if (role === 'listen') {
   await node.handle(PROTO, async ({ stream }) => {

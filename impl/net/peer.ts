@@ -14,7 +14,7 @@ import { identify } from '@libp2p/identify'
 import { gossipsub } from '@chainsafe/libp2p-gossipsub'
 import { multiaddr } from '@multiformats/multiaddr'
 
-// v5 fix: keep any ws/wss multiaddr (incl. /http-path/…) instead of exactMatch.
+// v5 fix: keep any ws/wss multiaddr (incl. /http-path/...) instead of exactMatch.
 const wsFilter = (addrs) => addrs.filter((ma) => /\/(wss?)(\/|$)/.test(ma.toString()))
 
 export async function createPeer() {

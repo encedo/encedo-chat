@@ -142,7 +142,7 @@ test('a string with XML in it is escaped, not injected', () => {
 /**
  * The status-bar icon was tiny next to every other one (reported at 0.5.9),
  * because the service reused `ic_launcher_monochrome`: that layer keeps the
- * adaptive-icon safe zone (glyph ≈44% of the canvas, the launcher mask crops
+ * adaptive-icon safe zone (glyph ~44% of the canvas, the launcher mask crops
  * 66/108 dp), and the status bar draws a resource full-bleed. The fix is a
  * dedicated `ic_stat_onchato` drawable, and THREE files must agree on it: the
  * PNGs checked into `icons/android/drawable-*`, the Kotlin's `setSmallIcon`,
@@ -167,7 +167,7 @@ test('the status-bar icon exists at every density and both notification paths na
   assert.ok(kt.includes('R.drawable.ic_stat_onchato'), 'the service should draw the status-bar icon')
   assert.ok(!kt.includes('setSmallIcon(R.mipmap'), 'a mipmap in the status bar is the bug this fixed')
 
-  // ⚠️ BISECT IN PROGRESS (0.5.20): APKs die at launch from 0.5.10 onward —
+  // WARNING: BISECT IN PROGRESS (0.5.20): APKs die at launch from 0.5.10 onward —
   // activity gone, service icon standing — and this plugin config is the one
   // 0.5.10 change that runs in the ACTIVITY's process. It is removed
   // diagnostically; the assertion flips to pin the removal so the suite stays

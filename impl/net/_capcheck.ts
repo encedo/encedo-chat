@@ -7,7 +7,7 @@ const routed = async (t: string) => { n.services.pubsub.subscribe(t); await new 
 console.log('cap=3, ttl=6s — filling the cap:')
 for (const t of ['room-1', 'room-2', 'room-3']) console.log(`  ${t}: routed=${await routed(t)}`)
 console.log(`  room-4 (over the cap): routed=${await routed('room-4')}   <- must be false`)
-console.log('waiting 9s for the idle sweep…')
+console.log('waiting 9s for the idle sweep...')
 await new Promise(r => setTimeout(r, 9000))
 console.log(`  room-5 (after eviction): routed=${await routed('room-5')}   <- must be true`)
 process.exit(0)

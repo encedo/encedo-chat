@@ -56,8 +56,11 @@ export const QUOTE_MAX_WIRE = 400
  */
 export function quoteSnippet(text: string): string {
   const flat = (text ?? '').replace(/\s+/g, ' ').trim()
+  // U+2026, not three dots: this is CONTENT — it goes in the bubble the reader
+  // sees and it counts against QUOTE_MAX, so widening it to three characters
+  // would change what travels (the test caught exactly that).
   const cp = [...flat]
-  return cp.length <= QUOTE_MAX ? flat : cp.slice(0, QUOTE_MAX).join('') + '…'
+  return cp.length <= QUOTE_MAX ? flat : cp.slice(0, QUOTE_MAX).join('') + '\u2026'
 }
 
 /** Build the `re` field. `authorPub` is the quoted message's author, if known. */

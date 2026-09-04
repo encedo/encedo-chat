@@ -1,12 +1,12 @@
 /**
  * grouproom.ts — a group over the transport (§8/§13). Ties a `GroupSession`
  * (crypto/state) to a GossipSub topic: subscribe, broadcast group-msg frames,
- * and dispatch inbound frames through `session.receive` → envelope → handlers.
+ * and dispatch inbound frames through `session.receive` -> envelope -> handlers.
  *
  * Groups ride GossipSub through the relay (NOT WebRTC — a mesh of N members would
  * be N² channels); content stays sender-key encrypted + per-recipient MAC'd, so
  * the relay sees ciphertext + metadata only. The plaintext inside is the SAME
- * `envelope` codec as 1:1 (msg / reaction / …), so the app layer is unchanged.
+ * `envelope` codec as 1:1 (msg / reaction / ...), so the app layer is unchanged.
  *
  * Liveness: a group is otherwise PASSIVE (it sends only when you type), so its
  * GossipSub mesh gets pruned when idle and, after relay churn, silently stops
@@ -23,7 +23,7 @@
  * derives from `group_secret` (`session.rotationOffsetMs()` — every member holds
  * the secret, so every member derives the same instant, rotations spread across
  * the day, and a topic observer cannot tell a group topic from a pair topic by
- * its hop time). Within the ±30 min guard BOTH adjacent days' topics are live —
+ * its hop time). Within the +/-30 min guard BOTH adjacent days' topics are live —
  * keepalives go to all of them, sends go to the current day's.
  */
 
@@ -90,7 +90,7 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
   const keepaliveOn = (t: string) => { try { node.services.pubsub.publish(t, KEEPALIVE).catch(() => {}) } catch {} }
 
   // ---- the live day-topics (rotation) ---------------------------------------
-  // `byDate` is the truth (date → topic); `live` is the handler's fast lookup.
+  // `byDate` is the truth (date -> topic); `live` is the handler's fast lookup.
   // `primary` is the current day's topic — the only one we SEND on; the adjacent
   // day inside the guard is subscribe+keepalive only, so a member on the other
   // side of the boundary still hears us on the day it considers current.
@@ -118,7 +118,7 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
       // (re)subscribing, so the first heartbeat would otherwise reach nobody
       // (same trick as join/presence).
       for (const ms of [1_000, 3_000, 7_000]) pending.push(unref(setTimeout(() => { if (!stopped) keepaliveOn(t) }, ms)))
-      log(`group topic live for ${d}: ${t.slice(0, 12)}…`)
+      log(`group topic live for ${d}: ${t.slice(0, 12)}...`)
     }
     for (const [d, t] of byDate) {
       if (dates.includes(d)) continue
@@ -130,7 +130,7 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
     primary = byDate.get(dates[0])!
   }
   await syncTopics()
-  // The rollover check. 60 s of granularity against a ±30 min guard is plenty,
+  // The rollover check. 60 s of granularity against a +/-30 min guard is plenty,
   // and one cheap date computation a minute costs nothing.
   const rotTimer = unref(setInterval(() => { void syncTopics().catch(() => {}) }, rot.tickMs ?? 60_000))
 
@@ -161,12 +161,12 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
     const t = nowMs()
     if (t - (lastAsk.get(memberPub) ?? 0) < ASK_COOLDOWN_MS) return
     lastAsk.set(memberPub, t)
-    log(`no sender key for ${memberPub.slice(0, 12)}… — asking them to re-send it`)
+    log(`no sender key for ${memberPub.slice(0, 12)}... — asking them to re-send it`)
     opts.onNeedSenderKey?.(memberPub)
   }
 
   node.services.pubsub.addEventListener('message', handler)
-  log(`joined group on ${primary.slice(0, 12)}…`)
+  log(`joined group on ${primary.slice(0, 12)}...`)
 
   // Keepalive: publish is fire-and-forget; a NoPeers error just means nobody is on
   // the topic right now, which the next tick handles. Every LIVE topic gets one —
@@ -179,7 +179,7 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
   // and the bytes ride a wake that is happening anyway. The old per-member
   // jitter kept members of one topic from herding; the per-session random
   // phase does that same job now — no two sessions share one.
-  // Slowable: 60 s in the background. ⚠️ The overnight-idle group death was
+  // Slowable: 60 s in the background. WARNING: The overnight-idle group death was
   // fixed at a 20–28 s keepalive and 60 s is unverified against the relay's
   // topic-liveness eviction — if passive groups ever die on a pocketed phone
   // again, THIS is the first suspect (drop slowable here before digging).
@@ -189,9 +189,9 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
     const frame = await session.send(bytes)
     try {
       const r = await node.services.pubsub.publish(primary, frame)
-      log(`published ${frame.length} B → ${primary.slice(0, 8)}… (recipients: ${r?.recipients?.length ?? '?'})`)
+      log(`published ${frame.length} B -> ${primary.slice(0, 8)}... (recipients: ${r?.recipients?.length ?? '?'})`)
     } catch (e: any) {
-      log(`publish FAILED on ${primary.slice(0, 8)}…: ${e?.message ?? e}`)
+      log(`publish FAILED on ${primary.slice(0, 8)}...: ${e?.message ?? e}`)
       throw e
     }
   }

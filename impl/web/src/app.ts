@@ -1,5 +1,5 @@
 /**
- * app.ts — onchato web GUI (mockup skin). Login (HEM) → dashboard.
+ * app.ts — onchato web GUI (mockup skin). Login (HEM) -> dashboard.
  *
  * Identity in the HEM (hem-sdk-js) or a password-sealed software profile.
  * Rendezvous/messages via the SAME engine as the CLI (../../lib, WebCrypto).
@@ -265,8 +265,8 @@ function paintStatus() {
   }
   if (activeGid) {
     // A group is on screen: its header is "N członków", not a 1:1 peer label. Without
-    // this, every onLink/refresh repainted it as `activeRoom()?.peerLabel ?? 'łączę…'`
-    // — activeRoom() is null for a group — so the group header flickered "łączę…".
+    // this, every onLink/refresh repainted it as `activeRoom()?.peerLabel ?? 'łączę...'`
+    // — activeRoom() is null for a group — so the group header flickered "łączę...".
     const gu = groupsUI.get(activeGid)
     dot.className = 'dot ok'
     txt.textContent = gu ? tr('{n} członków', { n: gu.members.length }) : ''
@@ -291,8 +291,8 @@ const clr = (id: string) => { const m = $(id); m.textContent = ''; m.className =
 /**
  * Two letters for an avatar. NOT the first two: "DevMachine" and "DevBox" both
  * came out "DE", and two people behind one badge is the thing a badge exists to
- * prevent. Several words → first letter of the first and of the LAST word (Ala
- * Kowalska → AK); one word → its first and last letter (DevM → DM). Iterated by
+ * prevent. Several words -> first letter of the first and of the LAST word (Ala
+ * Kowalska -> AK); one word -> its first and last letter (DevM -> DM). Iterated by
  * code point, so an emoji or a Polish letter is never cut in half.
  */
 const initials = (s: string) => {
@@ -334,7 +334,7 @@ const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talk
  * do nothing at all — asking for the strongest output has to give you output.
  *
  * Compile-time gate (webpack DefinePlugin, EC_ALLOW_KEYS): built with 0 the
- * second is `false && …`, the minifier drops the branch, and no URL can print a
+ * second is `false && ...`, the minifier drops the branch, and no URL can print a
  * key from that bundle.
  */
 declare const __EC_ALLOW_KEYS__: boolean
@@ -498,7 +498,7 @@ $('toggle').addEventListener('click', () => {
   mode = mode === 'login' ? 'register' : 'login'
   const reg = mode === 'register'
   $('reg-handle-wrap').hidden = !reg
-  // ⚠️ All four through `tr`. Three of them were bare Polish sitting next to
+  // WARNING: All four through `tr`. Three of them were bare Polish sitting next to
   // translated siblings in the same expression — which is how an English UI ends
   // up half in Polish and why the mix is invisible to whoever wrote it.
   $('go').textContent = reg ? tr('Zarejestruj') : tr('Zaloguj')
@@ -668,7 +668,7 @@ attachByteBudget($('add-name') as HTMLInputElement, PEER_NAME_MAX, $('add-name-b
  *
  * The three outcomes the screen has to tell apart come out of the storage and
  * the AEAD, with nothing compared and no password stored anywhere:
- * absent key → offer to create · opens → in · refuses → wrong password.
+ * absent key -> offer to create | opens -> in | refuses -> wrong password.
  */
 const softKey = (name: string) => 'ec-soft-id-' + name
 /**
@@ -697,7 +697,7 @@ let softCreating = ''
  * leads, a click on a row goes straight to that profile's password, and HEM
  * keeps a place of its own on the line below.
  *
- * ⚠️ The names are on screen before anyone signs in, which the single
+ * WARNING: The names are on screen before anyone signs in, which the single
  * remembered name this replaces was careful about. It is a deliberate trade and
  * a small one: local profile names are a caption on this device, the identity
  * behind them stays sealed by its password, and hiding them bought nothing
@@ -709,7 +709,7 @@ let softCreating = ''
  * there is nothing to disambiguate.
  */
 /**
- * ⚠️ A HEM sign-in is NOT remembered here, and that is the point.
+ * WARNING: A HEM sign-in is NOT remembered here, and that is the point.
  *
  * A row for it was tried and taken out on sight: it put a handle and a HEM
  * address on the sign-in screen, which tells anyone glancing at the machine
@@ -726,7 +726,7 @@ const LAST_HEM = 'ec-last-hem'
  * Which way this browser signed in last, so the daily return costs no clicks:
  * a software user meets the list, a HEM user meets the HEM form.
  *
- * ⚠️ This is the SAME class of fact as the HEM row that was removed, in its
+ * WARNING: This is the SAME class of fact as the HEM row that was removed, in its
  * smallest possible form — it says a HEM was used here, and nothing about which
  * one, whose, or where. That trade is the user's call and it was made
  * deliberately; the address and the handle stay unremembered.
@@ -760,7 +760,7 @@ function renderLoginProfiles(boot = false) {
   $('login-empty-sec').hidden = has
   // The HEM form is a choice on this card, not the card itself.
   $('hem-sec').hidden = true
-  // ⚠️ …unless this browser last came in that way — and this must be the LAST
+  // WARNING: ...unless this browser last came in that way — and this must be the LAST
   // line, after the hiding above. Put before it, `showHemForm` unhid the section
   // and the very next statement hid it again: every part of the card off, an
   // empty box on screen. Caught by rendering it, which is why the screens get
@@ -800,7 +800,7 @@ function openSoftModal(name?: string, creating = false) {
   $('scrim').classList.add('open'); $('soft-modal').classList.add('open')
   clr('soft-msg'); softCreating = ''
   softIntendsNew = creating
-  // ⚠️ A NEW profile starts EMPTY. Prefilling the last name here was the sign-in
+  // WARNING: A NEW profile starts EMPTY. Prefilling the last name here was the sign-in
   // behaviour leaking into creation: "+ new profile" opened with somebody else's
   // name in the field and only one password box, which reads as the wrong
   // window — and one careless press away from a confusing error.
@@ -901,7 +901,7 @@ function weakRefusal(pw: string): string {
 }
 
 const closeSoftModal = () => { softIntendsNew = false; $('scrim').classList.remove('open'); $('soft-modal').classList.remove('open') }
-// ⚠️ An arrow, not a reference. `openSoftModal` grew a `name` parameter when the
+// WARNING: An arrow, not a reference. `openSoftModal` grew a `name` parameter when the
 // login card learned to open a NAMED profile, and a listener passed by reference
 // hands it the PointerEvent — which landed in the name field as
 // "[object PointerEvent]" the moment anybody tried to create a profile.
@@ -1182,7 +1182,7 @@ $('nodes-toggle').addEventListener('click', () => {
 /**
  * The local contact book, with a signature over it.
  *
- * ⚠️ The book is the TRUST ANCHOR and it was the one piece of state with nothing
+ * WARNING: The book is the TRUST ANCHOR and it was the one piece of state with nothing
  * guarding it. Reading the file tells somebody who you talk to; WRITING it is
  * the attack — swap a contact's `pub` and the app derives the rendezvous with
  * the attacker, handshakes with the attacker and encrypts to the attacker,
@@ -1395,7 +1395,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
 
 // ---- contacts (HEM-backed book; in-memory cache keeps re-renders cheap) ----
 let contactsCache: Contact[] = []
-/** pub → fingerprint. Peers are shown exactly like our own identity: the
+/** pub -> fingerprint. Peers are shown exactly like our own identity: the
  *  8-byte SHA-256 of the key, not the raw base64 nobody can compare by eye. */
 const fpCache = new Map<string, string>()
 /**
@@ -1484,7 +1484,7 @@ async function syncPresence() {
  *   left visible in a reopened window is a password on a projector. Tapping
  *   the eye itself does not blur the input (pointerdown preventDefault), so
  *   the toggle works without fighting this rule.
- * - **SVG, not a glyph** (the ⏻/✏ tofu rule), and `tabindex=-1` — tabbing
+ * - **SVG, not a glyph** (the /tofu rule), and `tabindex=-1` — tabbing
  *   from password to the next field should not stop at an ornament.
  */
 const EYE_SVG = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>'
@@ -1522,7 +1522,7 @@ for (const input of document.querySelectorAll<HTMLInputElement>('input[type="pas
 
 /**
  * Long-press flips a row's actions into view — the touch stand-in for hover
- * (see the .c-edit CSS note: the delete × was unreachable on a phone).
+ * (see the .c-edit CSS note: the delete x was unreachable on a phone).
  * Android reports the gesture as `contextmenu`; a mouse keeps its real
  * context menu, so the handler is gated to coarse pointers. One row at a
  * time — the gesture that opens B closes A — and a re-render (which these
@@ -1961,10 +1961,10 @@ $('welcome-close').addEventListener('click', closeWelcome)
 $('welcome-share').addEventListener('click', () => { closeWelcome(); void openShare() })
 
 /**
- * ─────────────────────────────────────────────────────────────────────────────
+ * -----------------------------------------------------------------------------
  * WHERE INVITE LINKS POINT — change these two lines to point a build at another
  * deployment (your own domain, your own path), then rebuild.
- * ─────────────────────────────────────────────────────────────────────────────
+ * -----------------------------------------------------------------------------
  *
  * They matter only OUTSIDE a browser. On the web the address bar is the source
  * of truth: the link names the origin the user is actually looking at, so
@@ -1990,7 +1990,7 @@ const CANONICAL_PATH = '/chat'
  *
  * The web is untouched: there the default same-origin path still holds, which
  * is what keeps the store free of CORS and the IPFS node invisible to clients.
- * ⚠️ A packaged build now makes a CROSS-ORIGIN request to onchato.com, so the
+ * WARNING: A packaged build now makes a CROSS-ORIGIN request to onchato.com, so the
  * `/f` blocks in nginx must answer with `Access-Control-Allow-Origin`. Ship the
  * two together or the packaged apps stay exactly as broken.
  */
@@ -2563,7 +2563,7 @@ $('attach-drop').addEventListener('click', () => showAttach(null))
  *
  * **Recording does not send.** It fills the composer chip, exactly like a
  * pasted screenshot, so a note can carry a caption or answer a message — and so
- * a recording made by accident costs one ✕ rather than an upload and an
+ * a recording made by accident costs one [fail] rather than an upload and an
  * apology.
  *
  * The button is HIDDEN where the platform cannot record rather than dead. Same
@@ -2679,7 +2679,7 @@ if (voiceSupported()) $('btn-voice')!.hidden = false
  * same Send. That parity is the feature; a second, shortcut path that sends
  * immediately would be a different product for the same gesture.
  *
- * ⚠️ **The document refuses a dropped file everywhere.** A file dropped on a
+ * WARNING: **The document refuses a dropped file everywhere.** A file dropped on a
  * page NAVIGATES to it, and here that is not a nuisance — it replaces the
  * running app, which takes the transport, every ratchet and the whole
  * ephemeral transcript with it. So the default is cancelled window-wide and
@@ -3036,11 +3036,11 @@ function jumpToLatest() {
   // nothing at all. If the animation has not started by now, land immediately.
   setTimeout(() => {
     if (box.scrollTop === before) box.scrollTop = box.scrollHeight
-    // …and re-decide here. The refreshJump() below runs while we are still at
+    // ...and re-decide here. The refreshJump() below runs while we are still at
     // the top, so it leaves the button ON; what turns it off is the scroll
     // event — and a scroll set from code does not always produce one (headless
     // Chromium doesn't). Without this the view lands at the newest message and
-    // the ⬇ stays on screen over it, pointing nowhere.
+    // the stays on screen over it, pointing nowhere.
     refreshJump()
   }, 300)
   unread = 0
@@ -3049,7 +3049,7 @@ function jumpToLatest() {
 $('messages').addEventListener('scroll', refreshJump)
 $('to-bottom').addEventListener('click', jumpToLatest)
 
-/** msg id → the little delivery marker under our own bubble. */
+/** msg id -> the little delivery marker under our own bubble. */
 const stateEls = new Map<string, HTMLElement>()
 function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
   const el = stateEls.get(id)
@@ -3058,8 +3058,8 @@ function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
     el.textContent = tr(' · ✓ ') + tr('dostarczone')
     el.title = tr('Klient rozmówcy potwierdził odbiór{when} — to nie jest „przeczytane”', { when: ms !== undefined ? tr(' po {ms} ms', { ms }) : '' })
   } else if (state === 'late') {
-    // It said ⚠, and it was wrong: the confirmation came in after we had given
-    // up. Say so plainly rather than quietly flipping it to a clean ✓ — the
+    // It said undelivered, and it was wrong: the confirmation came in after we had given
+    // up. Say so plainly rather than quietly flipping it to a clean [ok] — the
     // long gap is exactly the thing worth noticing.
     el.textContent = ` · ⏱ ${tr('dostarczone z opóźnieniem')}${ms !== undefined ? ` (${Math.round(ms / 1000)}s)` : ''}`
     el.title = tr('Potwierdzenie przyszło już po tym, jak przestaliśmy ponawiać — wiadomość jednak dotarła')
@@ -3068,7 +3068,7 @@ function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
     el.textContent = tr(' · ⚠ niedostarczone')
     el.title = tr('Brak potwierdzenia mimo ponowień — rozmówca prawdopodobnie tego nie dostał')
     // The transport gave up; give the decision back to the user instead of
-    // leaving a dead ⚠ that can only be fixed by retyping the message.
+    // leaving a dead undelivered mark that can only be fixed by retyping the message.
     const again = document.createElement('button')
     again.type = 'button'
     again.className = 'b-resend'
@@ -3154,14 +3154,14 @@ function appendMsg(ev: MsgEv) {
   // somebody is reading is the one thing this feature must not do.
   if (ev.edited) m.appendChild(editedMark(ev))
   if (outOfOrder) {
-    // Same ⏱ as a late confirmation on our own side: one mark, one meaning —
+    // Same as a late confirmation on our own side: one mark, one meaning —
     // "this one did not travel normally".
     const late = document.createElement('span'); late.className = 'late-mark'; late.textContent = tr(' ⏱ spóźniona')
     late.title = tr('Dotarła po nowszych wiadomościach — wstawiona w miejscu, w którym została napisana')
     m.appendChild(late)
   }
   // A restored pin carries no delivery state: the acknowledgement it once had
-  // died with the session, and defaulting to "wysyłam…" would leave every kept
+  // died with the session, and defaulting to "wysyłam..." would leave every kept
   // message of ours sending forever.
   if (kind === 'me' && id && !pinned) {
     // Delivery state for our own messages. Instant-only: this says the peer's
@@ -3169,7 +3169,7 @@ function appendMsg(ev: MsgEv) {
     const st = document.createElement('span'); st.className = 'b-state'
     if (sent) {
       // A group broadcast: fire-and-forget over GossipSub, no per-recipient acks —
-      // so it is "sent", never the 1:1 "sending…→delivered" that would hang here.
+      // so it is "sent", never the 1:1 "sending...->delivered" that would hang here.
       st.textContent = tr(' · wysłano'); st.title = tr('Wysłane do grupy (broadcast — bez potwierdzeń doręczenia)')
     } else {
       st.textContent = tr(' · wysyłam…'); st.title = tr('Czekam na potwierdzenie od klienta rozmówcy')
@@ -3293,7 +3293,7 @@ function refuse(rep: Awaited<ReturnType<typeof probeCapabilities>>) {
  * Per-peer handshake state. The badge shows ONE thing, but a room can have more
  * than one peer id in it — a peer that reloaded, or a second tab logged into the
  * same identity, which can never complete a handshake with us. Rendering
- * whichever event came last made the badge flicker 🔐 → ⚠ → 🔐 while a perfectly
+ * whichever event came last made the badge flicker secure -> failed -> secure while a perfectly
  * good session was carrying messages. The best state wins instead: if any peer
  * has a live ratchet, we are secure, whatever the others are doing.
  */
@@ -3645,7 +3645,7 @@ document.addEventListener('keydown', (e: KeyboardEvent) => { if (e.key === 'Esca
  * appeared under the pointer while somebody was only reading. One bubble is
  * open at a time, and pressing it again closes it.
  *
- * ⚠️ A drag that selects text ends with a `click` on the bubble, so copying a
+ * WARNING: A drag that selects text ends with a `click` on the bubble, so copying a
  * message would have popped the bar every time. A collapsed selection means a
  * real press; anything else is somebody reading, and we keep out of the way.
  */
@@ -3853,7 +3853,7 @@ for (const el of document.querySelectorAll('#notify-opts input')) {
  * is forced rather than chosen: the browser a profile arrives in is empty by
  * definition, so there is no Settings to reach yet.
  *
- * ⚠️ A HEM identity has nothing to export — its key never leaves the device,
+ * WARNING: A HEM identity has nothing to export — its key never leaves the device,
  * which is the point of the device — so the export appears for software
  * profiles only, instead of offering a rescue it cannot perform.
  */
@@ -4051,7 +4051,7 @@ function diagLine(mark: 'ok' | 'bad' | 'meh', text: string) {
  * URL parameter rather than a piece of work — and `Kopiuj raport` is still the
  * fastest way to turn "it does not work here" into something answerable.
  *
- * ⚠️ What it costs: an ordinary user no longer has anywhere to read WHY the QR
+ * WARNING: What it costs: an ordinary user no longer has anywhere to read WHY the QR
  * button or the microphone is missing on their platform. The controls still
  * vanish rather than sitting there dead, but the explanation now needs asking
  * for.
@@ -4112,7 +4112,7 @@ $('btn-diag-copy')?.addEventListener('click', async () => {
 })
 
 /**
- * 💬 Feedback (`feedback.ts`). Wired here because the technical attachment IS
+ * Feedback (`feedback.ts`). Wired here because the technical attachment IS
  * the diagnostics report above — the same text `Kopiuj raport` produces, so a
  * tester never has to find `?debug=1` to give us the one thing a bug report
  * needs. The module gets the report as a function, never the session.
@@ -4208,7 +4208,7 @@ document.addEventListener('visibilitychange', () => {
  */
 let editing: { id: string; orig: string } | null = null
 
-/** The pencil, drawn rather than typed: `✏` is emoji-presentation on most
+/** The pencil, drawn rather than typed: `` is emoji-presentation on most
  *  platforms and came out as a colour blob beside the line-art pin. Same
  *  geometry and stroke as `pinSvg`, so the bar reads as one set of controls. */
 const PENCIL_SVG =
@@ -4271,7 +4271,7 @@ function repaintMsg(ev: MsgEv) {
 }
 
 /** Our own correction came back acknowledged, or did not. Handled where the room
- *  is known rather than through a delivery event, because the ✓ belongs to a
+ *  is known rather than through a delivery event, because the [ok] belongs to a
  *  bubble that already exists — and because the state has to survive a room
  *  switch, which it does by living on the event. */
 function noteEditDelivery(room: Room, id: string, state: 'ok' | 'lost' | 'late'): boolean {
@@ -4376,7 +4376,7 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
       // The setting, and the cap that keeps it honest: a fetch nobody asked for
       // must not be able to pull eighty megabytes because a `mime` said so.
       //
-      // ⚠️ It fetches; it does not PLAY. Having a voice note ready the instant
+      // WARNING: It fetches; it does not PLAY. Having a voice note ready the instant
       // you press play is a convenience; having somebody's voice come out of
       // your machine because a message arrived is not, and the difference is
       // one argument rather than a second setting.
@@ -4405,7 +4405,7 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
   if (env.id) row.dataset.mid = env.id
   if (au) row.dataset.au = au
   row.appendChild(bub)
-  // ⚠️ This bubble had the bar and no way to show it on a phone: hover was the
+  // WARNING: This bubble had the bar and no way to show it on a phone: hover was the
   // only reveal, so a file or a voice note could not be reacted to at all.
   if (env.id) { attachReactionBar(row, env.id); attachReveal(row, bub) }
   box.appendChild(row)
@@ -4446,11 +4446,11 @@ const humanSize = (n: number) =>
  *   person has decided they want it — the same shape of thing link previews
  *   are refused for (see `linkify.ts`). It would also be *us* keeping a file
  *   alive that the store drops in minutes.
- * - **…unless the setting says otherwise**, which is off by default and capped:
+ * - **...unless the setting says otherwise**, which is off by default and capped:
  *   an automatic fetch is a fetch nobody asked for, so it must not be able to
  *   pull eighty megabytes because a `mime` said `image/`.
  *
- * ⚠️ **SVG is not an image here.** Everything else in this list is a bitmap the
+ * WARNING: **SVG is not an image here.** Everything else in this list is a bitmap the
  * browser decodes; an SVG is a DOCUMENT, with its own reference machinery, and
  * `mime` is a string the SENDER chose. It stays an ordinary file — the same
  * fail-closed rule the link renderer uses for schemes it does not know.
@@ -4466,7 +4466,7 @@ const isPreviewable = (mime: string) => previewKind(mime) !== null
 const AUTO_MEDIA_MAX = 2 * 1024 * 1024
 
 /**
- * Envelope → a blob URL for its decrypted bytes.
+ * Envelope -> a blob URL for its decrypted bytes.
  *
  * Keyed by the envelope OBJECT, like `fileEls`, so a room replayed after a
  * switch draws the picture again without re-fetching, and nothing survives the
@@ -4528,7 +4528,7 @@ function voicePlayer(url: string): HTMLElement {
   /**
    * How long is it?
    *
-   * ⚠️ Nothing here seeks past the end any more. That trick — set `currentTime`
+   * WARNING: Nothing here seeks past the end any more. That trick — set `currentTime`
    * to 1e101 and read the duration on the first `timeupdate` — is a race, and it
    * lost. The engine answers while it is still seeking, so a seven-second note
    * came back as two seconds in one browser and as twenty hours in the desktop's
@@ -4610,7 +4610,7 @@ function voicePlayer(url: string): HTMLElement {
     } else { audio.pause(); play.innerHTML = icon(false) }
   })
   bar.addEventListener('click', (e) => {
-    // ⚠️ This called `total()`, a function deleted in the same commit that wrote
+    // WARNING: This called `total()`, a function deleted in the same commit that wrote
     // the line — so since 0.3.11 a click on the bar threw a ReferenceError
     // instead of seeking. Nothing caught it: the build strips types with Babel
     // and never typechecks, so an undefined name is a runtime surprise.
@@ -5175,7 +5175,7 @@ function renderMentions(into: HTMLElement, text: string) {
 
 function renderBody(into: HTMLElement, text: string) {
   for (const part of splitByLinks(text)) {
-    // Mentions are looked for only OUTSIDE the links: `…/@ala#3a7f1c02` is a
+    // Mentions are looked for only OUTSIDE the links: `.../@ala#3a7f1c02` is a
     // fragment of somebody's URL, not a person in this conversation.
     if (!part.link) renderMentions(into, part.text)
     else into.appendChild(document.createTextNode(part.text))
@@ -5298,7 +5298,7 @@ async function activateRoom(pub: string) {
  *
  * Reported from a desktop while a phone was being tested in the background:
  *
- *     antek1 left / antek1 w pokoju / antek1 left / antek1 w pokoju / …
+ *     antek1 left / antek1 w pokoju / antek1 left / antek1 w pokoju / ...
  *
  * and that was only a fragment. Nothing was malfunctioning — a phone that the
  * system puts to sleep really does stop announcing and really does come back,
@@ -5354,7 +5354,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
     const conv = await (await clientReady!).open({ pub: contact.pub, kid: contact.kid }, {
       webrtc: wantsDirect(),
       // STUN lives on the nodes, so the servers are whichever nodes this client
-      // dials — no second list to drift, and editing Settings → Network moves
+      // dials — no second list to drift, and editing Settings -> Network moves
       // this with it (`lib/ice.ts`).
       iceServers: iceServersFor(location.search, chosenRelays()),
       onWebrtcState: (s) => noteTransport(room, s),
@@ -5410,7 +5410,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
         const label = ev === 'join' ? tr('w pokoju') : ev === 'active' ? tr('wrócił/a') : ev === 'away' ? tr('nieobecny/a')
           : ev === 'quiet' ? tr('brak sygnału') : tr('wyszedł/wyszła')
         // Presence belongs in the header, not in the transcript. Every tab switch
-        // flips away→active; only entering and leaving are worth a line, and only
+        // flips away->active; only entering and leaving are worth a line, and only
         // when the state really changed.
         if ((ev === 'join' || ev === 'leave') && room.lastPresence !== ev) notePresenceLine(room, label)
         room.lastPresence = ev
@@ -5500,7 +5500,7 @@ function sendComposer() {
 let mentionAt = -1 // where the '@' being completed sits, -1 = the picker is closed
 let mentionSel = 0
 let mentionHits: Array<{ pub: string; name: string }> = []
-/** lower-cased name the picker wrote → the key it meant. Emptied with the composer. */
+/** lower-cased name the picker wrote -> the key it meant. Emptied with the composer. */
 const mentionPicks = new Map<string, string>()
 
 const closeMentionPop = () => { mentionAt = -1; $('mention-pop').hidden = true }
@@ -5629,7 +5629,7 @@ function avatarClusterHTML(members: { pub: string }[], max = 5): string {
 const isGroupAdmin = (gu: GroupUI): boolean => !!session && gu.members[0]?.pub === session.pub
 
 // Fill the group members popover: each participant with an online dot. The admin
-// (roster[0]) also gets a remove "×" per other member and an add-member picker.
+// (roster[0]) also gets a remove "x" per other member and an add-member picker.
 function renderMembersPop(gu: GroupUI) {
   const admin = isGroupAdmin(gu)
   const rows = gu.members.map((m) => {
@@ -5654,9 +5654,9 @@ function renderMembersPop(gu: GroupUI) {
 }
 
 /**
- * Admin changes the roster: rekey (epoch++, new group_secret → new topic, fresh
+ * Admin changes the roster: rekey (epoch++, new group_secret -> new topic, fresh
  * sending key), re-open the group on the new topic, redistribute the SKD to the
- * NEW roster (a removed member is never sent it → cannot derive the new topic or
+ * NEW roster (a removed member is never sent it -> cannot derive the new topic or
  * open new messages), and persist. roster[0] (the admin) is preserved so
  * admin-ness stays stable. The other members redistribute their own fresh keys
  * when they receive the new epoch (see onGroupInvite).
@@ -5765,7 +5765,7 @@ async function renameGroup(gid: string, name: string) {
  * the design lets one client revoke that. Leaving is local — the room stops,
  * the cache entry goes, and the remaining members carry on. Being removed FROM
  * the group is a different act, it belongs to the admin, and it is what the
- * members popover's × does.
+ * members popover's x does.
  */
 async function leaveGroup(gid: string) {
   const gu = groupsUI.get(gid); if (!gu) return
@@ -6087,9 +6087,9 @@ async function restoreGroups() {
   setTimeout(() => { void refreshContacts().then(() => recoverGroupsFromDevice()) }, RECOVERY_DELAY_MS)
 }
 
-/** One-time upgrade: a B1 plaintext blob (ec-groups-<handle>) → encrypt each group
+/** One-time upgrade: a B1 plaintext blob (ec-groups-<handle>) -> encrypt each group
  *  into the §10 cache, then delete the plaintext. Prevents groups vanishing on the
- *  B1→B2 upgrade the same way the identity change once broke 1:1. */
+ *  B1->B2 upgrade the same way the identity change once broke 1:1. */
 async function migrateLegacyGroups(seen: Set<string>) {
   const raw = localStorage.getItem(legacyGroupsKey()); if (!raw || !client) return
   try {
@@ -6116,7 +6116,7 @@ async function activateGroup(gid: string) {
   $('peer-avatar').textContent = tr('👥')
   $('peer-name').textContent = groupDisplay(gu); $('peer-name').title = ''
   $('peer-dot').className = 'dot ok'; $('peer-status').textContent = tr('{n} członków', { n: gu.members.length })
-  // Participant cluster in the header → click to see the full member list.
+  // Participant cluster in the header -> click to see the full member list.
   const cluster = $('members-cluster'); cluster.hidden = false; cluster.innerHTML = avatarClusterHTML(gu.members)
   cluster.title = tr('Uczestnicy grupy')
   cluster.onclick = (e: any) => { e.stopPropagation(); openMembersPopFor(gu, cluster, e as MouseEvent) }
@@ -6265,7 +6265,7 @@ async function onGroupInvite(from: string, skd: GroupSkdEnv) {
     // everyone else. The admin is roster[0]; who `from` is was authenticated by
     // the 1:1 ratchet the SKD arrived on.
     if (skd.name && from === members[0]?.pub) gu.name = skd.name
-    // A newer epoch means a rekey → a new group_secret → a new topic, so the room
+    // A newer epoch means a rekey -> a new group_secret -> a new topic, so the room
     // must re-join. A *same-epoch* SKD is just a member handing us its sender key
     // (already applied to the engine): keep the live room — tearing it down here
     // churns the mesh on every member's join-back and can drop in-flight frames.
@@ -6346,7 +6346,7 @@ document.addEventListener('visibilitychange', () => {
 // same "I'm back". Idempotent: presence goes out only if `away` was set.
 window.addEventListener('focus', () => { for (const r of rooms.values()) r.conv?.noteBack() })
 /**
- * Phone layout: one pane at a time (see the ≤720px rules in index.html). The
+ * Phone layout: one pane at a time (see the <=720px rules in index.html). The
  * class is what switches between the contact list and the conversation; on a
  * desktop it changes nothing.
  */
@@ -6401,7 +6401,7 @@ window.addEventListener('online', () => {
 // gone and closes itself for nothing.
 window.addEventListener('beforeunload', () => {
   void persistGroups()
-  // ⚠️ In the packaged shell a close REQUEST is not a departure. The shell
+  // WARNING: In the packaged shell a close REQUEST is not a departure. The shell
   // vetoes it and hides the window, but the webview has already fired this
   // event — so tearing the transport down here left a live window attached to
   // a STOPPED node, and the next room said "Pubsub has not started" with

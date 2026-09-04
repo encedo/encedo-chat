@@ -4,7 +4,7 @@ import { generateKeyPairSync, diffieHellman } from 'node:crypto'
 import { topicFromSecret } from '../lib/rendezvous.ts'
 import { hkdfBits } from '../lib/wc.ts'
 
-test('X25519 ECDH is commutative → Alice and Bob derive the same topic', async () => {
+test('X25519 ECDH is commutative -> Alice and Bob derive the same topic', async () => {
   const a = generateKeyPairSync('x25519')
   const b = generateKeyPairSync('x25519')
   const ssA = new Uint8Array(diffieHellman({ privateKey: a.privateKey, publicKey: b.publicKey }))

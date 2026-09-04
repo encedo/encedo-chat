@@ -15,6 +15,27 @@ operational reality — lessons, deploy rituals, platform traps.
 - These three go to the external cryptographer — protocol-meaningful changes
   still need the user's explicit GO; editorial truth-keeping does not.
 
+## Code is ASCII (the user's rule, 2026-09-03)
+
+No icons, no emoji, no dingbats or box-drawing in source — not in log output,
+not in comments. `[ok]` / `[fail]` / `WARNING:` / `->` say the same thing and
+survive a journal, an SSH session and a grep. Three things this rule does NOT
+cover, and each has bitten a sweep already:
+
+- **The UI keeps its glyphs** (the user confirmed): badges, buttons, the
+  reaction set, `data-i18n` strings, `index.html`. Only comments are scrubbed in
+  `impl/web/`.
+- **Test data is data.** `quote.test.ts` proves a snippet never splits an emoji;
+  `qr.test.ts` has KAT vectors; `linkify` carries a Cyrillic homograph on
+  purpose. Scrub comments there, never literals.
+- **Content is content.** `lib/quote.ts` appends U+2026 to a clamped quote — it
+  goes in the bubble and counts against `QUOTE_MAX`, so "tidying" it to three
+  dots changes what travels.
+
+Polish text and `§` stay (they are language, not decoration); prose dashes were
+left alone. When a log line changes, the docs that quote it change with it —
+`relay/README.md`, `relay/DEPLOY.md` and this file all print the relay banner.
+
 ## Repo layout (this repo — `encedo/encedo-chat`)
 
 - `docs/` — the three specs (PROTOCOL, ARCHITECTURE, THREAT-MODELS), kept 1:1 with the code.
@@ -27,7 +48,7 @@ operational reality — lessons, deploy rituals, platform traps.
   Transport-only; v5 + v6 share it. `--pass bs1.onchato.com` seeds the fixed
   PeerId (`12D3KooWP6Sp…cDmp`) — never change it or every client breaks.
   `DUMP=<dir>` env (`relay/dump.mjs`) traces every observable action to JSONL
-  for debugging/audit — banner says `🧾 DUMP ON`; **never on production**
+  for debugging/audit — banner says `DUMP ON`; **never on production**
   (`relay/README.md` § Dump). A new node from a clean Ubuntu is
   `relay/DEPLOY.md`, step by step; ufw on every node is 22/80/443 only — 9001
   is reached by nginx over loopback and stays closed (since 2026-09-03).
@@ -1150,8 +1171,8 @@ journalctl -u onchato-relay -n 12 --no-pager
 
 Four startup lines say it worked: the PeerId (**must** stay
 `12D3KooWP6Sp…cDmp` — it is compiled into every shipped node list; changing it
-invalidates every build), the port, the connection limit (`🔌 Połączenia:` —
-proves `--max-connections` took), and the topic budget (`📦 Tematy: limit …
+invalidates every build), the port, the connection limit (`Połączenia:` —
+proves `--max-connections` took), and the topic budget (`Tematy: limit ...
 eviction …`). If the log looks like the previous build, check in this order:
 `git log --oneline -1` (did the pull land, and in *this* clone?),
 `grep -c "max-topics" relay/relay.mjs` (is the code on disk?),

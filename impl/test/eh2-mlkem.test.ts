@@ -61,7 +61,7 @@ test('ss really enters SK: swapping in another peer\'s ciphertext breaks mac_r',
   const r1 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem: mlkem768, now: NOW })
 
   // Same X25519 ephemerals and the same MAC, only the ciphertext replaced: the
-  // initiator decapsulates a different ss → different SK → mac_r fails. (It also
+  // initiator decapsulates a different ss -> different SK -> mac_r fails. (It also
   // fails the transcript check, which is the point: ct is bound via h2_partial.)
   const other = await mlkem768.generate()
   const foreign = (await mlkem768.encapsulate(other.pub)).ct

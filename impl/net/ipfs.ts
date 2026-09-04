@@ -31,7 +31,7 @@ export const IPFS_PUT = '/f'
 export const IPFS_GET = (cid: string) => `/f/${encodeURIComponent(cid)}`
 
 /**
- * ⚠️ A PACKAGED build is not served by the store, so "our own origin" is a lie
+ * WARNING: A PACKAGED build is not served by the store, so "our own origin" is a lie
  * there — and it fails silently in the worst way.
  *
  * The desktop and Android shells load the bundle from their own scheme

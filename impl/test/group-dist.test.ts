@@ -22,7 +22,7 @@ async function softId(): Promise<GroupId> {
 }
 
 /** `from` hands its SKD for `gid` to each recipient — over the wire (envelope
- *  encode → decode), exactly as the 1:1 ratchet would carry it. */
+ *  encode -> decode), exactly as the 1:1 ratchet would carry it. */
 async function distribute(from: { id: GroupId; mgr: GroupManager }, gidHex: string, to: { id: GroupId; mgr: GroupManager }[]) {
   for (const r of to) {
     const skd = (await from.mgr.skdFor(gidHex, r.id.pub))! // per-recipient: the roster MAC is per member
@@ -51,12 +51,12 @@ test('3 members bootstrap via SKD, then broadcast on the shared topic', async ()
   assert.equal(await mB.session(gid)!.topic(), topic)
   assert.equal(await mC.session(gid)!.topic(), topic)
 
-  // A broadcasts → B and C decrypt.
+  // A broadcasts -> B and C decrypt.
   const f1 = await mA.session(gid)!.send(body('grupa dziala'))
   assert.deepEqual((await mB.session(gid)!.receive(f1))?.pt, body('grupa dziala'))
   assert.deepEqual((await mC.session(gid)!.receive(f1))?.pt, body('grupa dziala'))
 
-  // …and C broadcasts → A and B decrypt (every member has every sender key).
+  // ...and C broadcasts -> A and B decrypt (every member has every sender key).
   const f2 = await mC.session(gid)!.send(body('od C'))
   assert.deepEqual((await mA.session(gid)!.receive(f2))?.pt, body('od C'))
   assert.deepEqual((await mB.session(gid)!.receive(f2))?.pt, body('od C'))
@@ -67,7 +67,7 @@ test('before it receives an SKD, a member cannot open a broadcast', async () => 
   const mA = new GroupManager(A, P), mB = new GroupManager(B, P)
   const { gk, pub: gkPub } = await softwareGk()
   const gid = await mA.createGroup(gkPub, [{ pub: A.pub }, { pub: B.pub }], gk)
-  // A sent, but B never got A's SKD → B has no group at all.
+  // A sent, but B never got A's SKD -> B has no group at all.
   await distribute({ id: A, mgr: mA }, gid, []) // no-op recipient list
   assert.equal(mB.session(gid), undefined)
 })

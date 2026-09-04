@@ -107,7 +107,7 @@ export function bindingResponse(tid, address, port, family) {
 
 const cookieBuf = () => { const b = Buffer.alloc(4); b.writeUInt32BE(COOKIE, 0); return b }
 
-/** Address text → bytes. `::ffff:1.2.3.4` is an IPv4 client on a dual-stack socket. */
+/** Address text -> bytes. `::ffff:1.2.3.4` is an IPv4 client on a dual-stack socket. */
 export function ipBytes(address, v6) {
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)
   if (!v6 || mapped) {
@@ -195,21 +195,21 @@ function serve() {
       stats.served++
     })
     sock.on('error', (e) => {
-      console.error(`✗ ${family}: ${e.message}`)
+      console.error(`[fail] ${family}: ${e.message}`)
       if (family === 'udp4') process.exit(1) // v4 is not optional; v6 is
       try { sock.close() } catch {}
     })
-    sock.bind(PORT, host, () => console.log(`✓ STUN ${family} ${host}:${PORT}`))
+    sock.bind(PORT, host, () => console.log(`[ok] STUN ${family} ${host}:${PORT}`))
     return sock
   }
 
-  console.log(`🧭 onchato STUN — Binding Request only, no TURN, no TLS`)
+  console.log(`onchato STUN — Binding Request only, no TURN, no TLS`)
   bind('udp4', HOST)
   bind('udp6', HOST6)
 
   const t = setInterval(() => {
     gate.sweep()
-    if (!QUIET) console.log(`📊 served ${stats.served} · ignored ${stats.ignored} · rate-limited ${stats.limited} · sources ${gate.size}`)
+    if (!QUIET) console.log(`served ${stats.served} | ignored ${stats.ignored} | rate-limited ${stats.limited} | sources ${gate.size}`)
   }, 300_000)
   t.unref?.()
 }

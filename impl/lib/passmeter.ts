@@ -6,7 +6,7 @@
  * ## Why the app rates passwords at all
  *
  * A software profile is sealed under this password in localStorage
- * (PBKDF2-1M → AES, `lib/profile.ts`), with no verifier and no recovery.
+ * (PBKDF2-1M -> AES, `lib/profile.ts`), with no verifier and no recovery.
  * The attack it must survive is not someone guessing at the login card — it
  * is someone who COPIED the blob (a stolen laptop, a synced browser profile,
  * a backup) grinding offline at full speed. A million rounds slow that grind
@@ -52,13 +52,13 @@ export type Advice = 'common' | 'short' | 'one-class' | 'patterns' | 'ok'
 export interface Strength {
   /** Estimated bits against an offline guesser. An estimate, not a proof. */
   bits: number
-  /** 0 słabe · 1 przeciętne · 2 prawie · 3 mocne (the only accepted one) */
+  /** 0 słabe | 1 przeciętne | 2 prawie | 3 mocne (the only accepted one) */
   score: 0 | 1 | 2 | 3
   advice: Advice
 }
 
 /** The floor: a password scoring below this is REFUSED where one is chosen
- *  (see the section above). 3 is the full meter — four bars, ≈60 bits. */
+ *  (see the section above). 3 is the full meter — four bars, ~60 bits. */
 export const ENFORCE_MIN = 3
 
 /** Bucket edges in estimated bits, calibrated against PBKDF2-1M: at ~18k
@@ -155,7 +155,7 @@ export function assessPassword(pw: string): Strength {
 
   let eff = effectiveLength(pw)
   // A trailing year is a calendar, not four characters: `Krakow2024` ends in
-  // one of ~200 plausible values (≈ 2 characters of a lowercase pool).
+  // one of ~200 plausible values (~ 2 characters of a lowercase pool).
   if (/(19|20)\d\d$/.test(pw) && pw.length > 4) eff = Math.max(1, eff - 2)
 
   let pool = 0

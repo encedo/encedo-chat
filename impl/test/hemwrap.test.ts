@@ -100,5 +100,5 @@ test('a failure is reported with the code the transport gave it', async () => {
   const lines: string[] = []
   const hem = { async getStatus() { throw Object.assign(new Error('gone'), { code: 'timeout' }) } }
   await assert.rejects(() => traceHem(hem, (m) => lines.push(m)).getStatus())
-  assert.ok(lines.some((l) => l.startsWith('✗ device status — timeout:')), lines.join(' | '))
+  assert.ok(lines.some((l) => l.startsWith('[fail] device status — timeout:')), lines.join(' | '))
 })

@@ -22,7 +22,7 @@ test('finds plain http and https URLs', () => {
 test('a URL at the end of a sentence does not eat the punctuation', () => {
   assert.equal(findLinks('tu: https://a.example/b.')[0].text, 'https://a.example/b')
   assert.equal(findLinks('(https://a.example/x)')[0].text, 'https://a.example/x')
-  // …but a bracket that is part of the URL stays part of it.
+  // ...but a bracket that is part of the URL stays part of it.
   assert.equal(findLinks('https://a.example/wiki/X_(Y)')[0].text, 'https://a.example/wiki/X_(Y)')
 })
 

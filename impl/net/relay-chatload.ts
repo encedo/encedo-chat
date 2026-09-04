@@ -1,7 +1,7 @@
 /**
  * relay-chatload.ts — the relay-carries-content case (WebRTC NOT in use).
  *
- *   RELAY=/ip4/… node net/relay-chatload.ts [pairs] [msg/min per pair] [seconds]
+ *   RELAY=/ip4/... node net/relay-chatload.ts [pairs] [msg/min per pair] [seconds]
  *
  * The other load tools measure the light path: WebRTC carries content, so the
  * relay only ever sees rendezvous + the EH-2 handshake + presence heartbeats.
@@ -26,7 +26,7 @@ const PAIRS = Number(process.argv[2] ?? 20)
 const RATE = Number(process.argv[3] ?? 12)     // messages per minute, per peer
 const SECONDS = Number(process.argv[4] ?? 40)
 const RELAY = process.env.RELAY ?? (await onchatoRelay()).multiaddr
-const BODY = 'x'.repeat(180) // a typical short chat line, sealed → ~1 envelope
+const BODY = 'x'.repeat(180) // a typical short chat line, sealed -> ~1 envelope
 
 const nodes: any[] = []
 const rooms: any[] = []
@@ -48,7 +48,7 @@ async function pair(i: number) {
   return { A, B }
 }
 
-console.log(`relay-chatload — ${RELAY.slice(0, 48)}…`)
+console.log(`relay-chatload — ${RELAY.slice(0, 48)}...`)
 console.log(`${PAIRS} pairs, ${RATE} msg/min each way, ${SECONDS}s, content via the relay (no WebRTC)\n`)
 
 const built = []
@@ -70,7 +70,7 @@ await new Promise((r) => setTimeout(r, SECONDS * 1000 + 1500))
 for (const s of senders) clearInterval(s)
 const secs = (Date.now() - t0) / 1000
 console.log(`sent ${sent} messages (${Math.round(sent / secs)}/s aggregate), received ${received}`)
-console.log(`per active conversation: ${(RATE * 2)} msg/min ≈ ${((RATE * 2) / 60).toFixed(1)} msg/s through the relay`)
+console.log(`per active conversation: ${(RATE * 2)} msg/min ~ ${((RATE * 2) / 60).toFixed(1)} msg/s through the relay`)
 
 for (const r of rooms) { try { r.stop() } catch {} }
 for (const n of nodes) { try { await n.stop() } catch {} }

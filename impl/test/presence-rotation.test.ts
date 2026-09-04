@@ -37,7 +37,7 @@ test('the offset moves the rotation instant off midnight', () => {
 })
 
 test('rendezvousDay lags by the offset', () => {
-  // 1h offset → the pair rolls to the new day at 01:00, not 00:00.
+  // 1h offset -> the pair rolls to the new day at 01:00, not 00:00.
   assert.equal(rendezvousDay(at('2026-07-31T00:30:00Z'), HOUR), '2026-07-30', 'before 01:00 it is still yesterday')
   assert.equal(rendezvousDay(at('2026-07-31T01:30:00Z'), HOUR), '2026-07-31', 'after 01:00 it is today')
   assert.equal(rendezvousDay(at('2026-07-31T12:00:00Z'), 0), '2026-07-31', 'offset 0 is the calendar date')
@@ -45,7 +45,7 @@ test('rendezvousDay lags by the offset', () => {
 
 test('different offsets put different pairs in overlap at the same instant (spread)', () => {
   const t = at('2026-07-31T04:00:00Z')
-  // offset 4h → rolling now (overlap); offset 12h → nowhere near its instant.
+  // offset 4h -> rolling now (overlap); offset 12h -> nowhere near its instant.
   assert.equal(activeDatesForOffset(t, 4 * HOUR).length, 2)
   assert.equal(activeDatesForOffset(t, 12 * HOUR).length, 1)
 })
@@ -119,7 +119,7 @@ test('normally one day is watched; a contact there lights online', async () => {
 test('in the offset overlap, a contact on the adjacent day lights online', async () => {
   const net = hub(); const mac = await macKey()
   let online = false
-  // offset 12h → this pair rotates at 12:00; at 11:55 it is in the overlap and
+  // offset 12h -> this pair rotates at 12:00; at 11:55 it is in the overlap and
   // watches BOTH rendezvous days: shifted clock = 2026-07-30T23:55, so the days
   // are 2026-07-30 and (5 min ahead) 2026-07-31.
   const me = watchPresenceRotating(net.node('me'), 'me', deriveFor(mac), {
@@ -151,18 +151,18 @@ test('an incoming handshake is surfaced with the day it arrived on', async () =>
 
 // nextRotationAfter: the per-pair countdown instant used by the UI badge. The
 // topic rotates at `midnight + offset`; this is where rendezvousDay increments.
-test('nextRotationAfter: offset 0 → the next plain 00:00 UTC boundary', () => {
+test('nextRotationAfter: offset 0 -> the next plain 00:00 UTC boundary', () => {
   const now = Date.UTC(2026, 7, 3, 12, 0, 0) // 2026-08-03 12:00 UTC
   assert.equal(nextRotationAfter(now, 0), Date.UTC(2026, 7, 4, 0, 0, 0))
 })
 
-test('nextRotationAfter: an offset earlier in the day → rotation is TOMORROW at midnight+offset', () => {
+test('nextRotationAfter: an offset earlier in the day -> rotation is TOMORROW at midnight+offset', () => {
   const now = Date.UTC(2026, 7, 3, 12, 0, 0)
   // pair rotates at 06:00 UTC; 12:00 is past it, so next is tomorrow 06:00
   assert.equal(nextRotationAfter(now, 6 * 3600 * 1000), Date.UTC(2026, 7, 4, 6, 0, 0))
 })
 
-test('nextRotationAfter: an offset later in the day → rotation is still TODAY', () => {
+test('nextRotationAfter: an offset later in the day -> rotation is still TODAY', () => {
   const now = Date.UTC(2026, 7, 3, 12, 0, 0)
   // pair rotates at 18:00 UTC; 12:00 is before it, so next is today 18:00
   assert.equal(nextRotationAfter(now, 18 * 3600 * 1000), Date.UTC(2026, 7, 3, 18, 0, 0))

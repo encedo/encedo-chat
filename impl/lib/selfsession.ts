@@ -61,7 +61,7 @@ export function watchSelfSession(
   const stepDown = async (byPeer: string, why: string) => {
     if (done || stepping) return
     stepping = true
-    log(`a second window of this identity is here (${byPeer.slice(0, 12)}…, ${why})`
+    log(`a second window of this identity is here (${byPeer.slice(0, 12)}..., ${why})`
       + ' — closing this session; the other one closes itself the same way (§9.1)')
     // One last announce on the way out. Without it the rule only half fires: a
     // settled window hears the newcomer and goes silent immediately, so the
@@ -86,7 +86,7 @@ export function watchSelfSession(
       // Still settling in. Record it and let the opening window close: acting on
       // the first frame would race the rival's own announce, and we want both
       // sides to reach the same conclusion, not the faster one to win.
-      if (!preexisting.has(res.peer)) log(`another window is already on the self-topic: ${res.peer.slice(0, 12)}…`)
+      if (!preexisting.has(res.peer)) log(`another window is already on the self-topic: ${res.peer.slice(0, 12)}...`)
       preexisting.add(res.peer)
       return
     }
@@ -95,7 +95,7 @@ export function watchSelfSession(
 
   node.services.pubsub.addEventListener('message', handler)
   node.services.pubsub.subscribe(topic)
-  log(`watching the self-topic ${topic.slice(0, 12)}… as ${self.slice(0, 12)}… (§9.1)`)
+  log(`watching the self-topic ${topic.slice(0, 12)}... as ${self.slice(0, 12)}... (§9.1)`)
 
   const announce = async () => {
     if (done) return
@@ -145,7 +145,7 @@ export interface RotatingSelfOpts extends SelfWatchOpts {
  *
  * This keeps one `watchSelfSession` per ACTIVE day — rolling at the identity's
  * OWN instant (`offsetMs`, derived from the self-DH exactly as a pair derives
- * its instant from the pair secret, §5.4) with the same ±30 min guard —
+ * its instant from the pair secret, §5.4) with the same +/-30 min guard —
  * re-evaluated on a 60 s tick. `deriveForDate` maps a `YYYY-MM-DD` to that
  * day's topic + MAC key; the caller memoises the self-DH, so crossing the
  * rollover costs no device call. A duplicate heard on ANY live day stands the

@@ -113,7 +113,7 @@ test('two peers that both initiate: one attempt survives, the session works', as
   const bResp = await startHandshake({ role: 'responder', ik: ikB, peerIkPub: ikA.pub })
   const msg2 = await bResp.feed(aInit.initial[0])
   const msg3 = await (await startHandshake({ role: 'initiator', ik: ikA, peerIkPub: ikB.pub })).feed(msg2!)
-    .then(() => null, () => null) // the fresh initiator has a different msg1 → mac_r fails
+    .then(() => null, () => null) // the fresh initiator has a different msg1 -> mac_r fails
   assert.equal(msg3, null)
 
   // the honest pairing (one initiator, one responder) is the one that completes

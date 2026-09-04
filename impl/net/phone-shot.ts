@@ -9,8 +9,8 @@
  * uses, with device metrics for the phones people actually hold, logs in with a
  * software identity, opens a conversation, and writes PNGs.
  *
- * Sizes are CSS pixels at the device's own scale factor — an iPhone 16 is 393×852
- * at DPR 3, a Galaxy S24 is 360×780 at DPR 3 — plus the keyboard case, which is
+ * Sizes are CSS pixels at the device's own scale factor — an iPhone 16 is 393x852
+ * at DPR 3, a Galaxy S24 is 360x780 at DPR 3 — plus the keyboard case, which is
  * where a chat app usually falls apart.
  */
 
@@ -168,7 +168,7 @@ async function pressSoftGo(c: Chrome): Promise<'ask' | 'done' | 'form'> {
 /**
  * Sign in with a software profile, walking the flow the app actually asks for.
  * Two disjoint doors now: an EXISTING profile is entered from the login card's
- * list (`#login-profiles .pick` → `openSoftModal(name)` → password), while
+ * list (`#login-profiles .pick` -> `openSoftModal(name)` -> password), while
  * `go-soft` means CREATE from its first press — the modal opens in creation
  * mode with the repeat-password field already showing, and a taken name there
  * is refused, not signed into. The old single-door flow (press, confirm
@@ -239,7 +239,7 @@ try {
     await c.waitFor('app shell', `return document.getElementById('app') && !document.getElementById('app').hidden`)
     // A contact to look at (never answers — this is about layout, not networking).
     //
-    // ⚠️ Seeded under the identity's KID, which is what the app reads. This tool
+    // WARNING: Seeded under the identity's KID, which is what the app reads. This tool
     // went on writing `ec-local-contacts-ala` after per-identity state moved off
     // the handle, so every run since died on "timed out waiting for contact
     // list" — the contact was in a key nothing looks at. `browser-test` was
@@ -279,7 +279,7 @@ try {
     await sleep(300)
     await c.shot(join(OUT, `${d.name}-3-chat.png`))
 
-    // …and the case that breaks chat apps: the software keyboard.
+    // ...and the case that breaks chat apps: the software keyboard.
     await c.eval(`document.getElementById('msg-input').focus(); return 1`)
     await c.send('Emulation.setVisibleSize', { width: d.width, height: Math.round(d.height * 0.55) }, true).catch(() => {})
     await sleep(600)

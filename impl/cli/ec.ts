@@ -62,7 +62,7 @@ switch (cmd) {
     console.log(`identity: ${id.handle}`)
     console.log(`pubkey:   ${id.pub}`)
     console.log(`fp:       ${await fingerprint(id.pub)}`)
-    console.log(`\n→ give your pubkey to a contact; they run:  ec add ${id.handle} ${id.pub}`)
+    console.log(`\n-> give your pubkey to a contact; they run:  ec add ${id.handle} ${id.pub}`)
     break
   }
   case 'whoami': {
@@ -86,7 +86,7 @@ switch (cmd) {
   case 'contacts': {
     const cfg = loadConfig(CFG)
     const names = Object.keys(cfg.contacts)
-    console.log(names.length ? names.map((n) => `  ${n}  ${cfg.contacts[n].slice(0, 16)}…`).join('\n') : '(no contacts — ec add <name> <pubB64>)')
+    console.log(names.length ? names.map((n) => `  ${n}  ${cfg.contacts[n].slice(0, 16)}...`).join('\n') : '(no contacts — ec add <name> <pubB64>)')
     break
   }
   case 'chat': {
@@ -99,7 +99,7 @@ switch (cmd) {
     const p = { networkId: opt('--network', 'main')!, dateUTC: opt('--date', todayUTC())! }
     // Fall-back transport: same engine, a broker instead of the relay mesh.
     const mqtt = rest.includes('--mqtt') ? (opt('--mqtt', 'mqtt://127.0.0.1:1883') as string) : null
-    console.log(`[ec] ${id.handle} → ${name}  via ${mqtt ? `MQTT ${mqtt}` : 'onchato relay'}  [EH-2]`)
+    console.log(`[ec] ${id.handle} -> ${name}  via ${mqtt ? `MQTT ${mqtt}` : 'onchato relay'}  [EH-2]`)
     await runChatSession(id, peerPub, id.handle, name, RELAY, p, mqtt)
     break
   }

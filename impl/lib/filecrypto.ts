@@ -27,7 +27,7 @@
  * before it fetches anything. The CID is a hash of the ciphertext and also
  * arrives authenticated, which covers the whole blob independently.
  *
- * The nonce is `0x00000000 ‖ u64(index)`. A counter nonce is safe here for the
+ * The nonce is `0x00000000 || u64(index)`. A counter nonce is safe here for the
  * one reason that matters: the key is generated per file and never used again,
  * so an (key, nonce) pair cannot repeat.
  */
@@ -85,7 +85,7 @@ function nonce(index: number): Uint8Array {
   return n
 }
 
-/** `u32(index) ‖ u32(total)` — position and length, bound into every chunk. */
+/** `u32(index) || u32(total)` — position and length, bound into every chunk. */
 function aad(index: number, total: number): Uint8Array {
   const a = new Uint8Array(8)
   const v = new DataView(a.buffer)

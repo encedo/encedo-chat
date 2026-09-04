@@ -40,7 +40,7 @@ function rngFrom(seed: number) {
 interface NetProfile {
   name: string
   minMs: number
-  maxMs: number   // latency range → jitter, and therefore reordering
+  maxMs: number   // latency range -> jitter, and therefore reordering
   lossPct: number
   dupPct: number
   joinGapMs: number // how much later the second peer joins
@@ -107,7 +107,7 @@ interface Result {
   aGot: number; bGot: number; quietOk: boolean
   /** Arrivals that belonged behind something already delivered. */
   reordered: number
-  /** …of those, how many the room FAILED to flag. Any is a bug. */
+  /** ...of those, how many the room FAILED to flag. Any is a bug. */
   unflagged: number
   ok: boolean
 }
@@ -161,14 +161,14 @@ async function runOnce(p: NetProfile, seed: number): Promise<Result> {
   const A = joinChat(net.node('peer-a'), 'sim', { macKey, eh2: eh2(ikA, ikB.pub) }, {
     firstAnnounceMs: 50, heartbeatMs: 1_000,
     onMessage: (_f, m, meta) => aGot.push({ body: m.body, outOfOrder: meta.outOfOrder }),
-    onLog: LOG ? (m, lvl) => console.log(`    A${lvl === 'debug' ? '·' : ' '} ${m}`) : undefined,
+    onLog: LOG ? (m, lvl) => console.log(`    A${lvl === 'debug' ? '|' : ' '} ${m}`) : undefined,
     onUndelivered: LOG ? (id) => console.log(`    A  UNDELIVERED ${id}`) : undefined,
   })
   await new Promise((r) => setTimeout(r, p.joinGapMs))
   const B = joinChat(net.node('peer-b'), 'sim', { macKey, eh2: eh2(ikB, ikA.pub) }, {
     firstAnnounceMs: 50, heartbeatMs: 1_000,
     onMessage: (_f, m, meta) => bGot.push({ body: m.body, outOfOrder: meta.outOfOrder }),
-    onLog: LOG ? (m, lvl) => console.log(`    B${lvl === 'debug' ? '·' : ' '} ${m}`) : undefined,
+    onLog: LOG ? (m, lvl) => console.log(`    B${lvl === 'debug' ? '|' : ' '} ${m}`) : undefined,
     onUndelivered: LOG ? (id) => console.log(`    B  UNDELIVERED ${id}`) : undefined,
   })
 
@@ -185,7 +185,7 @@ async function runOnce(p: NetProfile, seed: number): Promise<Result> {
   const delivered = await until(() => aGot.length >= 3 && bGot.length >= 3, 12_000)
   const lossless = p.lossPct === 0
 
-  // …then B's tab goes to the background: its Announce stops being heard, long
+  // ...then B's tab goes to the background: its Announce stops being heard, long
   // enough for A to declare it gone. The ratchet must survive that.
   let quietOk = true
   if (p.quietMs > 0) {
@@ -230,7 +230,7 @@ for (let i = 0; i < RUNS; i++) {
   const seed = SEED + i
   const r = await runOnce(p, seed)
   results.push({ ...r, seed })
-  const mark = r.ok ? '✔' : '✖'
+  const mark = r.ok ? '[ok]' : '[fail]'
   const lost = 6 - Math.min(3, r.aGot) - Math.min(3, r.bGot)
   console.log(
     `${mark} ${p.name.padEnd(18)} seed=${seed}  established=${r.established ? `${r.msEstablished} ms` : 'NO'}` +

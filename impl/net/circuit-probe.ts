@@ -1,11 +1,11 @@
 /**
  * circuit-probe.ts — does the onchato relay allow circuit-relay-v2 HOP/reservations?
  *
- * GossipSub-flooding (what meet.ts/chat-test.ts already prove) ≠ circuit HOP. The
+ * GossipSub-flooding (what meet.ts/chat-test.ts already prove) circuit HOP. The
  * §13 data plane needs peers to open a DIRECT stream to each other, tunneled
  * through the relay as a blind byte-forwarder. This probes exactly that: two
  * peers reserve on the relay; one opens a /p2p-circuit stream to the other and
- * sends a byte. PASS ⇒ the direct-stream data plane is viable via onchato.
+ * sends a byte. PASS the direct-stream data plane is viable via onchato.
  *   node net/circuit-probe.ts
  */
 
@@ -21,7 +21,7 @@ import { onchatoRelay } from './onchato.ts'
 process.on('unhandledRejection', (e: any) => console.log('  unhandledRejection:', e?.message ?? e))
 
 const PROTO = '/onchato/probe/1.0.0'
-// keep ws/wss (incl. /http-path/…) but NOT /p2p-circuit — those go to the circuit transport
+// keep ws/wss (incl. /http-path/...) but NOT /p2p-circuit — those go to the circuit transport
 const wsFilter = (addrs) => addrs.filter((ma) => { const s = ma.toString(); return /\/(wss?)(\/|$)/.test(s) && !s.includes('/p2p-circuit') })
 
 async function mkNode() {
@@ -56,8 +56,8 @@ const na = await mkNode()
 const nb = await mkNode()
 
 await Promise.all([na.dial(multiaddr(relay)), nb.dial(multiaddr(relay))])
-console.log(`both dialed relay; A=${na.peerId.toString().slice(0, 12)}… B=${nb.peerId.toString().slice(0, 12)}…`)
-console.log('waiting for B reservation on the relay…')
+console.log(`both dialed relay; A=${na.peerId.toString().slice(0, 12)}... B=${nb.peerId.toString().slice(0, 12)}...`)
+console.log('waiting for B reservation on the relay...')
 
 const bCircuit = await waitCircuitAddr(nb)
 if (!bCircuit) {
@@ -73,10 +73,10 @@ await nb.handle(PROTO, async ({ stream }) => {
 })
 
 // dial via the relay's PeerId (A already holds a connection to it) — the relay's
-// /http-path/ ws addr is not Circuit.exactMatch-compatible, but /p2p/<relay>/… is
+// /http-path/ ws addr is not Circuit.exactMatch-compatible, but /p2p/<relay>/... is
 const dialAddr = multiaddr(`/p2p/${relayId}/p2p-circuit/p2p/${nb.peerId.toString()}`)
 await new Promise((r) => setTimeout(r, 3000)) // let B's reservation settle
-console.log('A dialing B via circuit + opening stream…', dialAddr.toString())
+console.log('A dialing B via circuit + opening stream...', dialAddr.toString())
 let stream
 for (let attempt = 1; attempt <= 3 && !stream; attempt++) {
   try {

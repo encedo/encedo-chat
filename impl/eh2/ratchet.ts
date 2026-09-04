@@ -123,7 +123,7 @@ async function aeadKey(mk: Uint8Array): Promise<{ key: CryptoKey; nonce: (n: num
 interface Skipped { mk: Uint8Array; ts: number }
 
 class SkippedKeys {
-  /** chain pub (b64) → (n → key) */
+  /** chain pub (b64) -> (n -> key) */
   private chains = new Map<string, Map<number, Skipped>>()
   private ttlMs: number
   private maxChains: number
@@ -213,7 +213,7 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
 
   plog('§7.2', `${hs.role} first DH step: RK_0=${val(rk)} ikm=${val(hs.firstStepIkm)}`)
   const first = await dhStep(rk, hs.firstStepIkm)
-  plog('§7.2', `${hs.role} first DH step → RK=${val(first.rk)} CK=${val(first.ck)}`)
+  plog('§7.2', `${hs.role} first DH step -> RK=${val(first.rk)} CK=${val(first.ck)}`)
   hs.firstStepIkm.fill(0)
   hs.sk.fill(0) // RK_0 is consumed by the first step — the handshake result dies here
   rk = first.rk
@@ -229,7 +229,7 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
     if (stepBeforeSend || !ckSend) {
       dhSelf = await generateX25519()
       const step = await dhStep(rk, await dhSelf.dh(dhPeerPub))
-      plog('§7.2', `DH ratchet (send): new DH_self=${val(dhSelf.pub)} × peer=${val(dhPeerPub)} → RK=${val(step.rk)} CK_send=${val(step.ck)}`)
+      plog('§7.2', `DH ratchet (send): new DH_self=${val(dhSelf.pub)} x peer=${val(dhPeerPub)} -> RK=${val(step.rk)} CK_send=${val(step.ck)}`)
       rk.fill(0); rk = step.rk
       if (ckSend) ckSend.fill(0)
       ckSend = step.ck
@@ -239,7 +239,7 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
     }
     const mk = await messageKey(ckSend!)
     const next = await chainNext(ckSend!)
-    plog('§7.2', `send n=${nSend} pn=${pn}: CK→CK' (${val(ckSend!)} → ${val(next)}) MK=${val(mk)}`)
+    plog('§7.2', `send n=${nSend} pn=${pn}: CK->CK' (${val(ckSend!)} -> ${val(next)}) MK=${val(mk)}`)
     ckSend!.fill(0); ckSend = next
 
     const header = encodeHeader({ dhPub: dhSelf!.pub, pn, n: nSend })
@@ -326,7 +326,7 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
       // (`walk.ck` IS `ckRecv` when the frame was in order).
       if (!pt) { wipeAll(mk, nextCk, walk.ck !== ckRecv ? walk.ck : null, ...walk.keys); return null }
 
-      plog('§7.2', `recv n=${h.n} (was at ${nRecv}${walk.keys.length ? `, stashed ${walk.keys.length} skipped` : ''}): MK=${val(mk)} → CK'=${val(nextCk)}`)
+      plog('§7.2', `recv n=${h.n} (was at ${nRecv}${walk.keys.length ? `, stashed ${walk.keys.length} skipped` : ''}): MK=${val(mk)} -> CK'=${val(nextCk)}`)
       for (let i = 0; i < walk.keys.length; i++) skipped.put(h.dhPub, nRecv + i, walk.keys[i], now())
       wipeAll(mk, ckRecv, walk.ck !== ckRecv ? walk.ck : null)
       ckRecv = nextCk
@@ -356,7 +356,7 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
       return null
     }
 
-    plog('§7.2', `DH ratchet (recv): peer key ${val(dhPeerPub)} → ${val(h.dhPub)}, RK=${val(step.rk)} CK_recv=${val(step.ck)}`
+    plog('§7.2', `DH ratchet (recv): peer key ${val(dhPeerPub)} -> ${val(h.dhPub)}, RK=${val(step.rk)} CK_recv=${val(step.ck)}`
       + `; n=${h.n} pn=${h.pn}${closing?.keys.length ? `, ${closing.keys.length} key(s) held from the closed chain` : ''}`)
     if (closing) for (let i = 0; i < closing.keys.length; i++) skipped.put(dhPeerPub, nRecv + i, closing.keys[i], now())
     for (let i = 0; i < walk.keys.length; i++) skipped.put(h.dhPub, i, walk.keys[i], now())

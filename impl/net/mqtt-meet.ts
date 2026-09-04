@@ -30,7 +30,7 @@ const [ikA, ikB] = [await generateX25519(), await generateX25519()]
 const ss = await ikA.dh(ikB.pub)
 const topic = await topicFromSecret(ss, P)
 const macKey = await announceMacKey(ss, P)
-console.log(`broker ${URL}\ntopic  ${topic.slice(0, 24)}…`)
+console.log(`broker ${URL}\ntopic  ${topic.slice(0, 24)}...`)
 
 const nodeA = await createMqttPeer({ url: URL, onLog: LOG ? (m) => console.log('  A:', m) : undefined })
 const nodeB = await createMqttPeer({ url: URL, onLog: LOG ? (m) => console.log('  B:', m) : undefined })
@@ -50,16 +50,16 @@ const B = joinChat(nodeB, topic, { macKey, eh2: eh2(ikB, ikA.pub) }, {
 
 const t0 = Date.now()
 await until(() => A.who().length > 0 && B.who().length > 0, 15_000, 'the two peers see each other')
-console.log(`✔ discovered each other in ${Date.now() - t0} ms`)
+console.log(`[ok] discovered each other in ${Date.now() - t0} ms`)
 
 await until(() => A.secured().length === 1 && B.secured().length === 1, 20_000, 'EH-2 completes')
-console.log(`✔ EH-2 established in ${Date.now() - t0} ms (ratchet live on both sides)`)
+console.log(`[ok] EH-2 established in ${Date.now() - t0} ms (ratchet live on both sides)`)
 
 A.sendText('cześć po MQTT')
-await until(() => got.length === 1, 10_000, 'A→B arrives')
+await until(() => got.length === 1, 10_000, 'A->B arrives')
 B.sendText('i z powrotem')
-await until(() => back.length === 1, 10_000, 'B→A arrives')
-console.log(`✔ messages both ways, ratchet-sealed: "${got[0]}" / "${back[0]}"`)
+await until(() => back.length === 1, 10_000, 'B->A arrives')
+console.log(`[ok] messages both ways, ratchet-sealed: "${got[0]}" / "${back[0]}"`)
 
 A.stop(); B.stop()
 await nodeA.stop(); await nodeB.stop()

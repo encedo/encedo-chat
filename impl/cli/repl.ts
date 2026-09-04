@@ -9,7 +9,7 @@
  *   onSigint  — Ctrl+C is handed to the caller (graceful shutdown) instead of an
  *               immediate exit. Without it, Ctrl+C closes the readline as before.
  *   onActivity— fires on every keypress (TTY only), so the session can drive
- *               "typing…" / idle-"away" meta-messages.
+ *               "typing..." / idle-"away" meta-messages.
  */
 
 import { createInterface, emitKeypressEvents, type Interface } from 'node:readline'
@@ -40,7 +40,7 @@ export function startRepl(prompt: string, onLine: (line: string) => void, opts: 
   rl.on('SIGINT', () => { if (opts.onSigint) opts.onSigint(); else rl.close() })
   rl.on('close', () => { process.stdout.write('\n'); process.exit(0) })
 
-  // Ctrl+Z → graceful leave, not suspend (belt-and-braces for the non-raw case)
+  // Ctrl+Z -> graceful leave, not suspend (belt-and-braces for the non-raw case)
   if (opts.onSigint) process.on('SIGTSTP', () => opts.onSigint!())
   if ((opts.onActivity || opts.onSigint) && (process.stdin as any).isTTY) {
     emitKeypressEvents(process.stdin)

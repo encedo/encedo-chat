@@ -3,7 +3,7 @@
  *
  * The plaintext INSIDE the Session seal (lib/session.ts) is a JSON
  * envelope: one versioned shape, a type discriminator `t`, and per-message meta
- * (id / ts / seq). New meta types (reaction, file, …) slot in here without
+ * (id / ts / seq). New meta types (reaction, file, ...) slot in here without
  * touching crypto or transport. An unknown `t` still decodes (to UnknownEnv) so
  * older clients ignore future messages gracefully — forward-compat.
  *

@@ -380,7 +380,7 @@ mod desk {
                 if started.elapsed() > deadline { break }
                 continue
             }
-            // 1 expired · 2 dismissed by the person · 3 closed by an app · 4 unspecified
+            // 1 expired | 2 dismissed by the person | 3 closed by an app | 4 unspecified
             let why = match reason {
                 1 => "expired",
                 2 => "dismissed by the user",
@@ -644,7 +644,7 @@ mod desk {
     /// match from the next launch — GNOME pairs a window with its entry when
     /// the window appears.
     ///
-    /// ⚠️ The updater replaces the file `APPIMAGE` names, so the variable is
+    /// WARNING: The updater replaces the file `APPIMAGE` names, so the variable is
     /// repointed at the new home for the rest of this process — otherwise an
     /// update accepted in this same session would try to land in the Downloads
     /// path the file just left.
@@ -747,7 +747,7 @@ mod desk {
     /// report from the first live test was exact: "od kliknięcia nic się nie
     /// działo i nagle restart".
     ///
-    /// ⚠️ Only ever called after `desk_update_kind` answered `self`. On a distro
+    /// WARNING: Only ever called after `desk_update_kind` answered `self`. On a distro
     /// package this downloads a bundle it cannot install (§ the kind command).
     ///
     /// It checks again rather than holding the update from the call before it:
@@ -837,7 +837,7 @@ mod desk {
     /**
      * Turn WebRTC on in WebKitGTK.
      *
-     * ⚠️ **Measured: this does not help on WebKitGTK 2.5x / Ubuntu aarch64.**
+     * WARNING: **Measured: this does not help on WebKitGTK 2.5x / Ubuntu aarch64.**
      * The setting is real — `enable-webrtc` is a WebKitSettings property that
      * defaults to off, the library ships the `RTCPeerConnection` symbol and
      * GStreamer ships the DTLS plugins — so it looked like the whole answer.
@@ -851,7 +851,7 @@ mod desk {
      * hold. `enable-media-stream` goes with it: getUserMedia is a separate
      * switch, and a connection with nothing to put in it is not worth opening.
      *
-     * Whether it worked is not a matter of belief: Ustawienia → Diagnostyka →
+     * Whether it worked is not a matter of belief: Ustawienia -> Diagnostyka ->
      * Sprawdź WebRTC answers it on the machine in front of you.
      */
     #[cfg(target_os = "linux")]
@@ -865,7 +865,7 @@ mod desk {
                 s.set_enable_webrtc(true);
                 s.set_enable_media_stream(true);
             }
-            // ⚠️ And the half that `enable-media-stream` alone does not buy.
+            // WARNING: And the half that `enable-media-stream` alone does not buy.
             //
             // Reported as "recording does not work in Tauri — no permission",
             // and it is the same shape as the notification bug: WebKitGTK does

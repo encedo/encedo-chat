@@ -60,14 +60,14 @@ const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '
  */
 const FULL_MAX = 64 // every secret in §5–§8 is 32 B; past this it is a public blob
 export function val(v: Uint8Array | string | number | undefined | null): string {
-  if (v == null) return '∅'
+  if (v == null) return ''
   if (typeof v === 'number') return String(v)
   if (typeof v === 'string') return showKeys ? v : `«${v.length} chars»`
-  if (!showKeys) return `«${v.length}B ${hex(v.slice(0, 4))}…»`
+  if (!showKeys) return `«${v.length}B ${hex(v.slice(0, 4))}...»`
   // Long values are ML-KEM public keys and ciphertexts — over a kilobyte each,
   // not secret, and they bury the 32-byte material the reader came for. Every
   // key, hash and MAC in the protocol prints whole.
-  return v.length <= FULL_MAX ? hex(v) : `${hex(v.slice(0, 8))}…${hex(v.slice(-8))} (${v.length}B)`
+  return v.length <= FULL_MAX ? hex(v) : `${hex(v.slice(0, 8))}...${hex(v.slice(-8))} (${v.length}B)`
 }
 
 /** One narration line, tagged with the section of the protocol it belongs to. */

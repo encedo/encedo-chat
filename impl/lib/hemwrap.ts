@@ -53,7 +53,7 @@ const CACHED_MS = 5
 /** Worth reporting how long it took; below this the question alone is enough. */
 const SLOW_MS = 500
 
-const kidish = (v: any) => typeof v === 'string' ? v.slice(0, 12) + (v.length > 12 ? '…' : '') : '?'
+const kidish = (v: any) => typeof v === 'string' ? v.slice(0, 12) + (v.length > 12 ? '...' : '') : '?'
 
 /**
  * What each SDK call is FOR, in the words someone debugging would use.
@@ -76,10 +76,10 @@ const CALLS: Record<string, (a: any[]) => string> = {
   getPubKey: (a) => `public key of KID=${kidish(a[1])}`,
   createKeyPair: (a) => `new ${a[2]} key pair, label "${a[1]}"`,
   importPublicKey: (a) => `import of ${a[2]} public key, label "${a[1]}"`,
-  updateKey: (a) => `update of KID=${kidish(a[1])} → label "${a[2]}"`,
+  updateKey: (a) => `update of KID=${kidish(a[1])} -> label "${a[2]}"`,
   deleteKey: (a) => `delete of KID=${kidish(a[1])}`,
-  ecdh: (a) => `ECDH: KID=${kidish(a[1])} × a peer public key`,
-  ecdhKid: (a) => `ECDH: KID=${kidish(a[1])} × KID=${kidish(a[2])}`,
+  ecdh: (a) => `ECDH: KID=${kidish(a[1])} x a peer public key`,
+  ecdhKid: (a) => `ECDH: KID=${kidish(a[1])} x KID=${kidish(a[2])}`,
   deriveKey: (a) => `derived key, label "${a[1]}"`,
 }
 
@@ -110,12 +110,12 @@ export function traceHem(hem: any, sink: TraceSink): any {
             // Saying which answers never left the machine matters: several lines
             // in a trace of one sign-in looked like device traffic and were the
             // SDK's token cache.
-            if (ms < CACHED_MS) sink(`✓ ${what} ‹cached›`, 'cached')
-            else if (ms >= SLOW_MS) sink(`… ${what} — ${ms} ms`, 'slow')
+            if (ms < CACHED_MS) sink(`[ok] ${what} ‹cached›`, 'cached')
+            else if (ms >= SLOW_MS) sink(`... ${what} — ${ms} ms`, 'slow')
             return r
           },
           (e: any) => {
-            sink(`✗ ${what} — ${e?.code ?? e?.name ?? 'error'}: ${e?.message ?? e}`, 'error')
+            sink(`[fail] ${what} — ${e?.code ?? e?.name ?? 'error'}: ${e?.message ?? e}`, 'error')
             throw e
           },
         )

@@ -37,9 +37,9 @@ test('hemIdentityFrom: ecdh uses base64 pubkey, or ecdhKid when a peer kid is gi
   }
   const id = hemIdentityFrom(hem, 'kid7', 'alice', 'PUBB64')
   assert.equal(id.handle, 'alice'); assert.equal(id.pub, 'PUBB64')
-  await id.ecdh('peerpub')                      // no kid → base64 ecdh
+  await id.ecdh('peerpub')                      // no kid -> base64 ecdh
   assert.deepEqual(base, { t: 'tok', kid: 'kid7', pub: 'peerpub' }); assert.equal(ext, null)
-  await id.ecdh('peerpub', 'peerKid9')          // kid present → two-KID ecdhKid
+  await id.ecdh('peerpub', 'peerKid9')          // kid present -> two-KID ecdhKid
   assert.deepEqual(ext, { t: 'tok', kid: 'kid7', extKid: 'peerKid9' })
 })
 
@@ -144,8 +144,8 @@ test('mergedContactBook: add routes by persistent, remove by source, list concat
     async remove(c: any) { hemCalls.removed.push(c.kid) },
   }
   const book = mergedContactBook(hem, local)
-  await book.add('carl', 'CARLPUB', false) // → local
-  await book.add('perm', 'PERMPUB', true)  // → hem
+  await book.add('carl', 'CARLPUB', false) // -> local
+  await book.add('perm', 'PERMPUB', true)  // -> hem
   assert.deepEqual(hemCalls.added, [['perm', 'PERMPUB']])
   assert.equal(store.length, 1); assert.equal(store[0].name, 'carl')
   const list = await book.list()
