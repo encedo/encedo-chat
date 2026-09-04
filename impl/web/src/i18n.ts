@@ -302,7 +302,6 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Wczytaj przeniesiony profil': 'Load a profile moved from elsewhere',
     'To nie jest profil software — tożsamości z HEM nie da się przenieść plikiem': 'This is not a software profile \u2014 a HEM identity cannot be moved with a file',
     'Przenieś profil': 'Move the profile',
-    'Zapisz profil do pliku': 'Save the profile to a file',
     'Przeniesienie na inne urządzenie': 'Moving to another device',
     'software': 'software',
     'Plik profilu': 'Profile file',
