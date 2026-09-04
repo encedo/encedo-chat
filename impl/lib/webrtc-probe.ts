@@ -61,9 +61,10 @@ export interface WebrtcProbeResult {
   stages: ProbeStage[]
 }
 
-/** The STUN server the app itself uses (`net/webrtc.ts`). Probing a different
- *  one would answer a question nobody asked. */
-export const PROBE_STUN = 'stun:stun.l.google.com:19302'
+/** The STUN server the app itself uses (`lib/ice.ts` — ours, on our nodes).
+ *  Probing a different one would answer a question nobody asked. */
+export { PROBE_STUN } from './ice.ts'
+import { PROBE_STUN } from './ice.ts'
 
 const LOOPBACK_MS = 10_000
 const ICE_MS = 4_000

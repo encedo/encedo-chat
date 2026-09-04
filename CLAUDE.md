@@ -20,7 +20,7 @@ operational reality — lessons, deploy rituals, platform traps.
 - `docs/` — the three specs (PROTOCOL, ARCHITECTURE, THREAT-MODELS), kept 1:1 with the code.
 - `skin/` — UI mockups (`ui-mockup.html`, `ui-mockup-hacker.html`); the shipped UI is `impl/web/` and has long diverged.
 - `impl/` — the app: engine (`lib/`, `eh2/`, `net/`), web UI (`web/`), CLI (`cli/`), Tauri desktop + Android shell (`src-tauri/`), tests (`test/`).
-- `infra/` — `nodes.json` (the compiled-in node list), `deploy-on-tag.sh` + systemd units (tag-driven web deploy), `nginx/onchato.com` (the versioned nginx config of the web host — scp to sites-available), `nginx/relay-node.conf` + `nginx/relay-limits.conf` (the template every relay-only node renders), IPFS TTL sweeper, `feedback/` (the in-app 💬 Feedback sink — zero-dep Node, appends JSONL, its own systemd unit).
+- `infra/` — `nodes.json` (the compiled-in node list), `deploy-on-tag.sh` + systemd units (tag-driven web deploy), `nginx/onchato.com` (the versioned nginx config of the web host — scp to sites-available), `nginx/relay-node.conf` + `nginx/relay-limits.conf` (the template every relay-only node renders), IPFS TTL sweeper, `feedback/` (the in-app 💬 Feedback sink — zero-dep Node, appends JSONL, its own systemd unit), `stun/` (our own STUN, below).
 - `MVP.md`, `MOBILE-PLAN.md`, `EMBED-PLAN.md`, `GROUPS-DESIGN.md`, `performance.md`, `hem_usage.md` — plans and measured records at root.
 - `relay/` — the onchato **bs1 relay** (libp2p GossipSub + circuit-relay-v2),
   self-contained + deployable (pull → `npm ci` → systemd `onchato-relay`).
@@ -461,6 +461,7 @@ session (`startSession({transport:'mqtt', broker})`, web `?mqtt=1`, CLI
 | `npm run phone-shot` | screenshots at real device metrics (layout truth — computed-style asserts miss clipping) |
 | `npm run crypto-bench` | the engine-cost numbers `performance.md` cites, reproducibly (EH-2 + ratchet, offline) |
 | `npm run relay-load` / `-saturate` / `-flood` / `-hsrate` / `-chatload` | the load/DoS toolkit (`performance.md`, `relay/README.md`) |
+| `node net/stun-probe.ts <host> [--bad]` | our STUN on a node: the reflexive address it reports, and that it ignores everything else |
 
 `browser-test` env switches worth knowing: `GROUP_ONLY=1` (just the group
 scenarios), `FAILOVER=1`, `RELAY_NODE=<full multiaddr>` (⚠️ a bare hostname
@@ -1170,6 +1171,22 @@ nginx config is versioned at `infra/nginx/onchato.com` — edit locally, `scp` t
 `sites-enabled`, `nginx -t`, reload. It carries the `/relay` and `/mqtt` per-IP
 limits (the DDoS protection — libp2p's own is off), the CORS on both `/f`
 blocks that the packaged apps need, and the `/feedback` block.
+
+**STUN is ours** (`infra/stun/stun.mjs`, since 0.5.48 — the user's call: "no
+dependency on anybody, only the VPS"). ICE needs one fact before it can offer a
+direct candidate, and asking Google's public server for it handed a third party
+the IP and timing of every attempt. `stun.mjs` is a zero-dep Binding-Request
+responder (RFC 5389 §15.2) running as `onchato-stun` on every relay node; the
+client list is `impl/lib/ice.ts` (three nodes — ICE asks in parallel, one answer
+is enough) and `?stun=<url>` / `?stun=0` override it for a page load. Two things
+to know: **it is not coturn on purpose** — coturn is a TURN server that can also
+do STUN, and TURN relays media for whoever asks, which is one config line from
+an open relay; there is no relaying code here at all. And **3478/udp is the only
+port on these machines that is not behind nginx** (nginx does not proxy UDP), so
+it is easy to forget in `ufw` — `relay/DEPLOY.md` §1 + §4b. Check a node with
+`node impl/net/stun-probe.ts <host> --bad`: the `--bad` half fires the datagrams
+that must be dropped and fails if any is answered, because a UDP responder that
+answers more than it must is a reflector somebody can aim.
 
 **Feedback sink** (`infra/feedback/`, since 0.5.39): the app's 💬 Feedback form
 POSTs one JSON document to `https://onchato.com/feedback`; `feedback.mjs`

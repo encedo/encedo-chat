@@ -73,13 +73,16 @@ sudo ufw default allow outgoing
 sudo ufw allow OpenSSH
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
+sudo ufw allow 3478/udp                          # STUN (§4b) — the only UDP door
 sudo ufw --force enable
 sudo ufw status verbose
 ```
 
-Three ports and nothing else. The relay itself listens on `0.0.0.0:9001`, but
+Four ports and nothing else. The relay itself listens on `0.0.0.0:9001`, but
 it is reached only by nginx over loopback, and loopback is not filtered by
-ufw — so **9001 stays closed** and clients notice nothing. Do not open it: an
+ufw — so **9001 stays closed** and clients notice nothing. 3478/udp is the one
+exception to "everything goes through nginx": nginx speaks TCP and STUN is UDP,
+so that service faces the world directly (§4b). Do not open it: an
 open 9001 is a plain-WS door around every limit nginx enforces. (bs1 has one
 extra listener, IPv6 port 9002, for exactly one reason: its provider blocks
 IPv4 between its VMs, so bs2 meshes with it over IPv6. ufw restricts that port
@@ -185,6 +188,41 @@ address published with the wrong id fails for every client that ever caches
 it. A `✗ … ponawiam` line is retried every 10 s (see Troubleshooting if it
 never turns into `✓`). Nothing reaches the node from outside yet — that is
 the next two steps.
+
+## 4b. STUN
+
+One more service on the same clone, and a small one: it tells a client the
+address the outside world sees, which is the single fact WebRTC needs before it
+can try a direct connection. Before 2026-09-03 the app asked Google's public
+STUN server for it; now it asks the nodes it is already connected to.
+
+```bash
+sudo cp /opt/github/encedo-chat/infra/stun/onchato-stun.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now onchato-stun
+journalctl -u onchato-stun -n 5 --no-pager
+```
+
+Two lines say it worked — `✓ STUN udp4 0.0.0.0:3478` and `✓ STUN udp6 [::]:3478`.
+The IPv6 one is best-effort: a host without IPv6 logs an error for it and keeps
+serving IPv4 (the v4 socket failing, by contrast, exits — that one is not
+optional).
+
+From your laptop, before anyone relies on it:
+
+```bash
+node impl/net/stun-probe.ts $HOST --bad
+```
+
+It prints the public address the node saw you from, then fires the datagrams the
+service must IGNORE (a TURN Allocate, a wrong magic cookie, a truncated header)
+and fails if any of them is answered. That second half is the one worth running:
+a UDP responder that answers more than it must is a reflector somebody else can
+aim at a third party.
+
+⚠️ **`ufw allow 3478/udp` (§1) is what makes this reachable.** Everything else on
+these machines is behind nginx, so it is easy to assume this is too — it is not,
+because nginx does not proxy UDP.
 
 ## 5. The certificate
 

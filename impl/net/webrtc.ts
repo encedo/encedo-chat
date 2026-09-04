@@ -9,6 +9,8 @@
  * peers see each other's IPs — that's the "direct"/P1 mode).
  */
 
+import { iceServersFor } from '../lib/ice.ts'
+
 export type Signal =
   | { kind: 'offer'; sdp: string }
   | { kind: 'answer'; sdp: string }
@@ -48,7 +50,13 @@ const PROBE_TRIES = 4
 const PROBE_EVERY_MS = 700
 
 export function webrtcLink(opts: WebRTCOpts): WebRTCLink {
-  const pc = new RTCPeerConnection({ iceServers: opts.iceServers ?? [{ urls: 'stun:stun.l.google.com:19302' }] })
+  // Ours, never a public one — `lib/ice.ts` holds the list, says why, and
+  // honours `?stun=` for a node that is not in a build yet. (`typeof location`
+  // because this module is imported by tests that run in Node, where the
+  // caller injects a link and no RTCPeerConnection is ever built.)
+  const pc = new RTCPeerConnection({
+    iceServers: opts.iceServers ?? iceServersFor(typeof location === 'undefined' ? '' : location.search),
+  })
   let dc: RTCDataChannel | null = null
   let ready = false
   let remoteSet = false
