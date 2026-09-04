@@ -224,6 +224,12 @@ aim at a third party.
 these machines is behind nginx, so it is easy to assume this is too — it is not,
 because nginx does not proxy UDP.
 
+⚠️ **Do this BEFORE §9 (publishing the node).** Clients do not carry a list of
+STUN servers; they ask the nodes they dial, on the default port, because running
+STUN is part of being a node (`impl/lib/ice.ts`). A node that reaches the
+published list without this service answers a client's Binding Request with
+nothing, and the client waits out the ICE timeout before falling back.
+
 ## 5. The certificate
 
 nginx's stock default site serves `/var/www/html` on port 80 for any name,

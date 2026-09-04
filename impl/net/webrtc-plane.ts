@@ -30,6 +30,9 @@ export interface WebRTCPlaneOpts {
   attemptMs?: number
   /** Build the link. Only tests replace it — `RTCPeerConnection` is browser-only. */
   makeLink?: typeof webrtcLink
+  /** STUN servers for the attempt — derived from the node list by the caller
+   *  (`lib/ice.ts`), because a node IS a STUN server (`relay/DEPLOY.md` §4b). */
+  iceServers?: { urls: string }[]
 }
 
 export function attachWebRTC(room: RoomDataPlane, self: string, opts: WebRTCPlaneOpts = {}): WebRTCPlane {
@@ -89,6 +92,7 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: WebRTCPlan
     try { link?.close() } catch {}
     link = (opts.makeLink ?? webrtcLink)({
       initiator: self < peer, // deterministic: lower PeerId offers
+      iceServers: opts.iceServers,
       sendSignal: (sig) => room.sendSignal(peer, sig),
       onData: (bytes) => room.injectContent(bytes, peer),
       onOpen: () => { // the ping/pong came back: this channel really carries

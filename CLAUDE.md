@@ -1176,9 +1176,14 @@ blocks that the packaged apps need, and the `/feedback` block.
 dependency on anybody, only the VPS"). ICE needs one fact before it can offer a
 direct candidate, and asking Google's public server for it handed a third party
 the IP and timing of every attempt. `stun.mjs` is a zero-dep Binding-Request
-responder (RFC 5389 §15.2) running as `onchato-stun` on every relay node; the
-client list is `impl/lib/ice.ts` (three nodes — ICE asks in parallel, one answer
-is enough) and `?stun=<url>` / `?stun=0` override it for a page load. Two things
+responder (RFC 5389 §15.2) running as `onchato-stun` on every relay node.
+**The client holds no list of STUN servers**: `impl/lib/ice.ts` derives them
+from the nodes it already dials (`stun:<host>:3478`, first three enabled), so
+editing Settings → Network or loading a list by CID moves them too, and nothing
+is written twice — the `DEFAULT_NODES`-beside-`nodes.json` drift is the lesson
+being applied. It is threaded app → core → plane → link rather than defaulted
+inside `net/webrtc.ts`, because only the front-end knows the node list.
+`?stun=<url>` / `?stun=0` override it for a page load. Two things
 to know: **it is not coturn on purpose** — coturn is a TURN server that can also
 do STUN, and TURN relays media for whoever asks, which is one config line from
 an open relay; there is no relaying code here at all. And **3478/udp is the only

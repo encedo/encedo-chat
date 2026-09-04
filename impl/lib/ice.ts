@@ -4,46 +4,78 @@
  * One list, because there were two: `net/webrtc.ts` defaulted to Google's
  * public server and `lib/webrtc-probe.ts` diagnosed against it separately, so
  * "which third party does this product talk to" had two answers and neither was
- * in the specs.
+ * in the specs. The answer is now **nobody**: STUN runs on our own nodes
+ * (`infra/stun/stun.mjs`, the user's decision 2026-09-03 — "no dependency on
+ * anybody, only the VPS"). A STUN server learns the client's IP and the timing
+ * of every negotiation; ours are hosts the client is already holding a WSS
+ * connection to, so the operator learns an address it necessarily has and
+ * nobody else learns anything.
  *
- * **It is our own nodes now, and that is the whole point** (the user's
- * decision, 2026-09-03: "no dependency on anybody — only the VPS"). A STUN
- * server learns the client's IP and the timing of every negotiation. Google's
- * knew both, for a product whose design goes out of its way not to need a third
- * party. Ours run on `infra/stun/stun.mjs`, on the same hosts the client is
- * already holding a WSS connection to — so the operator learns an address it
- * necessarily has, and nobody else learns anything.
+ * **The list is DERIVED from the node list, never written out here.** A node is
+ * a machine that carries this network's traffic, and since `relay/DEPLOY.md`
+ * §4b it runs STUN on the default port as part of being one — so the hosts a
+ * client already dials are exactly the hosts it can ask. That means a
+ * hardcoded second copy would be the bug this project has already paid for
+ * once: `DEFAULT_NODES` used to be typed out beside `infra/nodes.json` and the
+ * two drifted, so a fresh client dialled one node while the published file
+ * carried two. Here it is worse than drift — a hardcoded STUN list would keep
+ * pointing at old hosts after someone edits their nodes in Settings or loads a
+ * published list by CID.
  *
- * Three of them because there are three nodes: ICE queries them in parallel and
- * one reflexive answer is enough, so a node being down costs nothing. They are
- * NOT read from `infra/nodes.json` — that file is the relay list, its shape is
- * published by CID and compiled into every build, and a STUN URL is not a
- * libp2p multiaddr. A node list refreshed at runtime therefore does not move
- * this; when a fourth node ships, both files get a line.
+ * Consequences worth knowing:
  *
- * `?stun=<url>` replaces the list for one page load (`stun:` or `stuns:` only)
- * — for testing a node before it is in a build, and for a support conversation
- * that needs to rule the servers out. `?stun=0` turns STUN off entirely: ICE
- * then offers host candidates only, which is what a LAN pair has anyway.
+ *  - A node the user added by hand that does NOT answer STUN costs nothing:
+ *    ICE asks all of them in parallel and one reflexive answer is enough.
+ *  - `MAX_STUN` caps how many are asked. Every server means another round of
+ *    requests from every ICE gathering, and the answers are the same address.
+ *  - `?stun=<url>` replaces the derived list for one page load (`stun:`/`stuns:`
+ *    only — this value reaches `RTCPeerConnection`, and a `turn:` URL there
+ *    would route media somewhere a link chose). `?stun=0` asks nobody, leaving
+ *    host candidates, which is what a pair on one LAN uses anyway.
  */
 
-export const STUN_HOSTS = ['bs1.onchato.com', 'bs2.onchato.com', 'bs3.onchato.com']
+/** How many nodes are asked. One answer is enough; the rest is noise. */
+export const MAX_STUN = 3
 
-/** The default list, in the shape `RTCPeerConnection` wants. */
-export const ICE_SERVERS: { urls: string }[] = STUN_HOSTS.map((h) => ({ urls: `stun:${h}:3478` }))
-
-/** What the self-test dials (`lib/webrtc-probe.ts`) — the first of ours. */
-export const PROBE_STUN = ICE_SERVERS[0].urls
+/** The default STUN port — every node runs it there (`relay/DEPLOY.md` §4b). */
+export const STUN_PORT = 3478
 
 /**
- * The list for this page load, honouring `?stun=`. Anything that is not a
- * `stun:`/`stuns:` URL is ignored rather than passed on: this value reaches
- * `RTCPeerConnection` and a `turn:` URL there would send traffic somewhere a
- * URL parameter chose.
+ * The one host named in code, and only for a caller with no node list — today
+ * that is the self-test when it is run before a session exists. Everything on
+ * the message path derives its servers from the nodes instead.
  */
-export function iceServersFor(search: string): { urls: string }[] {
+export const STUN_FALLBACK_HOST = 'bs1.onchato.com'
+
+/**
+ * The host inside a multiaddr, for the address forms a node list can hold.
+ * `null` for anything else, including a hostname pasted without a protocol —
+ * which the node list already refuses for dialling (`lib/nodelist.ts`).
+ */
+export function hostOf(addr: string): string | null {
+  const m = /^\/(?:dns4|dns6|dnsaddr|ip4|ip6)\/([^/]+)\//.exec(addr)
+  return m ? m[1] : null
+}
+
+/** `stun:<host>:3478` for the first few nodes, in the order they are dialled. */
+export function stunFromNodes(addrs: string[], max = MAX_STUN): { urls: string }[] {
+  const hosts: string[] = []
+  for (const a of addrs) {
+    const h = hostOf(a)
+    if (h && !hosts.includes(h)) hosts.push(h)
+    if (hosts.length >= max) break
+  }
+  return hosts.map((h) => ({ urls: `stun:${h}:${STUN_PORT}` }))
+}
+
+/**
+ * The servers for this page load: the nodes, unless `?stun=` says otherwise.
+ * `addrs` is what the client actually dials (`chosenRelays()` in the web app),
+ * so editing the node list moves this with it.
+ */
+export function iceServersFor(search: string, addrs: string[]): { urls: string }[] {
   const v = new URLSearchParams(search).get('stun')
-  if (v == null || v === '') return ICE_SERVERS
   if (v === '0') return []
-  return /^stuns?:[^\s]+$/i.test(v) ? [{ urls: v }] : ICE_SERVERS
+  if (v && /^stuns?:[^\s]+$/i.test(v)) return [{ urls: v }]
+  return stunFromNodes(addrs)
 }

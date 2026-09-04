@@ -9,8 +9,6 @@
  * peers see each other's IPs — that's the "direct"/P1 mode).
  */
 
-import { iceServersFor } from '../lib/ice.ts'
-
 export type Signal =
   | { kind: 'offer'; sdp: string }
   | { kind: 'answer'; sdp: string }
@@ -50,13 +48,11 @@ const PROBE_TRIES = 4
 const PROBE_EVERY_MS = 700
 
 export function webrtcLink(opts: WebRTCOpts): WebRTCLink {
-  // Ours, never a public one — `lib/ice.ts` holds the list, says why, and
-  // honours `?stun=` for a node that is not in a build yet. (`typeof location`
-  // because this module is imported by tests that run in Node, where the
-  // caller injects a link and no RTCPeerConnection is ever built.)
-  const pc = new RTCPeerConnection({
-    iceServers: opts.iceServers ?? iceServersFor(typeof location === 'undefined' ? '' : location.search),
-  })
+  // No default of its own, on purpose. STUN runs on the NODES (`lib/ice.ts`,
+  // `infra/stun/`), so the list follows whichever nodes this client dials —
+  // which only the caller knows. An empty list is a legitimate answer (`?stun=0`,
+  // or a LAN pair): ICE then offers host candidates only.
+  const pc = new RTCPeerConnection({ iceServers: opts.iceServers ?? [] })
   let dc: RTCDataChannel | null = null
   let ready = false
   let remoteSet = false

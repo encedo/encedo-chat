@@ -443,6 +443,11 @@ export interface OpenOpts extends ChatOpts {
   broker?: string
   params?: RoomParams
   webrtc?: boolean // enable the WebRTC direct data plane (browser only)
+  /** STUN servers for the direct attempt. Derived from the node list by the
+   *  front-end (`lib/ice.ts`) — a node runs STUN as part of being a node — so
+   *  core does not know them and must not invent them. Absent or empty means
+   *  host candidates only, which is right for a LAN pair and for `?stun=0`. */
+  iceServers?: { urls: string }[]
   onWebrtcState?: (s: string) => void // WebRTC conn/ICE state (for a UI badge)
   /** EH-2 handshake progress per peer (for a UI badge). */
   onSecurity?: Eh2Options['onState']
@@ -1091,7 +1096,7 @@ async function openRoom(
   // RTCPeerConnection` mid-handshake. Without it, content simply stays on the relay
   // (GossipSub) — the fallback the plane would have used anyway.
   const webRtcOk = typeof RTCPeerConnection !== 'undefined'
-  if (opts.webrtc && webRtcOk) plane = attachWebRTC(room, self, { onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
+  if (opts.webrtc && webRtcOk) plane = attachWebRTC(room, self, { iceServers: opts.iceServers, onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
   else if (opts.webrtc) log('WebRTC unavailable in this webview — content stays on the relay')
   const unregister = host.register(room)
 

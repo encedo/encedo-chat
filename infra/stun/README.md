@@ -13,8 +13,14 @@ This runs on bs1/bs2/bs3, hosts the client is already holding a WSS connection
 to, so the operator learns an address it necessarily has and nobody else learns
 anything.
 
-The client list lives in `impl/lib/ice.ts` (three nodes; ICE asks them in
-parallel and one answer is enough, so a node being down costs nothing).
+**The client does not hold a list of STUN servers.** It derives them from the
+nodes it already dials (`impl/lib/ice.ts`: `stun:<host>:3478` for the first
+three enabled nodes), because running STUN is part of being a node — this file
+and `relay/DEPLOY.md` §4b are what make that true. So a node added in Settings →
+Network, or a list loaded by CID, moves the STUN servers with it, and nothing
+has to be edited twice. ICE asks them in parallel and one answer is enough, so a
+node that is down, or one somebody added that does not answer STUN, costs
+nothing.
 
 ## What it is
 
@@ -78,3 +84,6 @@ a reflexive candidate came back.
   mid-gathering re-asks.
 - **Direct is opt-in since 0.5.48**, so this is consulted only by clients that
   chose it in Settings.
+- **A new node must run this before it goes into the published list**, for the
+  same reason it must answer on 443 first: the client assumes a node it dials is
+  a node it can ask. `relay/DEPLOY.md` orders it that way (§4b before §9).

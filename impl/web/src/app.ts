@@ -42,6 +42,7 @@ import {
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
+import { iceServersFor } from '../../lib/ice.ts'
 import { setRadioProfile } from '../../lib/radiophase.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
@@ -4089,7 +4090,10 @@ $('btn-webrtc-probe')?.addEventListener('click', async () => {
       rows.push(diagLine(st.ok ? 'ok' : 'bad',
         `${st.id} [${stageWord(st)}] ${st.ms} ms${st.detail ? ' — ' + st.detail : ''}${st.error ? ' — ' + st.error : ''}`))
       out.innerHTML = rows.join('<br>')
-    })
+      // The self-test must dial what the app dials, or its verdict is about a
+      // server nobody uses. Same derivation as the conversation path; `?stun=0`
+      // leaves nothing to ask, so the stage falls back to the first node.
+    }, (iceServersFor(location.search, chosenRelays())[0]?.urls))
     ecLog(formatWebrtcProbe(lastWebrtcProbe))
     ;(window as any).__webrtcProbe = lastWebrtcProbe // read by the browser harness; harmless elsewhere
   } finally {
@@ -5349,6 +5353,10 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
     let warnedForeign = false
     const conv = await (await clientReady!).open({ pub: contact.pub, kid: contact.kid }, {
       webrtc: wantsDirect(),
+      // STUN lives on the nodes, so the servers are whichever nodes this client
+      // dials — no second list to drift, and editing Settings → Network moves
+      // this with it (`lib/ice.ts`).
+      iceServers: iceServersFor(location.search, chosenRelays()),
       onWebrtcState: (s) => noteTransport(room, s),
       onSecurity: (peer, state) => noteSecurity(room, peer, state),
       onLog: ecLog,

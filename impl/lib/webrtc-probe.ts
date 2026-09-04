@@ -40,6 +40,8 @@
  * only way to tell them apart was to read a transport badge and guess.
  */
 
+import { STUN_FALLBACK_HOST, STUN_PORT } from './ice.ts'
+
 export interface ProbeStage {
   id: string
   /** What this step is about: the webview, or the network it sits on. */
@@ -61,10 +63,16 @@ export interface WebrtcProbeResult {
   stages: ProbeStage[]
 }
 
-/** The STUN server the app itself uses (`lib/ice.ts` — ours, on our nodes).
- *  Probing a different one would answer a question nobody asked. */
-export { PROBE_STUN } from './ice.ts'
-import { PROBE_STUN } from './ice.ts'
+/**
+ * The STUN server this probe dials, when the caller does not name one.
+ *
+ * ⚠️ It is only a fallback for a caller that has no node list to hand. The app
+ * passes what it actually uses (`lib/ice.ts` derives it from the nodes, because
+ * a node runs STUN as part of being a node) — probing a server the app does not
+ * use would answer a question nobody asked, which is exactly what this constant
+ * did while it named Google's.
+ */
+const DEFAULT_PROBE_STUN = `stun:${STUN_FALLBACK_HOST}:${STUN_PORT}`
 
 const LOOPBACK_MS = 10_000
 const ICE_MS = 4_000
@@ -103,7 +111,7 @@ const err = (e: any) => `${e?.name ?? 'Error'}: ${e?.message ?? e}`
  * `onStage` fires as each step lands, so the UI fills in rather than sitting
  * blank for ten seconds — the loopback step alone can take several.
  */
-export async function probeWebrtc(onStage?: (s: ProbeStage) => void): Promise<WebrtcProbeResult> {
+export async function probeWebrtc(onStage?: (s: ProbeStage) => void, stun = DEFAULT_PROBE_STUN): Promise<WebrtcProbeResult> {
   const stages: ProbeStage[] = []
   const RTC = (globalThis as any).RTCPeerConnection as typeof RTCPeerConnection | undefined
   const open: RTCPeerConnection[] = []
@@ -184,12 +192,12 @@ export async function probeWebrtc(onStage?: (s: ProbeStage) => void): Promise<We
 
     // And the network question, kept apart from every platform one above.
     await run('stun', 'network', async () => {
-      const p = new RTC({ iceServers: [{ urls: PROBE_STUN }] }); open.push(p)
+      const p = new RTC({ iceServers: [{ urls: stun }] }); open.push(p)
       p.createDataChannel('stun-probe')
       await p.setLocalDescription(await p.createOffer())
       const seen = await gather(p, STUN_MS, (c) => /\btyp\s+srflx\b/.test(c))
       const types = candidateTypes(seen)
-      if (!types.srflx) throw new Error(`brak adresu odbitego od ${PROBE_STUN} — sieć albo zapora blokuje STUN`)
+      if (!types.srflx) throw new Error(`brak adresu odbitego od ${stun} — sieć albo zapora blokuje STUN`)
       return `${types.srflx}× srflx`
     })
   } finally {
