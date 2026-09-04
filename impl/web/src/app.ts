@@ -6,7 +6,9 @@
  * Content crypto is EH-2 + Double Ratchet, the only scheme; content prefers a
  * direct WebRTC DataChannel with GossipSub through the relay as the fallback
  * (docs/PROTOCOL.md §7.3/§13). The §13 relay-blind plane is pending the libp2p
- * v3 ecosystem (gossipsub not yet migrated). Timestamps shown in UTC.
+ * v3 ecosystem (gossipsub not yet migrated). Timestamps are shown on the
+ * READER's clock (`localHHMM`) — UTC is what the protocol computes in, not what
+ * a person is asked to read.
  *
  * Unbacked mockup elements (P1–P3 profiles, direct/relay
  * modes) are kept as visual placeholders until the engine backs them.
@@ -45,7 +47,7 @@ import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/file
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
 import type { FileEnv } from '../../lib/envelope.ts'
-import { nowMs, utcHHMM } from '../../lib/time.ts'
+import { nowMs, localHHMM, utcISO } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
 import { unb64, b64, randomBytes } from '../../lib/wc.ts'
@@ -3117,7 +3119,7 @@ function appendMsg(ev: MsgEv) {
   if (who && kind === 'peer') { const w = document.createElement('div'); w.className = 'b-who'; w.textContent = who; bub.appendChild(w) }
   if (re) bub.appendChild(quoteBlock(re))
   const t = document.createElement('div'); t.className = 'b-text'; renderBody(t, text)
-  const m = document.createElement('div'); m.className = 'b-meta'; m.textContent = utcHHMM(ts ?? nowMs()) + ' UTC'
+  const m = document.createElement('div'); m.className = 'b-meta'; stampTime(m, ts ?? nowMs())
   // A corrected bubble says so, on both sides and always: silently swapping what
   // somebody is reading is the one thing this feature must not do.
   if (ev.edited) m.appendChild(editedMark(ev))
@@ -3553,6 +3555,23 @@ function attachReactionBar(row: HTMLElement, id: string, canPin = false) {
     bar.appendChild(btn)
   }
   row.appendChild(bar)
+}
+
+/**
+ * The time on a bubble: the READER's clock, with UTC kept in the tooltip.
+ *
+ * The stamp used to say "12:03 UTC", which is right for the protocol and wrong
+ * for the person — a message sent a minute ago read as two hours old for
+ * anybody east of Greenwich (reported 2026-09-03). `ts` is epoch ms, so the
+ * conversion is `new Date(ts)` and the zone never leaves the device; putting a
+ * timezone on the wire would be handing out a location.
+ *
+ * The tooltip keeps the absolute UTC instant, because that is the form two
+ * machines can be compared in when something looks out of order.
+ */
+function stampTime(el: HTMLElement, ts: number) {
+  el.textContent = localHHMM(ts)
+  el.title = utcISO(ts)
 }
 
 // ---- replies ---------------------------------------------------------------
@@ -4102,7 +4121,7 @@ function editedMark(ev: MsgEv): HTMLElement {
 }
 function paintEditedMark(s: HTMLElement, ev: MsgEv) {
   s.textContent = tr(' · edytowano')
-  s.title = tr('Treść poprawiona przez autora o {t} UTC', { t: utcHHMM(ev.edited ?? nowMs()) })
+  s.title = tr('Treść poprawiona przez autora o {t}', { t: localHHMM(ev.edited ?? nowMs()) })
   s.classList.remove('warn') // textContent above already dropped an old ↻ button
   if (ev.kind !== 'me' || !ev.editState) return
   if (ev.editState === 'sending') {
@@ -4269,7 +4288,7 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
     bub.appendChild(cap)
   }
 
-  const meta = document.createElement('div'); meta.className = 'b-meta'; meta.textContent = utcHHMM(ts) + ' UTC'
+  const meta = document.createElement('div'); meta.className = 'b-meta'; stampTime(meta, ts)
   // Reactions need both halves: somewhere to draw them, and an entry in msgEls
   // so an incoming reaction can find this bubble. appendFile had neither, which
   // is why files could not be reacted to at all.

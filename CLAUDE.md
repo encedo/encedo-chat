@@ -173,7 +173,15 @@ Strict layering: `msgcrypto` seals/opens **opaque bytes** (type-agnostic),
 `envelope` does Envelope⇄bytes, `room` orchestrates (build→encode→seal→publish;
 open→decode→dispatch-by-type). The envelope is **EH-2-independent** — the same
 bytes get sealed by the ratchet later, codec unchanged. All time via
-`lib/time.ts` (**UTC only**). `test/envelope.test.ts` covers roundtrip +
+`lib/time.ts`, which holds **two clocks on purpose**: the protocol computes in
+UTC (epoch `ts`, and the §5.4 rendezvous day — go local there and two peers
+derive different topics), while anything shown to a person is `localHHMM`, the
+reader's own clock. A bubble stamped in UTC read as two hours old for anybody
+east of Greenwich, which is how it was reported. The timezone stays on the
+device — it is a location hint and must never reach an envelope; the absolute
+UTC instant lives in the bubble's `title`. `test/time.test.ts` pins both halves,
+including that the rendezvous day is the same date from Kiritimati (+14) to
+Niue (−11). `test/envelope.test.ts` covers roundtrip +
 validation + forward-compat.
 
 Presence: Announce/HMAC (§5.5) stays for authenticated discovery/liveness;

@@ -436,7 +436,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
       'The identity stays the same — only the password sealing it changes. Contacts and groups are untouched.',
     'Transport': 'Transport',
     'Transport treści': 'Content transport',
-    'Treść poprawiona przez autora o {t} UTC': 'Corrected by its author at {t} UTC',
+    'Treść poprawiona przez autora o {t}': 'Corrected by its author at {t}',
     'Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing': 'Content directly P2P — the relay is blind to content, sizes and timing',
     'Treść przez relay (GossipSub)': 'Content over the relay (GossipSub)',
     'Treść przez relay (GossipSub) — WebRTC direct gdy się zestawi': 'Content over the relay (GossipSub) — WebRTC direct once it establishes',
