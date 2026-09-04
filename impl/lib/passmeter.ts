@@ -6,12 +6,12 @@
  * ## Why the app rates passwords at all
  *
  * A software profile is sealed under this password in localStorage
- * (PBKDF2-600k → AES, `lib/profile.ts`), with no verifier and no recovery.
+ * (PBKDF2-1M → AES, `lib/profile.ts`), with no verifier and no recovery.
  * The attack it must survive is not someone guessing at the login card — it
  * is someone who COPIED the blob (a stolen laptop, a synced browser profile,
- * a backup) grinding offline at full speed. 600k rounds slow that grind a
- * million-fold and still cannot save `kasia2024`. The moment the password is
- * typed is the only moment anyone can say so.
+ * a backup) grinding offline at full speed. A million rounds slow that grind
+ * a million-fold and still cannot save `kasia2024`. The moment the password
+ * is typed is the only moment anyone can say so.
  *
  * ## Why hand-rolled and not zxcvbn
  *
@@ -22,12 +22,28 @@
  * down for the patterns people actually type — repeats, keyboard runs,
  * sequences, a trailing year, a top-list password dressed up with l33t.
  *
- * ## Advisory today — enforcement is one flip away
+ * ## Enforced since 2026-09-03 — the meter must be full
  *
- * The user's decision (2026-09-01): the UI warns, the weakest bucket asks
- * once (`ask` in app.ts), nothing is ever refused. When the day comes to
- * enforce, gate the two confirm sites on `score >= ENFORCE_MIN` — the
- * threshold lives here so both sites move together.
+ * It was advisory until then (the UI warned, the weakest bucket asked once,
+ * nothing was refused). The user's decision moved it to a floor: a password
+ * BELOW `ENFORCE_MIN` is refused where one is chosen — profile creation and
+ * the change-password modal — and the two sites read this constant so they
+ * cannot drift apart.
+ *
+ * The floor is the TOP bucket, not the first green one, for two reasons that
+ * only look strict together. The blob is grindable forever with no server to
+ * rate-limit it, no rotation and no revocation, so the promise has to be the
+ * "never" bucket rather than the "decades on one GPU" one. And reaching it
+ * costs a word: `kot pies dom` is 71 bits, `zielonyRower` 64. What the first
+ * green bucket would have blessed is `lubieplacki` (52) and `M0jPies!` (53)
+ * — the 8-to-11-character shape breach corpora are made of.
+ *
+ * Two boundaries the floor deliberately stops at. It is never applied at
+ * SIGN-IN: refusing to open an identity that already exists would lock
+ * someone out of a key nobody can recover, so an old weak profile keeps
+ * working and meets the floor the next time its password is chosen. And
+ * `mig-pass` (§10 export) has no meter and no floor — it seals under the
+ * profile's EXISTING password, so there is nothing there to choose.
  */
 
 /** What to tell the person, as a code — the UI owns the words (i18n). */
@@ -36,18 +52,19 @@ export type Advice = 'common' | 'short' | 'one-class' | 'patterns' | 'ok'
 export interface Strength {
   /** Estimated bits against an offline guesser. An estimate, not a proof. */
   bits: number
-  /** 0 słabe · 1 przeciętne · 2 dobre · 3 mocne */
+  /** 0 słabe · 1 przeciętne · 2 prawie · 3 mocne (the only accepted one) */
   score: 0 | 1 | 2 | 3
   advice: Advice
 }
 
-/** Future enforcement gate: a password below this score is refused. Unused
- *  today (advisory by decision); referenced from the confirm sites so the
- *  flip is one line here, not a hunt through app.ts. */
-export const ENFORCE_MIN = 1
+/** The floor: a password scoring below this is REFUSED where one is chosen
+ *  (see the section above). 3 is the full meter — four bars, ≈60 bits. */
+export const ENFORCE_MIN = 3
 
-/** Bucket edges in estimated bits, calibrated against PBKDF2-600k: at ~30k
- *  guesses/s/GPU, 28 bits falls in hours, 45 bits in decades, 60 bits never. */
+/** Bucket edges in estimated bits, calibrated against PBKDF2-1M: at ~18k
+ *  guesses/s/GPU, 28 bits falls in hours, 45 bits in decades on one card
+ *  (months on a rented rack — which is why the floor is the next bucket up),
+ *  60 bits never. */
 const EDGE = [28, 45, 60]
 
 /**
@@ -151,10 +168,14 @@ export function assessPassword(pw: string): Strength {
   const score: Strength['score'] =
     bits < EDGE[0] ? 0 : bits < EDGE[1] ? 1 : bits < EDGE[2] ? 2 : 3
   const oneClass = pool === 26 || pool === 10
+  // 'ok' means "nothing to fix", so only the accepted bucket may say it: with
+  // a floor at the top bucket, a password that is refused and advised nothing
+  // is a form that will not say what it wants. Below it, lengthening is always
+  // true, so it is the fallback.
   const advice: Advice =
-    score >= 3 ? 'ok'
+    score >= ENFORCE_MIN ? 'ok'
       : eff < pw.length * 0.75 ? 'patterns'
         : pw.length < 10 ? 'short'
-          : oneClass ? 'one-class' : score >= 2 ? 'ok' : 'short'
+          : oneClass ? 'one-class' : 'short'
   return { bits, score, advice }
 }

@@ -57,9 +57,33 @@ test('adding characters never weakens the estimate', () => {
   }
 })
 
-test('deterministic, and the future gate stays sane', () => {
+test('deterministic, and the floor is the full meter', () => {
   assert.deepEqual(assessPassword('Zielony-Rower-42'), assessPassword('Zielony-Rower-42'))
-  // The advisory-today decision leans on this: enforcement would refuse
-  // exactly the bucket the confirm dialog asks about.
-  assert.equal(ENFORCE_MIN, 1)
+  // Enforced since 2026-09-03: below this a password is REFUSED where one is
+  // chosen (profile creation, change password). Moving this number changes
+  // what the app accepts, so it is pinned here rather than left to the UI.
+  assert.equal(ENFORCE_MIN, 3)
+})
+
+test('the floor refuses what a breach corpus is made of, and accepts a phrase', () => {
+  // The two lists are the argument for the floor being the TOP bucket rather
+  // than the first green one: what it turns away is the 8-to-11-character
+  // shape, and what it costs everyone else is one more word.
+  for (const pw of ['lubieplacki', 'M0jPies!', 'onchato2026', 'h4rdP4ss', 'Ka9!zQ']) {
+    assert.ok(assessPassword(pw).score < ENFORCE_MIN, `${pw} would have been accepted`)
+  }
+  for (const pw of ['kot pies dom', 'zielonyRower', 'sobota-kawa', 'Zielona7Kanapa', 'poziomka lampa wiatr']) {
+    assert.ok(assessPassword(pw).score >= ENFORCE_MIN, `${pw} would have been refused`)
+  }
+})
+
+test('the harnesses can still create a profile', () => {
+  // Copies of SOFT_PASS in net/browser-test.ts and net/phone-shot.ts. Both
+  // walk the real creation form, so a floor they fail turns every browser
+  // scenario and every screenshot into "the profile was not created" — with
+  // nothing in the failure naming this rule. Tightening the estimator is
+  // allowed; taking these two down with it silently is not.
+  for (const pw of ['harness-passphrase', 'phone-shot-passphrase']) {
+    assert.ok(assessPassword(pw).score >= ENFORCE_MIN, `${pw} no longer clears the floor`)
+  }
 })

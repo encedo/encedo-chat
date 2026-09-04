@@ -2248,8 +2248,7 @@ async function main() {
     // one contact, sign out, create a second profile that copies the book — with
     // a wrong source password refused first, because the password is what stops
     // a copy from laundering a tampered book into a freshly-signed one.
-    scenario('a new profile can copy the contacts of an old one, after its password')
-    const createProfile = async (profName: string, copyFrom?: string, copyPass?: string) => {
+    const createProfile = async (profName: string, copyFrom?: string, copyPass?: string, pass = SOFT_PASS) => {
       // ⚠️ The post-wipeout reload parses the DOM long before the 1.3 MB bundle
       // finishes executing — `go-soft` exists while its listener does not yet,
       // and a click in that window lands on a deaf button (found the hard way:
@@ -2263,8 +2262,8 @@ async function main() {
       if (!opened.pass2) throw new Error(`creation mode did not open for ${profName}: ${JSON.stringify(opened)}`)
       return B.eval<any>(`
         document.getElementById('soft-name').value = ${JSON.stringify(profName)};
-        document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)};
-        document.getElementById('soft-pass2').value = ${JSON.stringify(SOFT_PASS)};
+        document.getElementById('soft-pass').value = ${JSON.stringify(pass)};
+        document.getElementById('soft-pass2').value = ${JSON.stringify(pass)};
         const sel = document.getElementById('soft-copy-from');
         if (${JSON.stringify(copyFrom ?? '')}) {
           sel.value = ${JSON.stringify(copyFrom ?? '')};
@@ -2279,6 +2278,21 @@ async function main() {
       `)
     }
 
+    // The password floor (lib/passmeter.ts ENFORCE_MIN), where it is actually
+    // enforced: the creation form. A unit test can say what the estimator
+    // thinks of `haslo123`; only this can say that the form refuses it, keeps
+    // the window open and writes nothing.
+    scenario('a weak password does not become a profile')
+    const weak = await createProfile('za-slabe', undefined, undefined, 'haslo123')
+    if (weak.entered) throw new Error('a weak password created a profile and signed straight in')
+    if (!/miernik|meter/i.test(weak.msg ?? '')) {
+      throw new Error(`the refusal did not name the rule — the window said: ${JSON.stringify(weak.msg)}`)
+    }
+    const leftover = await B.eval<number>(`return Object.keys(localStorage).filter((k) => k.includes('za-slabe')).length`)
+    if (leftover) throw new Error(`a refused profile still left ${leftover} keys behind`)
+    step('refused inline, nothing written, the form still open')
+
+    scenario('a new profile can copy the contacts of an old one, after its password')
     await createProfile('kopiuj-src')
     await B.waitFor('B inside the source profile', `return !document.getElementById('app').hidden`, 20_000)
     await B.eval(`

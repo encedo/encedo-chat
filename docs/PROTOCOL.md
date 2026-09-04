@@ -184,6 +184,8 @@ A first-class identity backend for onboarding without hardware (and the packaged
 
 Honest assurance difference: the key is **on the user's disk under a password**, not in hardware — theft of the sealed blob plus a guessed password is the identity, the §9.3 dead-man's-switch does not apply (a re-handshake needs no device), and the profile-export file (§10) carries the whole identity under that same password. Multiple software profiles per browser are supported; each is its own identity with its own KID-scoped state.
 
+Because the guess is the whole attack, the password is **not** left entirely to the user: wherever one is *chosen* — creating a profile, changing a profile's password — the client estimates its strength locally and **refuses** anything under ≈60 bits (`impl/lib/passmeter.ts`; the estimate is length and character classes, discounted for the patterns people type). The floor is not applied at sign-in or to the §10 export, which seals under the password the profile already has: refusing there would lock a user out of an identity nobody can recover, so an older profile below the floor keeps working until its password is next chosen.
+
 ---
 
 ## 5. Rendezvous & discovery

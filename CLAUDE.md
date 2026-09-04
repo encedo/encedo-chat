@@ -384,6 +384,22 @@ two-browser testing. ECDH via `crypto.subtle` (no 3rd-party crypto), byte-for-by
 == node/HEM raw X25519, so it interoperates with HEM identities. `localOnlyManager`
 gives it a local-only contact book.
 
+**The seal password has a floor, and it is the full meter** (`lib/passmeter.ts`
+`ENFORCE_MIN = 3`, ≈60 bits — the user's decision, 2026-09-03; §4.5 states it).
+A profile is a blob anyone who copies it can grind offline forever — no server
+to rate-limit, no rotation, no recovery — so the promise has to be the "never"
+bucket, and reaching it costs a word (`kot pies dom` is 71 bits). It replaced an
+"are you sure?" dialog: the person choosing cannot price an offline grind, and a
+modal asking permission to do the unsafe thing is answered yes in a hurry.
+Two places refuse (profile creation, change password) and both read the
+constant; **sign-in and `mig-pass` deliberately do not** — refusing there locks
+someone out of an unrecoverable identity, and the export seals under the
+password the profile already has. ⚠️ Both harnesses create a profile through
+the real form, so `SOFT_PASS` in `browser-test.ts` / `phone-shot.ts` must clear
+the floor; `test/passmeter.test.ts` pins exactly that, because otherwise
+tightening the estimator turns every scenario into "the profile was not
+created" with nothing naming the cause.
+
 ### MQTT — the fall-back transport (`net/mqtt.ts`, `net/mqtt-node.ts`)
 
 libp2p stays the main transport; MQTT is a second, fully working one, chosen per
@@ -431,7 +447,7 @@ session (`startSession({transport:'mqtt', broker})`, web `?mqtt=1`, CLI
 | `npm run room-sim` | seeded synthetic network: loss, duplication, reorder, staggered joins, a throttled tab |
 | `npm run gui-sim` | the `core.ts` facade the GUI buttons drive, printing a timeline |
 | `npm run eh2-test` / `meet` / `presence-test` / `group-test` / `hem-gk-test` / `ipfs-test` | live against the **real onchato relay** (and, for the last two, a real HEM / the IPFS store) |
-| `npm run browser-test` | two headless **Chromium**, the real bundle, the real relay, driven through the DOM — 35 scenarios |
+| `npm run browser-test` | two headless **Chromium**, the real bundle, the real relay, driven through the DOM — 36 scenarios |
 | `npm run browser-test:ff` | the same scenarios with **Chromium + Firefox** |
 | `npm run mqtt-meet` | the whole engine over an MQTT broker instead of libp2p |
 | `npm run phone-shot` | screenshots at real device metrics (layout truth — computed-style asserts miss clipping) |

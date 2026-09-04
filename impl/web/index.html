@@ -463,8 +463,12 @@
   .pw-meter .pwm-bar{display:flex;gap:4px}
   .pw-meter .pwm-bar i{flex:1;height:4px;border-radius:2px;background:var(--border)}
   .pw-meter[data-score="0"] .pwm-bar i.on{background:var(--err)}
-  .pw-meter[data-score="1"] .pwm-bar i.on{background:var(--warn)}
-  .pw-meter[data-score="2"] .pwm-bar i.on,.pw-meter[data-score="3"] .pwm-bar i.on{background:var(--good)}
+  /* Amber up to and including the third bar: green is the app's word for
+     "this one is accepted", and the floor accepts only the full meter
+     (lib/passmeter.ts). A green bar the form then refuses is the kind of
+     contradiction that makes people stop believing the meter. */
+  .pw-meter[data-score="1"] .pwm-bar i.on,.pw-meter[data-score="2"] .pwm-bar i.on{background:var(--warn)}
+  .pw-meter[data-score="3"] .pwm-bar i.on{background:var(--good)}
   .pw-meter .pwm-note{margin-top:4px;font-size:11.5px;color:var(--muted)}
   /* The composer's send is icon-only — the word was the widest thing in the
      row and said nothing the arrow does not (the user's call). Grid, to

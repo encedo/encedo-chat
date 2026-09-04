@@ -39,7 +39,7 @@ import {
   appimageStatus, appimageInstall, showWindow, openExternal,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
-import { assessPassword } from '../../lib/passmeter.ts'
+import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
 import { setRadioProfile } from '../../lib/radiophase.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
@@ -835,13 +835,14 @@ function softMode(creating: boolean) {
   ;($('soft-go') as HTMLButtonElement).textContent = creating ? tr('Utwórz profil') : tr('Dalej')
 }
 
-// ---- password strength (advisory — the user's decision, 2026-09-01) -------
+// ---- password strength (a floor since 2026-09-03 — the user's decision) ---
 /**
  * The meter paints only where a password is being CHOSEN: profile creation
  * and the change-password modal. `mig-pass` gets none on purpose — a move
  * seals under the profile's EXISTING password, and grading what cannot be
- * changed in that window is noise. Enforcement later is `ENFORCE_MIN` in
- * lib/passmeter.ts plus the two confirm sites below.
+ * changed in that window is noise. Those same two sites are where the floor
+ * (`ENFORCE_MIN`, lib/passmeter.ts) refuses — never at sign-in, which would
+ * lock someone out of an identity nobody can recover.
  */
 function paintMeter(box: HTMLElement, pw: string, visible: boolean) {
   if (!visible || !pw) { box.hidden = true; return }
@@ -849,7 +850,10 @@ function paintMeter(box: HTMLElement, pw: string, visible: boolean) {
   box.hidden = false
   box.dataset.score = String(s.score)
   box.querySelectorAll('.pwm-bar i').forEach((seg, i) => seg.classList.toggle('on', i <= s.score))
-  const word = [tr('słabe'), tr('przeciętne'), tr('dobre'), tr('mocne')][s.score]
+  // "dobre" was the advisory era's word for the third bucket; under the floor
+  // that bucket is refused, and a meter reading "good" beside a refusal is the
+  // form arguing with itself.
+  const word = [tr('słabe'), tr('przeciętne'), tr('prawie'), tr('mocne')][s.score]
   const hint = {
     common: tr('jest na listach najczęściej używanych haseł'),
     short: tr('wydłuż je — najlepiej do 12+ znaków'),
@@ -865,17 +869,20 @@ $('soft-pass').addEventListener('input', paintSoftMeter)
 $('pw-new').addEventListener('input', () =>
   paintMeter($('pwm-new'), ($('pw-new') as HTMLInputElement).value, true))
 
-/** The weakest bucket asks once; everything else passes. Never refuses —
- *  advisory today, and this is the site to gate on ENFORCE_MIN when that
- *  changes. Re-adds the scrim after ask() for the modal still open under it. */
-async function confirmWeak(pw: string): Promise<boolean> {
-  if (assessPassword(pw).score > 0) return true
-  const { ok } = await ask(
-    tr('Słabe hasło'),
-    tr('To hasło łatwo złamać offline, gdyby ktoś skopiował profil z tego urządzenia. Hasła nie da się potem odzyskać ani wzmocnić bez niego. Użyć mimo to?'),
-    tr('Użyj słabego hasła'))
-  $('scrim').classList.add('open')
-  return ok
+/**
+ * The floor, as the message to show — '' when the password clears it.
+ *
+ * It replaced a confirm dialog ("weak — use it anyway?"), and the reason is
+ * that the dialog was the wrong shape for this decision: the person choosing
+ * cannot see what an offline grind of the stolen blob costs, the profile has
+ * no recovery to fall back on, and a modal asking permission to do the unsafe
+ * thing is answered "yes" by everyone in a hurry. So: refused inline, beside
+ * the meter that already says what is wrong with the password they typed,
+ * with the field kept and focused rather than a dialog to dismiss first.
+ */
+function weakRefusal(pw: string): string {
+  if (assessPassword(pw).score >= ENFORCE_MIN) return ''
+  return tr('Za słabe hasło — miernik musi być pełny. Najprościej dopisać drugie słowo albo wydłużyć do 12+ znaków. Profilu nie da się odzyskać, więc to hasło jest całą jego ochroną.')
 }
 
 const closeSoftModal = () => { softIntendsNew = false; $('scrim').classList.remove('open'); $('soft-modal').classList.remove('open') }
@@ -964,7 +971,8 @@ async function softLogin() {
       if (pass !== ($('soft-pass2') as HTMLInputElement).value) {
         setMsg('soft-msg', tr('Hasła się różnią.'), 'err'); return
       }
-      if (!(await confirmWeak(pass))) return
+      const weak = weakRefusal(pass)
+      if (weak) { setMsg('soft-msg', weak, 'err'); ($('soft-pass') as HTMLInputElement).focus(); return }
 
       // ---- przepisanie kontaktów z innego profilu (creation only) ----------
       // Read and VERIFY the source before anything is written: a refused copy
@@ -2427,7 +2435,8 @@ $('pw-save').addEventListener('click', async () => {
   // Checked before touching the profile: a typo confirmed into the seal would
   // lock the identity away behind a password nobody knows.
   if (a !== b) { setMsg('pw-msg', tr('Nowe hasła się różnią.'), 'err'); return }
-  if (!(await confirmWeak(a))) return
+  const weak = weakRefusal(a)
+  if (weak) { setMsg('pw-msg', weak, 'err'); ($('pw-new') as HTMLInputElement).focus(); return }
   const raw = localStorage.getItem(softKey(activeSoftProfile))
   const blob = raw ? JSON.parse(raw) : null
   if (!isSealedProfile(blob)) { setMsg('pw-msg', tr('Nie znaleziono profilu do zmiany.'), 'err'); return }
