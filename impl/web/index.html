@@ -2,7 +2,16 @@
 <html lang="pl">
 <head>
 <meta charset="utf-8">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cg fill='%2316a37f'%3E%3Cpath d='M128 342 Q112 412 134 444 Q172 424 200 392 Z' stroke='%2316a37f' stroke-width='14' stroke-linejoin='round'/%3E%3Ccircle cx='256' cy='234' r='168'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-linecap%3D%22round%22%20stroke-width%3D%2210%22%20style%3D%22color%3A%230a0a0a%22%20viewBox%3D%220%200%20100%20100%22%3E%3Cstyle%3E%40media%20(prefers-color-scheme%3Adark)%7B%3Aroot%7Bcolor%3A%2335c99e%7D%7D%3C%2Fstyle%3E%3Cpath%20d%3D%22M36%2012v28m0%2026v28m28-82v24c-14%206-14%2028%200%2034v24%22%2F%3E%3C%2Fsvg%3E">
+  <!-- iOS "Add to Home Screen" takes this one; everything else uses the inline
+       tab icon above. `icons/` is generated (scripts/build-icons.mjs) and copied
+       into dist by the build.
+       WARNING: `icons/site.webmanifest` exists and is deliberately NOT linked. A
+       manifest invites the browser to offer "install", and an installed PWA
+       keeps the identity in storage a browser may evict - which here means the
+       key is gone (MOBILE-PLAN.md says the same). Linking it is one line, and a
+       decision, not an oversight. -->
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <!-- Any paint that happens before our stylesheet applies uses the UA's canvas
      colour, and without this line that canvas is white on every theme — the

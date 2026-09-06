@@ -129,7 +129,9 @@ export function patchIconBackground(xml, colour) {
   return xml.replace(found[0], found[1] + colour + found[3])
 }
 
-const ICON_BACKGROUND = '#FFFFFF'
+// The tile our mark sits on (assets/icon, scripts/build-icons.mjs COLORS.black).
+// Not #000000: pure black bands on OLED when a background animates behind it.
+const ICON_BACKGROUND = '#0A0A0A'
 
 /**
  * The one string the foreground-service notification shows, in both languages.

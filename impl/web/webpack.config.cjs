@@ -70,9 +70,19 @@ module.exports = (_env, argv) => {
       {
         apply(compiler) {
           compiler.hooks.afterEmit.tap('copy-favicon', () => {
-            require('fs').copyFileSync(
+            const fs = require('fs')
+            fs.copyFileSync(
               path.resolve(__dirname, 'favicon.ico'),
               path.resolve(compiler.options.output.path, 'favicon.ico'),
+            )
+            // The rest of the icon set travels the same way, for the same
+            // reason. `icons/` is generated (scripts/build-icons.mjs) and is
+            // small enough that copying it whole beats listing names that will
+            // change the next time somebody adds a size.
+            fs.cpSync(
+              path.resolve(__dirname, 'icons'),
+              path.resolve(compiler.options.output.path, 'icons'),
+              { recursive: true },
             )
           })
         },
