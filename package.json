@@ -1,0 +1,15 @@
+{
+  "name": "onchato-icon-build",
+  "private": true,
+  "type": "module",
+  "description": "Icon generation only (docs/icon-spec.md). The APP is impl/ with its own package.json - these devDependencies are deliberately NOT there, because impl/ is npm ci'd on every deploy and sharp alone is 50 MB of it.",
+  "scripts": {
+    "icons": "node scripts/build-icons.mjs"
+  },
+  "devDependencies": {
+    "opentype.js": "^1.3.4",
+    "png-to-ico": "^2.1.8",
+    "sharp": "^0.34.4",
+    "svgo": "^4.0.0"
+  }
+}
