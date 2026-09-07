@@ -37,6 +37,26 @@ mod desk {
     };
     use tauri_plugin_notification::{NotificationExt, PermissionState};
 
+    /// The tray icon: the mark on transparency, never the app tile.
+    ///
+    /// Reported from macOS at 0.5.50: the menu-bar icon turned into a white
+    /// rectangle. The tray was built from `default_window_icon()`, which used
+    /// to be a transparent speech bubble and is now the TILE - opaque, corner
+    /// to corner. A macOS template icon is drawn from the alpha channel alone,
+    /// so an opaque square is precisely a white square. The window keeps the
+    /// tile; the tray gets a silhouette.
+    ///
+    /// Raw RGBA rather than a PNG because `Image::from_bytes` sits behind
+    /// tauri's `image-png` feature - a decoder and a dependency in every
+    /// desktop build, for one 44 px icon. `Image::new` is `const` and takes
+    /// RGBA as it is. Both files are generated (`scripts/build-icons.mjs`);
+    /// `tray.png` is the one to look at.
+    const TRAY_SIDE: u32 = 44;
+    const TRAY_RGBA: &[u8] = include_bytes!("../icons/tray.rgba");
+    /// A regenerated icon of a different size would otherwise ship as garbage
+    /// pixels or a panic at startup; this fails the BUILD instead.
+    const _: () = assert!(TRAY_RGBA.len() == (TRAY_SIDE * TRAY_SIDE * 4) as usize);
+
     /// What the shell remembers between calls. All of it is a MIRROR of state the
     /// webview owns (it lives in `localStorage` there); the Rust side is told on
     /// startup and on every change, and never persists a copy of its own. Two
@@ -973,13 +993,14 @@ mod desk {
                 let menu = Menu::with_items(app, &[&show, &quit])?;
 
                 let tray = TrayIconBuilder::new()
-                    .icon(app.default_window_icon().unwrap().clone())
+                    .icon(tauri::image::Image::new(TRAY_RGBA, TRAY_SIDE, TRAY_SIDE))
                     .tooltip("onchato")
                     .menu(&menu);
                 // The macOS menu bar tints template icons itself for the light
                 // and dark bar; a colour icon is passed through as-is and can
                 // sink into some bar tints. Template uses the alpha channel as
-                // the silhouette — which our dot has.
+                // the silhouette, which is why the tray must NOT be handed the
+                // app tile — see TRAY_RGBA.
                 #[cfg(target_os = "macos")]
                 let tray = tray.icon_as_template(true);
                 tray

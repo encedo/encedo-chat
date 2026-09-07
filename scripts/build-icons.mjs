@@ -582,6 +582,36 @@ for (const [dpi, size] of Object.entries(STAT_DPI)) {
 }
 ok(`ic_stat_onchato in ${Object.keys(STAT_DPI).length} densities (status bar - nothing else writes these)`)
 
+/**
+ * The macOS / Windows / Linux tray icon, as a PNG to look at and as the raw
+ * RGBA the binary embeds.
+ *
+ * Reported from macOS after 0.5.50: the menu-bar icon became a white
+ * rectangle. The tray was built from `default_window_icon()`, which used to be
+ * a transparent speech bubble and is now the app TILE - opaque, corner to
+ * corner. macOS draws a template icon from the alpha channel alone, so an
+ * opaque square is exactly a white square. The mark on transparency is what a
+ * tray icon has to be.
+ *
+ * Why raw RGBA beside the PNG: `Image::from_bytes` (PNG) is behind tauri's
+ * `image-png` feature, which would add a decoder and a dependency to every
+ * desktop build for one 44 px icon. `Image::new` takes RGBA directly and is
+ * `const`, so the bytes go in with `include_bytes!` and nothing new is
+ * compiled. The Rust side asserts the length at COMPILE time, so a
+ * regenerated file of a different size cannot ship quietly.
+ */
+const TRAY_SIDE = 44
+{
+  const source = svg(`0 0 ${TRAY_SIDE} ${TRAY_SIDE}`,
+    markGroup(MASTER, { size: TRAY_SIDE, heightFraction: 0.86, stroke: COLORS.green }))
+  const png = await sharp(Buffer.from(source), { density: densityFor(source, TRAY_SIDE) })
+    .resize(TRAY_SIDE, TRAY_SIDE).png({ compressionLevel: 9, effort: 10, palette: false }).toBuffer()
+  writeFileSync(join(ROOT, 'impl', 'src-tauri', 'icons', 'tray.png'), png)
+  const rgba = await sharp(png).ensureAlpha().raw().toBuffer()
+  writeFileSync(join(ROOT, 'impl', 'src-tauri', 'icons', 'tray.rgba'), rgba)
+  ok(`tray.png + tray.rgba (${TRAY_SIDE}x${TRAY_SIDE}, ${rgba.length} B raw)`)
+}
+
 console.log(`\nonchato icons -> ${OUT}`)
 console.log(`font for the lockup: ${lock.font}`)
 console.log(`green: ${COLORS.green}   black: ${COLORS.black}\n`)
