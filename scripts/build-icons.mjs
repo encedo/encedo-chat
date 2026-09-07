@@ -476,16 +476,16 @@ const LOCKUP = /<!--lockup-->[\s\S]*?<!--\/lockup-->/g
 }
 ok('the lockup is inlined in the login card and the splash')
 
-/** The same mark on the empty conversation pane, where a tree used to sit. */
+/** The LOCKUP on the empty conversation pane, where a tree used to sit. */
 const EMPTY_MARK = /<!--emptymark-->[\s\S]*?<!--\/emptymark-->/g
 {
   const file = join(WEB, 'index.html')
   const html = readFileSync(file, 'utf8')
-  const inline = written['src/mark.svg'].trim()
+  const inline = written['lockup/lockup-horizontal.svg'].trim()
   if (!EMPTY_MARK.test(html)) bad('index.html: no <!--emptymark--> markers to fill')
   else writeFileSync(file, html.replace(EMPTY_MARK, `<!--emptymark-->${inline}<!--/emptymark-->`))
 }
-ok('the mark is inlined on the empty conversation pane')
+ok('the lockup is inlined on the empty conversation pane')
 
 const ICON_LINK = /<link rel="icon" href="data:image\/svg\+xml,[^"]*">/
 for (const page of ['index.html', 'landing.html']) {
