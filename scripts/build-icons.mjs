@@ -460,6 +460,22 @@ for (const f of ['apple-touch-icon.png', 'icon-192.png', 'icon-512.png', 'icon-5
  */
 const faviconDataUri = 'data:image/svg+xml,' + encodeURIComponent(written['web/favicon.svg'])
   .replace(/'/g, '%27').replace(/"/g, '%22')
+/**
+ * The lockup, inlined between markers in the login card and the boot splash.
+ * Inline for the same reason as the tab icon - no request, no 404 out of a
+ * cleaned dist/, works with no network in the packaged app - and generated
+ * rather than pasted so it cannot drift from `assets/icon/lockup/`.
+ */
+const LOCKUP = /<!--lockup-->[\s\S]*?<!--\/lockup-->/g
+{
+  const file = join(WEB, 'index.html')
+  const html = readFileSync(file, 'utf8')
+  const inline = written['lockup/lockup-horizontal.svg'].trim()
+  if (!LOCKUP.test(html)) bad('index.html: no <!--lockup--> markers to fill')
+  else writeFileSync(file, html.replace(LOCKUP, `<!--lockup-->${inline}<!--/lockup-->`))
+}
+ok('the lockup is inlined in the login card and the splash')
+
 const ICON_LINK = /<link rel="icon" href="data:image\/svg\+xml,[^"]*">/
 for (const page of ['index.html', 'landing.html']) {
   const file = join(WEB, page)
@@ -471,6 +487,37 @@ for (const page of ['index.html', 'landing.html']) {
   writeFileSync(file, html.replace(ICON_LINK, `<link rel="icon" href="${faviconDataUri}">`))
 }
 ok('impl/web: favicon.ico, icons/, and the inline tab icon in both pages')
+
+/**
+ * The status-bar icon, which nothing else generates.
+ *
+ * `tauri icon` writes the launcher mipmaps and stops there, so these five
+ * drawables are ours - and being ours is exactly why the old speech bubble
+ * survived a full icon swap and turned up in the notification shade on a phone
+ * (reported 2026-09-06, after 0.5.50 changed everything else).
+ *
+ * Two things about the format, both learned from a phone at 0.5.9 and written
+ * down in `android/patch.mjs` and `OnchatoService.kt`:
+ *
+ *  - it is a SILHOUETTE. Android throws the colour away and tints the alpha, so
+ *    the mark is drawn white and only its shape matters;
+ *  - the status bar renders the resource FULL-BLEED, unlike a launcher icon
+ *    with its safe zone. Reusing `ic_launcher_monochrome` there (glyph at ~44%
+ *    of the canvas) shipped a mark visibly smaller than every other icon in the
+ *    bar. The old bubble filled 0.92 of its canvas; this matches it.
+ */
+const STAT_FILL = 0.92
+const STAT_DPI = { mdpi: 24, hdpi: 36, xhdpi: 48, xxhdpi: 72, xxxhdpi: 96 }
+const ANDROID_RES = join(ROOT, 'impl', 'src-tauri', 'icons', 'android')
+for (const [dpi, size] of Object.entries(STAT_DPI)) {
+  const source = svg(`0 0 ${size} ${size}`,
+    markGroup(SMALL, { size, heightFraction: STAT_FILL, stroke: COLORS.white }))
+  const buf = await sharp(Buffer.from(source), { density: densityFor(source, size) })
+    .resize(size, size).png({ compressionLevel: 9, effort: 10, palette: false }).toBuffer()
+  mkdirSync(join(ANDROID_RES, `drawable-${dpi}`), { recursive: true })
+  writeFileSync(join(ANDROID_RES, `drawable-${dpi}`, 'ic_stat_onchato.png'), buf)
+}
+ok(`ic_stat_onchato in ${Object.keys(STAT_DPI).length} densities (status bar - nothing else writes these)`)
 
 console.log(`\nonchato icons -> ${OUT}`)
 console.log(`font for the lockup: ${lock.font}`)
