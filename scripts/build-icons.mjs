@@ -58,9 +58,10 @@ const svg = (viewBox, body, extra = '') =>
  *  centred in a `size` square. Round caps stick out by half a stroke, which is
  *  why the box is computed rather than assumed. */
 function markGroup(mark, { size, heightFraction, stroke, extraAttrs = '' }) {
-  const half = mark.width / 2
-  const box = { x0: 36 - half, y0: (mark === SMALL ? 12 : 14) - half, x1: 64 + half, y1: (mark === SMALL ? 94 : 92) + half }
-  const s = (size * heightFraction) / (box.y1 - box.y0)
+  const box = inkBox(mark)
+  // Every caller states the fraction it wanted BEFORE 2026-09-07; the shrink
+  // lives here so no call site has to remember it.
+  const s = (size * heightFraction * MARK_SCALE) / (box.y1 - box.y0)
   const tx = size / 2 - ((box.x0 + box.x1) / 2) * s
   const ty = size / 2 - ((box.y0 + box.y1) / 2) * s
   const paths = mark.paths.map((d) => `    <path d="${d}"/>`).join('\n')
@@ -69,10 +70,39 @@ function markGroup(mark, { size, heightFraction, stroke, extraAttrs = '' }) {
 
 const round = (n) => Math.round(n * 1000) / 1000
 
+/**
+ * How much of its former size the mark keeps, everywhere it is drawn.
+ *
+ * 0.8 since 2026-09-07, reported from a phone: on Android the top and bottom
+ * strokes ran to the edge of the tile with no margin left. It is one number
+ * rather than a correction per surface, so the mark stays the same size
+ * relative to itself on a launcher, in a tile, in the status bar and in the
+ * lockup - where the WORDMARK deliberately does not follow it (the user's
+ * call: only the glyph shrinks).
+ */
+const MARK_SCALE = 0.8
+
+/** The mark's inked box (round caps stick out by half a stroke). */
+function inkBox(mark) {
+  const half = mark.width / 2
+  return {
+    x0: 36 - half, x1: 64 + half,
+    y0: (mark === SMALL ? 12 : 14) - half,
+    y1: (mark === SMALL ? 94 : 92) + half,
+  }
+}
+
+/** The paths, scaled about the centre of their own 100-space. */
+function scaledPaths(mark, factor = MARK_SCALE) {
+  const paths = mark.paths.map((d) => `    <path d="${d}"/>`).join('\n')
+  const t = round(50 - 50 * factor)
+  return `  <g transform="translate(${t} ${t}) scale(${factor})">\n${paths}\n  </g>`
+}
+
 /** The mark alone, filling its own 100-space (variant C). */
 function markSvg(mark) {
-  const paths = mark.paths.map((d) => `  <path d="${d}"/>`).join('\n')
-  return svg('0 0 100 100', paths, ` fill="none" stroke="currentColor" stroke-width="${mark.width}" stroke-linecap="round"`)
+  return svg('0 0 100 100', scaledPaths(mark),
+    ` fill="none" stroke="currentColor" stroke-width="${mark.width}" stroke-linecap="round"`)
 }
 
 /** A 512 tile: rounded (22%) or square, mark at `heightFraction` of the side. */
@@ -105,7 +135,7 @@ const sources = {
       `    :root { color: ${COLORS.black}; }`,
       `    @media (prefers-color-scheme: dark) { :root { color: ${COLORS.green}; } }`,
       '  </style>',
-      SMALL.paths.map((d) => `  <path d="${d}"/>`).join('\n'),
+      scaledPaths(SMALL),
     ].join('\n'),
     ` fill="none" stroke="currentColor" stroke-width="${SMALL.width}" stroke-linecap="round"`),
 
@@ -145,18 +175,24 @@ function wordPaths(text, fontSize) {
 
 function lockupSvg({ markColor, textColor, bg = null }) {
   const H = 100                      // the mark's own space
-  const markInk = { h: 92 - 14 + MASTER.width, w: 64 - 36 + MASTER.width }
+  const box = inkBox(MASTER)
+  // Only the glyph takes MARK_SCALE; the wordmark keeps the size it had (the
+  // user's call, 2026-09-07). So the mark's box, its position and the gap are
+  // all computed from the SCALED ink, and `fontSize` is untouched.
+  const markInk = { h: (box.y1 - box.y0) * MARK_SCALE, w: (box.x1 - box.x0) * MARK_SCALE }
   const fontSize = 62                // cap height reads about the mark's gapless run
   const word = wordPaths('onchato', fontSize)
   const gap = 0.6 * markInk.h
-  const markX = 0
   const textX = markInk.w + gap
   const width = round(textX + word.bb.x2)
   const height = H
   const yText = round(H / 2 - (word.bb.y1 + word.bb.y2) / 2)
+  // Place the scaled mark by its ink: left edge at 0, vertically centred.
+  const mx = round(-box.x0 * MARK_SCALE)
+  const my = round(H / 2 - ((box.y0 + box.y1) / 2) * MARK_SCALE)
   const body = [
     bg ? `  <rect width="${width}" height="${height}" fill="${bg}"/>` : null,
-    `  <g transform="translate(${round(markX - (36 - MASTER.width / 2))} 0)" fill="none" stroke="${markColor}" stroke-width="${MASTER.width}" stroke-linecap="round">`,
+    `  <g transform="translate(${mx} ${my}) scale(${MARK_SCALE})" fill="none" stroke="${markColor}" stroke-width="${MASTER.width}" stroke-linecap="round">`,
     MASTER.paths.map((d) => `    <path d="${d}"/>`).join('\n'),
     '  </g>',
     `  <g transform="translate(${round(textX)} ${yText})" fill="${textColor}">`,
@@ -244,7 +280,7 @@ for (const [size, name] of [[16, 'favicon-16.png'], [32, 'favicon-32.png'], [48,
   const source = svg('0 0 100 100', [
     `  <rect width="100" height="100" fill="${COLORS.black}"/>`,
     `  <g fill="none" stroke="${COLORS.green}" stroke-width="${SMALL.width}" stroke-linecap="round">`,
-    SMALL.paths.map((d) => `    <path d="${d}"/>`).join('\n'),
+    scaledPaths(SMALL),
     '  </g>',
   ].join('\n'))
   // palette:false everywhere - "sRGB, 8 bit" read literally, and one mode for
