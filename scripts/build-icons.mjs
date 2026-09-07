@@ -49,6 +49,9 @@ const COLORS = {
   // and the product agree. One constant, one `make icons` to change it.
   green: '#35C99E',
   white: '#FFFFFF',
+  // The app's LIGHT-theme accent (--accent in impl/web/index.html). Used where
+  // a light background needs a darker green than the dark-theme one.
+  accentDark: '#0F6B57',
 }
 
 const svg = (viewBox, body, extra = '') =>
@@ -131,9 +134,22 @@ const sources = {
   // browser chrome and green on a dark one. Two rules, no script.
   'web/favicon.svg': svg('0 0 100 100',
     [
+      // GREEN is the default, not the dark-scheme variant.
+      //
+      // Reported from a browser: the tab icon was black and barely visible on a
+      // dark system scheme. The cause is two steps deep. The rule said "black,
+      // green when dark", svgo hoists a lone `:root` declaration onto the root
+      // element as `style="color:#0a0a0a"` - and an inline style beats a rule
+      // in a `<style>` block, so the media query could never win in ANY
+      // browser. Chrome makes it worse by not re-evaluating a favicon's media
+      // queries at all.
+      //
+      // So the colour that survives all of that has to be the one we want by
+      // default. Green reads on a dark tab strip and on a light one; the light
+      // override below is a bonus where it is honoured, never a requirement.
       '  <style>',
-      `    :root { color: ${COLORS.black}; }`,
-      `    @media (prefers-color-scheme: dark) { :root { color: ${COLORS.green}; } }`,
+      `    :root { color: ${COLORS.green}; }`,
+      `    @media (prefers-color-scheme: light) { :root { color: ${COLORS.accentDark}; } }`,
       '  </style>',
       scaledPaths(SMALL),
     ].join('\n'),
