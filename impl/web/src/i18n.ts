@@ -495,7 +495,6 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'wszystkie kontakty już w grupie': 'every contact is already in the group',
     'Wszystkie topiki na jednym połączeniu. Więcej węzłów (i failover) dodasz z edytowalnej listy w oknie logowania.': 'Every topic on one connection. Add more nodes (and failover) from the editable list on the sign-in screen.',
     'Wybierz co najmniej jednego członka.': 'Select at least one member.',
-    'Wybierz kontakt': 'Choose a contact',
     'Wybierz tożsamość': 'Choose an identity',
     'Wyślij poprawkę ponownie': 'Send the correction again',
     'Wygasł': 'Expired',

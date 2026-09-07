@@ -632,7 +632,11 @@
   }
   .btn-send:hover{filter:brightness(1.08)}
   .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:32px;text-align:center}
-  .empty .big{font-size:34px}.empty h3{margin:0;color:var(--text);font-size:16px}
+  /* The mark, sized like the glyph it replaced, with the gap the heading used
+     to occupy folded into it - `.empty`'s own `gap` is 10px and that read as
+     cramped once there was one element fewer. */
+  .empty .big{font-size:34px;color:var(--accent);margin-bottom:6px}
+  .empty .big svg{height:2.4em;width:auto;display:block}.empty h3{margin:0;color:var(--text);font-size:16px}
   .empty p{margin:0;max-width:44ch;font-size:13px;color:var(--muted)}
 
   /* Above EVERYTHING else that can be on screen — the members popover sits at 12
@@ -1011,8 +1015,11 @@
 
     <main class="chat">
       <div class="empty" id="chat-empty">
-        <div class="big">🌳</div>
-        <h3 data-i18n="Wybierz kontakt">Wybierz kontakt</h3>
+        <!-- Our own mark, not a picture of something else, and no heading under
+             it: "Wybierz kontakt" said what the empty pane already says by
+             being empty. The paragraph below is the part that carries
+             information, so it keeps its distance from the mark. -->
+        <div class="big" role="img" aria-label="onchato"><!--emptymark--><svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="8" viewBox="0 0 100 100"><path d="M36 14v30m0 18v30m28-78v24c-12 6-12 24 0 30v24"/></svg><!--/emptymark--></div>
         <p data-i18n="Wspólny pokój na dziś wyliczamy z Waszych kluczy i daty — nikt inny go nie zna. To spotkanie, nie skrzynka: wiadomości żyją tylko na ekranach uczestników.">Wspólny pokój na dziś wyliczamy z Waszych kluczy i daty — nikt inny go nie zna. To spotkanie, nie skrzynka: wiadomości żyją tylko na ekranach uczestników.</p>
       </div>
       <div id="chat-view" hidden style="display:flex;flex-direction:column;flex:1;min-height:0;position:relative">
