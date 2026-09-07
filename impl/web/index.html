@@ -671,7 +671,13 @@
   #btn-knock:disabled{opacity:.45}
   .qr-box{display:grid;place-items:center;background:#fff;border-radius:10px;padding:12px;margin:10px 0}
   .qr-box svg{display:block;max-width:100%;height:auto}
-  #scan-video{width:100%;max-height:46vh;border-radius:10px;background:#000;margin-top:8px;object-fit:cover}
+  /* `contain`, not `cover`: the detector reads the WHOLE frame, so a cropped
+     preview shows less than is being scanned - the picture should be the truth
+     about what the camera sees. */
+  #scan-video{width:100%;max-height:46vh;border-radius:10px;background:#000;margin-top:8px;object-fit:contain}
+  .zoom-row{display:flex;align-items:center;gap:10px;margin-top:8px}
+  .zoom-row input[type=range]{flex:1;accent-color:var(--accent)}
+  .zoom-lab{font-family:var(--mono);font-size:12px;color:var(--muted);min-width:3.2em;text-align:right}
   .group-members{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;margin-top:4px}
   .gmember{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);cursor:pointer;padding:6px 8px;border-radius:6px;margin:0}
   /* Name against the left margin, box against the right: the column then reads
@@ -1288,6 +1294,13 @@
     <h2 data-i18n="Zeskanuj kod QR">Zeskanuj kod QR</h2>
     <div class="msub" data-i18n="Pokaż aparatowi kod z ekranu drugiej osoby. Nieznany klucz zaproponuję dodać, znany — porównam z tym, który już masz.">Pokaż aparatowi kod z ekranu drugiej osoby. Nieznany klucz zaproponuję dodać, znany — porównam z tym, który już masz.</div>
     <video id="scan-video" playsinline muted></video>
+    <!-- Only when the camera says it has a zoom range (app.ts, lib/qrzoom.ts).
+         A slider that cannot move would claim a feature and then refuse it. -->
+    <div class="zoom-row" id="scan-zoom-row" hidden>
+      <span class="zoom-lab" id="scan-zoom-lab">1.0x</span>
+      <input type="range" id="scan-zoom" min="1" max="2" step="0.1" value="1"
+             aria-label="Powiększenie" data-i18n-aria-label="Powiększenie">
+    </div>
     <div class="msg" id="scan-msg"></div>
     <div class="modal-actions"><button class="btn-ghost" id="scan-cancel" style="flex:1" data-i18n="Anuluj">Anuluj</button></div>
   </div>

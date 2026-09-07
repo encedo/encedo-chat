@@ -43,6 +43,7 @@ import {
 import { qrSvg } from '../../lib/qr.ts'
 import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
 import { iceServersFor } from '../../lib/ice.ts'
+import { clampToStep, zoomPlan } from '../../lib/qrzoom.ts'
 import { setRadioProfile } from '../../lib/radiophase.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
@@ -2313,14 +2314,21 @@ async function openScan() {
   $('scrim').classList.add('open'); $('scan-modal').classList.add('open')
   const video = $('scan-video') as HTMLVideoElement
   try {
-    // The rear camera on a phone; whatever exists on a laptop.
-    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+    // The rear camera on a phone; whatever exists on a laptop. The resolution
+    // is ASKED FOR rather than accepted: with no constraint a browser is free
+    // to hand back 640x480, and a QR code at arm's length is then a handful of
+    // pixels that `BarcodeDetector` cannot resolve. `ideal` degrades quietly
+    // on a camera that cannot do it.
+    scanStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+    })
     video.srcObject = scanStream
     await video.play()
   } catch (e: any) {
     setMsg('scan-msg', tr('Brak dostępu do kamery: ') + (e?.message ?? e), 'err')
     return
   }
+  setupScanZoom(scanStream)
   const detector = new (globalThis as any).BarcodeDetector({ formats: ['qr_code'] })
   scanTimer = setInterval(async () => {
     try {
@@ -2331,8 +2339,47 @@ async function openScan() {
   }, 250)
 }
 
+/**
+ * The camera's own zoom, where it has one.
+ *
+ * Reported from Android: the scanner was "1:1, impractical". With several rear
+ * lenses `facingMode: 'environment'` often lands on the wide one, so the code
+ * is a small patch of a big frame. This is the camera's zoom, not a CSS
+ * transform: it crops inside the capture pipeline, so the code arrives bigger
+ * AND sharper - scaling the picture afterwards would only make the same few
+ * pixels larger.
+ *
+ * The arithmetic lives in `lib/qrzoom.ts` and is unit-tested, because
+ * capabilities are a driver detail that differs per device and per browser,
+ * and this file cannot be run by a test at all: headless Chromium has neither
+ * `BarcodeDetector` nor a camera that reports a zoom range.
+ */
+function setupScanZoom(stream: MediaStream) {
+  const row = $('scan-zoom-row')
+  const slider = $('scan-zoom') as HTMLInputElement
+  const label = $('scan-zoom-lab')
+  const track = stream.getVideoTracks()[0]
+  const plan = zoomPlan(track?.getCapabilities?.() as any)
+  row.hidden = !plan
+  if (!plan || !track) return
+
+  slider.min = String(plan.min); slider.max = String(plan.max); slider.step = String(plan.step)
+  const apply = (v: number) => {
+    const z = clampToStep(v, plan.min, plan.max, plan.step)
+    slider.value = String(z)
+    label.textContent = `${z.toFixed(1)}x`
+    // `advanced` so a camera that cannot do it keeps working instead of
+    // failing the whole constraint set; a rejected promise is not an error
+    // worth showing - the picture is still there, only closer than asked.
+    void track.applyConstraints({ advanced: [{ zoom: z } as any] } as any).catch(() => {})
+  }
+  slider.oninput = () => apply(Number(slider.value))
+  apply(plan.start)
+}
+
 function closeScan() {
   clearInterval(scanTimer); scanTimer = null
+  ;($('scan-zoom-row') as HTMLElement).hidden = true // the next camera may have no zoom
   for (const t of scanStream?.getTracks() ?? []) t.stop() // the camera light goes out
   scanStream = null
   ;($('scan-video') as HTMLVideoElement).srcObject = null

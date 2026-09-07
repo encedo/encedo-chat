@@ -252,6 +252,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Odpięcie skasuje ją z pamięci tej przeglądarki. Ten komunikat pokaże się raz na sesję.':
       'Unpinning erases it from this browser. This notice is shown once a session.',
     'Odpowiedz': 'Reply',
+    'Powiększenie': 'Zoom',
     'Reakcja': 'React',
     'Odcisk': 'Fingerprint',
     'Odeślij swój profil': 'Send yours back',
@@ -687,8 +688,9 @@ export function t(key: string, params?: Record<string, string | number>): string
 }
 
 /**
- * Translate the static markup: `data-i18n` for text, `data-i18n-title` and
- * `data-i18n-placeholder` for the attributes that are also user-visible. Called
+ * Translate the static markup: `data-i18n` for text, `data-i18n-title`,
+ * `data-i18n-placeholder` and `data-i18n-aria-label` for the attributes that
+ * are also user-visible. Called
  * at startup and again on every language switch, so index.html can hold the
  * Polish as its default content and still be translatable.
  */
@@ -701,5 +703,11 @@ export function applyDom(root: ParentNode = document) {
   }
   for (const el of root.querySelectorAll<HTMLInputElement>('[data-i18n-placeholder]')) {
     el.placeholder = t(el.dataset.i18nPlaceholder!)
+  }
+  // A control whose only name is its `aria-label` - a slider, an icon button -
+  // is unreadable to a screen reader in the wrong language, and there is no
+  // text node to translate instead.
+  for (const el of root.querySelectorAll<HTMLElement>('[data-i18n-aria-label]')) {
+    el.setAttribute('aria-label', t(el.dataset.i18nAriaLabel!))
   }
 }
