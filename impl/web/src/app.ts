@@ -4918,6 +4918,12 @@ async function attachFile(f: File) {
     show(tr('Pobierz'), humanSize(f.size))
     const els = fileEls.get(pending)
     if (els) { els.act.disabled = false; els.act.onclick = () => void downloadFile(pending, els.act) }
+    // `appendFile` drew this bubble while the file was still uploading, and a
+    // file with no cid has no preview to draw — so the sender was left with a
+    // voice note they could not play back and a picture they could not see
+    // until they switched rooms and came back (reported 2026-09-07). The bytes
+    // never left this device: the player goes in now, with no fetch to make.
+    paintPreview(pending)
   } catch (e: any) {
     ecLog('file upload failed: ' + (e?.message ?? e))
     show(tr('Błąd'), tr('nie wysłano'))

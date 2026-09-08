@@ -1226,6 +1226,41 @@ async function main() {
         return !!img && img.src.startsWith('blob:') && !row.querySelector('.f-see');
       `, 40_000)
       step('one click fetches, decrypts and draws it — and Download stays')
+
+      // ---- and the voice note the SENDER just sent -------------------------
+      // Reported from a phone (0.5.58): "recording works, but I cannot listen
+      // to it after sending — there is no such option". The bubble is drawn
+      // while the file is still uploading, and a file with no cid has no
+      // preview to draw; nothing painted one once the upload finished, so the
+      // player only ever appeared after leaving the room and coming back. An
+      // audio file rather than a real recording: what is under test is the
+      // bubble, and a headless browser's microphone is silence anyway.
+      scenario('a voice note can be played back by the person who sent it')
+      const voxTok = `glos-${Date.now().toString(36)}`
+      await A.eval(`
+        const dt = new DataTransfer();
+        dt.items.add(new File([new Uint8Array(2048)], ${JSON.stringify('%TOK%.webm')}, { type: 'audio/webm' }));
+        const i = document.getElementById('file-input');
+        i.files = dt.files; i.dispatchEvent(new Event('change'));
+        document.getElementById('send').click();
+        return 1;
+      `.replace(/%TOK%/g, voxTok))
+      await A.waitFor('the sender got a player for its own voice note', `
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(voxTok)}));
+        return !!(row && row.querySelector('.b-voice .v-play'));
+      `, 40_000)
+      const ownVox = await A.eval<any>(`
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => r.querySelector('.f-name').textContent.includes(${JSON.stringify(voxTok)}));
+        return { players: row.querySelectorAll('.b-voice').length,
+                 see: !!row.querySelector('.f-see'),
+                 act: (row.querySelector('.f-act') || {}).textContent };
+      `)
+      if (ownVox.players !== 1) throw new Error(`the sender's bubble holds ${ownVox.players} players`)
+      if (ownVox.see) throw new Error('the sender was offered Play for a note it can already play')
+      if (!/Pobierz|Download/.test(String(ownVox.act))) throw new Error(`the file action says "${ownVox.act}"`)
+      step('the player is there as soon as the upload finishes, without leaving the room')
     }
 
     // ---- replying, and correcting -------------------------------------------
