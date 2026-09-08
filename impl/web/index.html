@@ -397,23 +397,41 @@
   .reply-bar .r-text{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .reply-bar .x{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;flex-shrink:0;padding:4px 6px}
   .reply-bar .x:hover{color:var(--err)}
-  .composer{display:flex;gap:10px;padding:14px 20px;border-top:1px solid var(--border)}
+  /* `flex-end` for the same reason as inside the field: with a tall box, a Send
+     button stretched to match it is a green slab down the side of the screen. */
+  .composer{display:flex;align-items:flex-end;gap:10px;padding:14px 20px;border-top:1px solid var(--border)}
   /* The clip sits INSIDE the field, at its right edge — the field and the clip
      read as one control, so attaching feels like part of writing rather than a
      separate mode. The wrapper carries the border; the input gives its up. */
-  .composer-field{flex:1;display:flex;align-items:center;min-width:0;
+  /* `flex-end`, not `center`: with a four-line field, a clip centred against it
+     floats in the middle of the text. At one line the two are the same. */
+  .composer-field{flex:1;display:flex;align-items:flex-end;min-width:0;
     border:1px solid var(--border);border-radius:8px;background:var(--bg)}
   /* A FLOOR, not `min-width:0`. With zero the text field is the flex item that
      gives way first, so on a narrow phone the attachment chip squeezed it out of
      existence — the composer looked like it had lost its input. The chip shrinks
      instead: its name elides, and that is what a name is allowed to lose. */
-  .composer-field input{flex:1;min-width:8ch;border:none;background:none;padding-right:4px}
-  .composer-field input:focus-visible{outline:none}
+  /* A textarea, because a message can be a paragraph: it grows with the text,
+     up to four lines, and the handle above the composer takes it further. Every
+     default a textarea brings has to be undone — its own font, its resize grip,
+     the scrollbar it shows before the height is set — or the composer stops
+     looking like one line of chat. `field-sizing` does this natively in newer
+     Chromium and is left to do so where it exists; `growComposer()` in app.ts
+     is what makes it work everywhere else. */
+  .composer-field textarea{flex:1;min-width:8ch;border:none;background:none;padding-right:4px;
+    font:inherit;line-height:1.45;resize:none;overflow-y:auto;max-height:40dvh}
+  .composer-field textarea:focus-visible{outline:none}
+  .composer-grow{display:block;width:100%;padding:3px 0 0;border:none;background:none;
+    color:var(--muted);cursor:pointer;line-height:0;text-align:center}
+  .composer-grow:hover{color:var(--accent)}
+  .composer-grow svg{transition:transform .15s}
+  .composer-grow.open svg{transform:rotate(180deg)}
   .composer-field:focus-within{outline:2px solid var(--accent);outline-offset:2px}
   .composer-field .clip{border:none;background:none;color:var(--muted);font-size:17px;
     line-height:1;padding:8px 10px;border-radius:8px;flex-shrink:0}
   .composer-field .clip:hover{color:var(--accent)}
-  @media (pointer:coarse){.composer-field .clip{padding:10px 12px}}
+  @media (pointer:coarse){.composer-field .clip{padding:10px 12px}
+    .composer-grow{padding:9px 0 3px}}  /* a thumb needs more than the line itself */
   /* The picked file rides INSIDE the field, between the text and the clip that
      produced it — so it reads as part of the message being written, not as a
      transfer already under way. The name elides and the size never does: when
@@ -865,7 +883,7 @@
     .tab,.chip,.add-btn{min-height:42px}
     .icon-btn{min-height:42px;min-width:42px;width:42px;height:42px}
     .contact{min-height:52px}
-    .composer input,.composer button{min-height:44px}
+    .composer input,.composer textarea,.composer button{min-height:44px}
     /* 16px keeps iOS from zooming the page when a field takes focus. */
     input,select,textarea{font-size:16px}
   }
@@ -1082,10 +1100,15 @@
           <div class="r-body"><div class="r-who" id="reply-who"></div><div class="r-text" id="reply-text"></div></div>
           <button class="x" id="reply-cancel" title="Anuluj odpowiedź" data-i18n-title="Anuluj odpowiedź" aria-label="Anuluj odpowiedź">✕</button>
         </div>
+        <!-- The handle that makes the field taller. The box also grows by itself
+             as the text does, but a control that says so is the difference
+             between "it happens to me" and "I can do it" — Slack's chevron,
+             for the same reason. Up = it will grow, down = it will shrink. -->
+        <button class="composer-grow" id="composer-grow" title="Powiększ pole" data-i18n-title="Powiększ pole" aria-label="Powiększ pole" aria-expanded="false"><svg viewBox="0 0 40 12" width="34" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 9 20 3 38 9"/></svg></button>
         <div class="composer">
           <input type="file" id="file-input" hidden>
           <div class="composer-field">
-            <input id="msg-input" type="text" placeholder="Napisz wiadomość…" data-i18n-placeholder="Napisz wiadomość…" autocomplete="off">
+            <textarea id="msg-input" rows="1" placeholder="Napisz wiadomość…" data-i18n-placeholder="Napisz wiadomość…" autocomplete="off"></textarea>
             <span class="attach-chip" id="attach-chip" hidden>
               <img class="t" id="attach-thumb" alt="" hidden>
               <span class="n" id="attach-name"></span>

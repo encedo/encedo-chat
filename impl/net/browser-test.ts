@@ -963,6 +963,70 @@ async function main() {
     if (!/X25519/.test(rtc.caps)) throw new Error('the platform report is not shown in Settings')
     step('and the platform report is readable in Settings, not just in the log')
 
+    // ---- writing more than a line -------------------------------------------
+    // Reported 2026-09-08: "longer forms are awkward to write". The composer is
+    // a textarea now, and the two halves of that are exactly what a unit test
+    // cannot see: the box has to actually get taller in a browser, and Enter
+    // has to keep meaning Send on a keyboard while Shift+Enter stops meaning
+    // it. A message with a newline in it also has to survive the trip and be
+    // drawn as two lines on the other side.
+    scenario('a message can be more than one line')
+    const nlTok = `wiersze-${Date.now().toString(36)}`
+    const grew = await A.eval<any>(`
+      const i = document.getElementById('msg-input');
+      const one = i.getBoundingClientRect().height;
+      i.value = ${JSON.stringify(nlTok)} + String.fromCharCode(10) + 'druga linia';
+      i.dispatchEvent(new Event('input'));
+      return { one, two: i.getBoundingClientRect().height,
+               tag: i.tagName, sent: document.querySelectorAll('#messages .mrow').length };
+    `)
+    if (grew.tag !== 'TEXTAREA') throw new Error(`the composer is a <${grew.tag}>, not a textarea`)
+    if (!(grew.two > grew.one + 8)) throw new Error(`two lines did not make the box taller: ${grew.one} -> ${grew.two}`)
+    step(`the box grows with the text (${Math.round(grew.one)}px -> ${Math.round(grew.two)}px)`)
+
+    const held = await A.eval<any>(`
+      const i = document.getElementById('msg-input');
+      i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true }));
+      return { text: i.value, rows: document.querySelectorAll('#messages .mrow').length };
+    `)
+    if (!held.text.includes(nlTok)) throw new Error('Shift+Enter emptied the composer — it sent')
+    step('Shift+Enter breaks the line instead of sending')
+
+    const beforeSend = await A.eval<number>(`return document.querySelectorAll('#messages .mrow').length`)
+    const sentIt = await A.eval<any>(`
+      const i = document.getElementById('msg-input');
+      i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      return { left: i.value, height: i.getBoundingClientRect().height,
+               rows: document.querySelectorAll('#messages .mrow').length };
+    `)
+    if (sentIt.rows <= beforeSend) throw new Error('Enter did not send')
+    if (sentIt.left !== '') throw new Error('Enter sent and left the text behind')
+    if (!(sentIt.height < grew.two)) throw new Error('the box stayed tall after the message went')
+    step('Enter sends, and the box goes back to one line')
+
+    await B.waitFor('the two-line message arrived whole', `
+      const row = [...document.querySelectorAll('#messages .b-text')]
+        .find((t) => t.textContent.includes(${JSON.stringify(nlTok)}));
+      // white-space: pre-wrap is what keeps the newline visible rather than
+      // collapsed into a space: the text node must still hold it.
+      return !!row && row.textContent.includes(String.fromCharCode(10));
+    `, 20_000)
+    step('and it reaches the other side as two lines, not one')
+
+    const handle = await A.eval<any>(`
+      const i = document.getElementById('msg-input'), b = document.getElementById('composer-grow');
+      const shut = i.getBoundingClientRect().height;
+      b.click();
+      const open = i.getBoundingClientRect().height;
+      const said = b.getAttribute('aria-expanded');
+      b.click();
+      return { shut, open, said, back: i.getBoundingClientRect().height };
+    `)
+    if (!(handle.open > handle.shut + 40)) throw new Error(`the handle did not open the box: ${handle.shut} -> ${handle.open}`)
+    if (handle.said !== 'true') throw new Error('the handle does not say it is open')
+    if (!(handle.back < handle.open)) throw new Error('the handle does not close again')
+    step('and the handle opens the box on an empty composer, and shuts it again')
+
     // ---- a voice note --------------------------------------------------------
     // Recording is a MODE, and the first version did not say so: the button
     // armed itself, a chip appeared in the composer, and nothing on screen

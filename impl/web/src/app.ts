@@ -45,6 +45,7 @@ import { qrSvg } from '../../lib/qr.ts'
 import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
 import { iceServersFor } from '../../lib/ice.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
+import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile } from '../../lib/radiophase.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
@@ -2857,7 +2858,8 @@ document.addEventListener('paste', (e: ClipboardEvent) => {
  * otherwise sit one Send away from the next. Both go.
  */
 function clearComposer() {
-  ;($('msg-input') as HTMLInputElement).value = ''
+  ;($('msg-input') as HTMLTextAreaElement).value = ''
+  growComposer() // an emptied box is one line again
   showAttach(null)
   // A recording belongs to the conversation it was started in, and the
   // microphone must not outlive it — leaving it live would keep the platform's
@@ -3881,7 +3883,7 @@ function startReply(row: HTMLElement) {
   cancelEdit()  // one strip, one job
   replyTo = { id, au: row.dataset.au, text: rowQuoteText(row), who }
   paintComposerBar()
-  ;($('msg-input') as HTMLInputElement).focus()
+  ;($('msg-input') as HTMLTextAreaElement).focus()
 }
 const cancelReply = () => { replyTo = null; paintComposerBar() }
 /** One strip above the composer, two things it can be about — never both. */
@@ -4422,9 +4424,10 @@ function startEdit(row: HTMLElement) {
   row.classList.remove('tapped')
   cancelReply() // one strip, one job
   editing = { id, orig: ev.text }
-  const inp = $('msg-input') as HTMLInputElement
+  const inp = $('msg-input') as HTMLTextAreaElement
   inp.value = ev.text
   paintComposerBar()
+  growComposer() // the message being corrected may be a paragraph
   inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length)
 }
 /** Leaving edit mode also empties the composer: what is in it is the old message,
@@ -4432,7 +4435,8 @@ function startEdit(row: HTMLElement) {
 function cancelEdit() {
   if (!editing) return
   editing = null
-  ;($('msg-input') as HTMLInputElement).value = ''
+  ;($('msg-input') as HTMLTextAreaElement).value = ''
+  growComposer()
   paintComposerBar()
 }
 
@@ -4440,7 +4444,7 @@ function cancelEdit() {
  *  nothing to correct, so the ordinary send path can carry on. */
 function sendEditComposer(): boolean {
   if (!editing) return false
-  const inp = $('msg-input') as HTMLInputElement
+  const inp = $('msg-input') as HTMLTextAreaElement
   const text = inp.value.trim()
   const room = activeRoom()
   const ev = findMsgEv(room, editing.id)
@@ -4453,7 +4457,7 @@ function sendEditComposer(): boolean {
   ecLog(`edited ${editing.id} → "${text.slice(0, 40)}" (correction id ${eid})`)
   ev.text = text; ev.edited = nowMs(); ev.editId = eid; ev.editState = 'sending'
   repaintMsg(ev)
-  inp.value = ''
+  inp.value = ''; growComposer()
   editing = null
   paintComposerBar()
   return true
@@ -4837,7 +4841,7 @@ async function attachFile(f: File) {
   // Whatever is in the composer travels WITH the file, as one message. Taken
   // and cleared now, before the encrypt/upload await, so what is sent is what
   // the user saw when they picked the file — not whatever they typed since.
-  const inp = $('msg-input') as HTMLInputElement
+  const inp = $('msg-input') as HTMLTextAreaElement
   // A caption is a body like any other, so its mentions close here too — a file
   // sent with "@Ala popatrz" must reach Ala the same way the sentence alone would.
   const gm = gid ? groupsUI.get(gid) : null
@@ -4845,7 +4849,7 @@ async function attachFile(f: File) {
     ? closeMentions(inp.value.trim(), gm.members.filter((m) => m.pub !== session?.pub).map((m) => ({ pub: m.pub, name: memberName(m.pub) })), mentionPicks)
     : inp.value.trim()
   mentionPicks.clear()
-  inp.value = ''
+  inp.value = ''; growComposer()
   // A file answers a message the same way a sentence does — same field, spent
   // here so the bar is gone by the time the upload starts.
   const re = takeReply()
@@ -5581,7 +5585,7 @@ async function closeRoom(pub: string) {
 
 // The composer targets whichever room is on screen — wired once, not per open.
 function sendComposer() {
-  const inp = $('msg-input') as HTMLInputElement
+  const inp = $('msg-input') as HTMLTextAreaElement
   if (sendEditComposer()) return // the composer is holding a correction, not a message
   // A pending file takes the composer over. attachFile() reads the caption out
   // of this same input and clears it, so the text goes once, with the file —
@@ -5591,7 +5595,7 @@ function sendComposer() {
   const t = inp.value.trim(); if (!t) return
   if (activeGid) { // a group is on screen — broadcast to it
     const gu = groupsUI.get(activeGid); if (!gu?.room) return
-    inp.value = ''
+    inp.value = ''; growComposer()
     const re = takeReply()
     // "@Ala" typed straight through becomes "@Ala#3a7f1c02" here — the picker
     // already writes whole tokens, this is for the message written in one go.
@@ -5607,18 +5611,85 @@ function sendComposer() {
   const re = takeReply()
   const id = room.conv.sendText(t, re)
   ecLog(`sent "${t.slice(0, 40)}" (id ${id}); secured peers: ${room.conv.secured().length}`)
-  record(room, { t: 'msg', kind: 'me', text: t, ts: nowMs(), id, re, au: session?.pub }); inp.value = ''
+  record(room, { t: 'msg', kind: 'me', text: t, ts: nowMs(), id, re, au: session?.pub })
+  inp.value = ''; growComposer()
 }
 ;($('send') as HTMLButtonElement).onclick = sendComposer
-;($('msg-input') as HTMLInputElement).oninput = () => { activeRoom()?.conv?.noteActivity(); updateMentionPop() }
-;($('msg-input') as HTMLInputElement).onkeydown = (e: any) => {
+;($('msg-input') as HTMLTextAreaElement).oninput = () => {
+  activeRoom()?.conv?.noteActivity(); updateMentionPop(); growComposer()
+}
+;($('msg-input') as HTMLTextAreaElement).onkeydown = (e: any) => {
   if (mentionKey(e)) return // the picker is open: Enter picks a person, it does not send
   // out of the reply or the edit, not out of the room
   if (e.key === 'Escape' && (replyTo || editing)) { cancelReply(); cancelEdit(); return }
-  if (e.key === 'Enter') sendComposer()
+  if (e.key !== 'Enter' || !entersSend(e)) return
+  e.preventDefault() // or the newline lands in the box we are about to empty
+  sendComposer()
 }
-;($('msg-input') as HTMLInputElement).addEventListener('click', updateMentionPop)
-;($('msg-input') as HTMLInputElement).addEventListener('blur', () => closeMentionPop())
+
+/**
+ * Does this Enter send, or does it break the line?
+ *
+ * On a keyboard it sends, and Shift+Enter breaks the line — the habit every
+ * chat app has taught. On a phone it NEVER sends: the on-screen Enter is the
+ * only way to break a line there (nobody holds Shift on a phone), and a
+ * message that leaves half-written because a paragraph was wanted is a worse
+ * failure than one more press of Send. `pointer:fine` is the question actually
+ * being asked: is there a keyboard with a Shift on it.
+ *
+ * A key that is part of composing a character is not a key at all yet — an IME
+ * confirming a candidate with Enter must not send the message underneath it.
+ */
+const entersSend = (e: KeyboardEvent): boolean =>
+  !e.isComposing && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
+    && matchMedia('(pointer:fine)').matches
+
+/**
+ * How tall the message box is: as tall as what is in it, within limits.
+ *
+ * Reported 2026-09-08: "longer forms are awkward to write". They were — the
+ * composer was a single-line `<input>`, so a paragraph scrolled sideways
+ * through a slot one line high.
+ *
+ * The limits and the arithmetic are in `lib/composer.ts`, where they can be
+ * tested; what is here is the part only a browser can do — read what the text
+ * actually needs, and keep the transcript where the reader left it.
+ */
+let composerOpen = false
+
+function growComposer() {
+  const ta = $('msg-input') as HTMLTextAreaElement
+  const cs = getComputedStyle(ta)
+  const stick = atBottom()
+  // Released before measuring: `scrollHeight` on a box that is already tall
+  // enough reports the height it HAS, so a shrinking message would never
+  // shrink it back.
+  ta.style.height = 'auto'
+  const h = boxHeight({
+    line: parseFloat(cs.lineHeight),
+    pad: parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom),
+    scroll: ta.scrollHeight,
+  }, composerOpen)
+  ta.style.height = `${h}px`
+  // The transcript just lost whatever the composer took. Somebody reading
+  // history stays where they were; somebody at the bottom stays at the bottom,
+  // which is where the message they are answering is.
+  if (stick) $('messages').scrollTop = $('messages').scrollHeight
+  refreshJump()
+}
+
+$('composer-grow').addEventListener('click', () => {
+  composerOpen = !composerOpen
+  const btn = $('composer-grow')
+  btn.classList.toggle('open', composerOpen)
+  btn.setAttribute('aria-expanded', String(composerOpen))
+  const label = composerOpen ? tr('Zmniejsz pole') : tr('Powiększ pole')
+  btn.setAttribute('title', label); btn.setAttribute('aria-label', label)
+  growComposer()
+  ;($('msg-input') as HTMLTextAreaElement).focus()
+})
+;($('msg-input') as HTMLTextAreaElement).addEventListener('click', updateMentionPop)
+;($('msg-input') as HTMLTextAreaElement).addEventListener('blur', () => closeMentionPop())
 
 // ---- the @ picker ---------------------------------------------------------
 /**
@@ -5659,7 +5730,7 @@ function mentionCandidates(query: string): Array<{ pub: string; name: string }> 
 }
 
 function updateMentionPop() {
-  const inp = $('msg-input') as HTMLInputElement
+  const inp = $('msg-input') as HTMLTextAreaElement
   if (!activeGid) return closeMentionPop() // a 1:1 has no roster to offer
   const caret = inp.selectionStart ?? inp.value.length
   const upto = inp.value.slice(0, caret)
@@ -5677,7 +5748,7 @@ function updateMentionPop() {
 }
 
 function paintMentionPop() {
-  const pop = $('mention-pop'), inp = $('msg-input') as HTMLInputElement
+  const pop = $('mention-pop'), inp = $('msg-input') as HTMLTextAreaElement
   pop.innerHTML = ''
   mentionHits.forEach((h, i) => {
     const row = document.createElement('button')
@@ -5697,7 +5768,7 @@ function paintMentionPop() {
 
 function pickMention(i: number) {
   const hit = mentionHits[i]
-  const inp = $('msg-input') as HTMLInputElement
+  const inp = $('msg-input') as HTMLTextAreaElement
   if (!hit || mentionAt < 0) return closeMentionPop()
   const caret = inp.selectionStart ?? inp.value.length
   // The same shape `closeMentions` looks for — a name it cannot find again is a
@@ -5705,6 +5776,7 @@ function pickMention(i: number) {
   const written = '@' + mentionName(hit.name) + ' '
   mentionPicks.set(mentionName(hit.name).toLowerCase(), hit.pub)
   inp.value = inp.value.slice(0, mentionAt) + written + inp.value.slice(caret)
+  growComposer()
   const pos = mentionAt + written.length
   closeMentionPop()
   inp.focus(); inp.setSelectionRange(pos, pos)

@@ -91,11 +91,12 @@ test('and they keep their labels on a desktop, where there is room', () => {
 
 test('the composer keeps a text field however wide the attachment chip is', () => {
   // Reported from a portrait phone: picking a file left no visible input. The
-  // chip and the input are siblings in one flex row, and `min-width:0` made the
-  // INPUT the item that collapsed first. A floor moves that role to the chip,
+  // chip and the field are siblings in one flex row, and `min-width:0` made the
+  // FIELD the item that collapsed first. A floor moves that role to the chip,
   // which can afford it — a filename has an ellipsis, a text field has nothing.
-  const rule = HTML.match(/\.composer-field input\{([^}]*)\}/)
-  assert.ok(rule, '.composer-field input rule not found')
+  // (The field is a textarea since 0.5.60; the flex arithmetic is the same.)
+  const rule = HTML.match(/\.composer-field textarea\{([^}]*)\}/)
+  assert.ok(rule, '.composer-field textarea rule not found')
   const min = rule![1].match(/min-width:\s*([^;}]+)/)?.[1]?.trim()
   assert.ok(min && !/^0(\D|$)/.test(min), `the text field may not shrink to nothing (min-width: ${min})`)
 })
@@ -154,4 +155,22 @@ test('the page cannot be pinched about', () => {
   // Still opting into the notch area: dropping this is how the header ends up
   // under the status bar again.
   assert.match(content, /viewport-fit=cover/)
+})
+
+test('the message box can be more than one line', () => {
+  // The composer was a single-line input, and a paragraph scrolled sideways
+  // through it. Three things have to hold together for the textarea to look
+  // like a chat composer rather than a form: no resize grip, the app's own font
+  // rather than the textarea default, and a ceiling against the viewport so a
+  // long message cannot push the conversation off a phone.
+  const rule = HTML.match(/\.composer-field textarea\{([^}]*)\}/)
+  assert.ok(rule, '.composer-field textarea rule not found')
+  const css = rule![1]
+  assert.match(css, /resize:none/)
+  assert.match(css, /font:inherit/)
+  assert.match(css, /max-height:\s*\d+dvh/, 'the box needs a ceiling measured against the viewport')
+  assert.match(HTML, /<textarea id="msg-input"/, 'the composer is not a textarea')
+  // The handle that says so out loud, and the icon it turns over.
+  assert.match(HTML, /id="composer-grow"/)
+  assert.match(HTML, /\.composer-grow\.open svg\{transform:rotate\(180deg\)\}/)
 })

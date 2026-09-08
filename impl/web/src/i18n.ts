@@ -328,6 +328,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '{n} próby': '{n} attempts',
     '(sonda jeszcze nie skończyła)': '(the probe has not finished yet)',
     'Ten pulpit nie pokazuje ikon w zasobniku (w GNOME rysuje je rozszerzenie, a ono nie działa), więc zamknięcie okna kończy aplikację — chowanie jej do niewidocznej ikony znaczyłoby, że nie da się do niej wrócić.': 'This desktop does not show tray icons (in GNOME an extension draws them, and it is not running), so closing the window quits — hiding it into an icon nobody can see would mean no way back to it.',
+    'Powiększ pole': 'Make the box taller',
+    'Zmniejsz pole': 'Make the box shorter',
     'Nagraj głosówkę': 'Record a voice note',
     'Zatrzymaj nagrywanie': 'Stop recording',
     'Odrzuć nagranie': 'Discard the recording',
