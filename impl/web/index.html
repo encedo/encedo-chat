@@ -12,7 +12,12 @@
        key is gone (MOBILE-PLAN.md says the same). Linking it is one line, and a
        decision, not an oversight. -->
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- `user-scalable=no` freezes the pinch: this is an app screen, not a page.
+     Pinching it moved the whole layout around under the composer and left the
+     transcript scrolled somewhere nobody asked for (reported 2026-09-07). Text
+     size stays adjustable the right way - the system font-size setting, which
+     the layout follows because it is sized in relative units. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <!-- Any paint that happens before our stylesheet applies uses the UA's canvas
      colour, and without this line that canvas is white on every theme — the
      white flash packaged builds showed on dark desktops. -->

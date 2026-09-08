@@ -138,3 +138,20 @@ test('the one-pane layout switch covers the same set', () => {
   }
   assert.equal(matches(media[media.length - 1], DESKTOP.w, DESKTOP.h), false)
 })
+
+test('the page cannot be pinched about', () => {
+  // An app screen, not a document. Pinching it moved the whole layout under the
+  // composer and left the transcript scrolled somewhere nobody asked for
+  // (reported 2026-09-07: "I can enlarge it like a web page - we must freeze
+  // this"). Text size stays adjustable the way it should be, through the
+  // system's own font-size setting, which this layout follows because it is
+  // sized in relative units.
+  const meta = HTML.match(/<meta name="viewport" content="([^"]+)">/)
+  assert.ok(meta, 'the viewport meta is gone')
+  const content = meta![1]
+  assert.match(content, /user-scalable=no/)
+  assert.match(content, /maximum-scale=1\b/)
+  // Still opting into the notch area: dropping this is how the header ends up
+  // under the status bar again.
+  assert.match(content, /viewport-fit=cover/)
+})
