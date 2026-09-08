@@ -103,6 +103,9 @@ test('the page goes transparent while the native scanner runs', () => {
   const html = read('web', 'index.html')
   assert.match(html, /html\.scanning,html\.scanning body\{background:transparent!important\}/)
   assert.match(html, /html\.scanning #app\{visibility:hidden\}/)
+  // The scanner is opened from the "add a peer" modal, which is a SIBLING of
+  // #app: hiding the app leaves it standing on top of the camera picture.
+  assert.match(html, /html\.scanning \.modal:not\(#scan-modal\)[^{]*\{display:none\}/)
   const app = read('web', 'src', 'app.ts')
   assert.ok(app.includes("classList.add('scanning')"), 'app.ts never marks the page as scanning')
   assert.ok(app.includes("classList.remove('scanning')"), 'app.ts never takes the mark off again')

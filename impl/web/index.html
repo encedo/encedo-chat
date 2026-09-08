@@ -707,6 +707,13 @@
      whatever the camera is pointed at. `<video>` has no part in this path. */
   html.scanning,html.scanning body{background:transparent!important}
   html.scanning #app{visibility:hidden}
+  /* ...and everything that is NOT the app: the scanner is opened FROM a modal
+     ("Dodaj peera"), which is a sibling of #app and therefore untouched by
+     hiding it. Reported from a phone (0.5.60): the camera was running, the
+     zoom worked, and the picture was behind an opaque card. `display:none`
+     rather than a hidden attribute, so the modal keeps its state and comes
+     back with whatever was typed in it when the scan ends. */
+  html.scanning .modal:not(#scan-modal),html.scanning .drawer.open{display:none}
   html.scanning .scrim{background:transparent}
   html.scanning #scan-video{display:none}
   html.scanning #scan-modal{background:transparent;border-color:transparent;box-shadow:none;
