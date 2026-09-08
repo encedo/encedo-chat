@@ -1214,6 +1214,21 @@ it is easy to forget in `ufw` — `relay/DEPLOY.md` §1 + §4b. Check a node wit
 that must be dropped and fails if any is answered, because a UDP responder that
 answers more than it must is a reflector somebody can aim.
 
+**Android grants a WebView permission by AND, and one undeclared entry sinks
+it.** Reported at 0.5.56: the microphone was granted in the system dialog and
+recording still answered "denied". wry's `RustWebChromeClient.onPermissionRequest`
+asks for **MODIFY_AUDIO_SETTINGS *and* RECORD_AUDIO** in one
+`RequestMultiplePermissions` call and grants only if EVERY entry returns true.
+MODIFY_AUDIO_SETTINGS is a normal permission: undeclared it can never be
+granted, so the map holds a false, the AND fails, and the page is refused -
+while Android's permission screen shows the microphone as allowed, because it
+is. The camera path asks for CAMERA alone, which is why the QR scanner worked
+while voice notes did not: same bridge, one missing declaration apart. Both are
+in `PERMISSIONS` (`src-tauri/android/patch.mjs`) and pinned by
+`test/android-patch.test.ts`. The general shape to remember: on Android a
+webview permission is granted by a set, and a permission the manifest never
+declared is a silent `false` in that set.
+
 **Feedback sink** (`infra/feedback/`, since 0.5.39): the app's 💬 Feedback form
 POSTs one JSON document to `https://onchato.com/feedback`; `feedback.mjs`
 (127.0.0.1:9201, systemd `onchato-feedback`, `User=www-data`) validates the

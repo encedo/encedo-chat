@@ -26,12 +26,21 @@ export const PERMISSIONS = [
   // Without this the foreground notification is suppressed (the service still
   // runs) and every message notification is silently dropped.
   'android.permission.POST_NOTIFICATIONS',
-  // Voice notes. Declared because the feature ships; whether Android's WebView
-  // then passes getUserMedia through is NOT verified — wry installs the
-  // WebChromeClient, and on Linux the equivalent bridge had to be answered by
-  // hand (see `enable_webrtc` in lib.rs). If recording is refused on a phone,
-  // that bridge is where to look, not here.
+  // Voice notes. Both of these, and the second one is the whole bug.
+  //
+  // Reported from a phone (0.5.56): the microphone permission was granted and
+  // recording still answered "denied". wry's `RustWebChromeClient` DOES handle
+  // `onPermissionRequest`, and for AUDIO_CAPTURE it asks for
+  // MODIFY_AUDIO_SETTINGS **and** RECORD_AUDIO in one launcher call, then
+  // grants only if EVERY entry came back true. MODIFY_AUDIO_SETTINGS is a
+  // normal permission: undeclared, it can never be granted, so the map holds a
+  // false, the AND fails, and the request is denied - with the system's
+  // permission screen showing the microphone as allowed, because it is.
+  //
+  // The camera path asks for CAMERA alone, which is why scanning worked while
+  // recording did not: same bridge, one missing declaration apart.
   'android.permission.RECORD_AUDIO',
+  'android.permission.MODIFY_AUDIO_SETTINGS',
   // The QR scanner. This was DELIBERATELY absent while the scanner had never
   // been run on Android — and then somebody ran it (0.5.16, live): the modal
   // opened, the video stayed a grey placeholder, and the app said "Permission

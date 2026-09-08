@@ -63,6 +63,25 @@ test('the activity starts the service and gives it back on the way out', () => {
   assert.ok(out.includes('super.onCreate(savedInstanceState)'))
 })
 
+test('the manifest declares BOTH permissions wry asks for on an audio request', () => {
+  // The bug this pins (reported from a phone at 0.5.56): the microphone was
+  // granted and recording still answered "denied".
+  //
+  // wry's RustWebChromeClient handles `onPermissionRequest`, and for
+  // AUDIO_CAPTURE it launches a request for MODIFY_AUDIO_SETTINGS **and**
+  // RECORD_AUDIO together, granting only if every entry comes back true.
+  // MODIFY_AUDIO_SETTINGS is a normal permission: undeclared it can never be
+  // granted, the AND fails, and the page is refused - while Android's own
+  // permission screen shows the microphone as allowed, because it is.
+  //
+  // The camera path asks for CAMERA alone, which is exactly why scanning
+  // worked while recording did not.
+  const out = patchManifest(MANIFEST)
+  for (const p of ['RECORD_AUDIO', 'MODIFY_AUDIO_SETTINGS']) {
+    assert.ok(out.includes(`android.permission.${p}`), `the manifest must declare ${p}`)
+  }
+})
+
 test('patching twice changes nothing the second time', () => {
   const once = patchManifest(MANIFEST)
   assert.equal(patchManifest(once), once)
