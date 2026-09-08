@@ -34,6 +34,16 @@ serde_json = "1"
 # banner was dropped without a word.
 tauri-plugin-notification = "2"
 
+# Phone only. The QR scanner in the webview reads whatever frames the camera
+# hands it and cannot touch the lens; this plugin runs CameraX + ML Kit
+# natively, so the code can be zoomed - by the person, and by the decoder
+# itself when the code is too small to read. Vendored (300 KB) rather than
+# taken from crates.io because it is a FORK: the zoom commands and ML Kit's
+# zoom suggestions are Encedo's, and the same copy is what encedo-authenticator
+# ships. Two copies now; if either ever changes, both must.
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-barcode-scanner = { path = "plugins/barcode-scanner" }
+
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
 # Updating in place. Desktop only, and not by preference: the plugin replaces a

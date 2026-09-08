@@ -39,11 +39,12 @@ import {
   updateKind, updateCheck, updateDownload, updateProgress, updateApply,
   closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable, isMobileShell,
   appimageStatus, appimageInstall, showWindow, openExternal,
+  nativeScanAvailable, nativeScan, nativeScanCancel, nativeScanZoom, nativeScanSetZoom,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
 import { iceServersFor } from '../../lib/ice.ts'
-import { clampToStep, zoomPlan } from '../../lib/qrzoom.ts'
+import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { setRadioProfile } from '../../lib/radiophase.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
@@ -2303,15 +2304,18 @@ function knockReceived(room: Room) {
  * so the button appears only where the probe says both exist, and pasting the
  * link stays the way in everywhere else.
  */
-const scanSupported = () => typeof (globalThis as any).BarcodeDetector === 'function'
-  && !!navigator.mediaDevices?.getUserMedia
+const scanSupported = () => nativeScanAvailable()
+  || (typeof (globalThis as any).BarcodeDetector === 'function' && !!navigator.mediaDevices?.getUserMedia)
 let scanStream: MediaStream | null = null
 let scanTimer: any = null
+/** The native scanner is running: `closeScan` has a camera to stop. */
+let scanNative = false
 
 async function openScan() {
   if (!scanSupported()) return
   clr('scan-msg')
   $('scrim').classList.add('open'); $('scan-modal').classList.add('open')
+  if (nativeScanAvailable()) { await runNativeScan(); return }
   const video = $('scan-video') as HTMLVideoElement
   try {
     // The rear camera on a phone; whatever exists on a laptop. The resolution
@@ -2337,6 +2341,85 @@ async function openScan() {
       if (raw) handleScanned(String(raw))
     } catch { /* a frame that cannot be read is simply the next frame */ }
   }, 250)
+}
+
+/**
+ * The same scan, on the phone, through CameraX (see `nativeScanAvailable` in
+ * desktop.ts for why the webview's own camera is not good enough).
+ *
+ * The preview is drawn BEHIND the webview, so the page goes transparent for
+ * the duration — `html.scanning` in index.html — and this modal's text and its
+ * Cancel button are what is left floating over the picture.
+ *
+ * One call scans one code. A code that is not an invite leaves the modal open
+ * with a complaint, and the scanner is then started AGAIN: the plugin has
+ * already stopped its camera by the time we look at what it read, and a
+ * scanner that quietly stops after the first stray barcode is worse than one
+ * that never started.
+ */
+async function runNativeScan() {
+  scanNative = true
+  document.documentElement.classList.add('scanning')
+  void pollNativeZoom()
+  let raw: string | null
+  try {
+    raw = await nativeScan(PREFERRED_START)
+  } catch (e: any) {
+    closeScanNative()
+    setMsg('scan-msg', tr('Brak dostępu do kamery: ') + (e?.message ?? e), 'err')
+    return
+  }
+  // `closeScan()` ran while we were waiting: the answer is stale, and acting on
+  // it would reopen a window the user has just closed.
+  if (!scanNative) return
+  if (raw === null) { closeScan(); return } // backed out of the camera
+  handleScanned(raw)
+  if (scanNative && $('scan-modal').classList.contains('open')) void runNativeScan()
+}
+
+/** Stop the native camera and give the page its background back. */
+function closeScanNative() {
+  if (!scanNative) return
+  scanNative = false
+  void nativeScanCancel()
+  document.documentElement.classList.remove('scanning')
+}
+
+/**
+ * The lens's zoom, once there is a lens.
+ *
+ * CameraX binds the camera some way into the scan, so `zoom_range` answers
+ * nothing for the first few hundred milliseconds and the slider stays hidden
+ * until it does. Twelve tries at 300ms is ~3.6s, after which the honest
+ * reading is that this camera has no zoom to offer.
+ */
+async function pollNativeZoom() {
+  const row = $('scan-zoom-row')
+  const slider = $('scan-zoom') as HTMLInputElement
+  const label = $('scan-zoom-lab')
+  row.hidden = true
+  for (let i = 0; i < 12 && scanNative; i++) {
+    const r = await nativeScanZoom()
+    // A step of 0.1 is ours to choose: the plugin reports the ends of the range
+    // and nothing about granularity.
+    const plan = r ? zoomPlan({ zoom: { min: r.min, max: r.max, step: 0.1 } }) : null
+    if (plan && r) {
+      slider.min = String(plan.min); slider.max = String(plan.max); slider.step = String(plan.step)
+      const apply = (v: number, tell: boolean) => {
+        const z = clampToStep(v, plan.min, plan.max, plan.step)
+        slider.value = String(z)
+        label.textContent = `${z.toFixed(1)}x`
+        if (tell) void nativeScanSetZoom(z)
+      }
+      slider.oninput = () => apply(Number(slider.value), true)
+      // The scan opened at `PREFERRED_START`; show where the lens actually is
+      // rather than asking it again for a zoom it already has.
+      apply(r.current, false)
+      row.hidden = false
+      return
+    }
+    await new Promise((f) => setTimeout(f, 300))
+  }
 }
 
 /**
@@ -2378,6 +2461,7 @@ function setupScanZoom(stream: MediaStream) {
 }
 
 function closeScan() {
+  closeScanNative()
   clearInterval(scanTimer); scanTimer = null
   ;($('scan-zoom-row') as HTMLElement).hidden = true // the next camera may have no zoom
   for (const t of scanStream?.getTracks() ?? []) t.stop() // the camera light goes out

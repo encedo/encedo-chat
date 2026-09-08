@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/mobile-schema.json",
+  "identifier": "mobile",
+  "description": "Phone only: the native QR scanner. The webview's scanner cannot reach the lens, so on a phone the camera is driven by the barcode-scanner plugin — which is also what makes zoom possible, by hand and by the decoder itself.",
+  "platforms": ["android", "iOS"],
+  "windows": ["main"],
+  "permissions": [
+    "barcode-scanner:allow-scan",
+    "barcode-scanner:allow-cancel",
+    "barcode-scanner:allow-check-permissions",
+    "barcode-scanner:allow-request-permissions",
+    "barcode-scanner:allow-open-app-settings",
+    "barcode-scanner:allow-set-zoom",
+    "barcode-scanner:allow-zoom-range"
+  ]
+}

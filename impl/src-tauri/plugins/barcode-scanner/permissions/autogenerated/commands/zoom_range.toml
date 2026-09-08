@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-zoom-range"
+description = "Enables the zoom_range command without any pre-configured scope."
+commands.allow = ["zoom_range"]
+
+[[permission]]
+identifier = "deny-zoom-range"
+description = "Denies the zoom_range command without any pre-configured scope."
+commands.deny = ["zoom_range"]

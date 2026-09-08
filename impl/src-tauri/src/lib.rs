@@ -1153,7 +1153,14 @@ mod mobile {
     fn desk_show() {}
 
     pub fn wire(b: Builder<Wry>) -> Builder<Wry> {
-        b.plugin(tauri_plugin_notification::init())
+        // The native QR scanner (CameraX + ML Kit). The webview's own scanner
+        // stays for browsers; on a phone it cannot touch the lens, so a code at
+        // arm's length is a small patch of a wide frame and no amount of
+        // JavaScript makes it bigger. This one is driven by `scanQr()` in
+        // web/src/app.ts and can be zoomed - by the person through the slider,
+        // and by the decoder itself when it decides the code is too small.
+        b.plugin(tauri_plugin_barcode_scanner::init())
+            .plugin(tauri_plugin_notification::init())
             .invoke_handler(tauri::generate_handler![
                 desk_notify,
                 desk_notify_permission,

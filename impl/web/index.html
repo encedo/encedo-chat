@@ -676,6 +676,21 @@
      about what the camera sees. */
   #scan-video{width:100%;max-height:46vh;border-radius:10px;background:#000;margin-top:8px;object-fit:contain}
   .zoom-row{display:flex;align-items:center;gap:10px;margin-top:8px}
+  /* The NATIVE scanner (packaged Android) draws the camera preview BEHIND the
+     webview, so everything between the eye and the preview has to get out of
+     the way: the page loses its background, the app behind the modal is hidden
+     rather than dimmed, and this modal keeps only the parts that must stay
+     readable - which get their own dark plate, since the picture behind them is
+     whatever the camera is pointed at. `<video>` has no part in this path. */
+  html.scanning,html.scanning body{background:transparent!important}
+  html.scanning #app{visibility:hidden}
+  html.scanning .scrim{background:transparent}
+  html.scanning #scan-video{display:none}
+  html.scanning #scan-modal{background:transparent;border-color:transparent;box-shadow:none;
+    top:auto;bottom:calc(16px + env(safe-area-inset-bottom));transform:translate(-50%,0)}
+  html.scanning #scan-modal h2,html.scanning #scan-modal .msub{background:rgba(0,0,0,.62);color:#fff;
+    border-radius:8px;padding:6px 9px}
+  html.scanning #scan-modal .zoom-lab{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.7)}
   .zoom-row input[type=range]{flex:1;accent-color:var(--accent)}
   .zoom-lab{font-family:var(--mono);font-size:12px;color:var(--muted);min-width:3.2em;text-align:right}
   .group-members{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;margin-top:4px}

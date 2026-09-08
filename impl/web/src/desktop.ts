@@ -276,3 +276,79 @@ export const updateCheck = () => invoke<UpdateInfo | null>('desk_update_check')
 export const updateDownload = () => invoke<void>('desk_update_download')
 export const updateProgress = () => invoke<{ got: number; total: number | null }>('desk_update_progress')
 export const updateApply = () => invoke<void>('desk_update_apply')
+
+// ---- the camera, on the phone ----------------------------------------------
+/**
+ * The QR scanner, as the packaged Android shell does it.
+ *
+ * A browser scans with `getUserMedia` + `BarcodeDetector` and paints the frames
+ * into a `<video>`. The Android webview can do neither well: the camera it
+ * hands to `getUserMedia` comes back as the wide lens at whatever resolution it
+ * likes, with no zoom control, and a QR code at arm's length is then a patch of
+ * pixels too small to decode (reported 2026-09-07: "no zoom, 1:1, impractical").
+ *
+ * So on the phone the picture comes from CameraX instead, through the vendored
+ * `barcode-scanner` plugin: ML Kit decodes the frames, the lens has a real
+ * optical/digital zoom the slider can drive, and the preview is drawn BEHIND
+ * the webview — which is why the caller must make the page transparent while
+ * it runs (`html.scanning` in index.html) or the user aims a camera at a card
+ * they cannot see through.
+ *
+ * The plugin is invoked directly rather than through its npm package: the
+ * package is a thin wrapper over exactly these four commands, and one fewer
+ * dependency in the web bundle is worth the four lines.
+ */
+export interface ScanZoom { min: number; max: number; current: number }
+
+/** Can this build scan natively? Only the packaged phone shell can. */
+export const nativeScanAvailable = (): boolean => isMobileShell()
+
+type PermMap = { camera?: string } | string
+
+const permOf = (p: PermMap): string => (typeof p === 'string' ? p : (p?.camera ?? 'prompt'))
+
+/**
+ * Scan one code. Resolves with its content, or `null` when the user backed out
+ * — cancelling is not an error, and the plugin reports it as one. Rejects only
+ * when the camera genuinely cannot be used, which the caller shows.
+ */
+export async function nativeScan(zoom?: number): Promise<string | null> {
+  let p = permOf(await invoke<PermMap>('plugin:barcode-scanner|check_permissions'))
+  if (p !== 'granted' && p !== 'denied') {
+    p = permOf(await invoke<PermMap>('plugin:barcode-scanner|request_permissions'))
+  }
+  if (p !== 'granted') throw new Error('camera permission denied')
+  try {
+    const r = await invoke<{ content: string }>('plugin:barcode-scanner|scan', {
+      // `windowed` keeps our own UI on top of the preview instead of replacing
+      // the screen with the plugin's; `back` because a QR code is held out, not
+      // shown to oneself.
+      formats: ['QR_CODE'], windowed: true, cameraDirection: 'back', zoom,
+    })
+    return r.content
+  } catch (e) {
+    if (String(e).toLowerCase().includes('cancel')) return null
+    throw e
+  }
+}
+
+export async function nativeScanCancel(): Promise<void> {
+  try { await invoke<void>('plugin:barcode-scanner|cancel') } catch { /* nothing was running */ }
+}
+
+/**
+ * The lens's zoom range, or `null` while there is not one yet.
+ *
+ * CameraX binds the lens some way into the scan, so the honest answer for the
+ * first few hundred milliseconds is "not known" — the caller polls rather than
+ * showing a slider whose ends are a guess.
+ */
+export async function nativeScanZoom(): Promise<ScanZoom | null> {
+  try { return await invoke<ScanZoom>('plugin:barcode-scanner|zoom_range') } catch { return null }
+}
+
+/** Ask for a zoom ratio; answers with what the lens actually did. */
+export async function nativeScanSetZoom(ratio: number): Promise<number | null> {
+  try { return (await invoke<{ ratio: number }>('plugin:barcode-scanner|set_zoom', { ratio })).ratio }
+  catch { return null }
+}
