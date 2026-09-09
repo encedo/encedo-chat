@@ -106,6 +106,16 @@ test('the page goes transparent while the native scanner runs', () => {
   // The scanner is opened from the "add a peer" modal, which is a SIBLING of
   // #app: hiding the app leaves it standing on top of the camera picture.
   assert.match(html, /html\.scanning \.modal:not\(#scan-modal\)[^{]*\{display:none\}/)
+  // The aiming window, and where it must NOT be: `position:fixed` inside a
+  // transformed ancestor is positioned against that ancestor, and the scan
+  // modal is translated - with the frame as its child it drew around the
+  // buttons instead of the middle of the screen.
+  assert.match(html, /id="scan-vf"/)
+  assert.ok(html.indexOf('id="scan-vf"') < html.indexOf('id="scan-modal"'),
+    'the viewfinder must be a sibling BEFORE the scan modal, not inside it')
+  assert.match(html, /html\.scanning #scan-vf\{[^}]*box-shadow:0 0 0 100vmax/,
+    'the dimming around the frame is the spread shadow; without it there is no frame')
+
   const app = read('web', 'src', 'app.ts')
   assert.ok(app.includes("classList.add('scanning')"), 'app.ts never marks the page as scanning')
   assert.ok(app.includes("classList.remove('scanning')"), 'app.ts never takes the mark off again')

@@ -721,6 +721,19 @@
   html.scanning #scan-modal h2,html.scanning #scan-modal .msub{background:rgba(0,0,0,.62);color:#fff;
     border-radius:8px;padding:6px 9px}
   html.scanning #scan-modal .zoom-lab{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.7)}
+  /* The aiming window. Reported 2026-09-09: a full-screen picture is more than
+     is wanted - "people would rather have a frame to point the code at", the
+     way encedo-authenticator does it. The square itself paints nothing; the
+     spread shadow around it is what dims the rest of the camera, so the hole
+     IS the picture. */
+  #scan-vf{display:none}
+  html.scanning #scan-vf{display:block;position:fixed;left:50%;top:34%;transform:translate(-50%,-50%);
+    z-index:31;width:min(72vw,40vh);aspect-ratio:1;border-radius:18px;box-shadow:0 0 0 100vmax rgba(0,0,0,.78)}
+  html.scanning #scan-vf i{position:absolute;width:30px;height:30px;border:3px solid var(--accent)}
+  html.scanning #scan-vf i:nth-child(1){top:0;left:0;border-right:0;border-bottom:0;border-radius:18px 0 0 0}
+  html.scanning #scan-vf i:nth-child(2){top:0;right:0;border-left:0;border-bottom:0;border-radius:0 18px 0 0}
+  html.scanning #scan-vf i:nth-child(3){bottom:0;left:0;border-right:0;border-top:0;border-radius:0 0 0 18px}
+  html.scanning #scan-vf i:nth-child(4){bottom:0;right:0;border-left:0;border-top:0;border-radius:0 0 18px 0}
   html.scanning #scan-modal .btn-ghost,html.scanning #scan-msg:not(:empty){background:rgba(0,0,0,.62)}
   html.scanning #scan-msg:not(:empty){border-radius:8px;padding:6px 9px}
   .zoom-row input[type=range]{flex:1;accent-color:var(--accent)}
@@ -1342,6 +1355,17 @@
        the same import window, fingerprint and all), a key already in the contact
        list is a VERIFICATION — the one moment when "is this really their key"
        gets a machine-checked answer instead of two people reading hex aloud. -->
+  <!-- The aiming window, and only while the NATIVE scanner runs: the camera
+       picture is behind the webview, so the "window" is a hole - a transparent
+       square with a shadow spread wide enough to dim everything around it, and
+       four corners to point at the code with. The browser path has a <video>
+       instead, which needs none of this.
+
+       A SIBLING of the modal, not a child: `position:fixed` inside a
+       transformed ancestor is positioned against that ancestor, and the modal
+       is translated - which put the frame around the buttons. -->
+  <div class="viewfinder" id="scan-vf"><i></i><i></i><i></i><i></i></div>
+
   <div class="modal" id="scan-modal">
     <h2 data-i18n="Zeskanuj kod QR">Zeskanuj kod QR</h2>
     <div class="msub" data-i18n="Pokaż aparatowi kod z ekranu drugiej osoby. Nieznany klucz zaproponuję dodać, znany — porównam z tym, który już masz.">Pokaż aparatowi kod z ekranu drugiej osoby. Nieznany klucz zaproponuję dodać, znany — porównam z tym, który już masz.</div>
