@@ -7,6 +7,13 @@
  *
  *   node relay.mjs --pass <secret> --port 9001 [--host bs1.onchato.com] [--peers <ma>...]
  *                  [--max-topics 250] [--idle-ttl 120]
+ *                  [--stats 15] [--stats-json <path>] [--quiet-msgs]
+ *   --stats <min>  — one summary line per window instead of guessing from a
+ *                    trace: live topics (+added -evicted, REFUSED), messages,
+ *                    bytes, distinct publishers, connections, CPU, RSS, heap
+ *                    and the worst event-loop stall. Off without the flag.
+ *   --quiet-msgs   — drop the line-per-message (~51k a day on bs1). Only with
+ *                    --stats, or the log stops saying anything about traffic.
  *   DUMP=<dir> node relay.mjs ...   — debug/audit: every observable action to JSONL
  *                                  (dump.mjs). NEVER on production.
  *
@@ -28,6 +35,8 @@ import { peerIdFromPrivateKey } from '@libp2p/peer-id'
 import { multiaddr } from '@multiformats/multiaddr'
 import { createHash } from 'crypto'
 import { createDump } from './dump.mjs'
+import { startStats } from './stats.mjs'
+import { appendFile } from 'fs'
 
 const args = process.argv.slice(2)
 const get = (flag, def) => { const i = args.indexOf(flag); return i !== -1 ? args[i + 1] : def }
@@ -65,6 +74,13 @@ const IDLE_TTL = parseInt(get('--idle-ttl', '120')) * 1000
 // editing this file (a local edit conflicts on every git pull). Default sized for
 // 512 clients + inter-relay headroom; a load test passes e.g. --max-connections 50000.
 const MAX_CONNS = parseInt(get('--max-connections', '520'))
+// Periodic counters instead of a line per frame (see stats.mjs). `--stats 15`
+// prints one summary every fifteen minutes; without the flag none of it runs.
+// `--quiet-msgs` drops the per-message line, which is ~51k lines a day on bs1 —
+// only sensible WITH stats on, or the log stops saying anything at all.
+const STATS_MIN = parseFloat(get('--stats', '0')) || 0
+const STATS_JSON = get('--stats-json', null)
+const QUIET_MSGS = args.includes('--quiet-msgs')
 // DUMP=<dir> -> full JSONL trace of everything the relay observes (see dump.mjs).
 // Null when unset — every use below is `dump?.<call>`, so production runs no dump
 // code at all. Created BEFORE the node: its X-Real-IP capture wraps
@@ -157,18 +173,35 @@ const relay = await createLibp2p({
 const SWEEP_MS = Math.max(2_000, Math.min(30_000, Math.floor(IDLE_TTL / 2)))
 const lastSeen = new Map() // topic -> last activity (ms); drives eviction
 
+// Counters, if asked for. `null` otherwise, and every use below is `stats?.`,
+// so an unflagged relay runs none of this. The gauges are read at the instant
+// the line is written, so "topics now" and "messages since" belong together.
+const stats = STATS_MIN > 0
+  ? startStats({
+      windowMin: STATS_MIN,
+      jsonPath: STATS_JSON,
+      fs: STATS_JSON ? { appendFile } : null,
+      gauges: () => ({
+        topics: relay.services.pubsub.getTopics().length,
+        conns: relay.getConnections().length,
+      }),
+    })
+  : null
+
 relay.services.pubsub.addEventListener('subscription-change', (evt) => {
   for (const { topic, subscribe } of evt.detail.subscriptions) {
     if (subscribe && !relay.services.pubsub.getTopics().includes(topic)) {
       if (relay.services.pubsub.getTopics().length >= MAX_TOPICS) {
         // The client gets no error for this — it just never sees anyone in the
         // room. Loud in the log, because it looks like "the app is broken".
+        stats?.counters.topic('refuse')
         console.log(`[!topic] LIMIT ${MAX_TOPICS} reached — REFUSING "${topic}" (raise --max-topics)`)
         dump?.event('topic.refuse', { topic, peer: evt.detail.peerId.toString(), limit: MAX_TOPICS })
         continue
       }
       relay.services.pubsub.subscribe(topic)
       lastSeen.set(topic, Date.now())
+      stats?.counters.topic('add')
       console.log(`[+topic] "${topic}"`)
       dump?.event('topic.add', { topic, peer: evt.detail.peerId.toString() })
     }
@@ -181,7 +214,8 @@ relay.services.pubsub.addEventListener('message', (evt) => {
   // decoding it printed garbage anyway) — logging it just parked user metadata
   // in journald for no operational benefit.
   const from = evt.detail.from.toString().slice(0, 12)
-  console.log(`[msg:${evt.detail.topic.slice(0, 12)}...] ${from}... ${evt.detail.data.length} B`)
+  stats?.counters.msg(from, evt.detail.data.length)
+  if (!QUIET_MSGS) console.log(`[msg:${evt.detail.topic.slice(0, 12)}...] ${from}... ${evt.detail.data.length} B`)
 })
 
 // evict abandoned topics: no activity (not even a heartbeat) for IDLE_TTL -> all
@@ -192,14 +226,15 @@ setInterval(() => {
     if (now - (lastSeen.get(topic) ?? 0) > IDLE_TTL) {
       relay.services.pubsub.unsubscribe(topic)
       lastSeen.delete(topic)
+      stats?.counters.topic('evict')
       console.log(`[-topic] evicted "${topic}" (idle > ${IDLE_TTL / 1000}s)`)
       dump?.event('topic.evict', { topic, idle_s: IDLE_TTL / 1000 })
     }
   }
 }, SWEEP_MS)
 
-relay.addEventListener('peer:connect', (evt) => console.log('[+]', evt.detail.toString().slice(0, 16) + '...'))
-relay.addEventListener('peer:disconnect', (evt) => console.log('[-]', evt.detail.toString().slice(0, 16) + '...'))
+relay.addEventListener('peer:connect', (evt) => { stats?.counters.conn(1); console.log('[+]', evt.detail.toString().slice(0, 16) + '...') })
+relay.addEventListener('peer:disconnect', (evt) => { stats?.counters.conn(-1); console.log('[-]', evt.detail.toString().slice(0, 16) + '...') })
 // connections, subscriptions, every frame, reservations, start/stop -> JSONL
 dump?.attach(relay, { flags: args })
 
@@ -229,6 +264,14 @@ console.log(`Tematy: limit ${MAX_TOPICS} równoczesnych, eviction po ${IDLE_TTL 
 console.log(`Połączenia: limit ${MAX_CONNS}`)
 // Loud on purpose: this line's ABSENCE from the journal is what proves a node
 // ran without the dump. Nothing is printed when DUMP is unset.
+if (stats) {
+  console.log(`Statystyki: co ${STATS_MIN} min jedna linia [stats ${STATS_MIN}m]`
+    + `${STATS_JSON ? ` + JSONL -> ${STATS_JSON}` : ''}${QUIET_MSGS ? '; log per wiadomość WYŁĄCZONY' : ''}`)
+} else if (QUIET_MSGS) {
+  // Quiet without counters means a log that says nothing about traffic at all,
+  // which is worse than either choice made on purpose.
+  console.log('UWAGA: --quiet-msgs bez --stats — ruch nie będzie widoczny w logu w ŻADNEJ postaci')
+}
 if (dump) console.log(`DUMP ON -> ${dump.dir}  (events-*.jsonl + payload-*.jsonl, pełne peer id, IP z X-Real-IP — NIE na produkcji)`)
 if (HOST) {
   console.log(`Adres produkcyjny (WSS przez nginx):`)
