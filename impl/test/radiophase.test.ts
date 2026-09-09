@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { alignedTimer, setRadioProfile } from '../lib/radiophase.ts'
+import { alignedTimer, setRadioProfile, profileFor } from '../lib/radiophase.ts'
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
@@ -61,4 +61,21 @@ test('stop stops, and stopping one leaves the other running', async () => {
   stopB()
   assert.equal(a, aFrozen)
   assert.ok(b > aFrozen, `the survivor stalled too: ${b} <= ${aFrozen}`)
+})
+
+test('a desktop hidden in the tray does not slow down', () => {
+  // Measured on the relay (2026-09-09): two tray-resident desktops announced
+  // to each other exactly 60 times an hour all night - the 4x slowdown - while
+  // the receiving side writes a contact off after 90 s of silence. One late
+  // beacon is then enough to put the dot out, which is what both machines
+  // showed every morning. The slowdown exists for a radio and a battery; a
+  // desktop in the tray has neither, and pays the whole cost.
+  assert.equal(profileFor(true, 'desktop'), 'active')
+  assert.equal(profileFor(false, 'desktop'), 'active')
+  // A phone in a pocket is what the profile was written for, and a browser tab
+  // is throttled by the browser regardless.
+  assert.equal(profileFor(true, 'mobile'), 'background')
+  assert.equal(profileFor(true, 'browser'), 'background')
+  assert.equal(profileFor(false, 'mobile'), 'active')
+  assert.equal(profileFor(false, 'browser'), 'active')
 })

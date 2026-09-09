@@ -59,6 +59,28 @@ const radioPhase = Math.random() * RADIO_TICK_MS
  * is due.
  */
 export type RadioProfile = 'active' | 'background'
+
+/** Where this session is running, as far as the radio is concerned. */
+export type Host = 'desktop' | 'mobile' | 'browser'
+
+/**
+ * Which profile a hidden window deserves, per host.
+ *
+ * The slowdown buys battery on a radio, and an always-on desktop hidden in the
+ * tray has neither the battery nor the radio - what it has is the one job the
+ * slowdown costs: telling people it is still there. Measured on the relay
+ * (2026-09-09), two tray-resident desktops announced exactly 60 times an hour
+ * to each other all night, which is the 4x slowdown, and the receiving side
+ * writes a contact off after 90 s of silence. That is a margin of ONE beacon:
+ * a single late frame and the dot goes dark, which is what both machines
+ * showed every morning.
+ *
+ * A phone still slows down - that is what the profile is for - and so does a
+ * browser tab, whose timers the browser throttles anyway.
+ */
+export const profileFor = (hidden: boolean, host: Host): RadioProfile =>
+  hidden && host !== 'desktop' ? 'background' : 'active'
+
 let profile: RadioProfile = 'active'
 const rearms = new Set<() => void>()
 

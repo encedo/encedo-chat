@@ -46,7 +46,7 @@ import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
 import { iceServersFor } from '../../lib/ice.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { boxHeight } from '../../lib/composer.ts'
-import { setRadioProfile } from '../../lib/radiophase.ts'
+import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -6547,8 +6547,19 @@ document.addEventListener('visibilitychange', () => {
   // times fewer radio wakes where battery is actually spent. Open rooms keep
   // their cadence (their receivers' thresholds cannot be told about a
   // slowdown); coming back re-arms everything onto the next 15 s tick.
-  setRadioProfile(document.hidden ? 'background' : 'active')
-  if (document.hidden) void persistGroups() // best-effort flush on backgrounding (encrypt is async); sends are already durable
+  //
+  // A DESKTOP hidden in the tray does not slow down, and `profileFor` carries
+  // the measurement that says why: there is no radio and no battery to save
+  // there, and the saving cost exactly the thing a tray-resident app is for.
+  setRadioProfile(profileFor(document.hidden, isMobileShell() ? 'mobile' : isDesktopShell() ? 'desktop' : 'browser'))
+  if (document.hidden) { void persistGroups(); return } // best-effort flush on backgrounding (encrypt is async); sends are already durable
+  // Back on screen. The rooms were refreshed above; the LIGHT presence watches
+  // — the contact dots — were not, and neither was the transport. `refresh()`
+  // re-dials if the socket died unseen and announces on every watch at once,
+  // so the dots light up now instead of on the next heartbeat (up to a minute
+  // away on a slowed link). Reported 2026-09-09: opening from the tray showed
+  // no dot beside a peer that was there all along.
+  void client?.refresh().catch((e: any) => ecLog('refresh on reveal failed: ' + (e?.message ?? e), 'debug'))
 })
 // Alt-tab back does not change visibility (the window never left the screen),
 // but focus fires — and an idle-away person who returns that way deserves the
