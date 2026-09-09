@@ -352,3 +352,29 @@ export async function nativeScanSetZoom(ratio: number): Promise<number | null> {
   try { return (await invoke<{ ratio: number }>('plugin:barcode-scanner|set_zoom', { ratio })).ratio }
   catch { return null }
 }
+
+// ---- the connection diary --------------------------------------------------
+/**
+ * Where the recorder's lines go on a desktop, and where to find them.
+ *
+ * A packaged app has no console to open, so the one witness to what happened
+ * overnight has to be a file. See `lib/diag.ts` for what is allowed into it
+ * (the connection, never the conversation) and `desk_diag_append` for the
+ * rotation that keeps it from growing without end.
+ *
+ * A browser keeps its diary in memory only. There is nowhere honest to put a
+ * file, and a tab that is closed at night is not the case being investigated.
+ */
+export const diagFileAvailable = (): boolean => isDesktopShell() && deskKind === 'desktop'
+
+export async function diagPath(): Promise<string> {
+  if (!diagFileAvailable()) return ''
+  try { return await invoke<string>('desk_diag_path') } catch { return '' }
+}
+
+/** Append; a failure is not worth telling anyone about — this is diagnostics,
+ *  and losing a line of it must never interrupt what the app is doing. */
+export async function diagAppend(text: string): Promise<void> {
+  if (!text || !diagFileAvailable()) return
+  try { await invoke<void>('desk_diag_append', { text }) } catch {}
+}

@@ -40,6 +40,7 @@ import {
   closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable, isMobileShell,
   appimageStatus, appimageInstall, showWindow, openExternal,
   nativeScanAvailable, nativeScan, nativeScanCancel, nativeScanZoom, nativeScanSetZoom,
+  diagFileAvailable, diagPath, diagAppend,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
@@ -47,6 +48,7 @@ import { iceServersFor } from '../../lib/ice.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
+import { newDiag } from '../../lib/diag.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -359,6 +361,10 @@ for (const id of ['build-id-login', 'build-id-settings']) {
   const el = document.getElementById(id)
   if (el) { el.textContent = BUILD_ID; el.title = tr('Wersja i commit tej wersji aplikacji') }
 }
+/** The connection diary. Created HERE, above everything: `ecLog` feeds it and
+ *  is called from module top-level long before the rest of the wiring below. */
+const diag = newDiag()
+
 const SHOW_KEYS = __EC_ALLOW_KEYS__ && new URLSearchParams(location.search).has('keys')
 const HEM_TRACE = new URLSearchParams(location.search).has('debug') || SHOW_KEYS
 if (HEM_TRACE) {
@@ -1327,6 +1333,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     onLog: ecLog,
     onLink: (state) => {
       linkState = state; paintStatus()
+      diag.note(`link ${state}`)
       // The relay came back: 1:1 rooms are refreshed by core, but groups are passive
       // and not registered there — re-warm their meshes so they don't stay silently dead.
       if (state === 'online') {
@@ -1460,8 +1467,20 @@ async function syncPresence() {
   // announce, and `onWantsConversation` is guarded by `rooms.has`.
   const toWatch = contactsCache.filter((x) => x.pub !== activePub)
   await c.watchContacts(toWatch.map((x) => ({ pub: x.pub, kid: x.kid })), {
-    onOnline: (p) => { if (!onlinePubs.has(p.pub)) { onlinePubs.add(p.pub); renderContacts() } },
-    onOffline: (p) => { if (onlinePubs.delete(p.pub)) renderContacts() },
+    // Written down as well as painted: a dot that went dark at 03:14 and came
+    // back at 03:15 is the whole evidence for what the night did, and by
+    // morning the screen only shows the last state. The key prefix, not the
+    // name — the file has no business holding who somebody is.
+    onOnline: (p) => {
+      if (onlinePubs.has(p.pub)) return
+      onlinePubs.add(p.pub); renderContacts()
+      diag.note(`peer ${p.pub.slice(0, 12)} lit`)
+    },
+    onOffline: (p) => {
+      if (!onlinePubs.delete(p.pub)) return
+      renderContacts()
+      diag.note(`peer ${p.pub.slice(0, 12)} dark`)
+    },
     onWantsConversation: (p) => {
       // The contact is opening EH-2. Open the room IN THE BACKGROUND so their
       // frame is replayed and the handshake completes and the message arrives —
@@ -1901,7 +1920,35 @@ for (const el of document.querySelectorAll('#tmode input')) {
   })
 }
 
-const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles(); paintTransportSetting(); paintNotifySetting() }
+const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles(); paintTransportSetting(); paintNotifySetting(); void paintDiagSetting() }
+
+/**
+ * The diary's row in Settings: where the file is, and a way to take the log
+ * with you from anywhere else. Painted on open rather than at boot — the path
+ * is a question for the host, and asking it costs nothing once a drawer opens.
+ */
+async function paintDiagSetting() {
+  const path = await diagPath()
+  for (const id of ['log-section', 'log-hint', 'btn-log-copy']) $(id).hidden = false
+  const p = $('log-path')
+  p.hidden = !path
+  if (path) { p.textContent = path; p.title = path }
+}
+$('btn-log-copy').addEventListener('click', async () => {
+  // The in-memory ring, which on a desktop is the tail of the same file and in
+  // a browser is all there is.
+  const text = diag.all().join('\n')
+  try {
+    await navigator.clipboard.writeText(text)
+    toast(tr('Dziennik skopiowany ({n} linii)', { n: diag.all().length }))
+  } catch {
+    // A clipboard that refuses (no permission, no secure context) must not be
+    // the end of the road: the log is the reason somebody pressed this.
+    console.log(text)
+    toast(tr('Schowek odmówił — dziennik jest w konsoli'))
+  }
+  diagFlush()
+})
 const closeDrawer = () => { $('scrim').classList.remove('open'); $('drawer').classList.remove('open') }
 // ---- invite: my profile as a link, and someone else's arriving as one -------
 /**
@@ -3342,10 +3389,65 @@ const DEBUG = HEM_TRACE // `?keys=1` implies it, so one flag does not half-enabl
 const t0 = Date.now()
 function ecLog(msg: string, level: 'info' | 'debug' = 'info') {
   if (level === 'debug' && !DEBUG) return
+  // The diary takes the connection lines out of this stream and drops
+  // everything else — including this file's own `sent "..."`, which carries
+  // message text. The allowlist lives in lib/diag.ts and is tested there.
+  diag.fromLog(msg)
   const t = ((Date.now() - t0) / 1000).toFixed(2).padStart(6)
   const style = level === 'debug' ? 'color:#79829c' : 'color:#6579e0;font-weight:600'
   console.log(`%c[ec ${t}s] %c${msg}`, 'color:#74788d', style)
 }
+// ---- the connection diary --------------------------------------------------
+/**
+ * What was happening to the connection at three in the morning.
+ *
+ * `ecLog` goes to a console, and a packaged app has no console anybody can
+ * open — so the events that decide whether a contact looks present are also
+ * written down with a wall clock, and on a desktop into a file that survives a
+ * restart. `lib/diag.ts` holds the rule about what may go in: the connection,
+ * never the conversation.
+ *
+ * Everything here is periodic and cheap. The instrument that cannot be got any
+ * other way is the LATENESS probe: a timer that knows when it was due says how
+ * long the process was not running, which is the difference between "the peer
+ * went quiet" and "we were not there to hear them".
+ */
+const DIAG_TICK_MS = 15_000
+const DIAG_SUMMARY_MS = 5 * 60_000
+const DIAG_FLUSH_MS = 60_000
+
+const diagFlush = () => { const lines = diag.take(); if (lines.length) void diagAppend(lines.join('\n') + '\n') }
+
+function startDiag() {
+  diag.note(`start ${BUILD_ID} ${isMobileShell() ? 'mobile' : isDesktopShell() ? 'desktop' : 'browser'}`)
+  let due = Date.now() + DIAG_TICK_MS
+  setInterval(() => {
+    const late = Date.now() - due
+    due = Date.now() + DIAG_TICK_MS
+    diag.tick(Math.max(0, late))
+  }, DIAG_TICK_MS)
+  setInterval(() => {
+    // Whatever the transport can say about itself right now. `topics` is the
+    // one worth watching over a night: a subscription list that shrinks while
+    // the socket stays up is a mesh problem, and nothing else in the app would
+    // ever say so.
+    let extra = 'link=? '
+    try {
+      const n = client?.netStatus()
+      if (n) extra = `link=${n.link} peers=${n.peers} topics=${n.topics.length} `
+    } catch {}
+    diag.summary(`${extra}lit=${onlinePubs.size}/${contactsCache.length}`)
+  }, DIAG_SUMMARY_MS)
+  setInterval(diagFlush, DIAG_FLUSH_MS)
+  // A window being closed is exactly when the last minute matters most.
+  window.addEventListener('pagehide', diagFlush)
+}
+startDiag()
+// A seam for looking at the diary from the outside — the browser harness reads
+// it, and on a desktop `?debug=1` is not reachable anyway (there is no address
+// bar), so this costs the packaged app nothing.
+if (DEBUG) (globalThis as any).__diag = diag
+
 ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : 'libp2p'}`
   + ` rotation=${FORCED_ROTATION_SEC == null ? 'per-pair offset' : `forced ${String(Math.floor(FORCED_ROTATION_SEC / 3600)).padStart(2, '0')}:${String(Math.floor((FORCED_ROTATION_SEC % 3600) / 60)).padStart(2, '0')} UTC`};`
   + ' add ?debug=1 for the full trace, ?mqtt=1 for the broker transport, ?rot=<hour> to force the rollover time')
@@ -6533,6 +6635,7 @@ $('group-create').addEventListener('click', async () => {
 
 document.addEventListener('visibilitychange', () => {
   ecLog(document.hidden ? 'tab hidden — browser will throttle our timers' : 'tab visible — re-announcing')
+  diag.note(`vis ${document.hidden ? 'hidden' : 'visible'}`)
   // Every open room, not just the visible one: a background conversation must
   // stay alive across the throttle too. Coming back, the tab's timers were
   // throttled while hidden, so our Announce heartbeat went quiet and the peer may
@@ -6551,8 +6654,11 @@ document.addEventListener('visibilitychange', () => {
   // A DESKTOP hidden in the tray does not slow down, and `profileFor` carries
   // the measurement that says why: there is no radio and no battery to save
   // there, and the saving cost exactly the thing a tray-resident app is for.
-  setRadioProfile(profileFor(document.hidden, isMobileShell() ? 'mobile' : isDesktopShell() ? 'desktop' : 'browser'))
-  if (document.hidden) { void persistGroups(); return } // best-effort flush on backgrounding (encrypt is async); sends are already durable
+  const host = isMobileShell() ? 'mobile' : isDesktopShell() ? 'desktop' : 'browser'
+  const prof = profileFor(document.hidden, host)
+  setRadioProfile(prof)
+  diag.note(`radio ${prof} (${host})`)
+  if (document.hidden) { void persistGroups(); diagFlush(); return } // best-effort flush on backgrounding (encrypt is async); sends are already durable
   // Back on screen. The rooms were refreshed above; the LIGHT presence watches
   // — the contact dots — were not, and neither was the transport. `refresh()`
   // re-dials if the socket died unseen and announces on every watch at once,

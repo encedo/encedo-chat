@@ -1541,6 +1541,13 @@
     <div class="hint" id="mig-hint" style="margin-bottom:8px" data-i18n="Zapiszesz plik z całym profilem: tożsamością, kontaktami, grupami i ustawieniami. Otwiera go to samo hasło, którym logujesz się do profilu.">Zapiszesz plik z całym profilem: tożsamością, kontaktami, grupami i ustawieniami. Otwiera go to samo hasło, którym logujesz się do profilu.</div>
     <button class="btn" id="btn-export" style="margin-top:2px;background:none;color:var(--accent);border:1px solid var(--accent)" data-i18n="Przenieś profil">Przenieś profil</button>
     <button class="btn" id="btn-wipeout" style="margin-top:2px;background:none;color:var(--err);border:1px solid var(--err)" data-i18n="🧨 Wipeout — wyczyść wszystko">🧨 Wipeout — wyczyść wszystko</button>
+    <!-- The connection diary (lib/diag.ts). Hidden where there is no file to
+         name - a browser keeps it in memory, and the button is still the way
+         to get at it. -->
+    <div class="d-section" id="log-section" style="margin-top:22px" hidden data-i18n="Dziennik połączenia">Dziennik połączenia</div>
+    <div class="hint" id="log-hint" hidden style="margin-bottom:8px" data-i18n="Zapisuje, co dzieje się z łącznością — widoczność okna, stan przekaźnika, pojawianie się i znikanie kontaktów — z zegarem i po restarcie. Nie zapisuje treści rozmów.">Zapisuje, co dzieje się z łącznością — widoczność okna, stan przekaźnika, pojawianie się i znikanie kontaktów — z zegarem i po restarcie. Nie zapisuje treści rozmów.</div>
+    <div class="fp" id="log-path" hidden style="margin-bottom:8px"></div>
+    <button class="btn" id="btn-log-copy" hidden style="margin-top:2px;background:none;color:var(--accent);border:1px solid var(--accent)" data-i18n="Skopiuj dziennik">Skopiuj dziennik</button>
     <div class="build-id" id="build-id-settings"></div>
   </aside>
 </body>

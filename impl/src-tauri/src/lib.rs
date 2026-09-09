@@ -526,6 +526,45 @@ mod desk {
     #[tauri::command]
     fn desk_platform() -> String { "desktop".into() }
 
+    /// Where the connection diary lives. Shown in Settings, because a file
+    /// nobody can find is a file nobody reads.
+    fn diag_file(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+        let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        Ok(dir.join("connection.log"))
+    }
+
+    #[tauri::command]
+    fn desk_diag_path(app: AppHandle) -> Result<String, String> {
+        Ok(diag_file(&app)?.to_string_lossy().into_owned())
+    }
+
+    /// Append what the recorder has collected (lib/diag.ts).
+    ///
+    /// The file is the only part of this that survives a restart, which is the
+    /// whole point: the question is what happened at three in the morning, and
+    /// by breakfast an in-memory ring may have been through a relaunch.
+    ///
+    /// Rotated by SIZE and by hand: past the cap the file becomes `.1` and a
+    /// fresh one starts, so an app left running for a month cannot quietly fill
+    /// a disk, and the previous night is still there to read.
+    #[tauri::command]
+    fn desk_diag_append(app: AppHandle, text: String) -> Result<(), String> {
+        use std::io::Write;
+        const CAP: u64 = 512 * 1024;
+        let path = diag_file(&app)?;
+        if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > CAP {
+            let _ = std::fs::rename(&path, path.with_extension("log.1"));
+        }
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| e.to_string())?;
+        f.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     /// How this copy was installed — which decides whether it may update ITSELF.
     ///
     /// The updater replaces a self-contained bundle: an AppImage, an installer's
@@ -948,6 +987,8 @@ mod desk {
                 desk_strings,
                 desk_tray_ok,
                 desk_platform,
+                desk_diag_path,
+                desk_diag_append,
                 desk_show,
                 desk_open_url,
                 desk_update_kind,

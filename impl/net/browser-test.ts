@@ -2384,6 +2384,33 @@ async function main() {
 
     await A.eval(`document.getElementById('mig-cancel').click(); return 1`)
 
+    // ---- the connection diary ------------------------------------------------
+    // A packaged app has no console anybody can open, so what happened to the
+    // link overnight is written down (lib/diag.ts). The property worth testing
+    // is NEGATIVE and cannot be seen in the module alone: after a whole session
+    // of real messages, files, corrections and voice notes, not one word
+    // anybody said is in it. This runs late on purpose - by now the diary has
+    // the entire conversation behind it.
+    scenario('the connection diary records the link, and nothing that was said')
+    const diaryTok = `sekret-${Date.now().toString(36)}`
+    await send(A, diaryTok)
+    await A.waitFor('the secret is on screen', seen(diaryTok), 20_000)
+    const diary = await A.eval<any>(`
+      if (!window.__diag) return { missing: true };
+      const lines = window.__diag.all();
+      return { lines, text: lines.join(String.fromCharCode(10)) };
+    `)
+    if (diary.missing) throw new Error('the diary is not exposed — ?debug=1 should reach it')
+    if (!diary.lines.length) throw new Error('the diary recorded nothing at all')
+    // A wall clock on every line: an uptime is useless the morning after.
+    for (const l of diary.lines) {
+      if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} /.test(l)) throw new Error(`a line with no clock: ${l}`)
+    }
+    if (!/ (vis|radio|link|log) /.test(diary.text)) throw new Error('the diary holds no connection events')
+    if (diary.text.includes(diaryTok)) throw new Error('the diary leaked the text of a message')
+    if (diary.text.includes('"')) throw new Error('a quoted string reached the diary — that is how content travels here')
+    step(`${diary.lines.length} lines, all clocked, none of them anybody's words`)
+
     scenario('wipeout clears local state and returns to login')
     // The §10 WIPE: a device reset. It must delete every ec-* key (identity +
     // contacts) and drop back to the login form — nothing local survives.
