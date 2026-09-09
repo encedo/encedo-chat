@@ -135,7 +135,7 @@ export function formatLine(s, windowMin) {
  * line is written, so the "now" figures belong to the same instant as the
  * counts.
  */
-export function startStats({ windowMin, gauges, jsonPath = null, log = console.log, fs = null }) {
+export function startStats({ windowMin, gauges, jsonPath = null, log = console.log, fs = null, sink = null }) {
   const counters = newCounters()
   const windowMs = windowMin * 60_000
   const PROBE_MS = 1_000
@@ -155,7 +155,11 @@ export function startStats({ windowMin, gauges, jsonPath = null, log = console.l
       // the sake of a statistic.
       fs.appendFile(jsonPath, JSON.stringify(snap) + '\n', () => {})
     }
+    // A second home for the same snapshot, if one was configured (redis.mjs).
+    // The line and the file are unaffected by it failing - three sinks, no
+    // dependency between them.
+    try { sink?.write(snap) } catch {}
   }, windowMs)
 
-  return { stop() { clearInterval(probe); clearInterval(timer) }, counters }
+  return { stop() { clearInterval(probe); clearInterval(timer); sink?.stop?.() }, counters }
 }

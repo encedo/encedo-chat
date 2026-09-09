@@ -8,6 +8,8 @@
  *   node relay.mjs --pass <secret> --port 9001 [--host bs1.onchato.com] [--peers <ma>...]
  *                  [--max-topics 250] [--idle-ttl 120]
  *                  [--stats 15] [--stats-json <path>] [--quiet-msgs]
+ *                  [--stats-redis redis://127.0.0.1:6379] [--stats-node bs1]
+ *                  [--stats-ttl-days 30]
  *   --stats <min>  — one summary line per window instead of guessing from a
  *                    trace: live topics (+added -evicted, REFUSED), messages,
  *                    bytes, distinct publishers, connections, CPU, RSS, heap
@@ -36,6 +38,7 @@ import { multiaddr } from '@multiformats/multiaddr'
 import { createHash } from 'crypto'
 import { createDump } from './dump.mjs'
 import { startStats } from './stats.mjs'
+import { redisSink } from './redis.mjs'
 import { appendFile } from 'fs'
 
 const args = process.argv.slice(2)
@@ -80,6 +83,12 @@ const MAX_CONNS = parseInt(get('--max-connections', '520'))
 // only sensible WITH stats on, or the log stops saying anything at all.
 const STATS_MIN = parseFloat(get('--stats', '0')) || 0
 const STATS_JSON = get('--stats-json', null)
+// Same snapshot, into a hash per (node, window) — see redis.mjs. The URL is
+// 127.0.0.1 whether Redis runs on this box or arrives down a tunnel, so this
+// flag does not care which of those was chosen.
+const STATS_REDIS = get('--stats-redis', null)
+const STATS_NODE = get('--stats-node', null)
+const STATS_TTL_D = parseFloat(get('--stats-ttl-days', '30'))
 const QUIET_MSGS = args.includes('--quiet-msgs')
 // DUMP=<dir> -> full JSONL trace of everything the relay observes (see dump.mjs).
 // Null when unset — every use below is `dump?.<call>`, so production runs no dump
@@ -176,11 +185,20 @@ const lastSeen = new Map() // topic -> last activity (ms); drives eviction
 // Counters, if asked for. `null` otherwise, and every use below is `stats?.`,
 // so an unflagged relay runs none of this. The gauges are read at the instant
 // the line is written, so "topics now" and "messages since" belong together.
+const statsNode = STATS_NODE ?? (HOST ? HOST.split('.')[0] : 'relay')
 const stats = STATS_MIN > 0
   ? startStats({
       windowMin: STATS_MIN,
       jsonPath: STATS_JSON,
       fs: STATS_JSON ? { appendFile } : null,
+      sink: STATS_REDIS
+        ? redisSink({
+            url: STATS_REDIS,
+            node: statsNode,
+            windowMs: STATS_MIN * 60_000,
+            ttlSec: Math.round(STATS_TTL_D * 86_400),
+          })
+        : null,
       gauges: () => ({
         topics: relay.services.pubsub.getTopics().length,
         conns: relay.getConnections().length,
@@ -266,7 +284,9 @@ console.log(`Połączenia: limit ${MAX_CONNS}`)
 // ran without the dump. Nothing is printed when DUMP is unset.
 if (stats) {
   console.log(`Statystyki: co ${STATS_MIN} min jedna linia [stats ${STATS_MIN}m]`
-    + `${STATS_JSON ? ` + JSONL -> ${STATS_JSON}` : ''}${QUIET_MSGS ? '; log per wiadomość WYŁĄCZONY' : ''}`)
+    + `${STATS_JSON ? ` + JSONL -> ${STATS_JSON}` : ''}`
+    + `${STATS_REDIS ? ` + redis ${STATS_REDIS} jako "${statsNode}" (st:${statsNode}:<okno>, TTL ${STATS_TTL_D} dni)` : ''}`
+    + `${QUIET_MSGS ? '; log per wiadomość WYŁĄCZONY' : ''}`)
 } else if (QUIET_MSGS) {
   // Quiet without counters means a log that says nothing about traffic at all,
   // which is worse than either choice made on purpose.

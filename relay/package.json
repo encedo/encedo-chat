@@ -5,7 +5,8 @@
   "private": true,
   "description": "onchato.com libp2p relay (GossipSub + circuit-relay-v2) — the bs1 rendezvous/transport node",
   "scripts": {
-    "relay": "node relay.mjs"
+    "relay": "node relay.mjs",
+    "test": "node --test *.test.mjs"
   },
   "dependencies": {
     "libp2p": "2.2.1",
