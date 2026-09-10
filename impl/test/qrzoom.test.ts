@@ -15,12 +15,20 @@ test('a camera with a real range opens at arm’s length, not at 1x', () => {
   assert.deepEqual(p, { min: 1, max: 8, step: 0.1, start: PREFERRED_START })
 })
 
-test('a short range opens as far as it goes', () => {
-  // 1.5x is all this camera has; starting at 1x would waste it, and the point
-  // of the control is that the code arrives big enough to decode.
-  const p = zoomPlan({ zoom: { min: 1, max: 1.5 } })!
-  assert.equal(p.start, 1.5)
-  assert.ok(p.step > 0 && p.step <= 0.5, `step ${p.step}`)
+test('every camera opens on the whole frame, however far it can zoom', () => {
+  // This used to open as far in as the lens allowed, on the reasoning that a
+  // code is held at arm's length. A Galaxy S24 disproved it (2026-09-10):
+  // zoomed in, the scanner starts INSIDE the code and decodes nothing until
+  // somebody backs away. The whole frame is where a code is either readable or
+  // obviously too far, and the slider is right there for the rest.
+  const short = zoomPlan({ zoom: { min: 1, max: 1.5 } })!
+  assert.equal(short.start, 1)
+  assert.ok(short.step > 0 && short.step <= 0.5, `step ${short.step}`)
+  const long = zoomPlan({ zoom: { min: 1, max: 8 } })!
+  assert.equal(long.start, 1)
+  // A camera whose range does not include 1x opens at the nearest thing it has.
+  const cropped = zoomPlan({ zoom: { min: 2, max: 6 } })!
+  assert.equal(cropped.start, 2)
 })
 
 test('no control at all rather than one that cannot move', () => {

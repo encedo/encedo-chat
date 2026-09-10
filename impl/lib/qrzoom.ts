@@ -28,8 +28,18 @@ export interface ZoomPlan {
   start: number
 }
 
-/** Where to start, when the camera can go that far. */
-export const PREFERRED_START = 2
+/**
+ * Where to start.
+ *
+ * It was 2x, on the reasoning that a code is held at arm's length. Measured on
+ * a Galaxy S24 (2026-09-10) that reasoning is wrong: the native scanner opens
+ * on a lens whose own framing already fills the viewfinder at arm's length, so
+ * 2x starts INSIDE the code and there is nothing to decode until the person
+ * backs away or drags the slider down. Opening at 1x shows the whole frame -
+ * where a QR code is either readable or obviously too far - and the slider is
+ * right there for the times it is not.
+ */
+export const PREFERRED_START = 1
 
 const num = (v: unknown): number | null =>
   typeof v === 'number' && Number.isFinite(v) ? v : null

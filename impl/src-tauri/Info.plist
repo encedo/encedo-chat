@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated bundle by Tauri on macOS.
+
+  LSAppNapIsDisabled: measured, not assumed. On a Mac mini configured never to
+  sleep (`pmset`: sleep 0, standby 0, disksleep 0), with the window hidden to
+  the tray at 07:19:15, this app's own flight recorder wrote:
+
+      2026-09-10 09:36:42 STALL the process was away for 7753s
+
+  Two hours and nine minutes in which no timer fired, no Announce went out and
+  no frame was read - so every contact watching this machine saw it leave, and
+  the person opening it from the tray saw grey dots beside peers that had been
+  there all along. That is the report this started from ("otwieram z tray na
+  macOS - nie ma ikony przy peer linux"), and it was never a bug in the app's
+  timers: App Nap suspends a backgrounded process wholesale, and nothing
+  written in JavaScript runs during it.
+
+  A messenger with no store-and-forward is unreachable while it is asleep, and
+  being reachable IS the reason it sits in the tray. So this app opts out.
+
+  If a STALL ever appears here again, the next suspect is WebKit's own
+  occlusion handling (WKWebView suspends the web content of a hidden window),
+  which is a different switch from this one.
+-->
+<plist version="1.0">
+<dict>
+  <key>LSAppNapIsDisabled</key>
+  <true/>
+</dict>
+</plist>
