@@ -972,16 +972,26 @@ async function main() {
     // drawn as two lines on the other side.
     scenario('a message can be more than one line')
     const nlTok = `wiersze-${Date.now().toString(36)}`
+    // One line against TWO, both measured after an input — not the resting box
+    // against two. A touch target has a finger-sized floor taller than a line
+    // of text, so the box at rest is not the box holding one line, and starting
+    // from it compares two different things (which is exactly how this test
+    // first failed).
     const grew = await A.eval<any>(`
       const i = document.getElementById('msg-input');
+      const cs = getComputedStyle(i);
+      i.value = ${JSON.stringify(nlTok)};
+      i.dispatchEvent(new Event('input'));
       const one = i.getBoundingClientRect().height;
       i.value = ${JSON.stringify(nlTok)} + String.fromCharCode(10) + 'druga linia';
       i.dispatchEvent(new Event('input'));
-      return { one, two: i.getBoundingClientRect().height,
-               tag: i.tagName, sent: document.querySelectorAll('#messages .mrow').length };
+      return { one, two: i.getBoundingClientRect().height, tag: i.tagName,
+               line: cs.lineHeight, minH: cs.minHeight, pad: cs.paddingTop, scroll: i.scrollHeight };
     `)
     if (grew.tag !== 'TEXTAREA') throw new Error(`the composer is a <${grew.tag}>, not a textarea`)
-    if (!(grew.two > grew.one + 8)) throw new Error(`two lines did not make the box taller: ${grew.one} -> ${grew.two}`)
+    if (!(grew.two > grew.one + 8)) {
+      throw new Error(`two lines did not make the box taller: ${JSON.stringify(grew)}`)
+    }
     step(`the box grows with the text (${Math.round(grew.one)}px -> ${Math.round(grew.two)}px)`)
 
     const held = await A.eval<any>(`
@@ -1536,7 +1546,14 @@ async function main() {
       }, 300))`)
     await A.eval(`
       window.BarcodeDetector = class { constructor() {} async detect() { return [{ rawValue: ${JSON.stringify(bLink)} }] } };
-      navigator.mediaDevices.getUserMedia = async () => ({ getTracks: () => [{ stop() {} }] });
+      // A camera stub has to answer what the app actually asks a stream: the
+      // tracks to stop, AND the video track the zoom control is built from.
+      // Answering only the first hid a crash in the scanner for three releases.
+      navigator.mediaDevices.getUserMedia = async () => {
+        const track = { stop() {}, getCapabilities: () => ({ zoom: { min: 1, max: 4, step: 0.1 } }),
+                        applyConstraints: async () => {} };
+        return { getTracks: () => [track], getVideoTracks: () => [track] };
+      };
       HTMLMediaElement.prototype.play = async function () {};
       // srcObject refuses anything that is not a real MediaStream, and the app
       // assigns before it can scan — so the stub has to own the property too.

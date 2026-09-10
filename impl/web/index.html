@@ -113,6 +113,10 @@
   label{display:block;font-size:12px;color:var(--muted);margin:14px 0 6px}
   .row{display:flex;gap:8px;align-items:center}
   input,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px}
+  /* Form textareas: a key to paste, a feedback note. The composer is NOT one of
+     these — it overrides all four of these declarations, `min-height` included,
+     because a 54px floor is fourteen pixels taller than the line of text it
+     holds and made the box shrink on the first keystroke. */
   textarea{font-family:ui-monospace,"Cascadia Code",monospace;font-size:13px;resize:vertical;min-height:54px}
   .dot{width:9px;height:9px;border-radius:50%;background:var(--off);flex-shrink:0;transition:background .2s}
   /* Presence dot as a DELIVERY promise, not a beacon: green = a live EH-2
@@ -429,7 +433,7 @@
      Chromium and is left to do so where it exists; `growComposer()` in app.ts
      is what makes it work everywhere else. */
   .composer-field textarea{flex:1;min-width:8ch;border:none;background:none;padding-right:4px;
-    font:inherit;line-height:1.45;resize:none;overflow-y:auto;max-height:40dvh}
+    font:inherit;line-height:1.45;resize:none;overflow-y:auto;max-height:40dvh;min-height:0}
   .composer-field textarea:focus-visible{outline:none}
   .composer-grow{display:block;width:100%;padding:3px 0 0;border:none;background:none;
     color:var(--muted);cursor:pointer;line-height:0;text-align:center}

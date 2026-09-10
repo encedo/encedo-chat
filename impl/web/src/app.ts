@@ -1377,6 +1377,11 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   })
   closeIdentityModal() // the picker, if one was open, goes with the login screen
   $('login').hidden = true; $('app').hidden = false
+  // The composer's resting height is COMPUTED, not left to the stylesheet: on a
+  // touch target the 44px finger floor is taller than one line of text, so
+  // without this the box visibly shrank on the first keystroke and every
+  // measurement of "did it grow" started from the wrong number.
+  growComposer()
   stopHemPoll() // the login screen is gone; nothing left to watch for
   // Said HERE and not at boot: an empty contact list is what the user is about
   // to look at, and this is the sentence that explains it. Once per device.
@@ -2579,7 +2584,13 @@ function setupScanZoom(stream: MediaStream) {
   const row = $('scan-zoom-row')
   const slider = $('scan-zoom') as HTMLInputElement
   const label = $('scan-zoom-lab')
-  const track = stream.getVideoTracks()[0]
+  // Every step of this is optional and none of it may take the scanner down
+  // with it. A stream that does not answer `getVideoTracks` is not exotic — a
+  // webview with a partial implementation is one, and so is a test double —
+  // and losing the whole scan because there was no zoom control to build is
+  // the wrong trade by a mile. (Found by the browser harness, which had been
+  // failing on exactly this since the zoom landed.)
+  const track = stream.getVideoTracks?.()?.[0]
   const plan = zoomPlan(track?.getCapabilities?.() as any)
   row.hidden = !plan
   if (!plan || !track) return
@@ -5819,22 +5830,46 @@ function sendComposer() {
   sendComposer()
 }
 
+/** Which shell is answering — asked in one place, because two features now
+ *  turn on it (the radio profile and what Enter does). */
+const hostKind = (): 'mobile' | 'desktop' | 'browser' =>
+  isMobileShell() ? 'mobile' : isDesktopShell() ? 'desktop' : 'browser'
+
+/**
+ * Is the keyboard on the screen — i.e. is Enter the only way to break a line?
+ *
+ * The packaged shells KNOW: one is a phone, the other is a window with a real
+ * keyboard, and neither has to be inferred. Only a browser has to be guessed
+ * at, and there `pointer:coarse` (touch is the primary pointer) is the honest
+ * question.
+ *
+ * It was `pointer:fine` before, which looks equivalent and is not: a machine
+ * with no pointing device the browser recognises matches NEITHER — headless
+ * Chromium is one, and so is any desktop the query cannot classify. That made
+ * Enter stop sending on a keyboard, which the browser harness caught before a
+ * person did.
+ */
+const typesOnScreen = (): boolean => {
+  const host = hostKind()
+  if (host === 'mobile') return true
+  if (host === 'desktop') return false
+  return matchMedia('(pointer:coarse)').matches
+}
+
 /**
  * Does this Enter send, or does it break the line?
  *
  * On a keyboard it sends, and Shift+Enter breaks the line — the habit every
- * chat app has taught. On a phone it NEVER sends: the on-screen Enter is the
- * only way to break a line there (nobody holds Shift on a phone), and a
- * message that leaves half-written because a paragraph was wanted is a worse
- * failure than one more press of Send. `pointer:fine` is the question actually
- * being asked: is there a keyboard with a Shift on it.
+ * chat app has taught. Where the keyboard is on the screen it NEVER sends:
+ * Enter is the only way to break a line there (nobody holds Shift on a phone),
+ * and a message that leaves half-written because a paragraph was wanted is a
+ * worse failure than one more press of Send.
  *
  * A key that is part of composing a character is not a key at all yet — an IME
  * confirming a candidate with Enter must not send the message underneath it.
  */
 const entersSend = (e: KeyboardEvent): boolean =>
-  !e.isComposing && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
-    && matchMedia('(pointer:fine)').matches
+  !e.isComposing && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !typesOnScreen()
 
 /**
  * How tall the message box is: as tall as what is in it, within limits.
@@ -6744,7 +6779,7 @@ document.addEventListener('visibilitychange', () => {
   // A DESKTOP hidden in the tray does not slow down, and `profileFor` carries
   // the measurement that says why: there is no radio and no battery to save
   // there, and the saving cost exactly the thing a tray-resident app is for.
-  const host = isMobileShell() ? 'mobile' : isDesktopShell() ? 'desktop' : 'browser'
+  const host = hostKind()
   const prof = profileFor(document.hidden, host)
   setRadioProfile(prof)
   diag.note(`radio ${prof} (${host})`)
