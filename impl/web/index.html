@@ -435,6 +435,9 @@
   .composer-field textarea{flex:1;min-width:8ch;border:none;background:none;padding-right:4px;
     font:inherit;line-height:1.45;resize:none;overflow-y:auto;max-height:40dvh;min-height:0}
   .composer-field textarea:focus-visible{outline:none}
+  .msg-len{padding:2px 20px 0;font-size:11.5px;color:var(--muted);text-align:right;
+    font-variant-numeric:tabular-nums}
+  .msg-len.over{color:var(--err)}
   .composer-grow{display:block;width:100%;padding:3px 0 0;border:none;background:none;
     color:var(--muted);cursor:pointer;line-height:0;text-align:center}
   .composer-grow:hover{color:var(--accent)}
@@ -1134,6 +1137,11 @@
           <div class="r-body"><div class="r-who" id="reply-who"></div><div class="r-text" id="reply-text"></div></div>
           <button class="x" id="reply-cancel" title="Anuluj odpowiedź" data-i18n-title="Anuluj odpowiedź" aria-label="Anuluj odpowiedź">✕</button>
         </div>
+        <!-- How much room is left, and only when there is barely any. A byte
+             counter over an ordinary sentence is noise; past nine tenths of
+             what the relay will carry it is a warning, and over the line it is
+             the reason Send refuses. -->
+        <div class="msg-len" id="msg-len" hidden></div>
         <!-- The handle that makes the field taller. The box also grows by itself
              as the text does, but a control that says so is the difference
              between "it happens to me" and "I can do it" — Slack's chevron,

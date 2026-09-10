@@ -50,6 +50,7 @@ import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
 import { newDiag } from '../../lib/diag.ts'
 import { contactState, seenLabel, noteSeen as foldSeen, noteAdded as foldAdded, PRESENCE_TTL_MS, type Seen } from '../../lib/seen.ts'
+import { bodyBytes, fitsOnWire, overBy, MAX_BODY, WARN_AT, kb } from '../../lib/msgsize.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -1381,7 +1382,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   // touch target the 44px finger floor is taller than one line of text, so
   // without this the box visibly shrank on the first keystroke and every
   // measurement of "did it grow" started from the wrong number.
-  growComposer()
+  growComposer(); paintLength()
   stopHemPoll() // the login screen is gone; nothing left to watch for
   // Said HERE and not at boot: an empty contact list is what the user is about
   // to look at, and this is the sentence that explains it. Once per device.
@@ -3007,7 +3008,7 @@ document.addEventListener('paste', (e: ClipboardEvent) => {
  */
 function clearComposer() {
   ;($('msg-input') as HTMLTextAreaElement).value = ''
-  growComposer() // an emptied box is one line again
+  growComposer(); paintLength() // an emptied box is one line again
   showAttach(null)
   // A recording belongs to the conversation it was started in, and the
   // microphone must not outlive it — leaving it live would keep the platform's
@@ -4630,7 +4631,7 @@ function startEdit(row: HTMLElement) {
   const inp = $('msg-input') as HTMLTextAreaElement
   inp.value = ev.text
   paintComposerBar()
-  growComposer() // the message being corrected may be a paragraph
+  growComposer(); paintLength() // the message being corrected may be a paragraph
   inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length)
 }
 /** Leaving edit mode also empties the composer: what is in it is the old message,
@@ -4639,7 +4640,7 @@ function cancelEdit() {
   if (!editing) return
   editing = null
   ;($('msg-input') as HTMLTextAreaElement).value = ''
-  growComposer()
+  growComposer(); paintLength()
   paintComposerBar()
 }
 
@@ -4660,7 +4661,7 @@ function sendEditComposer(): boolean {
   ecLog(`edited ${editing.id} → "${text.slice(0, 40)}" (correction id ${eid})`)
   ev.text = text; ev.edited = nowMs(); ev.editId = eid; ev.editState = 'sending'
   repaintMsg(ev)
-  inp.value = ''; growComposer()
+  inp.value = ''; growComposer(); paintLength()
   editing = null
   paintComposerBar()
   return true
@@ -5047,12 +5048,17 @@ async function attachFile(f: File) {
   const inp = $('msg-input') as HTMLTextAreaElement
   // A caption is a body like any other, so its mentions close here too — a file
   // sent with "@Ala popatrz" must reach Ala the same way the sentence alone would.
+  // A caption travels inside the file's envelope, so it meets the same ceiling.
+  if (!fitsOnWire(inp.value)) {
+    toast(tr('Podpis jest za długi o {n} — skróć go albo wyślij osobno', { n: kb(overBy(inp.value)) }))
+    return
+  }
   const gm = gid ? groupsUI.get(gid) : null
   const caption = gm
     ? closeMentions(inp.value.trim(), gm.members.filter((m) => m.pub !== session?.pub).map((m) => ({ pub: m.pub, name: memberName(m.pub) })), mentionPicks)
     : inp.value.trim()
   mentionPicks.clear()
-  inp.value = ''; growComposer()
+  inp.value = ''; growComposer(); paintLength()
   // A file answers a message the same way a sentence does — same field, spent
   // here so the bar is gone by the time the upload starts.
   const re = takeReply()
@@ -5789,6 +5795,15 @@ async function closeRoom(pub: string) {
 // The composer targets whichever room is on screen — wired once, not per open.
 function sendComposer() {
   const inp = $('msg-input') as HTMLTextAreaElement
+  // The relay drops a frame over its ceiling and tells nobody, so a message
+  // that cannot travel is refused HERE — with the text left exactly where it
+  // is. Losing what somebody wrote in order to enforce a limit would be the
+  // worse half of the bargain.
+  if (!fitsOnWire(inp.value)) {
+    paintLength()
+    toast(tr('Wiadomość jest za długa o {n} — wyślij ją jako plik', { n: kb(overBy(inp.value)) }))
+    return
+  }
   if (sendEditComposer()) return // the composer is holding a correction, not a message
   // A pending file takes the composer over. attachFile() reads the caption out
   // of this same input and clears it, so the text goes once, with the file —
@@ -5798,7 +5813,7 @@ function sendComposer() {
   const t = inp.value.trim(); if (!t) return
   if (activeGid) { // a group is on screen — broadcast to it
     const gu = groupsUI.get(activeGid); if (!gu?.room) return
-    inp.value = ''; growComposer()
+    inp.value = ''; growComposer(); paintLength()
     const re = takeReply()
     // "@Ala" typed straight through becomes "@Ala#3a7f1c02" here — the picker
     // already writes whole tokens, this is for the message written in one go.
@@ -5815,11 +5830,11 @@ function sendComposer() {
   const id = room.conv.sendText(t, re)
   ecLog(`sent "${t.slice(0, 40)}" (id ${id}); secured peers: ${room.conv.secured().length}`)
   record(room, { t: 'msg', kind: 'me', text: t, ts: nowMs(), id, re, au: session?.pub })
-  inp.value = ''; growComposer()
+  inp.value = ''; growComposer(); paintLength()
 }
 ;($('send') as HTMLButtonElement).onclick = sendComposer
 ;($('msg-input') as HTMLTextAreaElement).oninput = () => {
-  activeRoom()?.conv?.noteActivity(); updateMentionPop(); growComposer()
+  activeRoom()?.conv?.noteActivity(); updateMentionPop(); growComposer(); paintLength()
 }
 ;($('msg-input') as HTMLTextAreaElement).onkeydown = (e: any) => {
   if (mentionKey(e)) return // the picker is open: Enter picks a person, it does not send
@@ -5884,6 +5899,30 @@ const entersSend = (e: KeyboardEvent): boolean =>
  */
 let composerOpen = false
 
+/**
+ * How much room is left, said only when it matters.
+ *
+ * The relay drops a frame over 64 KB, and everything the app could say after
+ * that is a guess — so the count is shown while the text still exists and the
+ * person is still looking at it. Below nine tenths of the budget: nothing at
+ * all, because a byte counter over a sentence teaches people to worry about a
+ * limit they will never meet.
+ */
+function paintLength(): boolean {
+  const text = (($('msg-input') as HTMLTextAreaElement).value)
+  const used = bodyBytes(text)
+  const el = $('msg-len')
+  const over = used > MAX_BODY
+  el.hidden = used < WARN_AT
+  el.classList.toggle('over', over)
+  if (!el.hidden) {
+    el.textContent = over
+      ? tr('za długa o {n} — wyślij jako plik', { n: kb(overBy(text)) })
+      : tr('zostało {n}', { n: kb(MAX_BODY - used) })
+  }
+  return !over
+}
+
 function growComposer() {
   const ta = $('msg-input') as HTMLTextAreaElement
   const cs = getComputedStyle(ta)
@@ -5912,7 +5951,7 @@ $('composer-grow').addEventListener('click', () => {
   btn.setAttribute('aria-expanded', String(composerOpen))
   const label = composerOpen ? tr('Zmniejsz pole') : tr('Powiększ pole')
   btn.setAttribute('title', label); btn.setAttribute('aria-label', label)
-  growComposer()
+  growComposer(); paintLength()
   ;($('msg-input') as HTMLTextAreaElement).focus()
 })
 ;($('msg-input') as HTMLTextAreaElement).addEventListener('click', updateMentionPop)
@@ -6003,7 +6042,7 @@ function pickMention(i: number) {
   const written = '@' + mentionName(hit.name) + ' '
   mentionPicks.set(mentionName(hit.name).toLowerCase(), hit.pub)
   inp.value = inp.value.slice(0, mentionAt) + written + inp.value.slice(caret)
-  growComposer()
+  growComposer(); paintLength()
   const pos = mentionAt + written.length
   closeMentionPop()
   inp.focus(); inp.setSelectionRange(pos, pos)
