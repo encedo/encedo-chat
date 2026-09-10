@@ -78,7 +78,14 @@ function serveDist(): Server {
         const up = await fetch(url, {
           method: 'POST',
           body: body as any,
-          headers: path === '/f' ? { 'content-type': req.headers['content-type'] ?? '' } : undefined,
+          headers: {
+            ...(path === '/f' ? { 'content-type': req.headers['content-type'] ?? '' } : {}),
+            // The same disguise production's nginx wears, and for the same
+            // reason: Kubo's CSRF guard refuses any User-Agent that starts with
+            // "Mozilla". Node does not send one of those, but saying it here
+            // means this proxy and the real one differ in nothing that matters.
+            'user-agent': 'encedo-proxy',
+          },
         })
         res.writeHead(up.status, { 'content-type': up.headers.get('content-type') ?? 'application/octet-stream' })
         res.end(Buffer.from(await up.arrayBuffer()))
@@ -1191,7 +1198,7 @@ async function main() {
       // the envelope and the blob was useless without it.
       const got = await B.eval<any>(`
         const row = [...document.querySelectorAll('#messages .b-file')]
-          .find((r) => r.querySelector('.f-name').textContent.includes(${JSON.stringify(fileTok)}));
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(fileTok)}));
         const cid = window.__lastFileCid;
         return { size: row.querySelector('.f-sub').textContent, hasAction: !!row.querySelector('.f-act') };
       `)
@@ -1265,7 +1272,7 @@ async function main() {
       `, 20_000)
       const senderShot = await A.eval<any>(`
         const row = [...document.querySelectorAll('#messages .mrow')]
-          .find((r) => r.querySelector('.f-name').textContent.includes(${JSON.stringify(imgTok2)}));
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(imgTok2)}));
         return { src: row.querySelector('.b-thumb').src.slice(0, 5), see: !!row.querySelector('.f-see') };
       `)
       if (senderShot.src !== 'blob:') throw new Error(`the sender's preview is not a local blob: ${senderShot.src}`)
@@ -1326,7 +1333,7 @@ async function main() {
       `, 40_000)
       const ownVox = await A.eval<any>(`
         const row = [...document.querySelectorAll('#messages .mrow')]
-          .find((r) => r.querySelector('.f-name').textContent.includes(${JSON.stringify(voxTok)}));
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(voxTok)}));
         return { players: row.querySelectorAll('.b-voice').length,
                  see: !!row.querySelector('.f-see'),
                  act: (row.querySelector('.f-act') || {}).textContent };

@@ -9,6 +9,26 @@ limit_req_zone  $binary_remote_addr zone=mqtt_req:10m rate=30r/s;
 limit_conn_zone $binary_remote_addr zone=relay_conn:10m;
 limit_req_zone  $binary_remote_addr zone=relay_req:10m rate=10r/s;
 
+# Magazyn plików (/f -> Kubo). Te drzwi MUSZĄ być otwarte bez uwierzytelnienia:
+# aplikacja przeglądarkowa nie ma sekretu, którego nie byłoby w bundlu, więc
+# jedyną obroną jest tempo. Mierzone 2026-09-10: POST /f przyjmuje plik od
+# każdego z internetu i zwraca CID.
+#
+# Wysyłka: człowiek wysyła plik co kilka sekund, skrypt tysiąc razy na minutę.
+# 20 r/min z burstem 20 puszcza wrzucenie dwudziestu zdjęć naraz (i biuro za
+# jednym NAT-em), a potem schodzi do jednego na trzy sekundy. Do tego limit
+# RÓWNOCZESNYCH wysyłek, bo samo tempo żądań nie ogranicza pasma przy 128 MB
+# na plik.
+limit_req_zone  $binary_remote_addr zone=fput_req:10m  rate=20r/m;
+limit_conn_zone $binary_remote_addr zone=fput_conn:10m;
+# Pobranie: otwarcie pokoju pełnego obrazków to seria żądań w jednej chwili,
+# więc burst jest hojny, a tempo i tak odcina zalew.
+limit_req_zone  $binary_remote_addr zone=fget_req:10m  rate=120r/m;
+limit_conn_zone $binary_remote_addr zone=fget_conn:10m;
+# 503 znaczy "serwer padł" i tak jest czytane; 429 mówi prawdę: za szybko.
+limit_req_status  429;
+limit_conn_status 429;
+
 # Feedback: formularz z aplikacji (infra/feedback). Człowiek pisze jedno
 # zgłoszenie na kilka minut — 1 r/s z burstem 5 puszcza każde uczciwe użycie
 # i zatrzymuje skrypt, zanim napełni plik.
@@ -95,6 +115,8 @@ server {
         add_header Access-Control-Allow-Origin "*" always;
 
         limit_except POST OPTIONS { deny all; }
+        limit_req  zone=fput_req burst=20 nodelay;
+        limit_conn fput_conn 4;
         client_max_body_size 128m;
         proxy_request_buffering off;
         proxy_read_timeout 300s;
@@ -118,6 +140,8 @@ server {
         add_header Cross-Origin-Resource-Policy "cross-origin" always;
 
         limit_except GET { deny all; }
+        limit_req  zone=fget_req burst=60 nodelay;
+        limit_conn fget_conn 8;
         proxy_method POST;
         proxy_set_header Origin     "";
         proxy_set_header Referer    "";
