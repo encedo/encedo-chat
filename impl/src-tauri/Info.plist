@@ -20,9 +20,24 @@
   A messenger with no store-and-forward is unreachable while it is asleep, and
   being reachable IS the reason it sits in the tray. So this app opts out.
 
-  If a STALL ever appears here again, the next suspect is WebKit's own
-  occlusion handling (WKWebView suspends the web content of a hidden window),
-  which is a different switch from this one.
+  It was NOT the whole story, and this file says so rather than pretending.
+  Measured again on 0.5.65, with this key confirmed present in the installed
+  bundle (`plutil -extract LSAppNapIsDisabled raw /Applications/onchato.app/
+  Contents/Info.plist` -> true) and the machine still set never to sleep:
+
+      2026-09-10 14:43:52 vis hidden
+      2026-09-10 14:48:10 5m late=1s          <- still running, five minutes in
+      2026-09-10 15:10:56 STALL ... 1129s     <- and back exactly when shown
+
+  Nine minutes after the window was hidden the process was suspended again,
+  and it came back in the same second the window was raised. That is the
+  OTHER suspect named above, and it is not App Nap: WebKit's own
+  `WKPreferences.inactiveSchedulingPolicy` defaults to "suspend", which is
+  documented to fully suspend a web view that is not in a window. It is turned
+  off in tauri.conf.json (`backgroundThrottling: disabled`, macOS 14+).
+
+  This key stays: App Nap is a separate mechanism with the same consequence,
+  and one of them being innocent does not make the other so.
 -->
 <plist version="1.0">
 <dict>
