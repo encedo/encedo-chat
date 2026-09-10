@@ -236,6 +236,16 @@
   .pane-label{font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);padding:10px 12px 4px}
   .contact{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:none;background:none;text-align:left;border-radius:8px;color:var(--body)}
   .contact:hover{background:var(--bg)}.contact.active{background:var(--accent-soft)}
+  /* What a contact has ever done, opposite the dot that says what it is doing.
+     NOWY is a call to action (it sends them your code), so it is coloured like
+     one; the cold "?" is the same fact gone stale and is deliberately quieter —
+     a contact that has never answered may simply have been away, and the app
+     does not accuse anybody. */
+  .contact .c-new{flex-shrink:0;font-size:10px;font-weight:700;letter-spacing:.06em;padding:2px 6px;
+    border-radius:999px;background:var(--accent-soft);color:var(--accent);cursor:pointer}
+  .contact .c-new.cold{background:none;border:1px solid var(--border);color:var(--muted);font-weight:600;padding:1px 7px}
+  .contact .c-new:hover{background:var(--accent);color:var(--accent-ink)}
+  .contact .c-seen{flex-shrink:0;font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
   .contact .c-name{font-weight:600;color:var(--text)}
   .contact .c-sub{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .contact .c-info{flex:1;min-width:0}

@@ -49,6 +49,7 @@ import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
 import { newDiag } from '../../lib/diag.ts'
+import { contactState, seenLabel, noteSeen as foldSeen, noteAdded as foldAdded, PRESENCE_TTL_MS, type Seen } from '../../lib/seen.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -527,7 +528,9 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   const pubkey = await pubKeyReader(hem)(id.kid)
   rememberMethod('hem')
   const hemId = hemIdentityFrom(hem, id.kid, id.handle, pubkey)
-  const local = await makeLocalBook(await identityKey(pubkey, id.kid), localStorage, hemId)
+  const idKey = await identityKey(pubkey, id.kid)
+  loadSeen(idKey) // per identity, like every other local record
+  const local = await makeLocalBook(idKey, localStorage, hemId)
   if (local.verdict === 'tampered') warnTampered()
   await enterApp(
     hemId,
@@ -1060,7 +1063,9 @@ async function softLogin() {
     activeSoftProfile = name
     rememberMethod('soft')
     localStorage.setItem(LAST_PROFILE, name)
-    const local = await makeLocalBook(await identityKey(id.pub), localStorage, id)
+    const idKey2 = await identityKey(id.pub)
+    loadSeen(idKey2)
+    const local = await makeLocalBook(idKey2, localStorage, id)
     if (local.verdict === 'tampered') warnTampered()
     await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
     if (copiedContacts) toast(tr('Przepisano kontakty z „{name}": {n}.', { name: copyFrom, n: String(copiedContacts.length) }))
@@ -1298,7 +1303,7 @@ function clearPreKidState(): number {
   let n = 0
   for (const k of Object.keys(localStorage)) {
     // Longest prefix first — `ec-gcache-emp-` also starts with `ec-gcache-`.
-    for (const p of ['ec-gcache-emp-', 'ec-gcache-', 'ec-local-contacts-', 'ec-groups-']) {
+    for (const p of ['ec-gcache-emp-', 'ec-gcache-', 'ec-local-contacts-', 'ec-groups-', 'ec-seen-']) {
       if (!k.startsWith(p)) continue
       if (!ID_KEYED.test(k.slice(p.length))) { localStorage.removeItem(k); n++ }
       break
@@ -1472,11 +1477,16 @@ async function syncPresence() {
     // morning the screen only shows the last state. The key prefix, not the
     // name — the file has no business holding who somebody is.
     onOnline: (p) => {
+      // Written down whether or not the dot changes: an Announce that verifies
+      // is proof they hold our key, which is the whole question a cold contact
+      // raises.
+      markSeen(p.pub)
       if (onlinePubs.has(p.pub)) return
       onlinePubs.add(p.pub); renderContacts()
       diag.note(`peer ${p.pub.slice(0, 12)} lit`)
     },
     onOffline: (p) => {
+      markGone(p.pub)
       if (!onlinePubs.delete(p.pub)) return
       renderContacts()
       diag.note(`peer ${p.pub.slice(0, 12)} dark`)
@@ -1571,6 +1581,47 @@ document.addEventListener('click', (e) => {
   }
 }, true)
 
+// ---- when each contact was last heard from ---------------------------------
+/**
+ * A soft, per-device record beside the contact book — never inside it. The book
+ * is MAC'd and can live in an HSM, where a rewrite is a device round trip; this
+ * is bookkeeping whose loss costs a few days of "new" badges. See lib/seen.ts
+ * for what the states mean and why the app refuses to guess between "switched
+ * off" and "holding the wrong key".
+ */
+const SEEN_PREFIX = 'ec-seen-'
+let seenMap: Record<string, Seen> = {}
+let seenKey = ''
+
+function loadSeen(idKey: string) {
+  seenKey = SEEN_PREFIX + idKey
+  try { seenMap = JSON.parse(localStorage.getItem(seenKey) || '{}') } catch { seenMap = {} }
+}
+const saveSeen = () => { if (seenKey) try { localStorage.setItem(seenKey, JSON.stringify(seenMap)) } catch {} }
+
+/** They announced: they are here, and they hold our key. */
+function markSeen(pub: string, at = nowMs()) {
+  seenMap[pub] = foldSeen(seenMap[pub], at)
+  saveSeen()
+}
+/**
+ * They stopped announcing. The watch waits out its TTL before saying so, so the
+ * last thing actually heard was that long ago — stamping this "now" would claim
+ * a sighting that did not happen.
+ */
+const markGone = (pub: string) => markSeen(pub, nowMs() - PRESENCE_TTL_MS)
+/** A contact exists as of now. Not a sighting. */
+function markAdded(pub: string) { seenMap[pub] = foldAdded(seenMap[pub], nowMs()); saveSeen() }
+
+/** The phrase under a contact, in the reader's own clock. */
+function seenText(pub: string): string {
+  const l = seenLabel(seenMap[pub], nowMs())
+  if (l.kind === 'never') return ''
+  if (l.kind === 'today') return tr('widziany {t}', { t: l.hhmm })
+  if (l.kind === 'yesterday') return tr('wczoraj {t}', { t: l.hhmm })
+  return tr('{d}, {t}', { d: l.date, t: l.hhmm })
+}
+
 function renderContacts() {
   const pane = $('pane-contacts'); pane.innerHTML = ''
   // Add-peer and the filter are static markup above this pane — see index.html
@@ -1596,11 +1647,32 @@ function renderContacts() {
     // The unread pill is the whole point of the background model: a message that
     // arrived while you were elsewhere lights here instead of yanking the view.
     const pill = unseen ? `<span class="c-unread" title="${unseen} nieprzeczytane">${unseen > 99 ? '99+' : unseen}</span>` : ''
+    // What this contact has ever done, as opposed to what it is doing (the dot).
+    // `new` and `cold` are the same fact — never once heard from — told
+    // differently because after three days it stops being ordinary. Both offer
+    // the same remedy, which happens to fix either cause without the app
+    // claiming to know which one it was (lib/seen.ts).
+    const state = contactState(seenMap[c.pub], nowMs(), online || inRoom)
+    const stamp = seenText(c.pub)
+    const mark = unseen ? '' // an unread message is louder than either of these
+      : state === 'new' ? `<span class="c-new" title="${escapeHtml(tr('Jeszcze się nie odezwał — jeśli nie ma Twojego klucza, wyślij mu swój kod (kliknij)'))}">${tr('NOWY')}</span>`
+      : state === 'cold' ? `<span class="c-new cold" title="${escapeHtml(tr('Ani razu się nie odezwał. Albo go nie było, albo nie ma Twojego klucza — kliknij, żeby wysłać kod ponownie'))}">?</span>`
+      : state === 'quiet' && stamp ? `<span class="c-seen">${escapeHtml(stamp)}</span>`
+      : ''
     b.innerHTML = `<span class="dot ${dotClass}" title="${escapeHtml(dotTitle)}"></span><div class="avatar">${escapeHtml(initials(c.name))}</div>`
       + `<div class="c-info"><div class="c-name">${escapeHtml(c.name)} <span class="src" title="${src.t}">${src.i}</span></div>`
-      + `<div class="c-sub" title="${escapeHtml(c.kid ? `KID ${c.kid}` : c.pub)}">🔑 ${escapeHtml(fpCache.get(c.pub) ?? '…')}${c.kid ? ' · KID ' + escapeHtml(shortKid(c.kid)) : ''}</div></div>`
-      + pill + `<button class="c-edit" title="${tr('Zmień nazwę')}">✎</button><span class="c-x" title="${tr('Usuń')}">×</span>`
+      // For a cold contact the explanation goes FIRST: this line ellipsizes on a
+      // phone, and the fingerprint losing its tail costs nothing next to the
+      // sentence that says why the dot will never light.
+      + `<div class="c-sub" title="${escapeHtml(c.kid ? `KID ${c.kid}` : c.pub)}">`
+      + `${state === 'cold' ? escapeHtml(tr('nigdy się nie odezwał')) + ' · ' : ''}`
+      + `🔑 ${escapeHtml(fpCache.get(c.pub) ?? '…')}${c.kid ? ' · KID ' + escapeHtml(shortKid(c.kid)) : ''}</div></div>`
+      + mark + pill + `<button class="c-edit" title="${tr('Zmień nazwę')}">✎</button><span class="c-x" title="${tr('Usuń')}">×</span>`
     b.addEventListener('click', async (e: any) => {
+      // Pressing the badge sends them your code instead of opening a room —
+      // which is the thing to do about a contact that has never answered, and
+      // the reason the badge is worth having at all.
+      if (e.target.classList.contains('c-new')) { e.stopPropagation(); void openShare(); return }
       if (e.target.classList.contains('c-edit')) {
         e.stopPropagation()
         const name = await promptName(tr('Zmień nazwę kontaktu'), `Widoczna tylko u Ciebie — ${c.name} nie zostanie o niej powiadomiony.`, c.name)
@@ -1634,11 +1706,16 @@ $('btn-new-group').addEventListener('click', openGroupModal)
 // draws those as browser chrome outside the app's skin, and they block the
 // event loop — which here means the transport stops pumping while a dialog is
 // open. -------------------------------------------------------------------
-function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string, href?: string, noLabel: string | null = 'Nie'): Promise<{ ok: boolean; remember: boolean }> {
+function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string, href?: string, noLabel: string | null = 'Nie', danger = true): Promise<{ ok: boolean; remember: boolean }> {
   return new Promise((resolve) => {
     $('ask-title').textContent = title
     $('ask-body').textContent = body
     $('ask-yes').textContent = yes
+    // Every use of this dialog until now was destructive — deleting a contact,
+    // wiping a device — so the affirmative button is red in the markup. An
+    // offer is not a warning, and a red "send my code" would teach people to
+    // hesitate over the one action the dialog exists to encourage.
+    $('ask-yes').classList.toggle('danger', danger)
     // The checkbox is opt-in per call: a destructive confirm must never offer to
     // stop asking, only an advisory one may.
     // Both of these are OPTIONAL parts of the dialog, so they are read
@@ -1891,8 +1968,14 @@ $('add-save').addEventListener('click', async () => {
   try {
     if (!(await claimContact(name, pub))) return
     await session.book.add(name, pub, persistent)
+    markAdded(pub)
     await refreshContacts()
     closeModal()
+    // Same question as the link path. Typing a key by hand is exactly the case
+    // where the other side has nothing of yours yet.
+    if ((await ask(tr('Dodano {name}', { name }),
+      tr('{name} nie ma jeszcze Twojego klucza — bez niego nie zobaczycie się nawzajem. Odesłać teraz swój kod?', { name }),
+      tr('Odeślij mój kod'), undefined, undefined, tr('Nie teraz'), false)).ok) await openShare(true)
   } catch (e: any) { setMsg('add-msg', contactAddError(e), 'err') }
   finally { btn.disabled = false; btn.textContent = tr('Zapisz') }
 })
@@ -2176,8 +2259,15 @@ $('import-add').addEventListener('click', async () => {
     // Only the FIRST leg asks for a key back. An imported reply means both sides
     // now hold both keys, and offering to send ours again is how this loops
     // forever — which is exactly what it did.
+    if (store !== 'none') markAdded(inv.pub)
+    // Reported 2026-09-10: the app answered "contact added" by putting YOUR OWN
+    // code on screen, which reads as a non-sequitur unless you already know
+    // why. The reason is that adding somebody is one-way — they still have
+    // nothing of yours — so it is said in a sentence and left as a choice.
     if (inv.reply) toast(tr('Wymiana zakończona — możecie rozmawiać'))
-    else await openShare(true)
+    else if ((await ask(tr('Dodano {name}', { name }),
+      tr('{name} nie ma jeszcze Twojego klucza — bez niego nie zobaczycie się nawzajem. Odesłać teraz swój kod?', { name }),
+      tr('Odeślij mój kod'), undefined, undefined, tr('Nie teraz'), false)).ok) await openShare(true)
   } catch (e: any) { setMsg('import-msg', contactAddError(e), 'err') }
   finally { btn.disabled = false; btn.textContent = label ?? tr('Dodaj kontakt') }
 })
@@ -2561,7 +2651,7 @@ let activeSoftProfile = ''
  * everyone that identity spoke to sitting under a prefix nobody owns any more —
  * and no way to reach them, since the identity that could is gone.
  */
-const PROFILE_KEYS = ['ec-soft-id-', 'ec-local-contacts-', 'ec-gcache-', 'ec-gcache-emp-', 'ec-groups-']
+const PROFILE_KEYS = ['ec-soft-id-', 'ec-local-contacts-', 'ec-gcache-', 'ec-gcache-emp-', 'ec-groups-', 'ec-seen-']
 
 function listSoftProfiles(): string[] {
   const out: string[] = []

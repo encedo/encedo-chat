@@ -2289,12 +2289,22 @@ async function main() {
     `, 20_000)
     // The return dialog is not a courtesy: the pair topic is ECDH(IK_a, IK_b),
     // so until A holds B's key too there is no topic either of them can reach.
+    // Since 0.5.63 it is OFFERED rather than sprung — the code appearing
+    // unbidden read as a non-sequitur (reported 2026-09-10) — so the sentence
+    // comes first and the modal follows a yes.
+    await B.waitFor('B is asked whether to send its key back', `
+      const m = document.getElementById('ask-modal');
+      return m.classList.contains('open') && /klucz|key/i.test(document.getElementById('ask-body').textContent || '');
+    `, 15_000)
+    const offered = await B.eval<boolean>(`return document.getElementById('share-modal').classList.contains('open')`)
+    if (offered) throw new Error('the share modal opened before the question was answered')
+    await B.eval(`document.getElementById('ask-yes').click(); return 1`)
     const back = await B.eval<any>(`
       const open = document.getElementById('share-modal').classList.contains('open');
       return { open, link: document.getElementById('share-link').value };
     `)
-    if (!back.open) throw new Error('after importing, B was not offered its own link back')
-    step('the contact was added, and B is offered its key in return')
+    if (!back.open) throw new Error('after saying yes, B was not offered its own link back')
+    step('the contact was added, B was asked, and saying yes offers its key in return')
 
     // The return leg has to TERMINATE. Importing a reply used to offer another
     // reply, so the two sides bounced dialogs at each other for ever.
@@ -2494,6 +2504,12 @@ async function main() {
       document.getElementById('add-save').click();
       return 1`)
     await B.waitFor('the source contact on the list', `return !!document.querySelector('#pane-contacts .contact')`, 10_000)
+    // Adding by hand asks the same question as adding by link; this test is
+    // about the contact surviving a profile copy, so it declines and moves on.
+    await B.eval(`
+      const m = document.getElementById('ask-modal');
+      if (m.classList.contains('open')) document.getElementById('ask-no').click();
+      return 1`)
 
     // Sign out (a reload — which is also what proves the copy survives one).
     await B.eval(`document.getElementById('btn-settings').click(); return 1`)
