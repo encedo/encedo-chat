@@ -40,6 +40,194 @@ Layering: `PROTOCOL.md` owns the **crypto-layer threat model** — adversaries i
 
 ---
 
+## Attack scenarios — what an attacker actually does
+
+The sections above state properties; this one states *stories*, because a limit
+is easy to nod at and a scenario is not. Everything here is written from the
+attacker's side: what they do, what it gets them, what stops them, and what
+still hurts. A few are deliberately far-fetched — they are kept because the
+boundary they illuminate is real, and an absurd scenario that has an answer is
+worth more than a plausible one that does not.
+
+Nothing below is a discovered vulnerability. This is the map, drawn on purpose.
+
+### A. The endpoint — the attacker is inside the app
+
+**A1. Modified JavaScript served to the web client.** The bundle comes from our
+own host; whoever controls that host, or the TLS path to it, controls the code
+running in every browser tab. That code inherits the session's full authority:
+it can ask the HEM for an ECDH against any peer key, read and rewrite the
+contact book, mint groups — all without the key ever leaving the device, which
+is exactly the point. **The HEM is not a control against this**; it confines
+key *theft*, not key *use*. The stale-bundle banner is likewise not a control:
+it compares a content hash to decide "you are out of date", not "you are
+authentic". The packaged builds are signed (updater minisign, Android
+keystore), the web bundle is not — which is the whole argument for
+recommending the packaged app where it matters, and the known price of the web
+convenience tier.
+
+**A2. A malicious browser extension.** Same authority as A1 with none of the
+work: no host to compromise, no certificate to forge. Entirely outside this
+project's reach. The packaged shell has no extension surface, which is an
+argument for it that costs us nothing to make.
+
+**A3. Theft of the password-derived key pair.** Authorisation derives an X25519
+pair from `PBKDF2(password, eid)` where `eid` is a **stable** salt, and holds it
+in memory so later authorisations need no password. That pair is therefore
+*password-equivalent*: exfiltrated once, it authorises device operations from
+anywhere with network reach to the HEM, until the password changes — longer
+than a stolen 5-minute token by any measure. **Planned control**: authorisation
+through the authenticator app instead of a password, which requires a human
+action on a second device per authorisation; with multi-scope tokens in newer
+firmware, one interaction can cover a burst of work. That trade — one deliberate
+tap against silent reuse — is the security-versus-convenience decision this
+system has to make explicitly rather than by default.
+
+**A4. Ordinary malware that never touches the app.** Screen capture,
+accessibility APIs, a keylogger. Defeats everything, by definition (limit 4).
+The corollary is worth saying out loud once: a phone camera pointed at the
+screen is a complete break of a messenger with perfect cryptography, and no
+protocol change will ever address it.
+
+**A5. A covert second session on the same identity.** §9.1 has both copies
+stand down, so parallel use is *noisy* rather than silent — the user sees the
+duplicate notice. It does not help against code riding the session already
+open in the same page, which is A1.
+
+### B. The operator — the "safe even from its maker" test
+
+**B1. A malicious or seized discovery node.** Sees ciphertext frames, sizes,
+timing, client IPs and topic ids. Cannot read content, cannot forge an Announce
+(the MAC key derives from the pair secret it does not have), cannot join a room
+undetected. It *can* deny service, and it can build a metadata graph — which is
+why the node is replaceable and self-hostable by design.
+
+**B2. A poisoned release.** CI holds the signing keys; a compromised workflow or
+a stolen minisign key ships a signed backdoor to every desktop that auto-updates.
+This is the **highest-leverage attack on the entire system** — better than any
+cryptanalysis, because the update channel is trusted by construction. The
+shipped controls are per-artifact signatures and public code; the missing one is
+an **offline operator root key**, which the assets table already records as an
+open item rather than a control.
+
+**B3. The operator serving A1 deliberately.** The same code path as a
+compromise, minus the compromise. Stated because "safe even from its maker" is
+only meaningful if the ways the maker could betray it are written down: the web
+tier can be backdoored per-session, per-user, invisibly. The packaged tier
+cannot, without leaving a signed artifact behind — a copy of the crime.
+
+**B4. The file store.** Ciphertext for minutes, plus size, timing and fetch IPs
+on a public unauthenticated gateway; the upload door has to stay open (a browser
+app holds no secret), so its defence is tempo, not authentication — per-IP rate
+limits since 2026-09-11.
+
+### C. The network
+
+**C1. TLS or DNS hijack of the app's origin.** Delivers A1 without touching our
+hosts. Certificate transparency and HSTS raise the cost; nothing in the product
+detects it. The packaged app narrows this to the update channel, where a
+signature is checked.
+
+**C2. The user's own router.** Observed benignly on 2026-09-11: a firmware
+update restarted it and every client on that network dropped simultaneously for
+about seventy seconds. A hostile router does the same indefinitely (denial), or
+mints a trusted certificate and becomes C1.
+
+**C3. Rendezvous flooding.** An attacker who knows a topic id can publish noise
+into it. Knowing one requires being a member of that pair — or being the node,
+which sees them all. Bounded by a 64 KB frame cap, a 250-topic ceiling with idle
+eviction, and per-IP limits at the edge.
+
+**C4. A global passive observer** correlating traffic across links defeats
+network-level privacy. Out of scope, and stated rather than hand-waved.
+
+### D. The peer
+
+**D1. The contact who is not who you think.** Swapping a `pub` re-aims the whole
+stack with nothing failing — the reason the contact book is listed as the trust
+anchor. A *known* key that changes is caught and named ("you already hold a
+contact of this name with a DIFFERENT key"); a **first** contact has nothing to
+compare against, so an out-of-band fingerprint check is the only control, and
+QR exists to make it cheap.
+
+**D2. The peer who keeps everything.** Deniability means they cannot prove to a
+third party that you wrote it; it has never meant they cannot keep it. Anyone
+you talk to can screenshot the conversation, and no design here changes that.
+
+### E. Physical
+
+**E1. A stolen HEM.** Locked; useless without the password (and, with
+authenticator-based authorisation, without the phone too). This is the case the
+device exists for and the one it handles cleanly.
+
+**E2. A stolen laptop with the session open.** Full authority until the window
+closes, bounded by the forced re-handshake at 4–8 h, which needs the device.
+There is no remote wipe and no idle lock — an honest gap, not an oversight:
+both are meaningful only with a management plane this product does not have.
+
+**E3. A memory dump of a live session.** Ratchet state, the pair secrets, the
+derived authorisation keys. In-device HKDF removes the pair secret from that
+dump — see the note below on what that does and does not buy.
+
+### F. Theoretical, and one or two frankly absurd
+
+**F1. Malicious HEM firmware.** A device that computed a DH against the
+attacker's key, or leaked the identity key, would defeat everything built on
+it, and the client cannot tell. The SDK exposes a device **attestation**
+endpoint; the app does not call it. That is an available control left unused,
+which is worth knowing before somebody assumes hardware implies verification.
+
+**F2. A backdoored dependency.** An npm package that publishes a subtly broken
+X25519 or a biased RNG. Lockfiles pin versions and the code is public; nothing
+stronger is in place, and no amount of protocol design substitutes for it.
+
+**F3. A clock pushed forward a day.** Topics and the rotation instant derive
+from UTC dates, so a client with a wrong clock derives a topic nobody else is
+on and simply finds an empty room — silent denial, self-healing when the clock
+returns. The ±30 min overlap window absorbs ordinary skew, not sabotage.
+
+**F4. A poisoned invite.** A QR or link adds the attacker as a contact. Against
+a key you already hold, the app answers with verification; against a first
+contact there is nothing to verify against except a fingerprint read aloud.
+
+**F5. A cryptanalytically relevant quantum computer.** Confidentiality is
+PQ-hybrid from day one, so recorded traffic stays shut. Authentication is
+classical until Phase 3 (S9): such an adversary could impersonate users in
+*new* handshakes, which is why the migration has a date and not a hope.
+
+**F6. Coercion.** Deniability answers a judge, not a person holding the phone.
+There is no duress mode, no panic wipe and no decoy profile. Listed because
+somebody will otherwise assume deniability covers it.
+
+**F7. A contact who floods you.** A 128 MB file every minute: bounded by the
+upload rate limit, the file size cap, and the fact that nothing is fetched
+automatically unless the recipient turned that on.
+
+**F8. An attacker who records everything today and waits for the pair secret to
+leak.** Nothing follows. The pair secret is rendezvous-only and **disjoint from
+every message-key DH** — it derives topics, the Announce MAC and the rotation
+instant, and never a message key. A leak years later still yields metadata
+linkability of that pair, never content. This is precisely why the disjointness
+is written into the protocol and not merely observed.
+
+### What moving HKDF into the device does — and does not — buy
+
+Deriving the rendezvous material inside the HEM (`ecdhDerive`) removes the raw
+pair secret from client RAM entirely. That narrows **E3** and the
+metadata-linkability limit noted against the current firmware, and it changes
+the shape of what an attacker can steal: a per-window derived value expires at
+the window boundary, where the raw secret was good until the identity key
+itself rotated. A permanent capability becomes a time-boxed one, which is a
+real gain.
+
+It does **not** touch A1–A3. Code inside the session can still ask the device to
+derive for any peer it likes; the device authorises an *operation*, never an
+*intention*. The control that addresses that class is a human action per
+authorisation (A3), not a better key derivation. Both are worth doing, and it is
+worth not confusing one for the other.
+
+---
+
 ## P1 — Private / casual
 
 **Adversary**: commercial surveillance, ISP snooping, opportunistic attackers, platform data harvesting. Not targeted by a state.
