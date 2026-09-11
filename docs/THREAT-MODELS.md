@@ -210,6 +210,50 @@ instant, and never a message key. A leak years later still yields metadata
 linkability of that pair, never content. This is precisely why the disjointness
 is written into the protocol and not merely observed.
 
+### Blast radius — what each compromise actually costs
+
+Scenarios say what an attacker does. This says what it *costs*, which is the
+question anybody deciding whether to deploy this asks first. Three columns on
+purpose: what is lost, for how long, and — the column usually missing — what is
+**not** lost, because a compromise that takes everything and one that takes a
+session are not the same event and must not read the same way.
+
+"History" appears in none of these rows for one reason: there is none. A
+transcript lives in the page and dies with it. What persists on a device is the
+contact book, the group cache (sealed at rest under a key derived from the
+identity — on a HEM profile, unsealing it needs the device) and the settings.
+
+| Compromise | What is lost | For how long | What is NOT lost |
+|---|---|---|---|
+| **Web bundle replaced / malicious extension** (A1, A2) | full use of the identity: impersonation toward any contact, the contact book, new groups | while the window is open; with a stolen authorisation pair, until the password changes | past traffic (ephemeral, and forward-secret), the identity key itself (never leaves the HEM), any other device |
+| **Packaged app backdoored via the update channel** (B2) | the same, on every machine that auto-updated | until a clean build is installed | the identity key; past traffic. But this is the widest-reaching event in the system, which is why the offline root key is an open item |
+| **Laptop stolen, session open** | the live session: read and write as the user | until the window closes, bounded by the forced re-handshake at **4–8 h per peer** (needs the device) | everything after that, absent the HEM and the password; no remote wipe exists, so this bound is the control |
+| **Laptop stolen, session closed — HEM profile** | nothing usable | — | the identity (in the device), the group cache (sealed under a device-derived key), future sessions |
+| **Laptop stolen, session closed — software profile** | the sealed identity blob, open to offline guessing at 1M PBKDF2 rounds | until the password is guessed; forever if it is weak | nothing else, and this row is precisely the tier difference the product asks users to choose with open eyes |
+| **HEM stolen on its own** | nothing | — | everything: it is locked, and unlocking needs the password — with authenticator-based authorisation, the phone too |
+| **Password stolen on its own (HEM profile)** | nothing by itself | — | everything, until the attacker also reaches the device. This is the property the second factor exists to keep |
+| **Authorisation key pair exfiltrated** (A3) | the ability to authorise device operations from anywhere with network reach to the HEM | **until the password changes** — the salt is stable, so this outlives every token | content already sent; the key itself |
+| **Discovery node seized or hostile** (B1) | metadata: client IPs, topic ids, sizes, timing, and the ability to deny service | while that node carries the client — a client can move to another, or self-host | all content, every key, the ability to forge an Announce or join a room |
+| **File store seized** (B4) | ciphertext blobs, their sizes, fetch times and fetcher IPs | **~5 minutes per file**, by retention | file contents (the key rides in the envelope, never in the store), text messages, which never touch it |
+| **A contact's device compromised** | everything you ever sent *that contact* | permanently — they hold it | every other conversation; and deniability still denies a third party the proof that you wrote it |
+| **Pair secret `ss` leaked — today** | metadata linkability of that one pair: their topics and Announce MACs, past and future | until that identity key rotates | **all content, always** — `ss` is rendezvous-only and disjoint from every message-key DH |
+| **Pair secret leaked — after in-device HKDF** | the same, for one rotation window | until the window ends | the same, plus the secret itself, which never left the device |
+| **Profile export file stolen** (§10) | identity, contacts and groups in one sealed blob, open to offline guessing | until the password is guessed | nothing, if the password holds. The file is the single densest asset this product produces — treat it accordingly |
+
+Two readings worth taking from the table rather than from any single row.
+
+**The HEM's value is visible in the "for how long" column, not in "what is
+lost".** Almost every row where the device is present ends in a bound: the
+window closes, the re-handshake falls due, the rotation window ends. Where it is
+absent — the software profile, the export file — the bound is a password and the
+attacker's patience.
+
+**The two rows that end in "until the password changes" are the ones worth
+engineering away**, and both are the same defect: a long-lived authorisation
+secret sitting in a process. That is the case for a human action per
+authorisation, and the reason a second factor changes the shape of this table
+rather than merely adding a step.
+
 ### What moving HKDF into the device does — and does not — buy
 
 Deriving the rendezvous material inside the HEM (`ecdhDerive`) removes the raw
