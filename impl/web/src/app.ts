@@ -53,6 +53,7 @@ import { contactState, seenLabel, noteSeen as foldSeen, noteAdded as foldAdded, 
 import { bodyBytes, fitsOnWire, overBy, MAX_BODY, WARN_AT, kb } from '../../lib/msgsize.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
+import { cidMatches, isVerifiableCid } from '../../lib/cid.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
 import type { FileEnv } from '../../lib/envelope.ts'
 import { nowMs, localHHMM, utcISO } from '../../lib/time.ts'
@@ -1126,7 +1127,20 @@ async function loadOfficialNodes(btnId: string, warn: (t: string) => void, redra
   const btn = $(btnId) as HTMLButtonElement
   btn.disabled = true; const label = btn.textContent; btn.textContent = tr('Pobieram…')
   try {
-    const text = new TextDecoder().decode(await getBlob(OFFICIAL_NODES_CID))
+    const raw = await getBlob(OFFICIAL_NODES_CID)
+    // The CID is compiled in so nobody can redirect WHICH list is asked for —
+    // and until this check, nothing said the bytes coming back were the ones it
+    // names. They arrive through our own `/f`, so whoever could shape that
+    // response chose the relays for every client: the first hop of every
+    // conversation. Content addressing is only integrity where somebody
+    // computes the hash (lib/cid.ts).
+    if (!await cidMatches(OFFICIAL_NODES_CID, raw)) {
+      warn(isVerifiableCid(OFFICIAL_NODES_CID)
+        ? tr('Pobrana lista NIE zgadza się ze swoim CID — nie wczytuję jej. Zgłoś to.')
+        : tr('Tej listy nie da się zweryfikować (stary format CID) — nie wczytuję jej.'))
+      return
+    }
+    const text = new TextDecoder().decode(raw)
     const nodes = parseNodeList(text)
     // Asked before applying: this REPLACES a list the user may have edited by
     // hand, and the button sits one tap from the one that adds a node.

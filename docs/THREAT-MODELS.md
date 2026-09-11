@@ -15,7 +15,7 @@ Layering: `PROTOCOL.md` owns the **crypto-layer threat model** — adversaries i
 | Long-term identity keys | HEM (HSM) — or, for a **software profile** (`PROTOCOL.md` §4.5), a password-sealed blob on the user's disk: a different assurance tier, named as such |
 | **The contact book — the trust anchor** | on device. Swapping a contact's `pub` re-aims the entire stack at the attacker with nothing failing (`PROTOCOL.md` §4.4); the shipped control is a keyed MAC over the stored book, verified at sign-in, with tampering surfaced and never overwritten |
 | **The profile export file** (§10) | wherever the user puts it — one sealed blob carrying identity + contacts + groups under the profile password; offline-attackable, file + guessed password = the identity |
-| Node list / app integrity | node list: a **compiled-in IPFS CID** (content addressing is the integrity; no signature); releases: three CI-held keys (updater minisign, Android keystore, Windows signing wired-but-off). An offline operator root key is an open item, not a shipped control |
+| Node list / app integrity | node list: a **compiled-in IPFS CID**, and since 2026-09-11 the fetched bytes are **checked against it** client-side (`lib/cid.ts`; CIDv1/raw/sha2-256 only — anything it cannot verify is refused, not waved through). Until that check existed the claim was stronger than the code: the list arrives through the operator's own `/f`, so whoever could shape that response chose every client's relays; releases: three CI-held keys (updater minisign, Android keystore, Windows signing wired-but-off). An offline operator root key is an open item, not a shipped control |
 | Service availability | discovery nodes (redundant, replaceable, self-hostable) |
 
 ## Baseline guarantees (all profiles)

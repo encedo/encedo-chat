@@ -337,6 +337,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'za długa o {n} — wyślij jako plik': '{n} too long - send it as a file',
     'Wiadomość jest za długa o {n} — wyślij ją jako plik': 'The message is {n} too long - send it as a file',
     'Podpis jest za długi o {n} — skróć go albo wyślij osobno': 'The caption is {n} too long - shorten it or send it separately',
+    'Pobrana lista NIE zgadza się ze swoim CID — nie wczytuję jej. Zgłoś to.': 'The downloaded list does NOT match its CID - refusing to load it. Please report this.',
+    'Tej listy nie da się zweryfikować (stary format CID) — nie wczytuję jej.': 'This list cannot be verified (old CID format) - refusing to load it.',
     'NOWY': 'NEW',
     'widziany {t}': 'seen at {t}',
     'wczoraj {t}': 'yesterday {t}',
