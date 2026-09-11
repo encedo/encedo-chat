@@ -98,6 +98,31 @@
   }
   *{box-sizing:border-box}
   html,body{height:100%}
+  /* Paski przewijania. Na Linuksie i macOS-ie platforma rysuje cienką nakładkę,
+     która znika sama, więc przez miesiące nikt tego nie widział; WebView2 na
+     Windows rysuje klasyczny pasek systemowy — biały, z przyciskami strzałek —
+     w środku ciemnego kompozytora (zgłoszone 2026-09-11 ze zrzutem). W tej
+     aplikacji przewija się DZIESIĘĆ powierzchni: transkrypcja, listy kontaktów
+     i grup, szuflada ustawień, listy członków i tożsamości, popovery, podgląd
+     zgłoszenia i pole wiadomości — artefakt był w każdej z nich.
+
+     Obie pisownie świadomie: `scrollbar-width`/`scrollbar-color` to standard i
+     są DZIEDZICZONE, więc `:root` załatwia całość; pseudoelementy `-webkit-`
+     rozumieją starsze silniki, a spakowany pulpit to WebKitGTK. Kolory z tokenów,
+     więc motyw jasny i ciemny dostają swoje bez osobnej reguły. */
+  /* UWAGA na asymetrię, którą łatwo przeoczyć: `scrollbar-color` JEST
+     dziedziczone, a `scrollbar-width` NIE — na `:root` zadziałałby tylko na
+     samym dokumencie, a dziesięć przewijalnych powierzchni zostałoby z
+     systemowym `auto` (sprawdzone przez getComputedStyle, nie zgadnięte). */
+  :root{scrollbar-color:var(--border) transparent}
+  *{scrollbar-width:thin}
+  *::-webkit-scrollbar{width:10px;height:10px}
+  *::-webkit-scrollbar-track{background:transparent}
+  *::-webkit-scrollbar-thumb{background:var(--border);border-radius:8px;
+    border:2px solid transparent;background-clip:padding-box}
+  *::-webkit-scrollbar-thumb:hover{background:var(--muted);background-clip:padding-box}
+  *::-webkit-scrollbar-corner{background:transparent}
+
   body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;background:var(--bg);color:var(--body);font-size:14px;line-height:1.5}
   button{font:inherit;cursor:pointer}
   input,textarea{font:inherit}
