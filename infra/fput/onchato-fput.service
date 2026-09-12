@@ -1,0 +1,28 @@
+# systemd — onchato upload prefixer (encedo-chat/infra/fput)
+# Install:  sudo cp onchato-fput.service /etc/systemd/system/
+#           sudo systemctl daemon-reload && sudo systemctl enable --now onchato-fput
+# Logs:     sudo journalctl -u onchato-fput -f
+#
+# Listens on 127.0.0.1:9202 only — nginx's `location = /f` is the door, and it
+# keeps the rate limits, the CORS and `proxy_request_buffering off`. That last
+# one is not cosmetic: without it nginx spools the whole upload to a temporary
+# FILE before this service sees a byte, which is exactly what the streaming
+# here exists to avoid.
+
+[Unit]
+Description=onchato upload prefixer (encedo-chat)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/github/encedo-chat/infra/fput
+ExecStart=/usr/bin/node fput.mjs
+Environment=NODE_ENV=production
+Environment=PORT=9202
+Environment=IPFS_RPC=https://rpc.ipfs.encedo.com
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
