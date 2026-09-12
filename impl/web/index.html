@@ -13,16 +13,25 @@
      WASM, bez `eval` (jedyne `new Function` to nieosiągalny polyfill
      `globalThis` w webpacku, opakowany w `try`).
 
-     `wss:` szeroko, nie lista naszych węzłów: lista przekaźników jest
-     edytowalna przez użytkownika, a wymienialność operatora to u nas własność
-     bezpieczeństwa, nie wygoda. Zawężenie do trzech nazw zabiłoby samodzielny
-     hosting, żeby utrudnić atak, który i tak wymaga wykonania obcego kodu.
+     `connect-src` jest SZEROKI świadomie i nie da się go zawęzić bez zepsucia
+     produktu: adres HEM-a **wpisuje użytkownik przy logowaniu** (zwykle
+     urządzenie w LAN-ie), lista przekaźników jest edytowalna, a wymienialność
+     operatora to u nas własność bezpieczeństwa, nie wygoda. Pierwsza wersja tej
+     polityki wymieniała `onchato.com` i `api.encedo.com` — i cicho blokowała
+     logowanie HEM-em, bo urządzenia nie ma i nie może być na żadnej liście
+     zaszytej przy budowaniu.
+     Ścianą jest `script-src`, nie `connect-src`: dokąd kod wysyła dane, ma
+     znaczenie dopiero wtedy, gdy obcy kod już się wykonuje — a tego pilnuje
+     dyrektywa wyżej. Ta zostawia zamknięte `http:`, `ws:`, `data:` i `blob:`.
+
+     Efekt uboczny, wart odnotowania: w polityce **nie ma ani jednej nazwy
+     hosta**, więc kto stawia własną instancję, nie zmienia tu niczego.
 
      `style-src 'unsafe-inline'`, bo arkusz jest wklejony w ten plik, a kod
      ustawia `style.height` na kompozytorze — atrybuty stylu też podlegają tej
      dyrektywie. Skrypt inline ma HASH liczony przy budowaniu (webpack.config.cjs),
      bo html-webpack-plugin go minifikuje i hash ze źródła byłby nieprawdziwy. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' __CSP_SCRIPT_HASHES__; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' wss: https://onchato.com https://api.encedo.com; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' __CSP_SCRIPT_HASHES__; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' wss: https:; base-uri 'none'; form-action 'none'; object-src 'none'">
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-linecap%3D%22round%22%20stroke-width%3D%2210%22%20style%3D%22color%3A%2335c99e%22%20viewBox%3D%220%200%20100%20100%22%3E%3Cstyle%3E%40media%20(prefers-color-scheme%3Alight)%7B%3Aroot%7Bcolor%3A%230f6b57%7D%7D%3C%2Fstyle%3E%3Cpath%20stroke-width%3D%228%22%20d%3D%22M38.8%2019.6V42m0%2020.8v22.4m22.4-65.6v19.2C50%2043.6%2050%2061.2%2061.2%2066v19.2%22%2F%3E%3C%2Fsvg%3E">
   <!-- iOS "Add to Home Screen" takes this one; everything else uses the inline
        tab icon above. `icons/` is generated (scripts/build-icons.mjs) and copied
