@@ -155,6 +155,16 @@ server {
         # sam pozwolić się wciągnąć — inaczej blokuje go izolacja, nie CORS.
         add_header Cross-Origin-Resource-Policy "cross-origin" always;
 
+        # Upload jest otwarty dla swiata, wiec pod tym adresem moze wisiec CUDZY
+        # plik — a adres jest NASZ. Aplikacja pobiera te bajty przez fetch i sama
+        # je odszyfrowuje, wiec oba naglowki sa dla niej bez znaczenia; znacza
+        # tylko dla kogos, komu podeslano taki link. Kubo oddaje dzis text/plain,
+        # czyli bezpiecznie z przypadku, nie z konstrukcji: attachment przesadza,
+        # ze przegladarka niczego nie wyrenderuje, a nosniff — ze nie zgadnie
+        # typu wbrew deklaracji.
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Content-Disposition    "attachment" always;
+
         limit_except GET { deny all; }
         limit_req  zone=fget_req burst=60 nodelay;
         limit_conn fget_conn 8;
