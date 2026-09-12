@@ -93,6 +93,20 @@ server {
     # składni w miejscu, gdzie jest HTML.
     location = /chat/ { return 301 /chat; }
 
+    # Cały build jednym plikiem — źródło dla publikacji na IPFS i dla kogoś,
+    # kto chce hostować swoją kopię. Leży OBOK dist, nie w środku: plik w
+    # katalogu wszedłby do jego CID-a i wynik `ipfs add -r` przestałby się
+    # zgadzać z liczbą, którą podaje CI. Archiwum jest powtarzalne (posortowane,
+    # bez czasów i właścicieli), więc ten sam commit daje ten sam bajt.
+    #
+    # Zaufania nie wymaga: po rozpakowaniu CID musi wyjść taki, jaki stoi w
+    # notatkach wydania — podmieniona paczka jest po prostu inną liczbą.
+    location = /chat/dist.tar.gz {
+        alias /opt/github/encedo-chat/impl/web/dist.tar.gz;
+        default_type application/gzip;
+        add_header Cache-Control "no-cache";
+    }
+
     location = /f {
         # CORS, bo paczka (Tauri/Android) NIE jest serwowana z tego origin.
         # Ładuje bundle z tauri://localhost, więc upload jest dla niej

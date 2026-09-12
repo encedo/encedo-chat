@@ -22,7 +22,7 @@
     "alice": "node alice/alice.ts",
     "ec": "node cli/ec.ts",
     "web:build": "webpack --config web/webpack.config.cjs --mode production",
-    "web:deploy": "cmp -s package-lock.json node_modules/.lock-stamp || { npm ci && cp package-lock.json node_modules/.lock-stamp; } && npm run web:build",
+    "web:deploy": "cmp -s package-lock.json node_modules/.lock-stamp || { npm ci && cp package-lock.json node_modules/.lock-stamp; } && npm run web:build && npm run web:pack",
     "web:dev": "webpack serve --config web/webpack.config.cjs --mode development",
     "room-sim": "node net/room-sim.ts",
     "browser-test": "node net/browser-test.ts",
@@ -34,7 +34,8 @@
     "relay-hsrate": "node net/relay-hsrate.ts",
     "relay-chatload": "node net/relay-chatload.ts",
     "phone-shot": "node net/phone-shot.ts",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "web:pack": "tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C web -cf - dist | gzip -n9 > web/dist.tar.gz"
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.2",

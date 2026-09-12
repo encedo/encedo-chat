@@ -31,3 +31,4 @@ Thumbs.db
 
 # local per-user CLI config (hsm url / kid pointers)
 *.local.json
+dist.tar.gz
