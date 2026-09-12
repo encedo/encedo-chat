@@ -107,6 +107,39 @@ module.exports = (_env, argv) => {
       // that somebody can read what it allows.
       {
         apply(compiler) {
+          // Subresource Integrity, liczone na SAMYM KOŃCU potoku.
+          //
+          // Bez SRI `index.html` zobowiązuje się tylko do NAZWY pliku: hash w
+          // nazwie jest webpacka i nikt go nie sprawdza, więc serwer może pod tą
+          // samą nazwą oddać co innego. Z SRI przeglądarka sama odmawia
+          // wykonania niezgodnego skryptu — a wtedy opublikowanie CID-a samego
+          // `index.html` domyka cały łańcuch: jeden mały plik ręczy
+          // kryptograficznie za 1,4 MB reszty.
+          //
+          // Etap REPORT, a nie hak html-webpack-plugin: w trybie produkcyjnym
+          // zawartość assetów jest finalizowana PÓŹNIEJ (minifikacja, wyciąganie
+          // licencji, `realContentHash`), więc hash policzony wcześniej nie
+          // zgadza się z plikiem, który wyjdzie na dysk. Sprawdzone — pierwsza
+          // wersja tego kodu wpisywała do HTML-a hash nieistniejącej treści.
+          compiler.hooks.compilation.tap('Sri', (compilation) => {
+            const { Compilation, sources } = compiler.webpack
+            compilation.hooks.processAssets.tap(
+              { name: 'Sri', stage: Compilation.PROCESS_ASSETS_STAGE_REPORT },
+              (assets) => {
+                for (const name of Object.keys(assets)) {
+                  if (!name.endsWith('.html')) continue
+                  const before = assets[name].source().toString()
+                  const after = before.replace(/<script([^>]*?)src="([^"]+\.bundle\.js)"([^>]*)>/g,
+                    (tag, pre, src, post) => {
+                      const asset = assets[src]
+                      if (!asset) throw new Error(`SRI: brak assetu ${src}`)
+                      const sri = crypto.createHash('sha384').update(asset.source()).digest('base64')
+                      return `<script${pre}src="${src}"${post} integrity="sha384-${sri}">`
+                    })
+                  if (after !== before) compilation.updateAsset(name, new sources.RawSource(after))
+                }
+              })
+          })
           compiler.hooks.compilation.tap('CspHashes', (compilation) => {
             HtmlWebpackPlugin.getHooks(compilation).beforeEmit.tapAsync('CspHashes', (data, cb) => {
               const hashes = []
