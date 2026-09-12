@@ -71,6 +71,95 @@ jobs:
             echo "release for $TAG already exists ($N) — leaving it alone"
           fi
 
+  # What the release SERVES, as a number anybody can recompute.
+  #
+  # A CID is a hash of the bytes — computing one needs the files and nothing
+  # else: no IPFS node, no key, no network. So CI can state it, and whoever
+  # pins the files to IPFS computes the same number independently. Two answers
+  # that must agree beat one answer nobody checks.
+  #
+  # The build has to be the one the host will deploy, or the number vouches for
+  # a bundle that never existed: same tag, same `npm run web:build`, no
+  # EC_ALLOW_KEYS (the deploy script sets none either), and a clean tree —
+  # `__EC_COMMIT__` appends `+` when it is dirty, which changes every hash
+  # downstream. Reproducibility across machines and Node versions is measured,
+  # not assumed (`scripts/release-cid.mjs`, and the note in CLAUDE.md).
+  cid:
+    name: release CID
+    if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
+    needs: draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # hem-sdk-js is a submodule that `impl/web` imports directly.
+          submodules: recursive
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: impl/package-lock.json
+
+      - run: npm ci
+        working-directory: impl
+
+      - name: Build what the host will serve
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain)" ]; then
+            git status --porcelain
+            echo "dirty tree — the build would be stamped '+' and match no deploy"
+            exit 1
+          fi
+          npm run web:build --prefix impl
+
+      - name: State the CIDs in the draft
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in refs/tags/*) ;; *) echo "not a tag build — nothing to state"; exit 0 ;; esac
+          TAG="$GITHUB_REF_NAME"
+
+          # Pinned image: the CID must not move because a base image did.
+          DIR=$(docker run --rm -v "$PWD/impl/web/dist:/d:ro" ipfs/kubo:v0.43.0 \
+                  add -r --cid-version=1 --raw-leaves --only-hash -Q /d | tail -1)
+          HTML=$(node scripts/release-cid.mjs | awk '/^index.html/ {print $2}')
+          echo "dist $DIR"
+          echo "index.html $HTML"
+
+          BODY=$(gh release view "$TAG" --json body -q .body)
+          case "$BODY" in
+            *'<!-- ec-cid -->'*) echo "the draft already states a CID — leaving it alone"; exit 0 ;;
+          esac
+
+          { printf '%s\n\n' "$BODY"
+            cat <<EOF
+          <!-- ec-cid -->
+          ## Verifying the code this release serves
+
+              index.html   $HTML
+              whole build  $DIR
+
+          \`index.html\` carries an SRI hash for the script it loads, so the first
+          CID covers what the browser executes; the second covers every file in
+          the build, lazily loaded chunks and icons included.
+
+          Recompute the first one from whatever the server gives you:
+
+              curl -sL https://onchato.com/chat | ipfs add --cid-version=1 --raw-leaves --only-hash -q
+
+          Computed by CI from the tagged tree. The build is reproducible, so a
+          number that does not match is a statement about the server, not noise.
+          EOF
+          } | sed 's/^          //' > /tmp/notes.md
+
+          gh release edit "$TAG" --notes-file /tmp/notes.md
+          echo "stated in the draft for $TAG"
+
   bundle:
     name: ${{ matrix.label }}
     # Skipped only for the repair dispatch (a tag input): that run exists to
