@@ -8,4 +8,7 @@ After=network-online.target onchato-relay.service
 Type=oneshot
 # Token żyje TYLKO tutaj, poza repozytorium: PUSH_URL=https://status…/api/push/<token>
 EnvironmentFile=/etc/onchato-health.env
-ExecStart=/opt/github/encedo-chat/infra/health/relay-health.sh
+# Stała ścieżka systemowa, nie kopia repozytorium na węźle: ta druga jest
+# aktualizowana dopiero przy nowym tagu (infra/deploy-on-tag.sh), więc monitoring
+# zależałby od cyklu wydawniczego aplikacji, z którym nie ma nic wspólnego.
+ExecStart=/usr/local/lib/onchato/relay-health.sh

@@ -22,13 +22,18 @@ Na wykres w Kumie trafia **najgorsze zacięcie pętli zdarzeń** z ostatniego ok
 printf 'PUSH_URL=https://status.encedo.com/api/push/<TOKEN>\n' | sudo tee /etc/onchato-health.env >/dev/null
 sudo chmod 600 /etc/onchato-health.env
 
-# 2. jednostki (repo jest już na węźle w /opt/github/encedo-chat)
-sudo cp /opt/github/encedo-chat/infra/health/onchato-health.{service,timer} /etc/systemd/system/
+# 2. skrypt pod stałą ścieżkę + jednostki
+sudo install -D -m 755 infra/health/relay-health.sh /usr/local/lib/onchato/relay-health.sh
+sudo cp infra/health/onchato-health.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now onchato-health.timer
 
 # 3. sprawdzenie
 sudo systemctl start onchato-health.service && journalctl -u onchato-health -n 5 --no-pager
 ```
+
+Skrypt leży w `/usr/local/lib/onchato/`, a nie w kopii repozytorium na węźle:
+tamta jest aktualizowana dopiero przy nowym tagu aplikacji, a monitoring nie ma
+z cyklem wydawniczym nic wspólnego. Po zmianie skryptu — skopiować ponownie.
 
 **Token jest sekretem** — kto go ma, może zgłaszać „żyję" za węzeł. Dlatego
 `/etc/onchato-health.env` ma prawa 0600 i nie ma go w repozytorium.
