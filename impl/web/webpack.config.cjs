@@ -1,6 +1,7 @@
 const path = require('path')
 const webpack = require('webpack')
 const HtmlWebpackPlugin = require('html-webpack-plugin')
+const crypto = require('crypto')
 const { execSync } = require('child_process')
 
 // Which build is this? Stamped in so a screenshot or a bug report identifies the
@@ -94,6 +95,38 @@ module.exports = (_env, argv) => {
       }),
       new webpack.NormalModuleReplacementPlugin(/^node:/, (r) => { r.request = r.request.replace(/^node:/, '') }),
       new HtmlWebpackPlugin({ template: './index.html', filename: 'index.html', chunks: ['app'] }),
+      // The CSP in index.html names the inline script by HASH, and the hash has
+      // to be of what is EMITTED: html-webpack-plugin minifies the page, so a
+      // hash taken from the source file is wrong by a few characters and the
+      // browser silently refuses the script — the theme then applies from the
+      // bundle instead, one frame late, which looks like a flash rather than
+      // like a policy error. So it is computed here, after the page is final.
+      //
+      // Deliberately not a dependency: twenty lines against a package, on a
+      // step that has to stay understandable — the whole point of the policy is
+      // that somebody can read what it allows.
+      {
+        apply(compiler) {
+          compiler.hooks.compilation.tap('CspHashes', (compilation) => {
+            HtmlWebpackPlugin.getHooks(compilation).beforeEmit.tapAsync('CspHashes', (data, cb) => {
+              const hashes = []
+              data.html = data.html.replace(/<script>([\s\S]*?)<\/script>/g, (m, body) => {
+                hashes.push(`'sha256-${crypto.createHash('sha256').update(body, 'utf8').digest('base64')}'`)
+                return m
+              })
+              if (data.html.includes('__CSP_SCRIPT_HASHES__')) {
+                data.html = data.html.replace('__CSP_SCRIPT_HASHES__', hashes.join(' '))
+              } else if (hashes.length && data.outputName === 'index.html') {
+                // The placeholder is how the policy learns about inline scripts.
+                // Losing it means shipping a page whose own script is refused.
+                cb(new Error('index.html has inline scripts but no __CSP_SCRIPT_HASHES__ in its CSP'))
+                return
+              }
+              cb(null, data)
+            })
+          })
+        },
+      },
       new HtmlWebpackPlugin({ template: './webrtc-test.html', filename: 'webrtc-test.html', chunks: ['webrtc-test'] }),
       // The public landing page, carried through verbatim: no chunks, no
       // injection, no minifier. It has no bundle — the whole point is that a

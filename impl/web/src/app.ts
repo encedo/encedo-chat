@@ -2208,6 +2208,10 @@ const openShare = async (returnMode = false) => {
   }
 }
 const closeShare = () => { $('scrim').classList.remove('open'); $('share-modal').classList.remove('open') }
+// Zaznaczenie linku po kliknięciu było atrybutem `onclick` w markupie; CSP nie
+// przepuszcza atrybutów zdarzeń, a jeden taki atrybut wymusiłby `unsafe-inline`
+// w `script-src`, co unieważnia całą politykę.
+;($('share-link') as HTMLInputElement).addEventListener('click', function () { this.select() })
 $('btn-share').addEventListener('click', () => void openShare())
 $('share-close').addEventListener('click', closeShare)
 $('share-copy').addEventListener('click', async () => {

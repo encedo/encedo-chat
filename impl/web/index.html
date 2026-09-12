@@ -2,6 +2,27 @@
 <html lang="pl">
 <head>
 <meta charset="utf-8">
+<!-- Content Security Policy. Nie broni przed wrogim serwerem — on poda inną
+     politykę razem z innym HTML-em — tylko przed WSTRZYKNIĘCIEM: zasobem
+     podmienionym po drodze, obcym skryptem, wyciekiem danych na inny adres.
+     Korzeń zaufania dla samego HTML-a leży poza stroną (podpisana paczka albo
+     CID sprawdzony przez klienta) i jest opisany w docs/THREAT-MODELS.md.
+
+     `default-src 'none'` i wymieniamy tylko to, czego aplikacja faktycznie
+     używa — sprawdzone w zbudowanym bundlu, nie założone: bez Workerów, bez
+     WASM, bez `eval` (jedyne `new Function` to nieosiągalny polyfill
+     `globalThis` w webpacku, opakowany w `try`).
+
+     `wss:` szeroko, nie lista naszych węzłów: lista przekaźników jest
+     edytowalna przez użytkownika, a wymienialność operatora to u nas własność
+     bezpieczeństwa, nie wygoda. Zawężenie do trzech nazw zabiłoby samodzielny
+     hosting, żeby utrudnić atak, który i tak wymaga wykonania obcego kodu.
+
+     `style-src 'unsafe-inline'`, bo arkusz jest wklejony w ten plik, a kod
+     ustawia `style.height` na kompozytorze — atrybuty stylu też podlegają tej
+     dyrektywie. Skrypt inline ma HASH liczony przy budowaniu (webpack.config.cjs),
+     bo html-webpack-plugin go minifikuje i hash ze źródła byłby nieprawdziwy. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' __CSP_SCRIPT_HASHES__; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' wss: https://onchato.com https://api.encedo.com; base-uri 'none'; form-action 'none'; object-src 'none'">
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-linecap%3D%22round%22%20stroke-width%3D%2210%22%20style%3D%22color%3A%2335c99e%22%20viewBox%3D%220%200%20100%20100%22%3E%3Cstyle%3E%40media%20(prefers-color-scheme%3Alight)%7B%3Aroot%7Bcolor%3A%230f6b57%7D%7D%3C%2Fstyle%3E%3Cpath%20stroke-width%3D%228%22%20d%3D%22M38.8%2019.6V42m0%2020.8v22.4m22.4-65.6v19.2C50%2043.6%2050%2061.2%2061.2%2066v19.2%22%2F%3E%3C%2Fsvg%3E">
   <!-- iOS "Add to Home Screen" takes this one; everything else uses the inline
        tab icon above. `icons/` is generated (scripts/build-icons.mjs) and copied
@@ -1344,7 +1365,7 @@
          element whose whole job is to be read by a machine across a table. -->
     <div class="qr-box" id="share-qr"></div>
     <label data-i18n="Link">Link</label>
-    <input id="share-link" type="text" readonly onclick="this.select()">
+    <input id="share-link" type="text" readonly>
     <div class="fp-box"><span class="fp-lbl" data-i18n="Twój odcisk">Twój odcisk</span><span class="fp-val" id="share-fp">—</span></div>
     <div class="hint" data-i18n="Podaj ten odcisk osobno — głosem albo osobiście. Odbiorca porówna go z tym, co zobaczy po kliknięciu linku; to jedyne, co wykrywa podmianę klucza po drodze.">Podaj ten odcisk osobno — głosem albo osobiście. Odbiorca porówna go z tym, co zobaczy po kliknięciu linku; to jedyne, co wykrywa podmianę klucza po drodze.</div>
     <div class="modal-actions"><button class="btn-send" id="share-copy" style="flex:1;border-radius:8px" data-i18n="Kopiuj link">Kopiuj link</button><button class="btn-ghost" id="share-close" data-i18n="Zamknij">Zamknij</button></div>
