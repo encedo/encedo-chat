@@ -138,14 +138,28 @@ server {
         proxy_read_timeout 300s;
         proxy_send_timeout 300s;
 
-        proxy_set_header Origin     "";
-        proxy_set_header Referer    "";
-        proxy_set_header User-Agent "encedo-proxy";   # ← Kubo odrzuca UA zaczynające się od "Mozilla"
-        proxy_ssl_server_name on;
-        rewrite ^ /api/v0/add?pin=false&to-files=/ec/$msec-$request_id break;
-        proxy_pass https://rpc.ipfs.encedo.com;
+        # Upload nie idzie juz prosto do Kubo, tylko przez onchato-fput
+        # (infra/fput/), ktory w locie dokleja osiem bajtow przed szyfrogramem.
+        # Dostaje je KAZDY upload, takze cudzy, i nikt ich potem nie zdejmuje —
+        # ani ten serwer, ani bramka. Dzieki temu magazyn nie oddaje niczego
+        # 1:1, a Kubo typuje wgrana strone HTML jako octet-stream zamiast
+        # text/html, wiec nie da sie jej nikomu podeslac jako strony.
+        #
+        # Stad znikly trzy rzeczy, ktore przenioslyby sie do serwisu: nazwa
+        # wpisu w ksiedze zamiatacza (/ec/<epoch>-<unikat>), pin=false oraz
+        # User-Agent — Kubo odrzuca naglowki zaczynajace sie od "Mozilla".
+        #
+        # `proxy_request_buffering off` wyzej NIE jest kosmetyka: bez niego
+        # nginx zapisuje cale cialo do pliku tymczasowego, zanim serwis
+        # zobaczy pierwszy bajt, i strumieniowanie po tamtej stronie przestaje
+        # cokolwiek znaczyc.
+        proxy_pass http://127.0.0.1:9202;
     }
 
+    # Pobieranie zostaje na nginxie, prosto z Kubo, i CELOWO nie zdejmuje
+    # prefiksu: gdyby zdejmowalo, dowolny plik dalby sie wgrac i pobrac bajt w
+    # bajt, czyli bylby to zwykly hosting z dodatkowym krokiem. Prefiks pomija
+    # dopiero nasz klient przy deszyfrowaniu (impl/lib/fileenvelope.ts).
     location ~ ^/f/(?<cid>[A-Za-z0-9]+)$ {
         # Jak wyżej: pobranie pliku w paczce to żądanie z innego origin. GET bez
         # własnych nagłówków nie robi preflightu, ale odpowiedź i tak musi się
