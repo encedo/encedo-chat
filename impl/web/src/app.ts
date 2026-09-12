@@ -1111,8 +1111,14 @@ function nodeRowsHTML(list: NodeEntry[]): string {
  * of which relays every client dials, which is the first hop of every
  * conversation. Publishing an updated list therefore means publishing a new CID
  * and shipping a build, and that is the right price.
+ *
+ * CIDv1 with raw leaves, deliberately: a v0 `Qm…` names a dag-pb node rather
+ * than the file, and `lib/cid.ts` refuses what it cannot check — so a v0 here
+ * would mean the bytes were never verified, which is how this constant spent
+ * its first months. Publish with
+ * `ipfs add --cid-version=1 --raw-leaves --pin`.
  */
-const OFFICIAL_NODES_CID = 'QmRtrkjbmMVrm3X33qQ79q8pAaVs5awxTmrwHxBAXbkSPn'
+const OFFICIAL_NODES_CID = 'bafkreih3ykpzxxq67bdvy3z3bp6w7orqkqs4i7hworiemjvba7y6ce5qam'
 
 /**
  * Replace the local list with the published one.
