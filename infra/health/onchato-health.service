@@ -1,0 +1,11 @@
+[Unit]
+# Zgłasza do Uptime Kuma, że PRZEKAŹNIK pracuje — nie tylko że nginx odpowiada.
+# Patrz infra/health/relay-health.sh i infra/health/README.md.
+Description=onchato — health push to Uptime Kuma
+After=network-online.target onchato-relay.service
+
+[Service]
+Type=oneshot
+# Token żyje TYLKO tutaj, poza repozytorium: PUSH_URL=https://status…/api/push/<token>
+EnvironmentFile=/etc/onchato-health.env
+ExecStart=/opt/github/encedo-chat/infra/health/relay-health.sh

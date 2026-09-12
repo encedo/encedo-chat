@@ -1,0 +1,12 @@
+[Unit]
+Description=onchato — health push co minutę
+
+[Timer]
+# Co 60 s, zgodnie z Heartbeat Interval monitora Push w Kumie. Przy dwóch
+# ponowieniach w Kumie alarm zapala się po około trzech minutach ciszy.
+OnBootSec=90s
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
