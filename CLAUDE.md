@@ -1229,6 +1229,26 @@ in `PERMISSIONS` (`src-tauri/android/patch.mjs`) and pinned by
 webview permission is granted by a set, and a permission the manifest never
 declared is a silent `false` in that set.
 
+**Upload prefixer** (`infra/fput/`, since 0.5.73): `POST /f` no longer reaches
+Kubo directly — nginx proxies it to `onchato-fput` (127.0.0.1:9202, systemd,
+`User=www-data`), which **prepends eight bytes to every upload** on its way to
+the store and streams it through without ever holding it. Nothing downstream
+removes them: `GET /f/<cid>` and the public gateway both serve the prefixed
+bytes, and only the client skips them when decrypting (`lib/fileenvelope.ts`).
+The point is the asymmetry — what enters the store is never what leaves it, so
+the store cannot hand anyone a byte-identical file, and a page somebody uploads
+is typed `application/octet-stream` instead of `text/html` (Kubo sniffs the
+first bytes). It refuses nothing; what it removes is the ability to hang a
+working phishing page under our own domain, which is a reputation risk that
+ends with the app not opening for anybody. Three things moved out of nginx into
+it and must stay together: the sweeper ledger name (`/ec/<epoch>-<unique>` — a
+name outside that shape **never expires** and `ipfs-ttl.sh` will not say so),
+`pin=false`, and `User-Agent: encedo-proxy`. Two nginx directives in that block
+are load-bearing for the same reason: `proxy_request_buffering off` and
+`proxy_http_version 1.1`, either of which missing puts the whole upload on disk
+before the service sees a byte. Not part of the tag-driven deploy — install
+once, restart by hand when its code changes.
+
 **Feedback sink** (`infra/feedback/`, since 0.5.39): the app's 💬 Feedback form
 POSTs one JSON document to `https://onchato.com/feedback`; `feedback.mjs`
 (127.0.0.1:9201, systemd `onchato-feedback`, `User=www-data`) validates the

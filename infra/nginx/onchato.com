@@ -153,6 +153,11 @@ server {
         # nginx zapisuje cale cialo do pliku tymczasowego, zanim serwis
         # zobaczy pierwszy bajt, i strumieniowanie po tamtej stronie przestaje
         # cokolwiek znaczyc.
+        # Bez 1.1 nginx rozmawia z upstreamem po HTTP/1.0, ktore nie zna chunked
+        # — a wtedy cialo bez Content-Length musialoby zostac zbuforowane, zeby
+        # dlugosc dalo sie policzyc. Czyli plik na dysku, mimo wylaczonego
+        # buforowania wyzej.
+        proxy_http_version 1.1;
         proxy_pass http://127.0.0.1:9202;
     }
 
