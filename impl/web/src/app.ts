@@ -53,7 +53,7 @@ import { contactState, seenLabel, noteSeen as foldSeen, noteAdded as foldAdded, 
 import { bodyBytes, fitsOnWire, overBy, MAX_BODY, WARN_AT, kb } from '../../lib/msgsize.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
-import { wrapBlob, unwrapBlob } from '../../lib/fileenvelope.ts'
+import { unwrapBlob } from '../../lib/fileenvelope.ts'
 import { cidMatches, isVerifiableCid } from '../../lib/cid.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
 import type { FileEnv } from '../../lib/envelope.ts'
@@ -5120,7 +5120,7 @@ async function attachFile(f: File) {
     const plain = new Uint8Array(await f.arrayBuffer())
     const { manifest, cipher } = await encryptBytes(key, plain, undefined,
       (done, total) => show(tr('Szyfruję…'), `${humanSize(f.size)} · ${pct(done, total)}%`))
-    const { cid } = await putBlob(wrapBlob(cipher), {
+    const { cid } = await putBlob(cipher, {
       onProgress: (sent, total) => show(tr('Wysyłam…'), `${humanSize(f.size)} · ${pct(sent, total)}%`),
     })
     ;(window as any).__lastFileCid = cid // read by the browser harness; harmless elsewhere
