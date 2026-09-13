@@ -1634,6 +1634,80 @@ async function main() {
     await roundTrip(A, B, 'after-upgrade')
     step('messages still flow after the transport decision')
 
+    // The direct plane is the ONLY place a transfer exists (§13.1), so this is
+    // the only harness that can see one at all — Node has no RTCPeerConnection
+    // and the unit tests run against an injected channel. It is skipped rather
+    // than failed when the channel did not come up: a NAT that refuses is not
+    // a defect in this code, and reporting it as one would train people to
+    // ignore the result.
+    scenario('a file goes straight from one browser to the other')
+    if (!direct) {
+      step('SKIPPED: no direct channel, and a transfer never falls back to the relay')
+    } else {
+      // The menu is the feature's whole entry point: it must exist while the
+      // channel does, and it must carry BOTH options, or the ordinary path has
+      // silently disappeared behind the new one.
+      await A.eval(`document.getElementById('btn-attach').click(); return 1`)
+      const rows = await A.eval<number>(`
+        const m = document.getElementById('xfer-menu');
+        return (m && !m.hidden) ? m.querySelectorAll('button').length : 0;
+      `)
+      if (rows !== 2) throw new Error(`the paperclip menu offered ${rows} options, expected 2`)
+      step('the paperclip offers both the store and the direct channel')
+
+      // Click the direct row, then hand the input a file the way a picker
+      // would. `input.click()` opens nothing in headless, which is exactly why
+      // the file is supplied separately — the point is that the REAL change
+      // handler runs, with the mode the menu just set.
+      const XFER_BYTES = 300 * 1024
+      await A.eval(`document.getElementById('xfer-menu').querySelectorAll('button')[1].click(); return 1`)
+      await A.eval(`
+        const input = document.getElementById('file-input');
+        const body = new Uint8Array(${XFER_BYTES});
+        for (let i = 0; i < body.length; i++) body[i] = (i * 31) & 255;
+        const dt = new DataTransfer();
+        dt.items.add(new File([body], 'proba.bin', { type: 'application/octet-stream' }));
+        input.files = dt.files;
+        input.dispatchEvent(new Event('change'));
+        return 1;
+      `)
+      await A.waitFor('the sender is waiting for consent',
+        `return document.getElementById('xfer-modal').classList.contains('open')
+                && /czekam|waiting/.test(document.getElementById('xfer-left').textContent || '')`, 15_000)
+      step('the sender waits for consent rather than pushing bytes')
+
+      await B.waitFor('the receiver is asked first',
+        `return document.getElementById('xfer-modal').classList.contains('open')
+                && /proba\.bin/.test(document.getElementById('xfer-file').textContent || '')`, 20_000)
+      step('the receiver is asked, with the name and size the sender claimed')
+
+      await B.eval(`document.getElementById('xfer-yes').click(); return 1`)
+      await B.waitFor('the file arrived',
+        `return /Odebrano|Received/.test(document.getElementById('xfer-title').textContent || '')`, 60_000)
+      const got = await B.eval<string>(`return document.getElementById('xfer-file').textContent || ''`)
+      if (!got.includes('proba.bin')) throw new Error(`the receiver ended up with: ${got}`)
+      step(`received: ${got}`)
+
+      // The transcript gets a line, never a file bubble: after a direct
+      // transfer there is nothing behind Show and Download.
+      const line = await B.eval<boolean>(`
+        return [...document.querySelectorAll('.sysline')].some(e => /Transfer: proba\.bin/.test(e.textContent || ''));
+      `)
+      if (!line) throw new Error('the conversation says nothing about the transfer')
+      await B.eval(`document.getElementById('xfer-no').click(); return 1`)   // Zamknij
+      const bubbles = await B.eval<number>(`
+        return [...document.querySelectorAll('.mrow')].filter(e => /proba\.bin/.test(e.textContent || '')).length;
+      `)
+      if (bubbles) throw new Error('a direct transfer left a file bubble, whose buttons would lead nowhere')
+      step('a system line, and no bubble that would lie about being downloadable')
+
+      // And the sender is free again — the engine refuses a second transfer
+      // while one runs, so this also proves the first one really ended.
+      await A.waitFor('the sender is free again',
+        `return !document.getElementById('xfer-modal').classList.contains('open')`, 20_000)
+      step('both sides are free for the next one')
+    }
+
     // ---- the scenarios that come from real manual testing --------------------
 
     scenario('one side reloads mid-conversation')

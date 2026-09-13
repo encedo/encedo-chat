@@ -2972,11 +2972,13 @@ function onXferEvent(room: Room, e: any) {
         a.href = url; a.download = e.name
         a.click()
         setTimeout(() => URL.revokeObjectURL(url), 30_000)
-        record(room, { t: 'sys', text: tr('Transfer: {name} — odebrany', { name: e.name }) })
         y.onclick = null
         xferClose()
       }
       record(room, { t: 'sys', text: tr('Transfer: {name} — odebrany', { name: e.name }) })
+      // The transfer is over; only the save is left. Clearing here means the
+      // Close button closes instead of cancelling something already finished.
+      xfer = null
       return
     }
     case 'failed': {
