@@ -166,12 +166,24 @@ const WEBRTC_OFF = new URLSearchParams(location.search).get('webrtc') === '0'
  * it; only "never opened Settings" moves.
  */
 const TRANSPORT_KEY = 'ec-transport'
-type TransportMode = 'auto' | 'relay'
+/**
+ * Three postures, and the third one is a promise rather than a preference.
+ *
+ * `relay`  — content always through the node (the default since 0.5.60).
+ * `auto`   — direct when the channel comes up, node when it does not.
+ * `direct` — the node is discovery ONLY: rendezvous, handshake and signalling
+ *            still ride it, content never does. A message with no channel waits
+ *            in the delivery contract and ends with a re-send button rather
+ *            than quietly taking the road the setting refuses.
+ */
+type TransportMode = 'auto' | 'relay' | 'direct'
 const transportMode = (): TransportMode =>
-  (localStorage.getItem(TRANSPORT_KEY) === 'auto' ? 'auto' : 'relay')
+  ((v) => (v === 'auto' || v === 'direct' ? v : 'relay'))(localStorage.getItem(TRANSPORT_KEY))
 /** The direct plane is negotiated only where it was CHOSEN (see above), and
  *  never when `?webrtc=0` says otherwise. */
-const wantsDirect = () => !WEBRTC_OFF && transportMode() === 'auto'
+const wantsDirect = () => !WEBRTC_OFF && transportMode() !== 'relay'
+/** Content may ONLY go direct — the node carries no message bytes at all. */
+const directOnly = () => wantsDirect() && transportMode() === 'direct'
 const $ = (id: string) => document.getElementById(id) as HTMLElement
 const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
@@ -1925,9 +1937,23 @@ $('add-save').addEventListener('click', async () => {
 function paintTransportSetting() {
   const mode = transportMode()
   const chip = $('chip-profile')
-  chip.textContent = mode === 'relay' ? tr('⚪ Tylko węzeł') : tr('🟢 Automatycznie')
+  chip.textContent = mode === 'relay' ? tr('⚪ Tylko węzeł')
+    : mode === 'direct' ? tr('🔒 Tylko bezpośrednio')
+    : tr('🟢 Automatycznie')
   const pick = document.querySelector(`#tmode input[value="${mode}"]`) as HTMLInputElement | null
   if (pick) pick.checked = true
+  // WebKitGTK (the packaged desktop) has no RTCPeerConnection at all, so this
+  // mode would not be a stricter posture there — it would be a mute button.
+  // `auto` is safe to offer anywhere because it degrades to the node; this one
+  // has nowhere to degrade to, by definition.
+  const canDirect = typeof RTCPeerConnection !== 'undefined' && !WEBRTC_OFF
+  const row = document.getElementById('tmode-direct-row') as HTMLElement | null
+  const radio = document.querySelector('#tmode input[value="direct"]') as HTMLInputElement | null
+  if (row && radio) {
+    radio.disabled = !canDirect
+    row.style.opacity = canDirect ? '' : '.5'
+    row.title = canDirect ? '' : tr('Ta przeglądarka nie ma WebRTC — nie ma czym prowadzić rozmowy bez węzła')
+  }
 }
 $('chip-profile').addEventListener('click', () => openDrawer())
 for (const el of document.querySelectorAll('#tmode input')) {
@@ -1936,10 +1962,10 @@ for (const el of document.querySelectorAll('#tmode input')) {
     // Written on every press, both ways: the stored value is what tells an
     // explicit choice apart from "never opened this drawer", and the default
     // (relay) is what the second group gets.
-    try { localStorage.setItem(TRANSPORT_KEY, v === 'auto' ? 'auto' : 'relay') } catch {}
+    try { localStorage.setItem(TRANSPORT_KEY, v === 'auto' || v === 'direct' ? v : 'relay') } catch {}
     paintTransportSetting()
-    toast(v === 'relay'
-      ? tr('Nowe rozmowy pójdą tylko przez węzeł')
+    toast(v === 'relay' ? tr('Nowe rozmowy pójdą tylko przez węzeł')
+      : v === 'direct' ? tr('Nowe rozmowy pójdą wyłącznie kanałem bezpośrednim — bez grup')
       : tr('Nowe rozmowy spróbują połączenia bezpośredniego'))
   })
 }
@@ -5893,6 +5919,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
     let warnedForeign = false
     const conv = await (await clientReady!).open({ pub: contact.pub, kid: contact.kid }, {
       webrtc: wantsDirect(),
+      directOnly: directOnly(),
       // STUN lives on the nodes, so the servers are whichever nodes this client
       // dials — no second list to drift, and editing Settings -> Network moves
       // this with it (`lib/ice.ts`).
@@ -6773,6 +6800,14 @@ async function migrateLegacyGroups(seen: Set<string>) {
 /** Show a group in the chat pane (reuses #messages; sender labels via `who`). */
 async function activateGroup(gid: string) {
   const gu = groupsUI.get(gid); if (!gu) return
+  // A group broadcast has no direct channel to ride — one channel per member
+  // would be N channels, and the sender-key plane is built on the node. Opening
+  // one here would send group content through the node while the setting says
+  // it never does, so the honest answer is to refuse and name the setting.
+  if (directOnly()) {
+    toast(tr('Grupy nie działają w trybie „tylko bezpośrednio” — zmień transport w Ustawieniach'), 3500)
+    return
+  }
   const sameTarget = activeGid === gid // as in activateRoom: a new audience empties the composer, a repaint does not
   activeGid = gid; activePub = null // a group takes over — no 1:1 is "active"
   if (!sameTarget) clearComposer()

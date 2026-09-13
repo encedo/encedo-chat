@@ -450,6 +450,9 @@ export interface OpenOpts extends ChatOpts {
    *  host candidates only, which is right for a LAN pair and for `?stun=0`. */
   iceServers?: { urls: string }[]
   onWebrtcState?: (s: string) => void // WebRTC conn/ICE state (for a UI badge)
+  /** Content may only travel on the direct channel; the node stays for
+   *  discovery, handshake and signalling (`room.ts` contentDirectOnly). */
+  directOnly?: boolean
   /** File transfer over the direct channel: offers, progress, the finished blob. */
   onXfer?: (e: XferEv) => void
   /** EH-2 handshake progress per peer (for a UI badge). */
@@ -1079,6 +1082,7 @@ async function openRoom(
   log(`room derived: topic ${topic.slice(0, 16)}...`)
 
   const room = joinChat(node, topic, keys, {
+    contentDirectOnly: !!opts.directOnly,
     onMessage: opts.onMessage,
     onTyping: opts.onTyping,
     // The plane is kicked from onSecurity (see above), not on presence 'join':

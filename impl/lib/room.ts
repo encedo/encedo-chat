@@ -71,6 +71,18 @@ export interface RoomKeys { macKey: CryptoKey; eh2: Eh2Options }
 export type PresenceEvent = 'join' | 'active' | 'away' | 'quiet' | 'leave'
 export interface ChatOpts {
   /**
+   * Content may ONLY leave over the direct channel — never through the node.
+   *
+   * The relay stops being a fallback and becomes discovery alone: rendezvous,
+   * Announce, the EH-2 handshake and the WebRTC signalling still ride it, but a
+   * sealed message with no channel to carry it is HELD rather than published.
+   * Nothing new is needed to make that safe: the message stays in the delivery
+   * contract (§7.3), gets re-sent on the ordinary backoff, and travels the
+   * moment the channel proves itself — or ends as an unconfirmed message with
+   * a re-send button, which is the honest outcome and the one the user chose.
+   */
+  contentDirectOnly?: boolean
+  /**
    * `meta.outOfOrder` marks a message that belongs behind one already shown —
    * the gap it left was filled after the fact. Front-ends that can place it
    * (the web transcript) should; the terminal just says so.
@@ -324,7 +336,11 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       // ordinary (it is fire-and-forget, and that is what the retry is for) —
       // banning WebRTC for the rest of the conversation because the relay
       // hiccuped would punish the wrong transport.
-      if (p.tries === 1 && contentSend !== gossipContent) { log('unconfirmed on the direct path — falling back to the relay'); onStall() }
+      // Demotion means "hand content back to the relay", which in direct-only
+      // mode would break exactly the promise the mode makes. The message is
+      // re-sent on the direct path instead, and gives up honestly if it never
+      // gets there.
+      if (p.tries === 1 && contentSend !== gossipContent && !opts.contentDirectOnly) { log('unconfirmed on the direct path — falling back to the relay'); onStall() }
       void emitContent(p.bytes)
       armRetry(id)
     }, delay)
@@ -1081,7 +1097,14 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   // data plane: content is sealed then sent here — GossipSub by default, or a
   // direct WebRTC DataChannel once the browser upgrader sets it (§13).
   const gossipContent = (sealed: Uint8Array) => gossip(sealed)
-  let contentSend: (sealed: Uint8Array) => void = gossipContent
+  // In direct-only mode the fallback is not the relay — there is none. Holding
+  // the frame keeps the promise the setting makes; the delivery contract does
+  // the rest, so this needs no queue of its own.
+  const holdContent = (sealed: Uint8Array) => {
+    dbg(`no direct channel and content is direct-only -> held (${sealed.length} B)`)
+  }
+  const relayFallback = opts.contentDirectOnly ? holdContent : gossipContent
+  let contentSend: (sealed: Uint8Array) => void = relayFallback
 
   let seq = 1
   /**
@@ -1096,7 +1119,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       return
     }
     for (const s of sessions.values()) {
-      try { const sealed = await s.encrypt(bytes); dbg(`-> content ${sealed.length} B via ${contentSend === gossipContent ? 'relay' : 'WebRTC'}`); contentSend(sealed) }
+      try { const sealed = await s.encrypt(bytes); dbg(`-> content ${sealed.length} B via ${contentSend === gossipContent ? 'relay' : contentSend === holdContent ? 'held (direct-only)' : 'WebRTC'}`); contentSend(sealed) }
       catch (e: any) { log(`send failed: ${e?.message ?? e}`) }
     }
   }
@@ -1160,7 +1183,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     // WebRTC signaling — always over GossipSub (the DataChannel isn't up yet)
     sendSignal: (to: string, sig: any) => emitGossip(encodeEnvelope(envRtc(seq++, to, sig))),
     // data-plane hooks used by the browser WebRTC upgrader
-    setContentSend: (fn: ((sealed: Uint8Array) => void) | null) => { contentSend = fn ?? gossipContent },
+    setContentSend: (fn: ((sealed: Uint8Array) => void) | null) => { contentSend = fn ?? relayFallback },
     injectContent: (sealed: Uint8Array, from: string) => { void processSealed(sealed, from) },
     who: () => [...lastSeen.keys()],
     /** Announce now — e.g. when a tab becomes visible after being throttled. */
