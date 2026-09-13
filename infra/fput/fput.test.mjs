@@ -50,14 +50,16 @@ test('the store receives the payload with the header in front of it', async () =
   assert.match(seen.body.toString('latin1'), /--\r\n$|--\r\n/)
 })
 
-test('the upload lands in the sweeper ledger, under a name it can read', async () => {
-  // A name outside `<epoch>-<unique>` is left alone by ipfs-ttl.sh, so the blob
-  // would never expire — and nothing would report it.
+test('the ledger name is in SECONDS, which is the unit the sweeper compares', async () => {
+  // The bug this pins, found in production rather than here: milliseconds read
+  // as a date fifty thousand years out, so `now - ts` is negative, the entry
+  // never reaches its deadline, and ipfs-ttl.sh says nothing — it leaves names
+  // it does not understand alone on purpose. The blob stays on the node forever.
   await upload(Buffer.from('x'))
   const to = new URL(`http://x${seen.path}`).searchParams.get('to-files')
-  const m = /^\/ec\/(\d{13})-([0-9a-f]{16})$/.exec(to)
+  const m = /^\/ec\/(\d{10})-([0-9a-f]{16})$/.exec(to)
   assert.ok(m, `to-files was ${to}`)
-  assert.ok(Math.abs(Date.now() - Number(m[1])) < 60_000)
+  assert.ok(Math.abs(Math.floor(Date.now() / 1000) - Number(m[1])) < 60)
   assert.match(seen.path, /pin=false/)
 })
 

@@ -61,10 +61,15 @@ export const server = createServer((req, res) => {
   }
 
   // `pin=false` + wpis w MFS: blob zyje, dopoki nazwa jest w ksiedze, i znika
-  // razem z nia. Nazwa musi miec ksztalt `<epoch>-<unikat>`, bo zamiatacz czyta
-  // z niej czas — inaczej plik zostaje na zawsze (a nazwy spoza schematu zamia-
-  // tacz zostawia w spokoju, wiec bledu nikt by nie zauwazyl).
-  const name = `${Date.now()}-${randomBytes(8).toString('hex')}`
+  // razem z nia. Nazwa musi miec ksztalt `<epoch w SEKUNDACH>-<unikat>`, bo
+  // `ipfs-ttl.sh` porownuje ja z `date +%s`.
+  //
+  // Milisekundy z `Date.now()` wygladaja tak samo, a znaczaja "za 54 tysiace lat":
+  // roznica wychodzi ujemna, wpis nigdy nie mija terminu i zamiatacz go NIE zglasza,
+  // bo nazwy, ktorych nie rozumie, zostawia w spokoju z rozmyslu. Pierwsza wersja
+  // tego pliku miala tu wlasnie milisekundy i dwa pliki zostaly na wezle na zawsze —
+  // widac to bylo dopiero po tym, jak nie wygasly.
+  const name = `${Math.floor(Date.now() / 1000)}-${randomBytes(8).toString('hex')}`
   const path = `${RPC.pathname.replace(/\/$/, '')}/api/v0/add` +
     `?pin=false&to-files=${encodeURIComponent(`${DIR}/${name}`)}`
 
