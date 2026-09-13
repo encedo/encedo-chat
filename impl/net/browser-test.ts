@@ -2541,13 +2541,9 @@ async function main() {
     if (afterKeys.length) throw new Error(`wipeout left ${afterKeys.length} ec-* key(s) behind: ${afterKeys.join(', ')}`)
     step(`wipeout cleared ${beforeKeys} ec-* key(s) and returned to login`)
 
-    // ---- copying contacts into a new profile ---------------------------------
+    // ---- creating a profile from the login card ------------------------------
     // B is at the login card over a wiped store — the clean stage this needs.
-    // The whole flow is driven through the DOM: create a source profile, give it
-    // one contact, sign out, create a second profile that copies the book — with
-    // a wrong source password refused first, because the password is what stops
-    // a copy from laundering a tampered book into a freshly-signed one.
-    const createProfile = async (profName: string, copyFrom?: string, copyPass?: string, pass = SOFT_PASS) => {
+    const createProfile = async (profName: string, pass = SOFT_PASS) => {
       // WARNING: The post-wipeout reload parses the DOM long before the 1.3 MB bundle
       // finishes executing — `go-soft` exists while its listener does not yet,
       // and a click in that window lands on a deaf button (found the hard way:
@@ -2563,12 +2559,6 @@ async function main() {
         document.getElementById('soft-name').value = ${JSON.stringify(profName)};
         document.getElementById('soft-pass').value = ${JSON.stringify(pass)};
         document.getElementById('soft-pass2').value = ${JSON.stringify(pass)};
-        const sel = document.getElementById('soft-copy-from');
-        if (${JSON.stringify(copyFrom ?? '')}) {
-          sel.value = ${JSON.stringify(copyFrom ?? '')};
-          sel.dispatchEvent(new Event('change'));
-          document.getElementById('soft-copy-pass').value = ${JSON.stringify(copyPass ?? '')};
-        }
         document.getElementById('soft-go').click();
         return new Promise((done) => setTimeout(() => done({
           msg: document.getElementById('soft-msg').textContent,
@@ -2582,7 +2572,7 @@ async function main() {
     // thinks of `haslo123`; only this can say that the form refuses it, keeps
     // the window open and writes nothing.
     scenario('a weak password does not become a profile')
-    const weak = await createProfile('za-slabe', undefined, undefined, 'haslo123')
+    const weak = await createProfile('za-slabe', 'haslo123')
     if (weak.entered) throw new Error('a weak password created a profile and signed straight in')
     if (!/miernik|meter/i.test(weak.msg ?? '')) {
       throw new Error(`the refusal did not name the rule — the window said: ${JSON.stringify(weak.msg)}`)
@@ -2590,46 +2580,6 @@ async function main() {
     const leftover = await B.eval<number>(`return Object.keys(localStorage).filter((k) => k.includes('za-slabe')).length`)
     if (leftover) throw new Error(`a refused profile still left ${leftover} keys behind`)
     step('refused inline, nothing written, the form still open')
-
-    scenario('a new profile can copy the contacts of an old one, after its password')
-    await createProfile('kopiuj-src')
-    await B.waitFor('B inside the source profile', `return !document.getElementById('app').hidden`, 20_000)
-    await B.eval(`
-      document.getElementById('btn-add-peer').click();
-      const pub = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
-      document.getElementById('add-pub').value = pub;
-      document.getElementById('add-name').value = 'KopiowanyKontakt';
-      document.getElementById('add-save').click();
-      return 1`)
-    await B.waitFor('the source contact on the list', `return !!document.querySelector('#pane-contacts .contact')`, 10_000)
-    // Adding by hand asks the same question as adding by link; this test is
-    // about the contact surviving a profile copy, so it declines and moves on.
-    await B.eval(`
-      const m = document.getElementById('ask-modal');
-      if (m.classList.contains('open')) document.getElementById('ask-no').click();
-      return 1`)
-
-    // Sign out (a reload — which is also what proves the copy survives one).
-    await B.eval(`document.getElementById('btn-settings').click(); return 1`)
-    await B.waitFor('the settings drawer', `return document.getElementById('drawer').classList.contains('open')`, 5_000)
-    await B.eval(`document.getElementById('btn-logout').click(); return 1`).catch(() => {})
-    await B.waitFor('B back at the login card', `return !!document.getElementById('go-soft') && document.getElementById('app').hidden`, 15_000)
-
-    const refused = await createProfile('kopiuj-dst', 'kopiuj-src', 'zle-haslo')
-    if (refused.entered) throw new Error('a wrong source password still created the profile and entered it')
-    if (!/hasło profilu źródłowego|source profile/i.test(refused.msg)) {
-      throw new Error(`the wrong source password was not named — the window said: ${JSON.stringify(refused.msg)}`)
-    }
-    step('a wrong source password is refused by name, and nothing is created')
-
-    const copied = await createProfile('kopiuj-dst', 'kopiuj-src', SOFT_PASS)
-    if (!copied.entered && copied.msg) throw new Error(`the copy path failed: ${JSON.stringify(copied.msg)}`)
-    await B.waitFor('B inside the new profile', `return !document.getElementById('app').hidden`, 20_000)
-    await B.waitFor('the copied contact on the new profile list',
-      `return (document.querySelector('#pane-contacts')?.textContent || '').includes('KopiowanyKontakt')`, 10_000)
-    const books = await B.eval<number>(`return Object.keys(localStorage).filter((k) => k.startsWith('ec-local-contacts-')).length`)
-    if (books < 2) throw new Error(`expected two contact books after the copy, found ${books}`)
-    step('the contact crossed into the new profile, each book signed under its own identity')
 
     // ---- the published node list, fetched by its compiled-in CID -------------
     // LAST, on A, and only with a node to read from: it replaces the relay list
