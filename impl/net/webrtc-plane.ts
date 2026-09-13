@@ -21,11 +21,21 @@ export interface WebRTCPlane {
   onSignal(from: string, env: { to: string; sig: Signal }): void // route a t:'rtc' envelope
   /** Content stopped being confirmed: hand it back to the relay and stay there. */
   demote(): void
+  /**
+   * The direct channel itself, for a file transfer (`lib/xfer.ts`) — `null`
+   * whenever there is no proven channel, which is also the answer to "may this
+   * conversation offer a transfer at all". A transfer never rides the relay:
+   * at ~1 MB/s per room it would be a slower copy of the store, paid for in
+   * relay bandwidth (`TRANSFER-DESIGN.md`).
+   */
+  direct(): { send(b: Uint8Array): void; buffered(): number; drain(): Promise<void> } | null
   stop(): void
 }
 
 export interface WebRTCPlaneOpts {
   onState?: (s: string) => void
+  /** Control frames off the channel — file-transfer frames, nothing else yet. */
+  onControl?: (bytes: Uint8Array) => void
   /** Override the negotiation deadline (tests; production waits the full 10 s). */
   attemptMs?: number
   /** Build the link. Only tests replace it — `RTCPeerConnection` is browser-only. */
@@ -95,6 +105,7 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: WebRTCPlan
       iceServers: opts.iceServers,
       sendSignal: (sig) => room.sendSignal(peer, sig),
       onData: (bytes) => room.injectContent(bytes, peer),
+      onControl: (bytes) => opts.onControl?.(bytes),
       onOpen: () => { // the ping/pong came back: this channel really carries
         stopAttemptTimer()
         if (!demoted && linkPeer === peer) room.setContentSend((sealed) => link!.send(sealed))
@@ -125,6 +136,14 @@ export function attachWebRTC(room: RoomDataPlane, self: string, opts: WebRTCPlan
 
   return {
     onPeer,
+    direct() {
+      // Demoted counts as no channel: content already went back to the relay,
+      // and a transfer must not be the one thing still trusting a link that
+      // just failed to deliver a message.
+      if (!link?.ready || demoted) return null
+      const l = link
+      return { send: (b: Uint8Array) => l.sendControl(b), buffered: () => l.buffered(), drain: () => l.drain() }
+    },
     demote() {
       if (demoted) return
       demoted = true

@@ -23,6 +23,10 @@ function fakeLink() {
       signals: [] as any[],
       handleSignal: async (s: any) => { l.signals.push(s) },
       send: () => {},
+      ctrl: [] as Uint8Array[],
+      sendControl: (b: Uint8Array) => { l.ctrl.push(b) },
+      buffered: () => 0,
+      drain: () => Promise.resolve(),
       close: () => { l.closed = true },
       /** Pretend the ping/pong round trip came back. */
       open: () => { l.ready = true; o.onOpen?.() },
@@ -172,4 +176,38 @@ test('demoting also reports a state the UI acts on', async () => {
   plane.demote()
   assert.equal(r.contentSend, null)
   assert.ok(states.some((s) => s.startsWith('demoted=')), `got ${JSON.stringify(states)}`)
+})
+
+test('a transfer gets the channel only while the channel is trusted', async () => {
+  // `direct()` is the one question the UI asks before offering a transfer, and
+  // three states must answer no: before the round trip proves the link, after
+  // a demotion (content already went back to the relay — a transfer must not
+  // be the last thing trusting it), and once the link is gone.
+  const { links, makeLink } = fakeLink()
+  const plane = attachWebRTC(room() as any, 'peer-a', { makeLink, attemptMs: 40 })
+  plane.onPeer('peer-b')
+  assert.equal(plane.direct(), null, 'before the probe')
+
+  links[0].open()
+  const d = plane.direct()
+  assert.ok(d, 'after the probe')
+  d!.send(new Uint8Array([0, 1, 2, 3, 4, 5]))
+  assert.equal(links[0].ctrl.length, 1)
+
+  plane.demote()
+  assert.equal(plane.direct(), null, 'after a demotion')
+  plane.stop()
+})
+
+test('control frames off the channel reach the caller, content does not', async () => {
+  const { links, makeLink } = fakeLink()
+  const seen: Uint8Array[] = []
+  const r = room()
+  const plane = attachWebRTC(r as any, 'peer-a', { makeLink, attemptMs: 40, onControl: (b) => seen.push(b) })
+  plane.onPeer('peer-b')
+  links[0].open()
+  links[0].opts.onControl(new Uint8Array([0x00, 0x04, 1, 2, 3, 4]))
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0][1], 0x04)
+  plane.stop()
 })

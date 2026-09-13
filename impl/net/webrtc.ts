@@ -18,6 +18,9 @@ export interface WebRTCLink {
   readonly ready: boolean
   handleSignal(sig: Signal): Promise<void> // feed a signal received from the peer
   send(bytes: Uint8Array): void
+  sendControl(bytes: Uint8Array): void
+  buffered(): number
+  drain(): Promise<void>
   close(): void
 }
 
@@ -25,6 +28,8 @@ export interface WebRTCOpts {
   initiator: boolean // the lower PeerId initiates (offer); the other answers
   sendSignal: (sig: Signal) => void // publish a signal to the peer (over GossipSub)
   onData: (bytes: Uint8Array) => void // incoming DataChannel bytes
+  /** Control frames that are not the channel's own ping/pong (file transfer). */
+  onControl?: (bytes: Uint8Array) => void
   onOpen?: () => void
   onClose?: () => void
   onState?: (s: string) => void // connection/ICE state transitions (diagnostics)
@@ -44,6 +49,9 @@ export interface WebRTCOpts {
 const CTRL = 0x00
 const PING = new Uint8Array([CTRL, 0x50])
 const PONG = new Uint8Array([CTRL, 0x4f])
+/** Pause a file transfer above this, resume when the channel drains to it. */
+const LOW_WATER = 1024 * 1024
+const HIGH_WATER = 8 * 1024 * 1024
 const PROBE_TRIES = 4
 const PROBE_EVERY_MS = 700
 
@@ -58,12 +66,18 @@ export function webrtcLink(opts: WebRTCOpts): WebRTCLink {
   let remoteSet = false
   const pendingIce: RTCIceCandidateInit[] = []
 
+  let onLow: (() => void) | null = null
   let probeTimer: any = null
   const stopProbe = () => { clearInterval(probeTimer); probeTimer = null }
 
   const wire = (channel: RTCDataChannel) => {
     dc = channel
     dc.binaryType = 'arraybuffer'
+    // Without this a send loop queues an entire file into the tab's memory in
+    // seconds: `send()` never blocks and never refuses. The threshold is what
+    // turns "push" into "push until told to wait".
+    dc.bufferedAmountLowThreshold = LOW_WATER
+    dc.onbufferedamountlow = () => { const f = onLow; onLow = null; f?.() }
     dc.onopen = () => {
       // Not ready yet — prove the round trip first.
       let tries = 0
@@ -82,14 +96,18 @@ export function webrtcLink(opts: WebRTCOpts): WebRTCLink {
     dc.onclose = () => { stopProbe(); if (ready) { ready = false; opts.onClose?.() } }
     dc.onmessage = (e) => {
       const bytes = new Uint8Array(e.data as ArrayBuffer)
-      if (bytes.length === 2 && bytes[0] === CTRL) {
-        if (bytes[1] === PING[1]) { try { channel.send(PONG) } catch {} ; return }
-        if (bytes[1] === PONG[1] && !ready) {
+      // EVERY 0x00 frame is control, not just the two-byte ones. Before file
+      // transfer there were only ping and pong, so the length was part of the
+      // test; a longer control frame would have been handed to the room as
+      // content and failed to open as a ratchet frame.
+      if (bytes.length >= 2 && bytes[0] === CTRL) {
+        if (bytes.length === 2 && bytes[1] === PING[1]) { try { channel.send(PONG) } catch {} ; return }
+        if (bytes.length === 2 && bytes[1] === PONG[1] && !ready) {
           stopProbe()
           ready = true
           opts.onState?.('probe=ok')
           opts.onOpen?.()   // only now may the room send content this way
-        }
+        } else if (bytes.length > 2) opts.onControl?.(bytes)
         return
       }
       opts.onData(bytes)
@@ -150,6 +168,18 @@ export function webrtcLink(opts: WebRTCOpts): WebRTCLink {
       }
     },
     send(bytes: Uint8Array) { if (dc && ready) dc.send(bytes) },
+    /** Same wire, but allowed to be longer than the two-byte ping/pong. */
+    sendControl(bytes: Uint8Array) { if (dc && ready) dc.send(bytes) },
+    buffered() { return dc?.bufferedAmount ?? 0 },
+    /**
+     * Resolves once the channel has room again. `bufferedamountlow` fires only
+     * on a fall THROUGH the threshold, so a caller that is already below it
+     * would wait for an event that never comes — hence the immediate return.
+     */
+    drain() {
+      if (!dc || dc.bufferedAmount < HIGH_WATER) return Promise.resolve()
+      return new Promise<void>((res) => { onLow = res })
+    },
     close() {
       stopProbe()
       try { dc?.close() } catch {}
