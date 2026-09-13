@@ -758,6 +758,22 @@
   #upd-txt{font-size:12.5px;color:var(--text)}
   .upd-track{margin-top:8px;height:4px;border-radius:2px;background:var(--accent-soft);overflow:hidden}
   #upd-fill{height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width .2s ease}
+  /* Transfer bezposredni. Menu wyrasta ze spinacza tylko przy zywym kanale —
+     ikona, ktora przychodzi i odchodzi, czyta sie jak awaria, a pozycja w menu
+     jak wybor. Plakietka w wierszu mowi, dlaczego ten wybor w ogole jest. */
+  .xfer-menu{position:fixed;z-index:12;background:var(--card);border:1px solid var(--border);
+    border-radius:12px;box-shadow:0 12px 30px rgba(18,38,63,.25);overflow:hidden;
+    width:min(340px,92vw);display:flex;flex-direction:column}
+  .xfer-menu button{background:none;border:none;text-align:left;cursor:pointer;padding:11px 14px;
+    display:flex;flex-direction:column;gap:2px;color:var(--text);font:inherit}
+  .xfer-menu button+button{border-top:1px solid var(--border)}
+  .xfer-menu button:hover{background:var(--accent-soft)}
+  .xfer-menu .hd{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13.5px;font-weight:600}
+  .xfer-menu small{color:var(--muted);font-size:11.5px;line-height:1.4}
+  .xfer-track{height:6px;border-radius:3px;background:var(--accent-soft);overflow:hidden;margin:10px 0 6px}
+  .xfer-fill{height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width .2s ease}
+  .xfer-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted)}
+  .xfer-name{font-size:13.5px;color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .modal h2{margin:0 0 4px;font-size:16px;color:var(--text)}
   .modal .msub{font-size:12px;color:var(--muted);margin-bottom:8px}
   .store-opts{display:flex;flex-direction:column;gap:6px;margin-top:4px}
@@ -1322,6 +1338,26 @@
        file chip: correct, and unreadable — nothing on screen said what state
        the app was in or how to get out of it. Recording is a mode, and a mode
        needs a surface that says so and offers the way back. -->
+  <!-- Transfer bezposredni (lib/xfer.ts, TRANSFER-DESIGN.md). JEDNO okno na
+       wszystkie stany — czekanie na zgode, postep, prosba o odbior i zapis —
+       bo to jedna sprawa widziana z dwoch stron i nic nie ma prawa podskoczyc
+       w polowie. Pusty kontener menu wypelnia app.ts, zeby tresc pozycji
+       zalezala od tego, czy kanal naprawde stoi. -->
+  <div class="xfer-menu" id="xfer-menu" hidden></div>
+
+  <div class="modal" id="xfer-modal">
+    <h2 id="xfer-title" data-i18n="Transfer bezpośredni">Transfer bezpośredni</h2>
+    <div class="msub" id="xfer-sub"></div>
+    <div class="xfer-name" id="xfer-file"></div>
+    <div class="xfer-track"><div class="xfer-fill" id="xfer-fill"></div></div>
+    <div class="xfer-row"><span id="xfer-left"></span><span id="xfer-right"></span></div>
+    <div class="msub" id="xfer-note" style="margin-top:10px"></div>
+    <div class="modal-actions">
+      <button class="btn-ghost" id="xfer-no" data-i18n="Nie teraz">Nie teraz</button>
+      <button class="btn-send" id="xfer-yes" style="border-radius:8px" data-i18n="Odbierz">Odbierz</button>
+    </div>
+  </div>
+
   <div class="modal" id="rec-modal">
     <h2 id="rec-title" data-i18n="Nagrywam…">Nagrywam…</h2>
     <div class="rec-face">

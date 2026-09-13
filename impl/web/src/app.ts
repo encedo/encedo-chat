@@ -2835,6 +2835,199 @@ function showAttach(f: File | null) {
  * refusals have to be the same too or two of the three paths quietly accept
  * something the third does not.
  */
+/**
+ * The transfer window: one surface for all four states, because they are one
+ * act seen from two sides and nothing may jump while somebody is watching a
+ * progress bar. Waiting for consent, sending, being asked, receiving.
+ *
+ * It is modal on purpose (the user's call): one transfer at a time per
+ * conversation, and the engine refuses a second one anyway.
+ */
+type XferUi = {
+  room: Room
+  dir: 'in' | 'out'
+  name: string; size: number; mime: string
+  t0: number
+  /** Bytes at the last repaint, for a speed that means something. */
+  markAt: number; markBytes: number; rate: number
+}
+let xfer: XferUi | null = null
+let xferTimer: any = null
+
+function xferOpen() { $('scrim').classList.add('open'); $('xfer-modal').classList.add('open') }
+function xferClose() {
+  clearInterval(xferTimer); xferTimer = null
+  xfer = null
+  $('xfer-modal').classList.remove('open'); $('scrim').classList.remove('open')
+  setFill(0)
+}
+const setFill = (pct: number) => { ($('xfer-fill') as HTMLElement).style.width = `${Math.max(0, Math.min(100, pct))}%` }
+/** No bar while nothing is moving — an empty track reads as a stalled one. */
+const showTrack = (on: boolean) => { (document.querySelector('.xfer-track') as HTMLElement).hidden = !on }
+function xferButtons(yes: string | null, no: string | null) {
+  const y = $('xfer-yes') as HTMLButtonElement, n = $('xfer-no') as HTMLButtonElement
+  y.hidden = !yes; n.hidden = !no
+  if (yes) y.textContent = yes
+  if (no) n.textContent = no
+}
+
+/** Start one: pick was made through the direct entry in the paperclip menu. */
+function startTransfer(f: File | null | undefined) {
+  const room = activeRoom()
+  if (!f || !room?.conv) return
+  const r = room.conv.offerFile(f)
+  if (r !== 'ok') {
+    toast(r === 'no-channel' ? tr('Kanał bezpośredni nie stoi — wyślij plik przez czat')
+      : r === 'busy' ? tr('Jeden transfer naraz — poczekaj, aż ten się skończy')
+      : r === 'too-big' ? tr('Plik jest za duży — limit transferu to 512 MB')
+      : tr('Pusty plik'))
+    return
+  }
+  xfer = { room, dir: 'out', name: f.name, size: f.size, mime: f.type, t0: nowMs(), markAt: nowMs(), markBytes: 0, rate: 0 }
+  $('xfer-title').textContent = tr('Transfer bezpośredni')
+  $('xfer-sub').textContent = tr('do: {who}', { who: room.contact.name })
+  $('xfer-file').textContent = `${f.name} · ${humanSize(f.size)}`
+  $('xfer-note').textContent = tr('Plik pójdzie prosto do drugiej przeglądarki. Nie trafi na żaden serwer i nie da się go pobrać później — musicie oboje zostać w rozmowie.')
+  $('xfer-left').textContent = tr('czekam na potwierdzenie…')
+  $('xfer-right').textContent = ''
+  xferButtons(null, tr('Anuluj'))
+  showTrack(true)
+  xferOpen()
+  // The wait has a bar of its own: thirty seconds of nothing is the state most
+  // likely to be read as "it hung", and the engine really does give up there.
+  const t0 = nowMs()
+  clearInterval(xferTimer)
+  xferTimer = setInterval(() => {
+    const left = Math.max(0, 30 - Math.round((nowMs() - t0) / 1000))
+    setFill(((30 - left) / 30) * 100)
+    $('xfer-right').textContent = tr('{s} s', { s: left })
+  }, 250)
+}
+
+/** Progress, for either direction, with a rate that is not jitter. */
+function xferProgress(done: number, total: number) {
+  if (!xfer) return
+  const t = nowMs()
+  if (t - xfer.markAt > 700) {
+    xfer.rate = ((done - xfer.markBytes) / (t - xfer.markAt)) * 1000
+    xfer.markAt = t; xfer.markBytes = done
+  }
+  setFill((done / total) * 100)
+  $('xfer-left').textContent = `${humanSize(done)} / ${humanSize(total)}`
+  const left = xfer.rate > 0 ? Math.round((total - done) / xfer.rate) : 0
+  $('xfer-right').textContent = xfer.rate > 0
+    ? `${humanSize(Math.round(xfer.rate))}/s · ${tr('zostało ~{s} s', { s: Math.max(1, left) })}`
+    : ''
+}
+
+/** Everything the engine reports about a transfer, for one room. */
+function onXferEvent(room: Room, e: any) {
+  const label = room.contact.name
+  switch (e.t) {
+    case 'offer': {
+      // Asked before a byte moves, because acceptance starts it immediately.
+      // The name and size are the SENDER's claims and are shown as such — a
+      // .pdf in a name does not make a file a PDF.
+      xfer = { room, dir: 'in', name: e.name, size: e.size, mime: e.mime, t0: nowMs(), markAt: nowMs(), markBytes: 0, rate: 0 }
+      clearInterval(xferTimer); xferTimer = null
+      $('xfer-title').textContent = tr('Przychodzi plik')
+      $('xfer-sub').textContent = tr('{who} chce wysłać:', { who: label })
+      $('xfer-file').textContent = `${e.name} · ${humanSize(e.size)}`
+      $('xfer-note').textContent = tr('Transfer bezpośredni — plik idzie prosto z tamtej przeglądarki do Twojej, nie przez nasz serwer. Musicie oboje zostać w rozmowie do końca.')
+      $('xfer-left').textContent = ''
+      $('xfer-right').textContent = ''
+      setFill(0); showTrack(false)
+      xferButtons(tr('Odbierz'), tr('Nie teraz'))
+      xferOpen()
+      return
+    }
+    case 'accepted': {
+      clearInterval(xferTimer); xferTimer = null
+      $('xfer-note').textContent = tr('Wysyłam…')
+      xferButtons(null, tr('Przerwij'))
+      setFill(0)
+      return
+    }
+    case 'progress': return xferProgress(e.done, e.total)
+    case 'done': {
+      record(room, { t: 'sys', text: tr('Transfer: {name} — wysłany', { name: xfer?.name ?? '' }) })
+      xferClose()
+      toast(tr('Wysłano'))
+      return
+    }
+    case 'received': {
+      // Nothing is written anywhere by itself: the file lives in this tab until
+      // somebody saves it, which is what "no store" actually means.
+      const url = URL.createObjectURL(e.blob)
+      $('xfer-title').textContent = tr('Odebrano')
+      $('xfer-file').textContent = `${e.name} · ${humanSize(e.blob.size)}`
+      $('xfer-note').textContent = tr('Plik jest tylko w tej karcie. Zamknięcie jej znaczy, że trzeba go wysłać jeszcze raz.')
+      $('xfer-left').textContent = ''
+      $('xfer-right').textContent = ''
+      setFill(100)
+      xferButtons(tr('Zapisz'), tr('Zamknij'))
+      const y = $('xfer-yes') as HTMLButtonElement
+      y.onclick = () => {
+        const a = document.createElement('a')
+        a.href = url; a.download = e.name
+        a.click()
+        setTimeout(() => URL.revokeObjectURL(url), 30_000)
+        record(room, { t: 'sys', text: tr('Transfer: {name} — odebrany', { name: e.name }) })
+        y.onclick = null
+        xferClose()
+      }
+      record(room, { t: 'sys', text: tr('Transfer: {name} — odebrany', { name: e.name }) })
+      return
+    }
+    case 'failed': {
+      const why: Record<string, string> = {
+        rejected: tr('odrzucony'), timeout: tr('niepodjęty'),
+        'cancelled-local': tr('przerwany'), 'cancelled-peer': tr('przerwany po drugiej stronie'),
+        channel: tr('kanał bezpośredni padł'), busy: tr('druga strona jest zajęta'),
+        'too-big': tr('za duży'), empty: tr('pusty'),
+        'out-of-order': tr('uszkodzony w drodze'), 'bad-frame': tr('uszkodzony w drodze'),
+      }
+      const name = xfer?.name ?? ''
+      record(room, { t: 'sys', text: tr('Transfer: {name} — {why}', { name, why: why[e.why] ?? e.why }) })
+      // A dead channel is the one failure that must be LOUD: content has gone
+      // back to the relay for the rest of the conversation, and the ordinary
+      // path is right there — but nothing may continue over it by itself.
+      if (e.why === 'channel') {
+        $('xfer-title').textContent = tr('Transfer przerwany')
+        $('xfer-note').textContent = tr('Kanał bezpośredni przestał działać. Plik nie doszedł — wyślij go przez czat.')
+        $('xfer-left').textContent = ''; $('xfer-right').textContent = ''
+        xferButtons(null, tr('Zamknij'))
+        xferOpen()
+        clearInterval(xferTimer); xferTimer = null
+        xfer = null
+        return
+      }
+      xferClose()
+      toast(tr('Transfer: {why}', { why: why[e.why] ?? e.why }))
+      return
+    }
+  }
+}
+
+$('xfer-yes').addEventListener('click', () => {
+  if (!xfer || xfer.dir !== 'in') return
+  const conv = xfer.room.conv
+  $('xfer-title').textContent = tr('Odbieram')
+  $('xfer-sub').textContent = tr('od: {who}', { who: xfer.room.contact.name })
+  $('xfer-note').textContent = tr('Plik idzie prosto z tamtej przeglądarki do Twojej.')
+  showTrack(true)
+  xferButtons(null, tr('Przerwij'))
+  conv?.acceptFile()
+})
+$('xfer-no').addEventListener('click', () => {
+  const cur = xfer
+  if (!cur) { xferClose(); return }
+  const conv = cur.room.conv
+  if (cur.dir === 'in' && $('xfer-title').textContent === tr('Przychodzi plik')) conv?.rejectFile()
+  else conv?.cancelFile()
+  xferClose()
+})
+
 function offerFile(f: File | null | undefined, count = 1) {
   if (!f) return
   // Paste and drop can happen with no conversation on screen, which the clip
@@ -2849,11 +3042,65 @@ function offerFile(f: File | null | undefined, count = 1) {
   if (count > 1) toast(tr('Jeden plik naraz — wziąłem {name}', { name: f.name }))
 }
 
-$('btn-attach').addEventListener('click', () => ($('file-input') as HTMLInputElement).click())
+/**
+ * The paperclip does what it always did, and grows a CHOICE when the direct
+ * channel is live: send through the chat (the store, 5-minute lease) or hand
+ * the file straight to the other browser (`lib/xfer.ts`, §13.1).
+ *
+ * A menu rather than a second icon, deliberately. This option appears and
+ * disappears with the transport, and an icon that comes and goes reads as
+ * something broken; a menu that grows a row reads as a choice. The badge is
+ * repeated inside the row so the reason sits next to the option.
+ */
+$('btn-attach').addEventListener('click', () => {
+  const conv = activeRoom()?.conv
+  if (!conv?.canTransfer?.()) { pickFile('store'); return }
+  openXferMenu($('btn-attach'))
+})
+function pickFile(mode: 'store' | 'direct') {
+  pickMode = mode
+  ;($('file-input') as HTMLInputElement).click()
+}
+let pickMode: 'store' | 'direct' = 'store'
+
+function openXferMenu(anchor: HTMLElement) {
+  const m = $('xfer-menu')
+  if (!m.hidden) { closeXferMenu(); return }
+  m.innerHTML = ''
+  const row = (title: string, sub: string, badge: string, fn: () => void) => {
+    const b = document.createElement('button'); b.type = 'button'
+    const hd = document.createElement('span'); hd.className = 'hd'
+    const t = document.createElement('span'); t.textContent = title
+    hd.appendChild(t)
+    if (badge) { const g = document.createElement('span'); g.className = 'badge direct'; g.textContent = badge; hd.appendChild(g) }
+    const s2 = document.createElement('small'); s2.textContent = sub
+    b.append(hd, s2)
+    b.addEventListener('click', () => { closeXferMenu(); fn() })
+    m.appendChild(b)
+  }
+  row(tr('Wyślij plik'), tr('przez czat — do {mb} MB, znika po 5 minutach', { mb: Math.floor(MAX_FILE / 1024 / 1024) }), '', () => pickFile('store'))
+  row(tr('Transfer bezpośredni'), tr('prosto do drugiej przeglądarki, nic nie trafia na serwer'), tr('🟢 Direct'), () => pickFile('direct'))
+  // Anchored to the button and flipped above it, like the emoji popover: the
+  // composer sits at the bottom edge, so below is never where this fits.
+  const r = anchor.getBoundingClientRect()
+  m.hidden = false
+  const w = Math.min(m.offsetWidth || 300, window.innerWidth - 16)
+  const h = Math.min(m.offsetHeight || 120, window.innerHeight - 16)
+  const below = r.bottom + 8
+  m.style.left = `${Math.max(8, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - 8))}px`
+  m.style.top = `${below + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 8) : below}px`
+}
+const closeXferMenu = () => { $('xfer-menu').hidden = true }
+document.addEventListener('click', (e: any) => {
+  if ($('xfer-menu').hidden) return
+  if ($('xfer-menu').contains(e.target) || $('btn-attach').contains(e.target)) return
+  closeXferMenu()
+})
 ;($('file-input') as HTMLInputElement).addEventListener('change', (e: any) => {
   const files: FileList | undefined = e.target.files
   const f = files?.[0]
   e.target.value = '' // so picking the same file twice still fires
+  if (pickMode === 'direct') { pickMode = 'store'; startTransfer(f); return }
   offerFile(f, files?.length ?? 1)
 })
 $('attach-drop').addEventListener('click', () => showAttach(null))
@@ -5735,6 +5982,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
       // this with it (`lib/ice.ts`).
       iceServers: iceServersFor(location.search, chosenRelays()),
       onWebrtcState: (s) => noteTransport(room, s),
+      onXfer: (e) => onXferEvent(room, e),
       onSecurity: (peer, state) => noteSecurity(room, peer, state),
       onLog: ecLog,
       onDelivered: (id, ms) => { if (!noteEditDelivery(room, id, 'ok')) record(room, { t: 'delivery', id, state: 'ok', ms }) },
