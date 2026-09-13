@@ -20,6 +20,7 @@ import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { createMqttPeer } from '../net/mqtt-node.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
+import { createXferSession, type XferSession, type XferEv, type FileLike, type OfferResult } from './xfer-session.ts'
 import { watchSelfSessionRotating, type SelfWatch } from './selfsession.ts'
 import { watchPresenceRotating, rendezvousDay, type PresenceWatch } from './presence.ts'
 import { GroupManager, type AdminGk, type GkBackend } from './group.ts'
@@ -449,6 +450,8 @@ export interface OpenOpts extends ChatOpts {
    *  host candidates only, which is right for a LAN pair and for `?stun=0`. */
   iceServers?: { urls: string }[]
   onWebrtcState?: (s: string) => void // WebRTC conn/ICE state (for a UI badge)
+  /** File transfer over the direct channel: offers, progress, the finished blob. */
+  onXfer?: (e: XferEv) => void
   /** EH-2 handshake progress per peer (for a UI badge). */
   onSecurity?: Eh2Options['onState']
   /** Narration for a UI console (the engine never writes to one itself). */
@@ -517,6 +520,20 @@ export interface Conversation {
   refresh(): void | Promise<void> // UI calls when the tab becomes visible again (throttled/frozen)
   who(): string[]
   secured(): string[] // peers with a live EH-2 ratchet (empty in interim mode)
+  /**
+   * Send a file straight down the DataChannel, bypassing the store entirely
+   * (`lib/xfer.ts`, `TRANSFER-DESIGN.md`). `'no-channel'` whenever content is
+   * not already going direct — a transfer never falls back to the relay, where
+   * it would be a slower copy of the store at ~1 MB/s of relay bandwidth.
+   */
+  offerFile(f: FileLike): OfferResult
+  /** Answer an incoming offer (`onXfer` reported it). */
+  acceptFile(): void
+  rejectFile(): void
+  /** Stop a transfer in either direction; the peer is told. */
+  cancelFile(): void
+  /** Is a transfer possible right now — the question the UI asks the paperclip. */
+  canTransfer(): boolean
   leave(): Promise<void> // presence:leave last-will + clean transport stop
 }
 
@@ -1096,8 +1113,18 @@ async function openRoom(
   // RTCPeerConnection` mid-handshake. Without it, content simply stays on the relay
   // (GossipSub) — the fallback the plane would have used anyway.
   const webRtcOk = typeof RTCPeerConnection !== 'undefined'
-  if (opts.webrtc && webRtcOk) plane = attachWebRTC(room, self, { iceServers: opts.iceServers, onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) } })
+  if (opts.webrtc && webRtcOk) plane = attachWebRTC(room, self, {
+    iceServers: opts.iceServers,
+    onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) },
+    onControl: (b) => xfer.onFrame(b),
+  })
   else if (opts.webrtc) log('WebRTC unavailable in this webview — content stays on the relay')
+  // The session exists even without a plane: it then answers 'no-channel' to
+  // everything, which is exactly what the UI needs to hear.
+  const xfer: XferSession = createXferSession(
+    { direct: () => plane?.direct() ?? null },
+    (e) => { if (e.t !== 'progress') log(`xfer: ${e.t}${'why' in e ? ` (${e.why})` : ''}`); opts.onXfer?.(e) },
+  )
   const unregister = host.register(room)
 
   let typingSent = false
@@ -1146,10 +1173,18 @@ async function openRoom(
     },
     who: () => room.who(),
     secured: () => room.secured(),
+    offerFile: (f) => xfer.offer(f),
+    acceptFile: () => xfer.accept(),
+    rejectFile: () => xfer.reject(),
+    cancelFile: () => xfer.cancel(),
+    canTransfer: () => !!plane?.direct() && !xfer.busy(),
     leave: async () => {
       log(`leaving room ${topic.slice(0, 12)}...`)
       clearTimeout(tT); clearTimeout(aT)
       unregister()
+      // Before the presence:leave, so a transfer in flight tells the peer why
+      // it stopped instead of leaving a progress bar to time out.
+      try { xfer.cancel(); xfer.stop() } catch {}
       try { room.sendPresence('leave') } catch {}
       await new Promise((r) => setTimeout(r, FLUSH_MS))
       try { plane?.stop() } catch {}

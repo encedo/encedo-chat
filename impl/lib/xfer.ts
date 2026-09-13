@@ -69,7 +69,7 @@ export interface Offer {
 
 export type Why =
   | 'rejected' | 'timeout' | 'cancelled-local' | 'cancelled-peer'
-  | 'too-big' | 'empty' | 'out-of-order' | 'bad-frame' | 'channel'
+  | 'too-big' | 'empty' | 'busy' | 'out-of-order' | 'bad-frame' | 'channel'
 
 export type Ev =
   | { t: 'accepted' }
