@@ -4670,6 +4670,11 @@ $('btn-webrtc-probe')?.addEventListener('click', async () => {
 $('btn-diag-copy')?.addEventListener('click', async () => {
   const text = [
     capReport ? formatReport(capReport) : 'platform: ' + tr('(sonda jeszcze nie skończyła)'),
+    // The capability list only knows the webview; the report must carry the
+    // same line the screen does, or it says the direct plane is missing on a
+    // platform where the host carries it (the first Linux report did).
+    ...(rustRtc && typeof RTCPeerConnection === 'undefined'
+      ? ['[ok] ' + tr('Kanał bezpośredni: przez hosta (Rust, webrtc-rs) — webview nie ma WebRTC')] : []),
     lastWebrtcProbe ? formatWebrtcProbe(lastWebrtcProbe) : 'webrtc: (nie sprawdzano)',
     `build: ${$('build-id-settings')?.textContent ?? '?'}`,
   ].join('\n')
