@@ -47,6 +47,7 @@ mod imp {
     use webrtc::data_channel::{DataChannel, DataChannelEvent};
     use webrtc::peer_connection::{
         PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
+        RTCIceConnectionState, RTCIceGatheringState, RTCPeerConnectionIceErrorEvent,
         RTCIceCandidateInit, RTCIceServer, RTCPeerConnectionIceEvent, RTCPeerConnectionState,
         RTCSessionDescription,
     };
@@ -76,6 +77,13 @@ mod imp {
         /// world — the selftest queued its payload before the channel opened,
         /// the writer died on the spot, and the probe reported 0 bytes.
         open: AtomicBool,
+        /// Candidates this side gathered, and candidates the peer sent us.
+        /// Reported with every connection-state line, because "stuck at
+        /// connecting" has two very different causes and nothing in the diary
+        /// told them apart: we gathered none (nothing for the peer to reach),
+        /// or none of the peer's arrived (nothing for us to check against).
+        cands_out: AtomicU64,
+        cands_in: AtomicU64,
     }
 
     impl Conn {
@@ -99,13 +107,29 @@ mod imp {
     impl PeerConnectionEventHandler for Handler {
         async fn on_ice_candidate(&self, ev: RTCPeerConnectionIceEvent) {
             if let Ok(j) = ev.candidate.to_json() {
+                self.conn.cands_out.fetch_add(1, Ordering::Relaxed);
                 self.conn.push(json!({ "t": "ice", "candidate": {
                     "candidate": j.candidate, "sdpMid": j.sdp_mid,
                     "sdpMLineIndex": j.sdp_mline_index, "usernameFragment": j.username_fragment } }));
             }
         }
         async fn on_connection_state_change(&self, s: RTCPeerConnectionState) {
-            self.conn.push(json!({ "t": "state", "conn": s.to_string() }));
+            self.conn.push(json!({ "t": "state", "conn": s.to_string(),
+                "out": self.conn.cands_out.load(Ordering::Relaxed),
+                "in": self.conn.cands_in.load(Ordering::Relaxed) }));
+        }
+        /// The browser link reports `ice=`; without these the host link went
+        /// silent between `conn=connecting` and whatever happened next, which
+        /// is exactly the window a failure to connect lives in.
+        async fn on_ice_connection_state_change(&self, s: RTCIceConnectionState) {
+            self.conn.push(json!({ "t": "state", "ice": s.to_string() }));
+        }
+        async fn on_ice_gathering_state_change(&self, s: RTCIceGatheringState) {
+            self.conn.push(json!({ "t": "state", "gather": s.to_string() }));
+        }
+        async fn on_ice_candidate_error(&self, ev: RTCPeerConnectionIceErrorEvent) {
+            self.conn.push(json!({ "t": "state", "ice-error":
+                format!("{} {} ({})", ev.error_code, ev.error_text, ev.url) }));
         }
         async fn on_data_channel(&self, dc: Arc<dyn DataChannel>) {
             attach(self.conn.clone(), self.runtime.clone(), dc).await;
@@ -209,6 +233,7 @@ mod imp {
                 outbox: Mutex::new(VecDeque::new()), outbox_bytes: AtomicU64::new(0),
                 sctp_bytes: AtomicU64::new(0), notify: tokio::sync::Notify::new(), closed: AtomicBool::new(false),
                 open: AtomicBool::new(false),
+                cands_out: AtomicU64::new(0), cands_in: AtomicU64::new(0),
             });
             *pending.lock().unwrap() = Some(conn.clone());
             if initiator {
@@ -234,6 +259,15 @@ mod imp {
         }
         async fn on_data_channel(&self, dc: Arc<dyn DataChannel>) {
             if let Some(c) = self.conn() { Handler { conn: c, runtime: self.runtime.clone() }.on_data_channel(dc).await }
+        }
+        async fn on_ice_connection_state_change(&self, s: RTCIceConnectionState) {
+            if let Some(c) = self.conn() { Handler { conn: c, runtime: self.runtime.clone() }.on_ice_connection_state_change(s).await }
+        }
+        async fn on_ice_gathering_state_change(&self, s: RTCIceGatheringState) {
+            if let Some(c) = self.conn() { Handler { conn: c, runtime: self.runtime.clone() }.on_ice_gathering_state_change(s).await }
+        }
+        async fn on_ice_candidate_error(&self, ev: RTCPeerConnectionIceErrorEvent) {
+            if let Some(c) = self.conn() { Handler { conn: c, runtime: self.runtime.clone() }.on_ice_candidate_error(ev).await }
         }
     }
 
@@ -331,6 +365,7 @@ mod imp {
     #[tauri::command]
     pub async fn rtc_ice(state: tauri::State<'_, Rtc>, id: u32, candidate: Value) -> Result<(), String> {
         let c = state.get(id)?;
+        c.cands_in.fetch_add(1, Ordering::Relaxed);
         c.pc.add_ice_candidate(candidate_from(&candidate)).await.map_err(|e| e.to_string())
     }
 

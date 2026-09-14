@@ -16,10 +16,13 @@ const sentBytes = (c: { args: any }) => new Uint8Array(Buffer.from(c.args.b64, '
 function fakeHost() {
   const calls: Array<{ cmd: string; args: any; headers?: any }> = []
   const queue: any[] = []
+  const overrides = new Map<string, () => Promise<any>>()
   let buffered = 0
   ;(globalThis as any).__TAURI_INTERNALS__ = {
     invoke: async (cmd: string, args: any, options?: any) => {
       calls.push({ cmd, args, headers: options?.headers })
+      const over = overrides.get(cmd)
+      if (over) return over()
       switch (cmd) {
         case 'rtc_available': return true
         case 'rtc_offer': return 'v=0 offer'
@@ -31,6 +34,7 @@ function fakeHost() {
   }
   return {
     calls, push: (ev: any) => queue.push(ev), setBuffered: (n: number) => { buffered = n },
+    onCall: (cmd: string, fn: () => Promise<any>) => overrides.set(cmd, fn),
     sent: () => calls.filter((c) => c.cmd === 'rtc_send'),
     stop: () => { delete (globalThis as any).__TAURI_INTERNALS__ },
   }
@@ -175,5 +179,41 @@ test('ICE that arrives before the remote description waits for it', async () => 
   // And once the description is in, candidates go straight through.
   await link.handleSignal({ kind: 'ice', candidate: { candidate: 'a=3' } as any })
   assert.equal(host.calls.filter((c) => c.cmd === 'rtc_ice').length, 3)
+  link.close(); host.stop()
+})
+
+test('a candidate the host emits while the offer is still being made goes out AFTER the offer', async () => {
+  // webrtc-rs emits its first candidates during set_local_description, so the
+  // poll loop can see them before rtc_offer has returned. A candidate that
+  // reaches the peer first describes a session it has not been told about.
+  const host = fakeHost()
+  const signals: any[] = []
+  host.onCall('rtc_offer', async () => {
+    host.push({ t: 'ice', candidate: { candidate: 'a=1' } })
+    await tick(200)                      // long enough for the poll loop to drain it
+    return 'v=0 offer'
+  })
+  const link = webrtcLinkTauri({ initiator: true, sendSignal: (s) => signals.push(s), onData: () => {} })
+  await tick(500)
+  assert.equal(signals[0]?.kind, 'offer', `the first signal out was ${signals[0]?.kind}`)
+  assert.ok(signals.some((s) => s.kind === 'ice'), 'the held candidate was never sent at all')
+  link.close(); host.stop()
+})
+
+test('the host\'s ICE vocabulary reaches the diary, with the candidate counts', async () => {
+  const host = fakeHost()
+  const states: string[] = []
+  const link = webrtcLinkTauri({ initiator: true, sendSignal: () => {}, onData: () => {}, onState: (s) => states.push(s) })
+  await tick()
+  host.push({ t: 'state', gather: 'gathering' })
+  host.push({ t: 'state', ice: 'checking' })
+  host.push({ t: 'state', conn: 'connecting', out: 4, in: 0 })
+  host.push({ t: 'state', 'ice-error': '701 no route (stun:bs1:3478)' })
+  await tick()
+  assert.ok(states.includes('gather=gathering'), states.join(','))
+  assert.ok(states.includes('ice=checking'), states.join(','))
+  // The count is the whole point: gathered four, received none of theirs.
+  assert.ok(states.includes('conn=connecting cand 4/0'), states.join(','))
+  assert.ok(states.some((s) => s.startsWith('ice-error: 701')), states.join(','))
   link.close(); host.stop()
 })

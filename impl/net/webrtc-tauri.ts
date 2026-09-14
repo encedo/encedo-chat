@@ -87,6 +87,24 @@ export function webrtcLinkTauri(opts: WebRTCOpts): WebRTCLink {
   let created!: Promise<void>
   let buffered = 0
   let onLow: (() => void) | null = null
+  // webrtc-rs emits its first candidates while set_local_description is still
+  // running, and the poll loop forwards them the moment it sees them — so a
+  // candidate could reach the peer BEFORE our own offer or answer did,
+  // describing a session the peer has not been told about yet. The peer's link
+  // buffers early candidates, but its PLANE reads a stray signal as "the peer
+  // is here under a new id" and can rebind a negotiation that is mid-flight.
+  // Ours wait for our SDP; the spike found this the moment its page stopped
+  // buffering for us (2026-09-14).
+  let localSignalled = false
+  const heldIce: any[] = []
+  const sendIce = (c: any) => {
+    if (localSignalled) opts.sendSignal({ kind: 'ice', candidate: c })
+    else heldIce.push(c)
+  }
+  const flushOutIce = () => {
+    localSignalled = true
+    for (const c of heldIce.splice(0)) opts.sendSignal({ kind: 'ice', candidate: c })
+  }
   let probeTimer: any = null
   let pollTimer: any = null
   let polling = false
@@ -115,13 +133,21 @@ export function webrtcLinkTauri(opts: WebRTCOpts): WebRTCLink {
 
   const handle = (ev: any) => {
     switch (ev.t) {
-      case 'ice': opts.sendSignal({ kind: 'ice', candidate: ev.candidate }); return
-      case 'state':
-        opts.onState?.('conn=' + ev.conn)
+      case 'ice': sendIce(ev.candidate); return
+      case 'state': {
+        // The host reports more than the connection state now. `ice=` matches
+        // the browser link's vocabulary, and the candidate counts on `conn=`
+        // separate the two ways a link sits at `connecting` for ever: we
+        // gathered none, or none of the peer's ever reached us.
+        if (typeof ev.ice === 'string') { opts.onState?.('ice=' + ev.ice); return }
+        if (typeof ev.gather === 'string') { opts.onState?.('gather=' + ev.gather); return }
+        if (typeof ev['ice-error'] === 'string') { opts.onState?.('ice-error: ' + ev['ice-error']); return }
+        opts.onState?.(`conn=${ev.conn} cand ${ev.out ?? '?'}/${ev.in ?? '?'}`)
         if (ev.conn === 'failed' || ev.conn === 'closed' || ev.conn === 'disconnected') {
           if (ready) { ready = false; opts.onClose?.() }
         }
         return
+      }
       case 'open': if (!opened) { opened = true; startProbe() }; return
       case 'close': stopProbe(); if (ready) { ready = false; opts.onClose?.() }; return
       case 'low': { const f = onLow; onLow = null; f?.(); return }
@@ -171,6 +197,7 @@ export function webrtcLinkTauri(opts: WebRTCOpts): WebRTCLink {
       if (opts.initiator) {
         const sdp = await call<string>('rtc_offer')
         opts.sendSignal({ kind: 'offer', sdp })
+        flushOutIce()
       }
     } catch (e: any) { opts.onState?.(`create-failed: ${e?.message ?? e}`) }
   })()
@@ -190,6 +217,7 @@ export function webrtcLinkTauri(opts: WebRTCOpts): WebRTCLink {
         if (sig.kind === 'offer') {
           const sdp = await call<string>('rtc_answer', { sdp: sig.sdp })
           opts.sendSignal({ kind: 'answer', sdp })
+          flushOutIce()
           await flushIce()
         } else if (sig.kind === 'answer') {
           await call('rtc_set_answer', { sdp: sig.sdp })
