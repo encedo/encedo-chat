@@ -20,6 +20,7 @@ import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { createMqttPeer } from '../net/mqtt-node.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
+import type { webrtcLink } from '../net/webrtc.ts'
 import { createXferSession, type XferSession, type XferEv, type FileLike, type OfferResult } from './xfer-session.ts'
 import { watchSelfSessionRotating, type SelfWatch } from './selfsession.ts'
 import { watchPresenceRotating, rendezvousDay, type PresenceWatch } from './presence.ts'
@@ -453,6 +454,14 @@ export interface OpenOpts extends ChatOpts {
   /** Content may only travel on the direct channel; the node stays for
    *  discovery, handshake and signalling (`room.ts` contentDirectOnly). */
   directOnly?: boolean
+  /**
+   * Build the direct link some other way than `new RTCPeerConnection`. The
+   * Linux desktop has no RTCPeerConnection in its webview and gets a channel
+   * from the Tauri host instead (`net/webrtc-tauri.ts`); the engine does not
+   * know which it is holding, and must not — only the front-end knows what
+   * the platform can do.
+   */
+  makeLink?: typeof webrtcLink
   /** File transfer over the direct channel: offers, progress, the finished blob. */
   onXfer?: (e: XferEv) => void
   /** EH-2 handshake progress per peer (for a UI badge). */
@@ -1116,9 +1125,10 @@ async function openRoom(
   // without RTCPeerConnection, so attaching the plane would throw `new
   // RTCPeerConnection` mid-handshake. Without it, content simply stays on the relay
   // (GossipSub) — the fallback the plane would have used anyway.
-  const webRtcOk = typeof RTCPeerConnection !== 'undefined'
+  const webRtcOk = typeof RTCPeerConnection !== 'undefined' || !!opts.makeLink
   if (opts.webrtc && webRtcOk) plane = attachWebRTC(room, self, {
     iceServers: opts.iceServers,
+    makeLink: opts.makeLink,
     onState: (st) => { log(`webrtc: ${st}`); opts.onWebrtcState?.(st) },
     onControl: (b) => xfer.onFrame(b),
   })

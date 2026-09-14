@@ -111,7 +111,16 @@ const err = (e: any) => `${e?.name ?? 'Error'}: ${e?.message ?? e}`
  * `onStage` fires as each step lands, so the UI fills in rather than sitting
  * blank for ten seconds — the loopback step alone can take several.
  */
-export async function probeWebrtc(onStage?: (s: ProbeStage) => void, stun = DEFAULT_PROBE_STUN): Promise<WebrtcProbeResult> {
+/**
+ * A platform whose webview has no RTCPeerConnection may still have a channel
+ * — the Linux desktop gets one from the Tauri host (`src-tauri/src/rtc.rs`).
+ * The caller hands in that host's own loopback test and the probe reports it
+ * as THE `loopback` stage: same meaning (the stack works, so any failure to
+ * reach a peer is about the network), different place.
+ */
+export type HostLoopback = () => Promise<{ bytes: number; ms: number }>
+
+export async function probeWebrtc(onStage?: (s: ProbeStage) => void, stun = DEFAULT_PROBE_STUN, hostLoopback?: HostLoopback): Promise<WebrtcProbeResult> {
   const stages: ProbeStage[] = []
   const RTC = (globalThis as any).RTCPeerConnection as typeof RTCPeerConnection | undefined
   const open: RTCPeerConnection[] = []
@@ -135,6 +144,20 @@ export async function probeWebrtc(onStage?: (s: ProbeStage) => void, stun = DEFA
 
   try {
     if (typeof RTC !== 'function') {
+      if (hostLoopback) {
+        // The webview cannot, the host can. The four platform stages that
+        // examine a webview object have no subject here; the loopback is real.
+        for (const id of ['construct', 'datachannel', 'sdp', 'ice']) {
+          const st: ProbeStage = { id, about: 'platform', ok: true, ms: 0, detail: 'kanał w hoście (Rust) — nie dotyczy webview' }
+          stages.push(st); onStage?.(st)
+        }
+        const ok = await run('loopback', 'platform', async () => {
+          const r = await hostLoopback()
+          return `Rust DataChannel: ${r.bytes} B w ${r.ms} ms`
+        })
+        skip('stun', 'network', 'pominięte — sonda STUN działa tylko w webview')
+        return { ok, reflexive: false, stages }
+      }
       skip('construct', 'platform', 'RTCPeerConnection nie istnieje w tym webview')
       for (const id of ['datachannel', 'sdp', 'ice', 'loopback']) skip(id, 'platform', 'pominięte — brak RTCPeerConnection')
       skip('stun', 'network', 'pominięte — brak RTCPeerConnection')

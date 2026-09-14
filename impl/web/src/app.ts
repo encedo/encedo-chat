@@ -53,6 +53,7 @@ import { contactState, seenLabel, noteSeen as foldSeen, noteAdded as foldAdded, 
 import { bodyBytes, fitsOnWire, overBy, MAX_BODY, WARN_AT, kb } from '../../lib/msgsize.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
+import { webrtcLinkTauri, tauriRtcAvailable, tauriRtcSelftest } from '../../net/webrtc-tauri.ts'
 import { unwrapBlob } from '../../lib/fileenvelope.ts'
 import { cidMatches, isVerifiableCid } from '../../lib/cid.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -139,6 +140,18 @@ const FORCED_ROTATION_SEC = parseRotSec(new URLSearchParams(location.search).get
 // survive a reload; the same applies to diagnosing a user ("turn Direct off and
 // see if it still works"). Absent or any other value = the default, Direct on.
 const WEBRTC_OFF = new URLSearchParams(location.search).get('webrtc') === '0'
+/**
+ * The Linux desktop has no RTCPeerConnection in its webview, but since 0.5.77
+ * the Tauri host can open the DataChannel itself (`src-tauri/src/rtc.rs`,
+ * `net/webrtc-tauri.ts`). Whether it can is a build fact, asked once; until
+ * the answer arrives the app behaves as if it cannot, which is the safe side.
+ */
+let rustRtc = false
+void tauriRtcAvailable().then((v) => { rustRtc = v; if (v) { try { paintTransportSetting() } catch {} } })
+/** A direct channel is possible here — natively, or through the host. */
+const directPossible = () => typeof RTCPeerConnection !== 'undefined' || rustRtc
+/** The link builder to hand the engine: the host's when the webview has none. */
+const linkBuilder = () => (typeof RTCPeerConnection === 'undefined' && rustRtc ? webrtcLinkTauri : undefined)
 
 /**
  * Where content travels: straight to the peer, or through the node.
@@ -1946,7 +1959,7 @@ function paintTransportSetting() {
   // mode would not be a stricter posture there — it would be a mute button.
   // `auto` is safe to offer anywhere because it degrades to the node; this one
   // has nowhere to degrade to, by definition.
-  const canDirect = typeof RTCPeerConnection !== 'undefined' && !WEBRTC_OFF
+  const canDirect = directPossible() && !WEBRTC_OFF
   const row = document.getElementById('tmode-direct-row') as HTMLElement | null
   const radio = document.querySelector('#tmode input[value="direct"]') as HTMLInputElement | null
   if (row && radio) {
@@ -4616,6 +4629,12 @@ function paintCaps() {
   ))
   // The user agent is the first thing anyone reading a bug report wants and the
   // last thing they can get out of a packaged app.
+  // The capability list asks the webview, and on the Linux desktop the honest
+  // answer is "no WebRTC here, but the host carries the channel" — without
+  // this line the report would say the direct plane is missing while it works.
+  if (rustRtc && typeof RTCPeerConnection === 'undefined') {
+    rows.push(diagLine('ok', tr('Kanał bezpośredni: przez hosta (Rust, webrtc-rs) — webview nie ma WebRTC')))
+  }
   box.innerHTML = [escapeHtml(capReport.ua), ...rows].join('<br>')
   paintDiagnostics()
 }
@@ -4638,7 +4657,9 @@ $('btn-webrtc-probe')?.addEventListener('click', async () => {
       // The self-test must dial what the app dials, or its verdict is about a
       // server nobody uses. Same derivation as the conversation path; `?stun=0`
       // leaves nothing to ask, so the stage falls back to the first node.
-    }, (iceServersFor(location.search, chosenRelays())[0]?.urls))
+    }, (iceServersFor(location.search, chosenRelays())[0]?.urls),
+      // No RTCPeerConnection but a host that has one: the loopback runs there.
+      typeof RTCPeerConnection === 'undefined' && rustRtc ? tauriRtcSelftest : undefined)
     ecLog(formatWebrtcProbe(lastWebrtcProbe))
     ;(window as any).__webrtcProbe = lastWebrtcProbe // read by the browser harness; harmless elsewhere
   } finally {
@@ -5985,6 +6006,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
     const conv = await (await clientReady!).open({ pub: contact.pub, kid: contact.kid }, {
       webrtc: wantsDirect(),
       directOnly: directOnly(),
+      makeLink: linkBuilder(),
       // STUN lives on the nodes, so the servers are whichever nodes this client
       // dials — no second list to drift, and editing Settings -> Network moves
       // this with it (`lib/ice.ts`).

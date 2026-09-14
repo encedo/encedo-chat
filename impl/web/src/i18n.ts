@@ -572,6 +572,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'bezpośrednio': 'direct',
     'Aktualizacja zniknęła z serwera — zaproponuję po następnym uruchomieniu': 'The update disappeared from the server — I will offer it again after the next launch',
     'Pobrana wersja {v} — nowsza niż pokazana {shown}': 'Downloaded version {v} — newer than the {shown} you were shown',
+    'Kanał bezpośredni: przez hosta (Rust, webrtc-rs) — webview nie ma WebRTC': 'Direct channel: through the host (Rust, webrtc-rs) — the webview has no WebRTC',
     'Wysyłam…': 'Sending…',
     'wyszedł/wyszła': 'left',
     'Wysłane do grupy (broadcast — bez potwierdzeń doręczenia)': 'Sent to the group (broadcast — no delivery acknowledgements)',
