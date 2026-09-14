@@ -5000,15 +5000,39 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
   // is why files could not be reacted to at all.
   const rx = document.createElement('div'); rx.className = 'b-reactions'
   bub.append(meta, rx)
-  if (env.id) msgEls.set(env.id, rx)
-  if (env.id) row.dataset.mid = env.id
   if (au) row.dataset.au = au
   row.appendChild(bub)
-  // WARNING: This bubble had the bar and no way to show it on a phone: hover was the
-  // only reveal, so a file or a voice note could not be reacted to at all.
-  if (env.id) { attachReactionBar(row, env.id); attachReveal(row, bub) }
+  wireBubbleId(row, env.id)
   box.appendChild(row)
   refreshJump()
+}
+
+/**
+ * Make a file bubble a message that can be answered: an id is what a reaction
+ * or a reply names, and a bubble without one is inert.
+ *
+ * All four halves are here because they drifted apart twice. A file we SEND is
+ * drawn before its id exists — the id is minted by the send, which happens
+ * after the encrypt and the upload — so the bubble was wired a second time
+ * afterwards, by hand, and that copy attached the reaction BAR without the
+ * reveal that shows it. The bar is `display:none` until a press adds `.tapped`
+ * (attachReveal), so a file or a voice note you sent through the node carried a
+ * reaction bar no press could ever open, while one you received was fine and a
+ * direct transfer was fine. Reported 2026-09-14: "transfer via node i IPFS tez
+ * ma miec reakcje - jak Transfer direct".
+ *
+ * Idempotent, because the sending path calls it twice by construction: once at
+ * draw time with no id yet, once when the send returns one.
+ */
+function wireBubbleId(row: HTMLElement, id: string) {
+  if (!id || row.dataset.mid === id) return
+  const bub = row.querySelector('.bubble') as HTMLElement | null
+  const rx = row.querySelector('.b-reactions') as HTMLElement | null
+  if (!bub || !rx) return
+  msgEls.set(id, rx)          // where an incoming reaction is drawn
+  row.dataset.mid = id        // what a reply and a scroll-to-quote look for
+  attachReactionBar(row, id)  // the controls
+  attachReveal(row, bub)      // and the press that shows them
 }
 
 
@@ -5427,18 +5451,12 @@ async function attachFile(f: File) {
     // the finished one and a replay after switching rooms shows the real file.
     Object.assign(pending, meta)
     pending.id = gid ? await groupsUI.get(gid)!.room!.sendFile(meta) : room!.conv!.sendFile(meta)
-    // The bubble was drawn before the message had an id — it could not have one,
-    // the send had not happened — so appendFile skipped BOTH halves of
-    // reactions. Registering msgEls let other people's reactions land here;
-    // without the bar, we still could not add our own to a file we sent.
-    // Received files were fine, which is why this looked like it was about
-    // expiry: by the time anyone tries, five minutes have passed.
-    if (pending.id) {
-      const row = fileEls.get(pending)?.act.closest('.mrow') as HTMLElement | null
-      const rx = row?.querySelector('.b-reactions') as HTMLElement | null
-      if (rx) msgEls.set(pending.id, rx)
-      if (row) attachReactionBar(row, pending.id)
-    }
+    // The bubble was drawn before the message had an id — it could not have
+    // one, the send had not happened — so it is wired now, through the same
+    // helper the draw path uses. Doing it by hand here is what left a file we
+    // sent with a reaction bar and no way to open it.
+    const idRow = fileEls.get(pending)?.act.closest('.mrow') as HTMLElement | null
+    if (idRow) wireBubbleId(idRow, pending.id)
     show(tr('Pobierz'), humanSize(f.size))
     const els = fileEls.get(pending)
     if (els) {

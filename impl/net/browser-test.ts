@@ -1229,15 +1229,41 @@ async function main() {
       // the reaction bar was never attached. Received files were fine, which is
       // what made this look like a problem with expired files — by the time
       // anyone tried, five minutes had gone by.
+      // Having the bar is not the same as being able to OPEN it, and that gap
+      // is what shipped: the bar is `display:none` until a press adds `.tapped`
+      // (attachReveal), and the sending path attached the bar without the
+      // reveal. So this presses the bubble and actually reacts, rather than
+      // asking whether the buttons exist.
       const mine = await A.eval<any>(`
         const row = [...document.querySelectorAll('#messages .mrow')]
           .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(fileTok)}));
-        return { found: !!row, bar: !!(row && row.querySelector('.b-react button')),
-                 slot: !!(row && row.querySelector('.b-reactions')) };
+        if (!row) return { found: false };
+        row.querySelector('.bubble').click();
+        const bar = row.querySelector('.b-react');
+        return { found: true, mid: row.dataset.mid, hasAct: row.classList.contains('has-act'),
+                 tapped: row.classList.contains('tapped'),
+                 barShown: !!bar && getComputedStyle(bar).display !== 'none',
+                 slot: !!row.querySelector('.b-reactions') };
       `)
       if (!mine.found) throw new Error('the sender has no bubble for the file it just sent')
-      if (!mine.slot || !mine.bar) throw new Error('the sender cannot react to a file it sent')
-      step('and the sender can react to its own file too')
+      if (!mine.mid) throw new Error('the sender\'s file bubble carries no message id')
+      if (!mine.slot || !mine.hasAct) throw new Error('the sender\'s file bubble was never wired for reactions')
+      if (!mine.tapped || !mine.barShown) throw new Error('pressing the sender\'s file bubble does not open its controls')
+      const sentReact = await A.eval<any>(`
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(fileTok)}));
+        row.querySelector('.b-more').click();
+        const first = document.getElementById('emoji-pop').querySelector('[data-emoji]');
+        const emoji = first.getAttribute('data-emoji');
+        first.click();
+        return { emoji };
+      `)
+      await B.waitFor('the reaction on our own file reached the other side', `
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(fileTok)}));
+        return !!row && !!row.querySelector('.rchip');
+      `, 25_000)
+      step(`and the sender can react to its own file too: ${sentReact.emoji} crossed`)
 
       // The store must not be able to read it: fetch the raw blob and look.
       const leaked = await B.eval<boolean>(`
