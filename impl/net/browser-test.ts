@@ -1682,24 +1682,28 @@ async function main() {
       step('the receiver is asked, with the name and size the sender claimed')
 
       await B.eval(`document.getElementById('xfer-yes').click(); return 1`)
-      await B.waitFor('the file arrived',
-        `return /Odebrano|Received/.test(document.getElementById('xfer-title').textContent || '')`, 60_000)
-      const got = await B.eval<string>(`return document.getElementById('xfer-file').textContent || ''`)
-      if (!got.includes('proba.bin')) throw new Error(`the receiver ended up with: ${got}`)
-      step(`received: ${got}`)
+      // The file lands in the conversation as a bubble — the same one on both
+      // sides, with Open and Save — and the window closes by itself. The bytes
+      // live in the tab, so the bubble is honest for exactly as long as the
+      // transcript is, which is the same lifetime.
+      const BUBBLE = `
+        const b = [...document.querySelectorAll('.mrow')].find(e => /proba\.bin/.test(e.textContent || ''));
+        if (!b) return null;
+        return { side: b.classList.contains('out') ? 'out' : 'in',
+                 open: !!b.querySelector('.f-see'), save: !!b.querySelector('.f-act'),
+                 sub: (b.querySelector('.f-sub') || {}).textContent || '' };`
+      await B.waitFor('the receiver has a file bubble', `const r = (() => {${BUBBLE}})(); return !!r;`, 60_000)
+      const rb = await B.eval<any>(BUBBLE)
+      if (rb.side !== 'in' || !rb.open || !rb.save) throw new Error(`receiver bubble is wrong: ${JSON.stringify(rb)}`)
+      if (!/bezpo|direct/i.test(rb.sub)) throw new Error(`the bubble does not say it came direct: ${rb.sub}`)
+      await B.waitFor('the receiver window closed itself',
+        `return !document.getElementById('xfer-modal').classList.contains('open')`, 10_000)
+      step(`received as a bubble: ${rb.sub}`)
 
-      // The transcript gets a line, never a file bubble: after a direct
-      // transfer there is nothing behind Show and Download.
-      const line = await B.eval<boolean>(`
-        return [...document.querySelectorAll('.sysline')].some(e => /Transfer: proba\.bin/.test(e.textContent || ''));
-      `)
-      if (!line) throw new Error('the conversation says nothing about the transfer')
-      await B.eval(`document.getElementById('xfer-no').click(); return 1`)   // Zamknij
-      const bubbles = await B.eval<number>(`
-        return [...document.querySelectorAll('.mrow')].filter(e => /proba\.bin/.test(e.textContent || '')).length;
-      `)
-      if (bubbles) throw new Error('a direct transfer left a file bubble, whose buttons would lead nowhere')
-      step('a system line, and no bubble that would lie about being downloadable')
+      await A.waitFor('the sender has the same bubble', `const r = (() => {${BUBBLE}})(); return !!r;`, 20_000)
+      const sb = await A.eval<any>(BUBBLE)
+      if (sb.side !== 'out' || !sb.open || !sb.save) throw new Error(`sender bubble is wrong: ${JSON.stringify(sb)}`)
+      step('the sender sees the same file, with the same two actions')
 
       // And the sender is free again — the engine refuses a second transfer
       // while one runs, so this also proves the first one really ended.
