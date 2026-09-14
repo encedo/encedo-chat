@@ -55,6 +55,7 @@ import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/file
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { webrtcLinkTauri, tauriRtcAvailable, tauriRtcSelftest } from '../../net/webrtc-tauri.ts'
 import { unwrapBlob } from '../../lib/fileenvelope.ts'
+import { beginSave, browserSaveEnv } from '../../lib/saveas.ts'
 import { cidMatches, isVerifiableCid } from '../../lib/cid.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
 import type { FileEnv } from '../../lib/envelope.ts'
@@ -4440,7 +4441,7 @@ $('mig-cancel')?.addEventListener('click', closeMigrate)
 $('go-migrate')?.addEventListener('click', () => openMigrate('import'))
 $('btn-export')?.addEventListener('click', () => openMigrate('export'))
 
-async function runExport(password: string) {
+async function runExport(password: string): Promise<boolean> {
   const name = session?.handle ?? ''
   // The password is checked against the identity itself before anything is
   // written. A file sealed under a mistyped password opens for nobody, and its
@@ -4450,12 +4451,10 @@ async function runExport(password: string) {
   if (!isSealedProfile(blob)) throw new Error(tr('To nie jest profil software — tożsamości z HEM nie da się przenieść plikiem'))
   await unseal(password, blob) // throws BadPassword
   const file = await exportProfile(localKV(), name, session?.idKey ?? '', password, nowMs())
-  const url = URL.createObjectURL(new Blob([JSON.stringify(file)], { type: 'application/json' }))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `onchato-${name}-${new Date(nowMs()).toISOString().slice(0, 10)}.${FILE_EXT}`
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 30_000)
+  const sink = await beginSave(`onchato-${name}-${new Date(nowMs()).toISOString().slice(0, 10)}.${FILE_EXT}`, saveEnv)
+  if (!sink) return false   // the dialog was closed: nothing written, and the modal stays for another try
+  await sink.write(new Blob([JSON.stringify(file)], { type: 'application/json' }))
+  return true
 }
 
 async function runImport(password: string): Promise<string> {
@@ -4479,7 +4478,7 @@ $('mig-go')?.addEventListener('click', async () => {
   btn.disabled = true
   try {
     if (migMode === 'export') {
-      await runExport(password)
+      if (!(await runExport(password))) return
       closeMigrate()
       toast(tr('Zapisano plik z profilem — pamiętaj, że to przeniesienie, a nie kopia'))
     } else {
@@ -4557,6 +4556,7 @@ function initDesktopShell() {
     show: tr('Pokaż onchato'),
     quit: tr('Zakończ'),
     hiddenTitle: tr('onchato działa dalej'),
+    saveTitle: tr('Zapisz plik'),
     hiddenBody: tr('Okno zostało schowane do zasobnika — jesteś nadal osiągalny/a. Wyjście jest w menu ikony.'),
   }).then(() => {
     // The host answers about the notification permission asynchronously, so the
@@ -4937,9 +4937,7 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
     // sender from the file it picked. Nothing expires and nothing is fetched.
     sub.textContent = humanSize(env.size) + ' \u00b7 ' + tr('bezpośrednio')
     act.textContent = tr('Zapisz')
-    act.addEventListener('click', () => {
-      const a = document.createElement('a'); a.href = direct; a.download = env.name; a.click()
-    })
+    act.addEventListener('click', () => { void saveDirect(env, act) })
     const open = document.createElement('button'); open.className = 'f-see'; open.textContent = tr('Otwórz')
     open.addEventListener('click', () => { window.open(direct, '_blank', 'noopener') })
     fileEls.set(env, { act, sub, see: open })
@@ -5087,6 +5085,24 @@ const previews = new WeakMap<FileEnv, string>()
  */
 const directFiles = new WeakMap<FileEnv, string>()
 const directBlobs = new WeakMap<FileEnv, Blob>()
+/** The platform's two ways to save (lib/saveas.ts): a picker where there is one, the anchor elsewhere. */
+const saveEnv = browserSaveEnv()
+
+/**
+ * Save a transferred file. Where to is asked FIRST — the click is the gesture
+ * the picker wants — and a closed dialog is an answer, not an error. Save and
+ * Open used to do the same download, which is what the remark was about.
+ */
+async function saveDirect(env: FileEnv, btn: HTMLButtonElement) {
+  const blob = directBlobs.get(env)
+  if (!blob) return
+  const sink = await beginSave(env.name, saveEnv)
+  if (!sink) return
+  btn.disabled = true
+  try { await sink.write(blob); btn.textContent = tr('Zapisano') }
+  catch (e: any) { btn.textContent = tr('Błąd'); ecLog('save failed: ' + (e?.message ?? e)) }
+  setTimeout(() => { btn.textContent = tr('Zapisz'); btn.disabled = false }, 5000)
+}
 /**
  * The bubble's message id, derived from the transfer id on BOTH sides. A
  * reaction or a reply names a message by id and the other side must hold a
@@ -5478,6 +5494,11 @@ function setFileAction(act: HTMLButtonElement, env: FileEnv) {
 }
 
 async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
+  // Where to, BEFORE the fetch: the picker wants the click it was born from,
+  // and the file is fetched and decrypted first. Asked afterwards it would
+  // refuse, and the file would land in Downloads without a word.
+  const sink = await beginSave(env.name, saveEnv)
+  if (!sink) return
   btn.disabled = true; btn.textContent = tr('Pobieram…')
   // The same evidence line on the RECEIVING side, which is where it is most
   // useful: this is a file someone else encrypted, and the key arrived over the
@@ -5488,10 +5509,7 @@ async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
   }), 'debug')
   try {
     const plain = await fetchPlain(env)
-    const url = URL.createObjectURL(new Blob([plain as any], { type: env.mime }))
-    const a = document.createElement('a')
-    a.href = url; a.download = env.name; a.click()
-    setTimeout(() => URL.revokeObjectURL(url), 30_000)
+    await sink.write(new Blob([plain as any], { type: env.mime }))
     btn.textContent = tr('Zapisano')
     // Saving once must not be the end of it: browsers put downloads in places
     // people do not find, and a second copy is a reasonable thing to want. The
@@ -5500,6 +5518,9 @@ async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
     // while the bubble sat there.
     setTimeout(() => setFileAction(btn, env), 5000)
   } catch (e: any) {
+    // The picker created an empty file the moment a name was chosen; a fetch
+    // that failed must not leave a zero-byte one where the person looked.
+    void sink.discard()
     // Past its lifetime, ANY failure is expiry. The store answers a request for
     // a swept file by going looking for it on the public network — a hunt for
     // something we deleted on purpose — so what comes back is a proxy timeout,

@@ -89,6 +89,9 @@ mod desk {
         pending_update: Mutex<Option<Vec<u8>>>,
         hidden_title: Mutex<String>,
         hidden_body: Mutex<String>,
+        /// Title of the host's own "save as" dialog (`on_download`), in the
+        /// app's language. English until the webview reports in.
+        save_title: Mutex<String>,
         /// The window has been revealed at least once — the webview said
         /// "painted", or a person asked for it. Setup's watchdog checks this
         /// before forcing the hidden-at-start window onto the screen, so it
@@ -125,6 +128,7 @@ mod desk {
                 pending_update: Mutex::new(None),
                 hidden_title: Mutex::new("onchato".into()),
                 hidden_body: Mutex::new("Still running in the tray.".into()),
+                save_title: Mutex::new("Save file".into()),
                 booted: std::sync::atomic::AtomicBool::new(false),
                 hidden_at: Mutex::new(None),
                 #[cfg(target_os = "linux")]
@@ -176,6 +180,50 @@ mod desk {
     /// Bring the window back from wherever it went — hidden, minimised, or just
     /// behind something. All three happen, and only doing one of them is why
     /// "clicking the tray does nothing" is a common complaint about tray apps.
+    /// Where a download goes: the platform's own "save as" dialog.
+    ///
+    /// The webview saves by clicking an anchor with `download`. On WebView2 the
+    /// page asks for a location itself (`showSaveFilePicker`) and this hook
+    /// rarely fires; WebKitGTK and WKWebView have no such API, so every save
+    /// there arrives here, with the folder and name wry proposes (Downloads +
+    /// the anchor's name). The dialog starts from those; the person decides;
+    /// closing it cancels the download — nothing is written anywhere. Runs on
+    /// the main thread (WebKit's decide-destination / WKDownload delegate),
+    /// which is where a blocking native dialog has to run on macOS.
+    fn on_download(webview: tauri::Webview<Wry>, ev: tauri::webview::DownloadEvent<'_>) -> bool {
+        use tauri::webview::DownloadEvent;
+        match ev {
+            DownloadEvent::Requested { destination, .. } => {
+                let name = destination
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "file".into());
+                let title = webview.state::<Shell>().save_title.lock().unwrap().clone();
+                let mut dialog = rfd::FileDialog::new().set_title(title).set_file_name(name);
+                if let Some(dir) = destination.parent() {
+                    dialog = dialog.set_directory(dir);
+                }
+                match dialog.save_file() {
+                    Some(path) => {
+                        *destination = path;
+                        true
+                    }
+                    None => false,
+                }
+            }
+            DownloadEvent::Finished { url, path, success } => {
+                if !success {
+                    let _ = diag_append(
+                        webview.app_handle(),
+                        &format!("host: download failed: {} -> {:?}\n", url, path),
+                    );
+                }
+                true
+            }
+            _ => true,
+        }
+    }
+
     fn reveal<R: Runtime>(app: &AppHandle<R>) {
         let shell = app.state::<Shell>();
         shell
@@ -501,6 +549,7 @@ mod desk {
         quit: String,
         hidden_title: String,
         hidden_body: String,
+        save_title: String,
     ) {
         if let Some(i) = shell.show_item.lock().unwrap().as_ref() {
             let _ = i.set_text(&show);
@@ -510,6 +559,7 @@ mod desk {
         }
         *shell.hidden_title.lock().unwrap() = hidden_title;
         *shell.hidden_body.lock().unwrap() = hidden_body;
+        *shell.save_title.lock().unwrap() = save_title;
     }
 
     /// Can this desktop show a tray icon at all? The web side hides the
@@ -553,9 +603,13 @@ mod desk {
     /// a disk, and the previous night is still there to read.
     #[tauri::command]
     fn desk_diag_append(app: AppHandle, text: String) -> Result<(), String> {
+        diag_append(&app, &text)
+    }
+
+    fn diag_append(app: &AppHandle, text: &str) -> Result<(), String> {
         use std::io::Write;
         const CAP: u64 = 512 * 1024;
-        let path = diag_file(&app)?;
+        let path = diag_file(app)?;
         if std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0) > CAP {
             let _ = std::fs::rename(&path, path.with_extension("log.1"));
         }
@@ -1019,6 +1073,26 @@ mod desk {
                 desk_update_apply,
             ])
             .setup(|app| {
+                // The main window is built HERE, from its own entry in
+                // tauri.conf.json (which says `create: false`), because a
+                // download hook can only be attached by the builder. Saving a
+                // file from the webview is an anchor with `download`; WebKitGTK
+                // and WKWebView have no save picker of their own, so the host
+                // asks where with the platform's dialog (`on_download`) and
+                // the webview never learns a path. Everything that finds the
+                // window by its label is unchanged.
+                let main_cfg = app
+                    .config()
+                    .app
+                    .windows
+                    .iter()
+                    .find(|w| w.label == "main")
+                    .cloned()
+                    .ok_or("tauri.conf.json has no window labelled main")?;
+                tauri::WebviewWindowBuilder::from_config(app.handle(), &main_cfg)?
+                    .on_download(on_download)
+                    .build()?;
+
                 // The webview's first frame is white — WebKitGTK paints before
                 // the page does — and on a dark desktop that is a flash of the
                 // wrong colour at every launch (reported: a white or half-white

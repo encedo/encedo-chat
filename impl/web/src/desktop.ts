@@ -197,13 +197,13 @@ export function openExternal(url: string) {
  * is exactly the seam that makes a packaged web app feel packaged.
  */
 export async function initDesktop(s: {
-  show: string; quit: string; hiddenTitle: string; hiddenBody: string
+  show: string; quit: string; hiddenTitle: string; hiddenBody: string; saveTitle: string
 }) {
   if (!isDesktopShell()) return
   try { deskPerm = await invoke<Perm>('desk_notify_permission') } catch { deskPerm = 'default' }
   try { deskTray = await invoke<boolean>('desk_tray_ok') } catch { deskTray = false }
   try { deskKind = await invoke<'desktop' | 'mobile'>('desk_platform') } catch { deskKind = 'desktop' }
-  try { await invoke('desk_strings', { show: s.show, quit: s.quit, hiddenTitle: s.hiddenTitle, hiddenBody: s.hiddenBody }) } catch {}
+  try { await invoke('desk_strings', { show: s.show, quit: s.quit, hiddenTitle: s.hiddenTitle, hiddenBody: s.hiddenBody, saveTitle: s.saveTitle }) } catch {}
   try { await invoke('desk_close_to_tray', { on: closeToTray() }) } catch {}
 }
 

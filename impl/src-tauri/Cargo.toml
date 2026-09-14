@@ -46,6 +46,13 @@ tauri-plugin-barcode-scanner = { path = "plugins/barcode-scanner" }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"
+# The native "save as" dialog behind a download. The webview's Save is an
+# anchor with `download`; on WebView2 the page asks for a location itself
+# (`showSaveFilePicker`), but WebKitGTK and WKWebView have no such API, so the
+# host intercepts the download (`on_download` in `wire()`) and asks with the
+# platform's own dialog. rfd is what tauri-plugin-dialog wraps; used directly,
+# because a plugin would also open a JS-side surface nothing here needs.
+rfd = "0.15"
 # Updating in place. Desktop only, and not by preference: the plugin replaces a
 # self-contained bundle, which Android does not have and a distro package is
 # not — see `desk_update_kind`, which is what stops the app offering an update

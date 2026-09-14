@@ -586,6 +586,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Zamknij': 'Close',
     'Zapis': 'Storage',
     'Zapisano': 'Saved',
+    'Zapisz plik': 'Save file',
     'Zapisuję…': 'Saving…',
     'Zapisz': 'Save',
     'Zaproszenie': 'Invitation',

@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "onchato",
         "width": 1100,
         "height": 720,
