@@ -35,7 +35,8 @@
     "relay-chatload": "node net/relay-chatload.ts",
     "phone-shot": "node net/phone-shot.ts",
     "tauri": "tauri",
-    "web:pack": "tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C web -cf - dist | gzip -n9 > web/dist.tar.gz"
+    "web:pack": "tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C web -cf - dist | gzip -n9 > web/dist.tar.gz",
+    "rtc-spike": "node net/rtc-spike.ts"
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.2",

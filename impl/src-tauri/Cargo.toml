@@ -61,6 +61,16 @@ tauri-plugin-single-instance = "2"
 # would give two incompatible `WebView` types and `with_webview` would not
 # compile against ours.
 [target.'cfg(target_os = "linux")'.dependencies]
+# The direct plane for Linux, where WebKitGTK has no RTCPeerConnection: a
+# DataChannel in Rust (`webrtc-rs`), exposed to the webview behind the same
+# link interface the browser implements (`net/webrtc.ts`). Linux-only on
+# purpose — WebView2 and WKWebView do WebRTC themselves, and this is ~100
+# crates that Windows and macOS builds do not need to carry.
+webrtc = "0.20"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+bytes = "1"
+async-trait = "0.1"
+
 webkit2gtk = "=2.0.2"
 # Notifications are sent by hand on Linux — see `xdg_notify` in lib.rs for the
 # reason, which is that the plugin's connection dies before the banner is read.
