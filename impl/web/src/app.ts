@@ -2911,7 +2911,7 @@ function onXferEvent(room: Room, e: any) {
     case 'progress': return xferProgress(e.done, e.total)
     case 'done': {
       if (xfer?.file) {
-        const env = directFileEnv({ name: xfer.name, size: xfer.size, mime: xfer.mime }, URL.createObjectURL(xfer.file))
+        const env = directFileEnv({ name: xfer.name, size: xfer.size, mime: xfer.mime }, xfer.file, e.id)
         record(room, { t: 'file', kind: 'me', ts: nowMs(), file: env, au: session?.pub })
       }
       xferClose()
@@ -2922,7 +2922,7 @@ function onXferEvent(room: Room, e: any) {
       // The file lands in the conversation as a bubble with the same two
       // actions the sender's has, and the window closes: a modal that only
       // repeats what the bubble offers is a modal that is in the way.
-      const env = directFileEnv({ name: e.name, size: e.blob.size, mime: e.mime }, URL.createObjectURL(e.blob))
+      const env = directFileEnv({ name: e.name, size: e.blob.size, mime: e.mime }, e.blob, e.id)
       record(room, { t: 'file', kind: 'peer', ts: nowMs(), file: env, au: room.contact.pub })
       xferClose()
       toast(tr('Odebrano'))
@@ -5086,13 +5086,24 @@ const previews = new WeakMap<FileEnv, string>()
  * page and files are not pinnable — which is what makes a bubble honest here.
  */
 const directFiles = new WeakMap<FileEnv, string>()
-function directFileEnv(f: { name: string; size: number; mime: string }, url: string): FileEnv {
+const directBlobs = new WeakMap<FileEnv, Blob>()
+/**
+ * The bubble's message id, derived from the transfer id on BOTH sides. A
+ * reaction or a reply names a message by id and the other side must hold a
+ * bubble under the same one; the transfer id is the only value about a direct
+ * file that both ends already share (every frame carried it). The `x` keeps
+ * it out of the space of ordinary message ids.
+ */
+const xferMsgId = (id: number) => 'x' + (id >>> 0).toString(16).padStart(8, '0')
+function directFileEnv(f: { name: string; size: number; mime: string }, blob: Blob, xferId: number): FileEnv {
+  const url = URL.createObjectURL(blob)
   const env = {
-    v: 1, t: 'file', id: '', ts: nowMs(), seq: 0,
+    v: 1, t: 'file', id: xferMsgId(xferId), ts: nowMs(), seq: 0,
     cid: '', name: f.name, size: f.size, mime: f.mime || 'application/octet-stream',
     key: '', chunk: 0, chunks: 0, alg: 'direct',
   } as unknown as FileEnv
   directFiles.set(env, url)
+  directBlobs.set(env, blob)
   if (isPreviewable(env.mime)) previews.set(env, url)
   return env
 }

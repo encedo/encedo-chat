@@ -56,7 +56,10 @@ test('a file crosses, and arrives as the same bytes', async () => {
   const f = fakeFile(CHUNK * 2 + 1234)
   assert.equal(A.offer(f), 'ok')
   await flush()
-  assert.deepEqual(evs.b.at(-1), { t: 'offer', name: 'raport.pdf', size: f.size, mime: 'application/pdf' })
+  const offer = evs.b.at(-1) as any
+  assert.equal(offer.t, 'offer')
+  assert.deepEqual({ name: offer.name, size: offer.size, mime: offer.mime }, { name: 'raport.pdf', size: f.size, mime: 'application/pdf' })
+  assert.ok(Number.isInteger(offer.id) && offer.id >= 0, 'the offer carries the transfer id')
 
   B.accept()
   await flush()
@@ -66,7 +69,12 @@ test('a file crosses, and arrives as the same bytes', async () => {
   assert.equal(got.blob.size, f.size)
   const back = new Uint8Array(await got.blob.arrayBuffer())
   assert.ok(back.every((v, i) => v === f.at(i)), 'the bytes are not the ones that were sent')
-  assert.ok(evs.a.some((e) => e.t === 'done'))
+  // One id, known at both ends: the bubble each side builds from these events
+  // can be reacted to and answered, because a reaction names a message by id.
+  assert.equal(got.id, offer.id, 'the receiver knows the file by the id the offer carried')
+  const done = evs.a.find((e) => e.t === 'done') as any
+  assert.ok(done, 'the sender was not told it finished')
+  assert.equal(done.id, offer.id, 'the sender knows it by the same id')
   // Both sides are free again the moment it ends.
   assert.equal(A.busy(), false)
   assert.equal(B.busy(), false)

@@ -1705,6 +1705,26 @@ async function main() {
       if (sb.side !== 'out' || !sb.open || !sb.save) throw new Error(`sender bubble is wrong: ${JSON.stringify(sb)}`)
       step('the sender sees the same file, with the same two actions')
 
+      // A transferred file is a message like any other, so it can be reacted
+      // to — which needs the SAME id on both sides, and nothing about a direct
+      // transfer crosses the wire under a message id; the bubble takes the
+      // transfer's own. The opener exists only when the bubble has an id at all.
+      const reacted = await B.eval<any>(`
+        const row = [...document.querySelectorAll('.mrow')].find(e => /proba\.bin/.test(e.textContent || ''));
+        const more = row && row.querySelector('.b-more');
+        if (!more) return { mid: row && row.dataset.mid, emoji: null };
+        more.click();
+        const pop = document.getElementById('emoji-pop');
+        const first = pop.querySelector('[data-emoji]');
+        const emoji = first.getAttribute('data-emoji');
+        first.click();
+        return { mid: row.dataset.mid, emoji };`)
+      if (!reacted.mid || !reacted.emoji) throw new Error(`the file bubble cannot be reacted to: ${JSON.stringify(reacted)}`)
+      await A.waitFor('the reaction reached the sender\'s file bubble', `
+        const row = [...document.querySelectorAll('.mrow')].find(e => /proba\.bin/.test(e.textContent || ''));
+        return !!row && row.dataset.mid === ${JSON.stringify(reacted.mid)} && !!row.querySelector('.rchip');`, 25_000)
+      step(`the file can be reacted to: ${reacted.emoji} landed on the same bubble (${reacted.mid})`)
+
       // And the sender is free again — the engine refuses a second transfer
       // while one runs, so this also proves the first one really ended.
       await A.waitFor('the sender is free again',

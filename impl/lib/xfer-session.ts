@@ -43,13 +43,22 @@ export interface XferHost {
   now?(): number
 }
 
+/**
+ * `id` on offer / done / received is the transfer's own 32-bit id, the one every
+ * frame carried — so it is the ONE value both ends already agree on. The UI
+ * builds the file bubble from these events, and a bubble needs an id both
+ * sides share before anyone can react to it or answer it: a reaction names a
+ * message by id, and nothing else about a direct transfer ever crossed the
+ * wire under an id. Without this the transferred file was the only message in
+ * a conversation that could not be reacted to (reported 2026-09-14).
+ */
 export type XferEv =
   /** Somebody wants to send us a file; the UI asks the person. */
-  | { t: 'offer'; name: string; size: number; mime: string }
+  | { t: 'offer'; id: number; name: string; size: number; mime: string }
   | { t: 'accepted' }
   | { t: 'progress'; dir: 'in' | 'out'; done: number; total: number }
-  | { t: 'done'; dir: 'out' }
-  | { t: 'received'; name: string; mime: string; blob: Blob }
+  | { t: 'done'; dir: 'out'; id: number }
+  | { t: 'received'; id: number; name: string; mime: string; blob: Blob }
   | { t: 'failed'; dir: 'in' | 'out'; why: Why }
 
 export type OfferResult = 'ok' | 'busy' | 'no-channel' | 'too-big' | 'empty'
@@ -83,7 +92,7 @@ export function createXferSession(host: XferHost, onEvent: (e: XferEv) => void):
       if (e.t === 'progress') onEvent({ t: 'progress', dir, done: e.done, total: e.total })
       else if (e.t === 'accepted') onEvent({ t: 'accepted' })
       else if (e.t === 'failed') { onEvent({ t: 'failed', dir, why: e.why }); clear() }
-      else if (e.t === 'done' && dir === 'out') { onEvent({ t: 'done', dir: 'out' }); clear() }
+      else if (e.t === 'done' && dir === 'out') { onEvent({ t: 'done', dir: 'out', id: send ? send.offer.id : 0 }); clear() }
     }
   }
 
@@ -168,7 +177,7 @@ export function createXferSession(host: XferHost, onEvent: (e: XferEv) => void):
         if (o.size > MAX_DIRECT) return say('too-big')
         if (o.size === 0) return say('empty')
         recv = createReceiver(o)
-        onEvent({ t: 'offer', name: o.name, size: o.size, mime: o.mime })
+        onEvent({ t: 'offer', id: o.id, name: o.name, size: o.size, mime: o.mime })
         return
       }
 
@@ -186,10 +195,10 @@ export function createXferSession(host: XferHost, onEvent: (e: XferEv) => void):
         const finished = out.evs.some((e) => e.t === 'done')
         emit(out.evs.filter((e) => e.t !== 'done'), 'in')
         if (finished && recv) {
-          const { name, mime } = recv.offer
+          const { id, name, mime } = recv.offer
           const blob = new Blob(recv.parts() as BlobPart[], { type: mime })
           clear()
-          onEvent({ t: 'received', name, mime, blob })
+          onEvent({ t: 'received', id, name, mime, blob })
         }
       }
     },
