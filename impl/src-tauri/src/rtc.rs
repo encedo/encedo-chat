@@ -70,6 +70,12 @@ mod imp {
         sctp_bytes: AtomicU64,
         notify: tokio::sync::Notify,
         closed: AtomicBool,
+        /// Set by the reader on OnOpen. The writer waits for it: a send on a
+        /// channel that is still opening is an error in webrtc-rs, and the
+        /// first version of the writer treated any error as the end of the
+        /// world — the selftest queued its payload before the channel opened,
+        /// the writer died on the spot, and the probe reported 0 bytes.
+        open: AtomicBool,
     }
 
     impl Conn {
@@ -119,7 +125,11 @@ mod imp {
             runtime.spawn(Box::pin(async move {
                 while let Some(ev) = dc.poll().await {
                     match ev {
-                        DataChannelEvent::OnOpen => conn.push(json!({ "t": "open" })),
+                        DataChannelEvent::OnOpen => {
+                            conn.open.store(true, Ordering::Relaxed);
+                            conn.notify.notify_one();
+                            conn.push(json!({ "t": "open" }));
+                        }
                         DataChannelEvent::OnClose => { conn.push(json!({ "t": "close" })); break }
                         DataChannelEvent::OnBufferedAmountLow => {
                             conn.sctp_bytes.store(dc.outstanding_bytes().await.unwrap_or(0) as u64, Ordering::Relaxed);
@@ -139,20 +149,25 @@ mod imp {
             let conn = conn.clone();
             runtime.spawn(Box::pin(async move {
                 loop {
+                    if conn.closed.load(Ordering::Relaxed) { break }
+                    // Nothing leaves before the channel is open. Queued bytes
+                    // simply wait; the reader wakes us on OnOpen.
+                    if !conn.open.load(Ordering::Relaxed) { conn.notify.notified().await; continue }
                     let next = conn.outbox.lock().unwrap().pop_front();
                     match next {
                         Some(bytes) => {
                             conn.outbox_bytes.fetch_sub(bytes.len() as u64, Ordering::Relaxed);
-                            if dc.send(BytesMut::from(&bytes[..])).await.is_err() {
-                                conn.push(json!({ "t": "close" }));
-                                break;
+                            if let Err(e) = dc.send(BytesMut::from(&bytes[..])).await {
+                                // A failed send is reported, and the frame is
+                                // gone — the ratchet above tolerates a lost
+                                // frame, a dead writer it does not.
+                                conn.push(json!({ "t": "state", "send-failed": e.to_string() }));
+                                if conn.closed.load(Ordering::Relaxed) { break }
+                                continue;
                             }
                             conn.sctp_bytes.store(dc.outstanding_bytes().await.unwrap_or(0) as u64, Ordering::Relaxed);
                         }
-                        None => {
-                            if conn.closed.load(Ordering::Relaxed) { break }
-                            conn.notify.notified().await;
-                        }
+                        None => conn.notify.notified().await,
                     }
                 }
             }));
@@ -193,6 +208,7 @@ mod imp {
                 pc, dc: Mutex::new(None), events: Mutex::new(VecDeque::new()),
                 outbox: Mutex::new(VecDeque::new()), outbox_bytes: AtomicU64::new(0),
                 sctp_bytes: AtomicU64::new(0), notify: tokio::sync::Notify::new(), closed: AtomicBool::new(false),
+                open: AtomicBool::new(false),
             });
             *pending.lock().unwrap() = Some(conn.clone());
             if initiator {
@@ -333,6 +349,13 @@ mod imp {
     /// reach a real peer is about the network.
     #[tauri::command]
     pub async fn rtc_selftest(state: tauri::State<'_, Rtc>) -> Result<Value, String> {
+        state.selftest().await
+    }
+
+    impl Rtc {
+    /// The body of `rtc_selftest`, callable from a test without Tauri.
+    pub async fn selftest(&self) -> Result<Value, String> {
+        let state = self;
         let t0 = Instant::now();
         let a = state.make(true, vec![]).await?;
         let b = state.make(false, vec![]).await?;
@@ -357,7 +380,13 @@ mod imp {
                 for ev in evs {
                     if ev["t"] == "ice" { let _ = to.pc.add_ice_candidate(candidate_from(&ev["candidate"])).await; }
                     if ev["t"] == "data" && std::ptr::eq(from, &b) {
-                        got += ev["b64"].as_str().map(|s| s.len() / 4 * 3).unwrap_or(0);
+                        // Exact, not len/4*3: the padding is not payload, and
+                        // a probe that reports 65538 of 65536 bytes is a probe
+                        // nobody will trust about anything else.
+                        if let Some(s) = ev["b64"].as_str() {
+                            let pad = s.bytes().rev().take_while(|&c| c == b'=').count();
+                            got += s.len() / 4 * 3 - pad;
+                        }
                     }
                 }
             }
@@ -366,8 +395,45 @@ mod imp {
         }
         let _ = a.pc.close().await;
         let _ = b.pc.close().await;
-        if got < payload.len() { return Err(format!("loopback carried {got} of {} bytes in 10 s", payload.len())) }
+        if got < payload.len() {
+            // Say what the two sides got to, so a report names the stage
+            // instead of "0 bytes": no candidates at all is a different fault
+            // from a channel that opened and stayed silent.
+            let sa = a.events.lock().unwrap().len();
+            let sb = b.events.lock().unwrap().len();
+            return Err(format!("loopback carried {got} of {} bytes in 10 s (a open={} b open={} queued a={} b={})",
+                payload.len(), a.open.load(Ordering::Relaxed), b.open.load(Ordering::Relaxed), sa, sb))
+        }
         Ok(json!({ "ok": true, "bytes": got, "ms": t0.elapsed().as_millis() as u64 }))
+    }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        /// Under the crate's own runtime, the way the spike ran.
+        #[test]
+        fn loopback_under_crate_runtime() {
+            let rtc = Rtc::new();
+            let rt = rtc.runtime.clone();
+            let out: std::sync::Mutex<Option<Result<Value, String>>> = std::sync::Mutex::new(None);
+            rt.block_on(Box::pin(async { *out.lock().unwrap() = Some(rtc.selftest().await); }));
+            let r = out.into_inner().unwrap().unwrap();
+            assert!(r.is_ok(), "{r:?}");
+            assert_eq!(r.unwrap()["bytes"], 65536);
+        }
+
+        /// Under a FOREIGN multi-thread tokio runtime — which is what a Tauri
+        /// async command runs on. The command path is this one, not the above.
+        #[test]
+        fn loopback_under_a_tauri_like_runtime() {
+            let rtc = Rtc::new();
+            let host = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+            let r = host.block_on(rtc.selftest());
+            assert!(r.is_ok(), "{r:?}");
+            assert_eq!(r.unwrap()["bytes"], 65536);
+        }
     }
 }
 
