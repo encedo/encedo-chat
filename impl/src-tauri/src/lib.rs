@@ -28,6 +28,9 @@
 // kind of seam that gives a packaged build away.
 
 #[cfg(desktop)]
+mod rtc;
+
+#[cfg(desktop)]
 mod desk {
     use std::sync::Mutex;
     use tauri::{
@@ -983,7 +986,18 @@ mod desk {
             ))
             .plugin(tauri_plugin_updater::Builder::new().build())
             .manage(Shell::default())
+            .manage(crate::rtc::Rtc::new())
             .invoke_handler(tauri::generate_handler![
+                crate::rtc::rtc_available,
+                crate::rtc::rtc_create,
+                crate::rtc::rtc_offer,
+                crate::rtc::rtc_answer,
+                crate::rtc::rtc_set_answer,
+                crate::rtc::rtc_ice,
+                crate::rtc::rtc_send,
+                crate::rtc::rtc_poll,
+                crate::rtc::rtc_close,
+                crate::rtc::rtc_selftest,
                 desk_notify,
                 desk_notify_permission,
                 desk_notify_request,
