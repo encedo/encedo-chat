@@ -27,6 +27,12 @@ test('the connection lines are kept', () => {
   assert.ok(isLifecycle('relay connection restored — announcing and flushing what is waiting'))
   assert.ok(isLifecycle('contact silent on 3f9a1c... -> offline'))
   assert.ok(isLifecycle('node list updated (3): bs1, bs2, bs3'))
+  // The direct channel's states and the transfer's outcomes: what a report has
+  // to show before anybody can say whether content really left the relay.
+  assert.ok(isLifecycle('webrtc: conn=connected'))
+  assert.ok(isLifecycle('webrtc: probe=ok'))
+  assert.ok(isLifecycle('webrtc: send-failed: rtc_send: not base64'))
+  assert.ok(isLifecycle('xfer: failed (channel)'))
 })
 
 test('a stall is written down the moment it happens', () => {

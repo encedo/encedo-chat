@@ -271,6 +271,11 @@ interface Room {
    *  exactly like a peer who left, so our own link wins when it is down. */
   security: Map<string, 'handshaking' | 'established' | 'failed'>
   transport: string
+  /** The channel answered the liveness ping, so content really rides it. The
+   *  badge used to light on `conn=connected` alone, which is a fact about the
+   *  connection and not about the channel — and read Direct while every
+   *  message still went through the node (Linux desktop, 2026-09-14). */
+  directProven?: boolean
   peerLabel: string
   lastPresence: string | null
   /** The presence line on screen, so a burst rewrites it instead of repeating
@@ -3794,7 +3799,7 @@ ecLog(`origin: ${location.origin}${location.pathname}`
  */
 let capReport: Awaited<ReturnType<typeof probeCapabilities>> | null = null
 void (async () => {
-  const rep = await probeCapabilities()
+  const rep = await probeCapabilities({ hostRtc: await tauriRtcAvailable() })
   capReport = rep
   paintCaps()
   renderNetwork() // a phone has no console — the Network tab is where this is readable
@@ -3834,7 +3839,7 @@ function refuse(rep: Awaited<ReturnType<typeof probeCapabilities>>) {
   const retry = document.getElementById('cap-retry') as HTMLButtonElement | null
   retry?.addEventListener('click', async () => {
     retry.disabled = true; retry.textContent = tr('…')
-    const again = await probeCapabilities()
+    const again = await probeCapabilities({ hostRtc: await tauriRtcAvailable() })
     capReport = again
     ecLog(formatReport(again))
     if (again.ok) { location.reload(); return }
@@ -3918,11 +3923,16 @@ function noteTransport(room: Room, state: string) {
   // this matcher only knew the `conn=` vocabulary. Anything that is not
   // `conn=connected` paints Relay, which is the safe direction to be wrong in.
   if (/^(conn=(connected|failed|disconnected|closed)|demoted=)/.test(state)) room.transport = state
+  // The badge is a security indicator, so it follows PROOF, not state: the
+  // link reports probe=ok once its ping came back, and only then does the room
+  // send content down the channel. Anything that ends the channel ends the proof.
+  if (state === 'probe=ok') room.directProven = true
+  if (state === 'probe=failed' || /^(conn=(failed|disconnected|closed)|demoted=)/.test(state)) room.directProven = false
   if (room === activeRoom()) paintTransport(room)
 }
 function paintTransport(room: Room) {
   const b = $('transport-badge')
-  if (room.transport.startsWith('conn=connected')) setBadge(b, 'badge direct', tr('🟢 Direct'), tr('Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing'))
+  if (room.directProven) setBadge(b, 'badge direct', tr('🟢 Direct'), tr('Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing'))
   else setBadge(b, 'badge relay', tr('⚪ Relay'), tr('Treść przez relay (GossipSub)'))
 }
 

@@ -58,6 +58,13 @@ const LIFECYCLE = [
   'presence', 'contact online', 'contact silent', 'watch', 'rotation', 'rotat',
   'session closing', 'offline', 'online', 'reconnect', 'transport', 'topic',
   'handshake', 'ratchet', 'mesh', 'subscribe', 'announce',
+  // The direct channel and the file transfer report through core's log with
+  // these two prefixes (`webrtc: conn=connected`, `webrtc: probe=ok`,
+  // `webrtc: send-failed: ...`, `xfer: failed (channel)`). Their vocabulary is
+  // states and short reason codes, never a name or a byte of content. Without
+  // them the first Linux desktop report (2026-09-14) showed a badge saying
+  // Direct and a diary with nothing at all about the channel.
+  'webrtc:', 'xfer:',
 ]
 
 /** Is this log line about the connection? Unrecognised lines are dropped. */

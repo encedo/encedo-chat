@@ -64,7 +64,7 @@ export interface CapabilityReport {
  * derive with it — several webviews expose the algorithm name and then throw on
  * use, which a feature-detect by string would report as present.
  */
-export async function probeCapabilities(): Promise<CapabilityReport> {
+export async function probeCapabilities(opts: { hostRtc?: boolean } = {}): Promise<CapabilityReport> {
   const caps: Capability[] = []
   const add = (id: string, required: boolean, ok: boolean, note?: string, error?: string, tries?: number) =>
     caps.push({ id, required, ok, note: ok ? undefined : note, error, tries: tries && tries > 1 ? tries : undefined })
@@ -133,7 +133,11 @@ export async function probeCapabilities(): Promise<CapabilityReport> {
   })(), 'Brak localStorage — tożsamość i kontakty nie przetrwają odświeżenia. Tryb prywatny?')
 
   // Optional from here down: the app runs without these, with less.
-  add('WebRTC', false, typeof RTCPeerConnection === 'function',
+  // `hostRtc`: the Linux desktop has no RTCPeerConnection in its webview and a
+  // DataChannel in the Tauri host instead (`src-tauri/src/rtc.rs`). Content
+  // goes direct there just the same, so reporting "no WebRTC" was a false
+  // alarm sitting next to a Direct badge.
+  add('WebRTC', false, typeof RTCPeerConnection === 'function' || !!opts.hostRtc,
     'Brak WebRTC — treść pójdzie przez węzeł sieci (relay), nie bezpośrednio.')
 
   add('visualViewport', false, typeof (globalThis as any).visualViewport === 'object',
