@@ -98,13 +98,20 @@ function loadNodes(): NodeEntry[] {
   return DEFAULT_NODES.map((n) => ({ ...n }))
 }
 function saveNodes(list: NodeEntry[]) { try { localStorage.setItem('ec-nodes', JSON.stringify(list)) } catch {} }
-/** The relay to dial this session — the first enabled node, or bs1 as a floor. */
+/** The relay to dial this session — the first enabled node, or the first published one as a floor. */
 function chosenRelay(): string { return loadNodes().find((n) => n.enabled)?.addr || RELAY }
 /**
  * All enabled nodes in list order — the failover candidates (3b). The first is
  * the preferred relay; if it is down the session falls through to the next.
- * Because the relays are meshed this does not split users. Never empty: bs1 is
- * the floor so a login with every node unchecked still has something to dial.
+ * Because the relays are meshed this does not split users. Never empty: the
+ * first published node is the floor, so a login with every node unchecked still
+ * has something to dial.
+ *
+ * ORDER IS A DEPLOYMENT DECISION, and it lives in `infra/nodes.json`. Since
+ * 2026-09-14 it is bs3, bs2, bs1: bs1 carried almost every client (200 dials a
+ * day against 13 and 8) while also being the web host, and its network is the
+ * one that drops the inter-relay links. Putting it last leaves it as the
+ * fallback it should be. Nothing here reads a name — change the file, not this.
  */
 function chosenRelays(): string[] {
   const on = loadNodes().filter((n) => n.enabled).map((n) => n.addr)
@@ -1064,7 +1071,7 @@ function nodeRowsHTML(list: NodeEntry[]): string {
  * its first months. Publish with
  * `ipfs add --cid-version=1 --raw-leaves --pin`.
  */
-const OFFICIAL_NODES_CID = 'bafkreih3ykpzxxq67bdvy3z3bp6w7orqkqs4i7hworiemjvba7y6ce5qam'
+const OFFICIAL_NODES_CID = 'bafkreies7oi6xdeyz7gpqifoa7loas65nu25pp6shdczelkxjbiras77ti'
 
 /**
  * Replace the local list with the published one.
