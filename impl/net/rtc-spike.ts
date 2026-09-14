@@ -77,12 +77,26 @@ const PAGE = `<!doctype html><meta charset="utf-8"><title>rtc-spike</title><scri
   }
   const offer = await pc.createOffer(); await pc.setLocalDescription(offer)
   up({ kind: 'offer', sdp: offer.sdp })
+  // Candidates are BUFFERED until the answer is in, exactly as net/webrtc.ts
+  // does: webrtc-rs emits its first candidates while set_local_description is
+  // still running, so they reach this page BEFORE the answer line does, and
+  // addIceCandidate on a null remote description throws them away. Without
+  // this the page ends with the answer set and no remote candidates at all,
+  // and the spike reports a connectivity failure that is its own doing.
+  let remoteSet = false
+  const held = []
   for (;;) {
     const lines = await (await fetch('/down')).json()
     for (const l of lines) {
       const v = JSON.parse(l)
-      if (v.kind === 'answer') await pc.setRemoteDescription({ type: 'answer', sdp: v.sdp })
-      else if (v.kind === 'ice') { try { await pc.addIceCandidate(v.candidate) } catch (e) { say('ice add failed: ' + e.message) } }
+      if (v.kind === 'answer') {
+        await pc.setRemoteDescription({ type: 'answer', sdp: v.sdp })
+        remoteSet = true
+        for (const c of held.splice(0)) { try { await pc.addIceCandidate(c) } catch (e) { say('held ice add failed: ' + e.message) } }
+      } else if (v.kind === 'ice') {
+        if (!remoteSet) held.push(v.candidate)
+        else { try { await pc.addIceCandidate(v.candidate) } catch (e) { say('ice add failed: ' + e.message) } }
+      }
     }
     await new Promise((r) => setTimeout(r, 100))
   }
