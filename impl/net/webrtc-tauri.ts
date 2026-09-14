@@ -12,12 +12,12 @@
  *
  * Events come by POLLING (`rtc_poll`), at 20 ms while something is happening
  * and 100 ms when nothing is, which is how the rest of this shell talks to its
- * host. Content arrives base64 inside JSON; the send path is a raw body, so a
- * 64 KiB transfer chunk costs one IPC call and no encoding.
+ * host. Content travels base64 inside JSON in both directions — one IPC call
+ * per frame, and a third more bytes on the wire than the frame itself.
  */
 import type { Signal, WebRTCLink, WebRTCOpts } from './webrtc.ts'
 
-type Internals = { invoke: (cmd: string, args?: unknown, options?: { headers?: Record<string, string> }) => Promise<any> }
+type Internals = { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<any> }
 const internals = (): Internals | undefined => (globalThis as any).__TAURI_INTERNALS__
 
 /** Is the Rust channel there? Answered once per page load — it is a build fact. */
@@ -54,6 +54,13 @@ const POLL_IDLE_MS = 100
 
 let nextId = 1
 
+function toB64(bytes: Uint8Array): string {
+  // In slices: String.fromCharCode over a 64 KiB array would spread 65 536
+  // arguments onto the stack, which some engines refuse.
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192) as unknown as number[])
+  return btoa(bin)
+}
 function fromB64(s: string): Uint8Array {
   const bin = atob(s)
   const out = new Uint8Array(bin.length)
@@ -85,12 +92,14 @@ export function webrtcLinkTauri(opts: WebRTCOpts): WebRTCLink {
   let polling = false
   const stopProbe = () => { clearInterval(probeTimer); probeTimer = null }
 
+  // base64 inside JSON, not a raw body. The raw path compiled and could not
+  // be exercised by anything but a packaged app — where it turned out that
+  // nothing ever left the webview. This costs a third more per chunk and
+  // works on every IPC transport Tauri has, which is the trade the receive
+  // side already makes.
   const sendRaw = (bytes: Uint8Array) => {
     if (closed) return
-    // A copy, because a subarray's buffer would ship the whole underlying
-    // allocation — a 64 KiB chunk sliced out of an 8 MiB file would send 8 MiB.
-    const body = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : bytes.slice()
-    void i.invoke('rtc_send', body, { headers: { 'x-id': String(id) } }).catch((e: any) => opts.onState?.(`send-failed: ${e?.message ?? e}`))
+    void call('rtc_send', { b64: toB64(bytes) }).catch((e: any) => opts.onState?.(`send-failed: ${e?.message ?? e}`))
   }
 
   const startProbe = () => {

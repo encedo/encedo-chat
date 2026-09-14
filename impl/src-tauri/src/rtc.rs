@@ -247,6 +247,35 @@ mod imp {
         }
     }
 
+    /// Standard base64 in, bytes out; `None` on anything that is not base64.
+    fn unb64(s: &str) -> Option<Vec<u8>> {
+        let val = |c: u8| -> Option<u32> {
+            Some(match c {
+                b'A'..=b'Z' => (c - b'A') as u32,
+                b'a'..=b'z' => (c - b'a') as u32 + 26,
+                b'0'..=b'9' => (c - b'0') as u32 + 52,
+                b'+' => 62, b'/' => 63,
+                _ => return None,
+            })
+        };
+        let bytes = s.as_bytes();
+        if bytes.len() % 4 != 0 { return None }
+        let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
+        for q in bytes.chunks(4) {
+            let pad = q.iter().rev().take_while(|&&c| c == b'=').count();
+            if pad > 2 { return None }
+            let mut n: u32 = 0;
+            for (i, &c) in q.iter().enumerate() {
+                let v = if c == b'=' { if i < 4 - pad { return None } ; 0 } else { val(c)? };
+                n = (n << 6) | v;
+            }
+            out.push((n >> 16) as u8);
+            if pad < 2 { out.push((n >> 8) as u8) }
+            if pad < 1 { out.push(n as u8) }
+        }
+        Some(out)
+    }
+
     /// Standard base64, no padding tricks — the webview decodes with atob.
     fn b64(data: &[u8]) -> String {
         const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -305,16 +334,18 @@ mod imp {
         c.pc.add_ice_candidate(candidate_from(&candidate)).await.map_err(|e| e.to_string())
     }
 
-    /// Raw body in, queued in order. `x-id` names the connection, because a
-    /// raw request carries no JSON arguments.
+    /// Bytes in as base64 inside an ordinary JSON argument, queued in order.
+    ///
+    /// The first version took a raw request body with the id in a header. It
+    /// compiled, the selftest could not exercise it (the selftest queues bytes
+    /// directly), and in the packaged app on WebKitGTK nothing ever left the
+    /// webview: neither side got a pong, the badge said Direct on the strength
+    /// of `conn=connected`, and every transfer went the classic way. base64 in
+    /// JSON costs a third more on a 64 KiB chunk and works on every IPC
+    /// transport Tauri has — the same trade the receive side already makes.
     #[tauri::command]
-    pub fn rtc_send(state: tauri::State<'_, Rtc>, request: tauri::ipc::Request<'_>) -> Result<(), String> {
-        let id: u32 = request.headers().get("x-id").and_then(|v| v.to_str().ok()).and_then(|s| s.parse().ok())
-            .ok_or("x-id header missing")?;
-        let bytes: Vec<u8> = match request.body() {
-            tauri::ipc::InvokeBody::Raw(b) => b.clone(),
-            tauri::ipc::InvokeBody::Json(_) => return Err("rtc_send wants a raw body".into()),
-        };
+    pub fn rtc_send(state: tauri::State<'_, Rtc>, id: u32, b64: String) -> Result<(), String> {
+        let bytes = unb64(&b64).ok_or("rtc_send: not base64")?;
         let c = state.get(id)?;
         c.outbox_bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
         c.outbox.lock().unwrap().push_back(bytes);
@@ -424,6 +455,17 @@ mod imp {
             assert_eq!(r.unwrap()["bytes"], 65536);
         }
 
+        #[test]
+        fn base64_round_trips_every_length() {
+            for n in 0..70usize {
+                let data: Vec<u8> = (0..n).map(|i| (i * 37 + 11) as u8).collect();
+                assert_eq!(unb64(&b64(&data)).unwrap(), data, "len {n}");
+            }
+            assert_eq!(unb64("AFA=").unwrap(), vec![0x00, 0x50]);   // the ping
+            assert!(unb64("AFA").is_none());
+            assert!(unb64("A*A=").is_none());
+        }
+
         /// Under a FOREIGN multi-thread tokio runtime — which is what a Tauri
         /// async command runs on. The command path is this one, not the above.
         #[test]
@@ -449,7 +491,7 @@ mod imp {
     #[tauri::command] pub async fn rtc_answer(_s: tauri::State<'_, Rtc>, _id: u32, _sdp: String) -> Result<String, String> { Err(NO.into()) }
     #[tauri::command] pub async fn rtc_set_answer(_s: tauri::State<'_, Rtc>, _id: u32, _sdp: String) -> Result<(), String> { Err(NO.into()) }
     #[tauri::command] pub async fn rtc_ice(_s: tauri::State<'_, Rtc>, _id: u32, _candidate: Value) -> Result<(), String> { Err(NO.into()) }
-    #[tauri::command] pub fn rtc_send(_s: tauri::State<'_, Rtc>, _request: tauri::ipc::Request<'_>) -> Result<(), String> { Err(NO.into()) }
+    #[tauri::command] pub fn rtc_send(_s: tauri::State<'_, Rtc>, _id: u32, _b64: String) -> Result<(), String> { Err(NO.into()) }
     #[tauri::command] pub fn rtc_poll(_s: tauri::State<'_, Rtc>, _id: u32) -> Result<Value, String> { Err(NO.into()) }
     #[tauri::command] pub async fn rtc_close(_s: tauri::State<'_, Rtc>, _id: u32) -> Result<(), String> { Err(NO.into()) }
     #[tauri::command] pub async fn rtc_selftest(_s: tauri::State<'_, Rtc>) -> Result<Value, String> { Err(NO.into()) }

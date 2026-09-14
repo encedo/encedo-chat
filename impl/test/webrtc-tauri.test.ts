@@ -2,14 +2,15 @@
  * The Rust-backed link, against a fake Tauri host. What is under test is the
  * CONTRACT it shares with the browser link: the order of the opening moves,
  * that `ready` waits for the pong, that 0x00 frames are control and the rest
- * is content, and that a send is one raw IPC call with the connection id in a
- * header. The host itself is proven by `rtc_selftest` and the spike.
+ * is content, and that a send is one IPC call carrying base64 and the id. The host itself is proven by `rtc_selftest` and the spike.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { webrtcLinkTauri, tauriRtcAvailable } from '../net/webrtc-tauri.ts'
 
 const b64 = (b: Uint8Array) => Buffer.from(b).toString('base64')
+/** What a send put on the wire, decoded — sends are base64 in a JSON argument. */
+const sentBytes = (c: { args: any }) => new Uint8Array(Buffer.from(c.args.b64, 'base64'))
 
 /** A host that records every command and answers from a script. */
 function fakeHost() {
@@ -73,8 +74,8 @@ test('ready only after the pong, and the ping is the browser link\'s bytes', asy
   assert.equal(link.ready, false, 'open alone must not mean ready')
   const ping = host.sent()[0]
   assert.ok(ping, 'no ping was sent after open')
-  assert.deepEqual([...new Uint8Array(ping.args)], [0x00, 0x50])
-  assert.equal(ping.headers['x-id'], String(host.calls[0].args.id))
+  assert.deepEqual([...sentBytes(ping)], [0x00, 0x50])
+  assert.equal(ping.args.id, host.calls[0].args.id)
   host.push({ t: 'data', b64: b64(new Uint8Array([0x00, 0x4f])) })
   await tick()
   assert.equal(link.ready, true)
@@ -95,12 +96,12 @@ test('control frames and content go to different places, like the browser link',
   await tick()
   assert.equal(data.length, 1); assert.equal(data[0][0], 0x10)
   assert.equal(ctrl.length, 1); assert.equal(ctrl[0][1], 0x04)
-  const pong = host.sent().find((c) => new Uint8Array(c.args)[1] === 0x4f)
+  const pong = host.sent().find((c) => sentBytes(c)[1] === 0x4f)
   assert.ok(pong, 'their ping was not answered')
   link.close(); host.stop()
 })
 
-test('a send before ready is dropped, after ready it is one raw call in order', async () => {
+test('a send before ready is dropped, after ready it is one call per frame, in order', async () => {
   const host = fakeHost()
   const link = webrtcLinkTauri({ initiator: true, sendSignal: () => {}, onData: () => {} })
   await tick()
@@ -111,8 +112,8 @@ test('a send before ready is dropped, after ready it is one raw call in order', 
   const before = host.sent().length
   for (let i = 0; i < 5; i++) link.send(new Uint8Array([0x10, i]))
   const mine = host.sent().slice(before)
-  assert.deepEqual(mine.map((c) => new Uint8Array(c.args)[1]), [0, 1, 2, 3, 4])
-  assert.ok(mine.every((c) => c.args instanceof Uint8Array), 'content must travel as a raw body, not JSON')
+  assert.deepEqual(mine.map((c) => sentBytes(c)[1]), [0, 1, 2, 3, 4])
+  assert.ok(mine.every((c) => typeof c.args.b64 === 'string' && c.args.id === host.calls[0].args.id), 'a send is base64 in JSON with the id')
   link.close(); host.stop()
 })
 
