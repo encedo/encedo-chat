@@ -148,7 +148,7 @@ Running your own network is not merely tolerated — it is **encouraged**. Today
 
 - Desktop: tray + close-to-tray (probed against the actual desktop — no tray host means close quits, honestly), autostart, native notifications (own D-Bus path on Linux), single-instance, **self-updater** (minisign; `.deb`/`.rpm` get a notification + link, never a silent replace).
 - Android: a **foreground service** (`specialUse`) keeps the process alive so a phone in a pocket stays reachable — the honest price of no store-and-forward, paid as a permanent notification; local notifications, no FCM (no Google server between two people).
-- Linux desktop caveat, measured: WebKitGTK exposes no `RTCPeerConnection`, so the desktop build is **relay-only** (`PROTOCOL.md` §3.2/§13).
+- Desktop caveat, measured (2026-09-14): the packaged app has the direct plane on Windows (WebView2) and macOS (WKWebView); on **Linux** WebKitGTK as shipped by Ubuntu is built without a WebRTC backend and exposes no `RTCPeerConnection`, so that build is **relay-only** (`PROTOCOL.md` §3.2/§13) until a Rust-side DataChannel (`webrtc-rs`) replaces the webview's.
 
 **Roadmap — the hardened tier:** a Rust `core-rs` (native for Tauri, WASM for the web) holding keys, ratchet state and the HEM client outside the webview, with transport behind a trait. That is the isolation story earlier drafts described; it is not the build, and claims about webview-compromise resistance must not be made until it is.
 

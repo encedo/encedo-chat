@@ -1424,11 +1424,20 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
   GO; if the review lands changes, they go into `docs/` and `impl/` together.
 - **EH-2 + Double Ratchet is the only content crypto** (the interim box is
   removed, no opt-out); session lifetime / forced re-handshake is built (§7.3).
-- **WebRTC direct data plane (P1) works in browsers**; ⚠️ the packaged Linux
-  desktop (WebKitGTK) has **no `RTCPeerConnection`** — measured, `enable-webrtc`
-  changed nothing — so **desktop = relay-only** until a newer WebKitGTK.
+- **WebRTC direct data plane (P1) works in browsers and in the packaged app
+  on Windows 11 ARM (WebView2) and macOS (WKWebView)** — measured by the user
+  with the probe, 2026-09-14. ⚠️ The **Linux** desktop (WebKitGTK) has **no
+  `RTCPeerConnection`**, and that is now settled rather than suspected: Ubuntu
+  24.04 and 26.04 both ship libwebkit2gtk 2.52.6 built **without the
+  GStreamer-WebRTC backend** (`webrtcbin` absent from the library), so neither
+  `enable-webrtc` nor the 2.42+ feature API (`PeerConnectionEnabled` is in the
+  binary but not on the feature list) surfaces the object — measured on both
+  architectures. **Linux desktop = relay-only** until `webrtc-rs` lands behind
+  the `makeLink` seam of `net/webrtc-plane.ts` (the decided route; Flatpak was
+  rejected as a fourth artifact with its own update channel).
   `lib/webrtc-probe.ts` (six stages, `loopback` decides) is the user-facing
-  diagnosis separating a dead webview from a blocked network.
+  diagnosis separating a dead webview from a blocked network, and since 0.5.76
+  it sits behind the Diagnostyka button at the bottom of Settings, not `?debug=1`.
 - Shipped since these notes' earlier eras, with their stories in `git log` and
   the protocol truth in `docs/PROTOCOL.md`: files over IPFS + voice notes
   (§7.5), notifications (`lib/notify.ts`), contact-book MAC (`lib/bookmac.ts`,
