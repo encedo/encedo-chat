@@ -273,7 +273,10 @@ export const updateCheck = () => invoke<UpdateInfo | null>('desk_update_check')
  * live test named the cost precisely: nothing visibly happened, then a sudden
  * restart. Only ever after `updateKind()` said `self`.
  */
-export const updateDownload = () => invoke<void>('desk_update_download')
+/** Resolves to the version that was ACTUALLY fetched — the release can move
+ *  between the dialog and the click, and the dialog must not name a version
+ *  the disk does not hold. */
+export const updateDownload = () => invoke<string>('desk_update_download')
 export const updateProgress = () => invoke<{ got: number; total: number | null }>('desk_update_progress')
 export const updateApply = () => invoke<void>('desk_update_apply')
 

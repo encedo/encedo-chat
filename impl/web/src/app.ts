@@ -5538,10 +5538,26 @@ async function offerUpdateInner() {
     return
   }
 
-  const { ok } = await ask(tr('Jest nowa wersja {v}', { v: info.version }),
-    tr('Pobrać ją teraz? Instalacja i restart przyjdą osobno, kiedy powiesz.'),
-    tr('Pobierz'), undefined, undefined, tr('Później'))
-  if (!ok) { answeredUpdates.add(info.version); return }
+  // Ask, then LOOK AGAIN before fetching. A person reads "0.5.72 is available"
+  // and presses the button whenever they get to it — by which time 0.5.73 and
+  // 0.5.74 may have shipped, and the download command fetches whatever is
+  // newest. Until 2026-09-14 that installed a version nobody had been shown,
+  // and the next dialog went on naming the old one. So: if the release moved,
+  // the dialog comes back with what is actually there, and only a click on a
+  // version that is still the current one starts a download.
+  for (;;) {
+    const { ok } = await ask(tr('Jest nowa wersja {v}', { v: info.version }),
+      tr('Pobrać ją teraz? Instalacja i restart przyjdą osobno, kiedy powiesz.'),
+      tr('Pobierz'), undefined, undefined, tr('Później'))
+    if (!ok) { answeredUpdates.add(info.version); return }
+    let again: typeof info | null
+    try { again = await updateCheck() } catch { again = null }
+    if (!again) { toast(tr('Aktualizacja zniknęła z serwera — zaproponuję po następnym uruchomieniu')); return }
+    if (again.version === info.version) break
+    // "Later" said to THIS newer one earlier in the session still holds.
+    if (answeredUpdates.has(again.version)) return
+    info = again
+  }
 
   // The bar exists because its absence was the reported bug: between the click
   // and the restart 0.5.16 showed NOTHING, and a person watching nothing
@@ -5563,7 +5579,8 @@ async function offerUpdateInner() {
     }).catch(() => {})
   }, 200)
 
-  try { await updateDownload() } catch (e: any) {
+  let fetched = ''
+  try { fetched = await updateDownload() } catch (e: any) {
     // The app is still the old version and still working, so this is a toast
     // and not a stop.
     clearInterval(poll)
@@ -5577,11 +5594,18 @@ async function offerUpdateInner() {
   txt.textContent = tr('Pobrane.')
   setTimeout(() => { bar.hidden = true }, 600)
 
-  // The restart is the person's call, not the download's side effect.
-  const go = await ask(tr('Aktualizacja {v} pobrana', { v: info.version }),
+  // The restart is the person's call, not the download's side effect. The
+  // dialog names what is ON DISK — the version the host reported fetching —
+  // and says so when that is not the one that was shown: the window between
+  // the re-check above and the download is seconds, but it is not zero.
+  const got = fetched || info.version
+  const title = fetched && fetched !== info.version
+    ? tr('Pobrana wersja {v} — nowsza niż pokazana {shown}', { v: fetched, shown: info.version })
+    : tr('Aktualizacja {v} pobrana', { v: got })
+  const go = await ask(title,
     tr('Zainstalować i uruchomić ponownie teraz?'),
     tr('Uruchom ponownie'), undefined, undefined, tr('Później'))
-  if (!go.ok) { answeredUpdates.add(info.version); toast(tr('Dobrze — zaproponuję znów po następnym uruchomieniu.')); return }
+  if (!go.ok) { answeredUpdates.add(got); toast(tr('Dobrze — zaproponuję znów po następnym uruchomieniu.')); return }
   try { await updateApply() } catch (e: any) {
     ecLog('update install failed: ' + (e?.message ?? e))
     toast(tr('Nie udało się zaktualizować — pobierz nową wersję ręcznie'))

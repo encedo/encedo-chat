@@ -810,12 +810,17 @@ mod desk {
     /// package this downloads a bundle it cannot install (§ the kind command).
     ///
     /// It checks again rather than holding the update from the call before it:
-    /// the handle is not ours to keep across an IPC boundary, and asking twice
-    /// costs one request against a release that has not moved. Progress goes
+    /// the handle is not ours to keep across an IPC boundary. That second check
+    /// is also where the release may have MOVED — a person can read "0.5.72 is
+    /// available" and press the button after 0.5.74 has shipped (reported
+    /// 2026-09-14), and this command would then download 0.5.74 while the
+    /// webview went on naming 0.5.72. So it returns the version it actually
+    /// fetched, and the webview re-checks before calling it (app.ts
+    /// offerUpdateInner) so the dialog and the download agree. Progress goes
     /// into two atomics the webview POLLS (`desk_update_progress`) — no event
     /// plugin, no npm package, the same two-sided ask the rest of this file is.
     #[tauri::command]
-    async fn desk_update_download(app: AppHandle) -> Result<(), String> {
+    async fn desk_update_download(app: AppHandle) -> Result<String, String> {
         use std::sync::atomic::Ordering;
         use tauri_plugin_updater::UpdaterExt;
         let update = app.updater().map_err(|e| e.to_string())?
@@ -836,7 +841,7 @@ mod desk {
             || {},
         ).await.map_err(|e| e.to_string())?;
         *app.state::<Shell>().pending_update.lock().unwrap() = Some(bytes);
-        Ok(())
+        Ok(update.version.clone())
     }
 
     #[derive(serde::Serialize)]
