@@ -36,8 +36,26 @@ export const T = {
   CHUNK: 0x04, RECEIPT: 0x05, CANCEL: 0x06, DONE: 0x07,
 } as const
 
-/** 64 KiB: the largest chunk every browser sends without splitting it. */
-export const CHUNK = 64 * 1024
+/**
+ * The most bytes a DataChannel message may carry to a peer that advertises no
+ * `max-message-size`. RFC 8841 says treat that peer as accepting 65536 bytes,
+ * and a browser then REFUSES to send it anything larger — `send()` throws, the
+ * pump reports a dead channel, and the transfer fails at the first chunk while
+ * ping/pong and messages, all smaller, keep crossing. webrtc-rs (the Linux
+ * desktop's host channel) advertises none, so this is the ceiling on that
+ * path; browsers advertise 262144 to each other and never hit it. A whole
+ * chunk frame — CHUNK_HEADER + body — must fit here (reported 2026-09-14:
+ * Tauri<->Chromium, badge Direct, every transfer `failed (channel)`).
+ */
+export const DC_MAX_MESSAGE = 65536
+/** CTRL, subtype, u32 id, u32 index. `encodeChunk` lays these out. */
+export const CHUNK_HEADER = 10
+/**
+ * The body per chunk: as large as fits, so a whole chunk frame is exactly the
+ * ceiling above. Was a flat 64 KiB, which made the frame 65546 B — ten past
+ * the ceiling, and invisibly so.
+ */
+export const CHUNK = DC_MAX_MESSAGE - CHUNK_HEADER
 /**
  * 512 MiB. The receiver holds the whole file in memory until it is saved, so
  * this is a memory limit, not a policy one — it moves when the receiving side
@@ -123,7 +141,7 @@ export function decodeOffer(b: Uint8Array): Offer | null {
 }
 
 export const encodeChunk = (id: number, index: number, body: Uint8Array) => {
-  const out = new Uint8Array(10 + body.length)
+  const out = new Uint8Array(CHUNK_HEADER + body.length)
   out[0] = CTRL; out[1] = T.CHUNK
   out.set(u32(id), 2); out.set(u32(index), 6); out.set(body, 10)
   return out

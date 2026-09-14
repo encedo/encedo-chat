@@ -2,8 +2,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   createSender, createReceiver, openOffer, decodeOffer, isXfer, receiptEvery,
-  CHUNK, MAX_DIRECT, ACCEPT_MS, STALL_MS, T, CTRL,
+  encodeChunk, newId, CHUNK, DC_MAX_MESSAGE, MAX_DIRECT, ACCEPT_MS, STALL_MS, T, CTRL,
 } from '../lib/xfer.ts'
+
+test('a full chunk frame fits the message ceiling a peer that advertises no max-message-size imposes', () => {
+  // The bug this pins: a 64 KiB body made the frame 65546 bytes, ten past the
+  // 65536 a browser assumes for such a peer (webrtc-rs), so the browser refused
+  // to send it and every Tauri<->Chromium transfer died at the first chunk.
+  const frame = encodeChunk(newId(), 0, new Uint8Array(CHUNK))
+  assert.equal(frame.length, DC_MAX_MESSAGE, 'a full chunk frame should be exactly the ceiling')
+})
 
 const file = (size: number, name = 'raport.pdf') => ({ name, size, mime: 'application/pdf' })
 const bytes = (n: number, seed = 0) => Uint8Array.from({ length: n }, (_, i) => (i + seed) & 0xff)
