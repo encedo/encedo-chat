@@ -1970,7 +1970,7 @@ for (const el of document.querySelectorAll('#tmode input')) {
   })
 }
 
-const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles(); paintTransportSetting(); paintNotifySetting(); void paintDiagSetting() }
+const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles(); paintTransportSetting(); paintNotifySetting(); void paintDiagSetting(); paintDiagnostics() }
 
 /**
  * The diary's row in Settings: where the file is, and a way to take the log
@@ -2787,6 +2787,8 @@ type XferUi = {
   room: Room
   dir: 'in' | 'out'
   name: string; size: number; mime: string
+  /** The sender's own file, so its bubble can offer the same actions as the receiver's. */
+  file?: File
   t0: number
   /** Bytes at the last repaint, for a speed that means something. */
   markAt: number; markBytes: number; rate: number
@@ -2823,7 +2825,7 @@ function startTransfer(f: File | null | undefined) {
       : tr('Pusty plik'))
     return
   }
-  xfer = { room, dir: 'out', name: f.name, size: f.size, mime: f.type, t0: nowMs(), markAt: nowMs(), markBytes: 0, rate: 0 }
+  xfer = { room, dir: 'out', name: f.name, size: f.size, mime: f.type, file: f, t0: nowMs(), markAt: nowMs(), markBytes: 0, rate: 0 }
   $('xfer-title').textContent = tr('Transfer bezpośredni')
   $('xfer-sub').textContent = tr('do: {who}', { who: room.contact.name })
   $('xfer-file').textContent = `${f.name} · ${humanSize(f.size)}`
@@ -2890,35 +2892,22 @@ function onXferEvent(room: Room, e: any) {
     }
     case 'progress': return xferProgress(e.done, e.total)
     case 'done': {
-      record(room, { t: 'sys', text: tr('Transfer: {name} — wysłany', { name: xfer?.name ?? '' }) })
+      if (xfer?.file) {
+        const env = directFileEnv({ name: xfer.name, size: xfer.size, mime: xfer.mime }, URL.createObjectURL(xfer.file))
+        record(room, { t: 'file', kind: 'me', ts: nowMs(), file: env, au: session?.pub })
+      }
       xferClose()
       toast(tr('Wysłano'))
       return
     }
     case 'received': {
-      // Nothing is written anywhere by itself: the file lives in this tab until
-      // somebody saves it, which is what "no store" actually means.
-      const url = URL.createObjectURL(e.blob)
-      $('xfer-title').textContent = tr('Odebrano')
-      $('xfer-file').textContent = `${e.name} · ${humanSize(e.blob.size)}`
-      $('xfer-note').textContent = tr('Plik jest tylko w tej karcie. Zamknięcie jej znaczy, że trzeba go wysłać jeszcze raz.')
-      $('xfer-left').textContent = ''
-      $('xfer-right').textContent = ''
-      setFill(100)
-      xferButtons(tr('Zapisz'), tr('Zamknij'))
-      const y = $('xfer-yes') as HTMLButtonElement
-      y.onclick = () => {
-        const a = document.createElement('a')
-        a.href = url; a.download = e.name
-        a.click()
-        setTimeout(() => URL.revokeObjectURL(url), 30_000)
-        y.onclick = null
-        xferClose()
-      }
-      record(room, { t: 'sys', text: tr('Transfer: {name} — odebrany', { name: e.name }) })
-      // The transfer is over; only the save is left. Clearing here means the
-      // Close button closes instead of cancelling something already finished.
-      xfer = null
+      // The file lands in the conversation as a bubble with the same two
+      // actions the sender's has, and the window closes: a modal that only
+      // repeats what the bubble offers is a modal that is in the way.
+      const env = directFileEnv({ name: e.name, size: e.blob.size, mime: e.mime }, URL.createObjectURL(e.blob))
+      record(room, { t: 'file', kind: 'peer', ts: nowMs(), file: env, au: room.contact.pub })
+      xferClose()
+      toast(tr('Odebrano'))
       return
     }
     case 'failed': {
@@ -4607,12 +4596,17 @@ function diagLine(mark: 'ok' | 'bad' | 'meh', text: string) {
  * vanish rather than sitting there dead, but the explanation now needs asking
  * for.
  */
+let diagOpen = DEBUG   // ?debug=1 opens it; anybody else presses the button
 function paintDiagnostics() {
-  for (const id of ['diag-section', 'diag-caps', 'btn-diag-copy', 'btn-webrtc-probe', 'diag-webrtc-note']) {
-    const el = $(id); if (el) el.hidden = !DEBUG
-  }
-  const out = $('diag-webrtc'); if (out) out.hidden = !DEBUG || !lastWebrtcProbe
+  const more = $('diag-more'); if (more) more.hidden = !diagOpen
+  const chev = $('diag-chev'); if (chev) chev.textContent = diagOpen ? '\u25BE' : '\u25B8'
+  const out = $('diag-webrtc'); if (out) out.hidden = !lastWebrtcProbe
 }
+$('btn-diag-toggle')?.addEventListener('click', () => {
+  diagOpen = !diagOpen
+  paintDiagnostics()
+  if (diagOpen) paintCaps()   // the capability list is cheap, but only worth computing when it is looked at
+})
 
 function paintCaps() {
   const box = $('diag-caps'); if (!box || !capReport) return
@@ -4900,21 +4894,39 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
   sub.textContent = humanSize(env.size) + (fileGone(env) ? ' · ' + tr('wygasł') : '')
   info.append(name, sub)
   const act = document.createElement('button'); act.className = 'f-act'
-  // No cid yet means it is still being encrypted or uploaded: the button shows
-  // that state instead of offering a download that cannot work. attachFile
-  // updates these two elements as it goes, via `fileEls`.
-  const pending = !env.cid
-  if (pending) { act.textContent = tr('Wysyłam…'); act.disabled = true }
-  else setFileAction(act, env)
-  if (!pending) act.addEventListener('click', () => void downloadFile(env, act))
-  fileEls.set(env, { act, sub })
-  wrap.append(ico, info, act)
-  bub.appendChild(wrap)
+  const direct = directFiles.get(env)
+  if (direct) {
+    // Same bubble on both sides — name, size, when — and the same two actions,
+    // because both sides hold the bytes: the receiver from the channel, the
+    // sender from the file it picked. Nothing expires and nothing is fetched.
+    sub.textContent = humanSize(env.size) + ' \u00b7 ' + tr('bezpośrednio')
+    act.textContent = tr('Zapisz')
+    act.addEventListener('click', () => {
+      const a = document.createElement('a'); a.href = direct; a.download = env.name; a.click()
+    })
+    const open = document.createElement('button'); open.className = 'f-see'; open.textContent = tr('Otwórz')
+    open.addEventListener('click', () => { window.open(direct, '_blank', 'noopener') })
+    fileEls.set(env, { act, sub, see: open })
+    wrap.append(ico, info, open, act)
+    bub.appendChild(wrap)
+    paintPreview(env)   // a picture or a voice note shows inline, like a sent one does
+  } else {
+    // No cid yet means it is still being encrypted or uploaded: the button shows
+    // that state instead of offering a download that cannot work. attachFile
+    // updates these two elements as it goes, via `fileEls`.
+    const pending = !env.cid
+    if (pending) { act.textContent = tr('Wysyłam…'); act.disabled = true }
+    else setFileAction(act, env)
+    if (!pending) act.addEventListener('click', () => void downloadFile(env, act))
+    fileEls.set(env, { act, sub })
+    wrap.append(ico, info, act)
+    bub.appendChild(wrap)
+  }
 
   // An image gets a second, quieter action. Not a replacement for Download:
   // showing a picture and saving it are different wants, and folding them into
   // one button means one of the two is unavailable.
-  if (isPreviewable(env.mime) && !pending && !fileGone(env)) {
+  if (!direct && isPreviewable(env.mime) && env.cid && !fileGone(env)) {
     if (previews.has(env)) {
       paintPreview(env) // a replay after switching rooms — already decrypted
     } else {
@@ -5028,6 +5040,26 @@ const AUTO_MEDIA_MAX = 2 * 1024 * 1024
  * and revoking on a room switch is how a bubble comes back broken.
  */
 const previews = new WeakMap<FileEnv, string>()
+/**
+ * Files that came (or went) over the direct channel (`lib/xfer.ts`): the bytes
+ * are in THIS tab and nowhere else, so the bubble's actions are an object URL,
+ * not a fetch. Keyed by the envelope object like `previews`, and for the same
+ * reason: the room log holds that object, so a replay finds the file again.
+ *
+ * An in-memory file cannot outlive its bubble — the transcript dies with the
+ * page and files are not pinnable — which is what makes a bubble honest here.
+ */
+const directFiles = new WeakMap<FileEnv, string>()
+function directFileEnv(f: { name: string; size: number; mime: string }, url: string): FileEnv {
+  const env = {
+    v: 1, t: 'file', id: '', ts: nowMs(), seq: 0,
+    cid: '', name: f.name, size: f.size, mime: f.mime || 'application/octet-stream',
+    key: '', chunk: 0, chunks: 0, alg: 'direct',
+  } as unknown as FileEnv
+  directFiles.set(env, url)
+  if (isPreviewable(env.mime)) previews.set(env, url)
+  return env
+}
 
 /** Per identity, like every other stored preference. The key still says `img`
  *  because it was written before the setting covered sound too, and renaming it
@@ -5346,7 +5378,16 @@ async function attachFile(f: File) {
     }
     show(tr('Pobierz'), humanSize(f.size))
     const els = fileEls.get(pending)
-    if (els) { els.act.disabled = false; els.act.onclick = () => void downloadFile(pending, els.act) }
+    if (els) {
+      // Through setFileAction, not by hand. The receiver's bubble goes through
+      // it at draw time and gets the one thing that matters here: a timer armed
+      // for the moment the file expires. The sender's bubble used to set the
+      // label and the handler directly, so nothing was ever watching its clock
+      // and "Pobierz" stayed alive for good — pressed after five minutes it
+      // learned from the store that the file was gone (reported 2026-09-14).
+      setFileAction(els.act, pending)
+      els.act.onclick = () => void downloadFile(pending, els.act)
+    }
     // `appendFile` drew this bubble while the file was still uploading, and a
     // file with no cid has no preview to draw — so the sender was left with a
     // voice note they could not play back and a picture they could not see
