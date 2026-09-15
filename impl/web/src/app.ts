@@ -56,6 +56,7 @@ import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { webrtcLinkTauri, tauriRtcAvailable, tauriRtcSelftest } from '../../net/webrtc-tauri.ts'
 import { unwrapBlob } from '../../lib/fileenvelope.ts'
 import { beginSave, browserSaveEnv } from '../../lib/saveas.ts'
+import { newInboxSecret, inboxSecretBytes } from '../../lib/invite.ts'
 import { cidMatches, isVerifiableCid } from '../../lib/cid.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
 import type { FileEnv } from '../../lib/envelope.ts'
@@ -1335,6 +1336,10 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
       // by now; clear the transcript, because this window cannot decrypt
       // anything any more, and say plainly what to do about it.
       for (const r of rooms.values()) { r.conv = null; r.inRoom = false }
+      // The inbox watches die with the transport, but the handles would keep
+      // looking live and a later `startInboxWatches` would skip every invite as
+      // already watched. Logout does not need this - it reloads the page.
+      stopInboxWatches()
       $('messages').innerHTML = ''
       msgEls.clear(); stateEls.clear(); setTyping(false)
       appendSys(tr('Wykryto drugie okno zalogowane na tę samą tożsamość.')
@@ -1345,7 +1350,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
       $('peer-status').textContent = tr('sesja zamknięta (duplikat)')
     },
   })
-  clientReady.then((c) => { client = c; void restoreGroups() }, (e: any) => {
+  clientReady.then((c) => { client = c; void restoreGroups(); startInboxWatches() }, (e: any) => {
     ecLog(`session failed to start: ${e?.message ?? e}`)
     toast(tr('Brak połączenia z przekaźnikiem — odśwież stronę'))
   })
@@ -1689,7 +1694,7 @@ function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string, h
   return new Promise((resolve) => {
     $('ask-title').textContent = title
     $('ask-body').textContent = body
-    $('ask-yes').textContent = yes
+    $('ask-yes').textContent = tr(yes)   // same reason as `noLabel` below
     // Every use of this dialog until now was destructive — deleting a contact,
     // wiping a device — so the affirmative button is red in the markup. An
     // offer is not a warning, and a red "send my code" would teach people to
@@ -1716,14 +1721,19 @@ function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string, h
     const open = document.getElementById('ask-open') as HTMLAnchorElement | null
     if (open) {
       open.hidden = !href
-      if (href) { open.href = href; open.textContent = yes }
+      if (href) { open.href = href; open.textContent = tr(yes) }
     }
     $('ask-yes').hidden = !!(href && open)
     // A NOTICE has one way out. Passing no `noLabel` hides the second button, so
     // "close this and try again" does not have to be phrased as yes-or-no.
     const no = $('ask-no')
     no.hidden = noLabel === null
-    if (noLabel) no.textContent = noLabel
+    // Through `tr`, because the DEFAULTS here are Polish literals and this line
+    // overwrites the translated text the markup already carried. Every
+    // confirmation in the app said "Nie" in an English UI - caught in a
+    // screenshot of the invites tab, 2026-09-15. A key with no entry comes back
+    // unchanged, so a caller that already translated its label is unaffected.
+    if (noLabel) no.textContent = tr(noLabel)
     $('members-pop').hidden = true; closeEmojiPop() // nothing may stay clickable behind a modal
     $('scrim').classList.add('open'); $('ask-modal').classList.add('open')
     const done = (v: boolean) => {
@@ -3401,17 +3411,202 @@ $('me-avatar').addEventListener('keydown', (e: any) => {
 $('sess-id').addEventListener('dblclick', copyPub)     // double-click Tożsamość → copy pubkey
 
 // ---- placeholder tabs ----
-for (const [tab, pane] of [['tab-contacts', 'contacts'], ['tab-groups', 'groups'], ['tab-network', 'network']]) {
+const TABS = [['tab-contacts', 'contacts'], ['tab-groups', 'groups'], ['tab-invites', 'invites'], ['tab-network', 'network']] as const
+for (const [tab, pane] of TABS) {
   $(tab).addEventListener('click', () => {
-    for (const t of ['tab-contacts', 'tab-groups', 'tab-network']) $(t).classList.toggle('active', t === tab)
-    for (const p of ['contacts', 'groups', 'network']) $('pane-' + p).hidden = (p !== pane)
+    for (const [t] of TABS) $(t).classList.toggle('active', t === tab)
+    for (const [, p] of TABS) $('pane-' + p).hidden = (p !== pane)
     // Each list's box travels with its list. Nothing on the Network tab is a
     // list of names, so neither box follows it there.
     $('head-contacts').hidden = pane !== 'contacts'
     $('head-groups').hidden = pane !== 'groups'
+    $('head-invites').hidden = pane !== 'invites'
     if (pane === 'groups') renderGroups()
+    if (pane === 'invites') renderInvites()
     if (pane === 'network') startNetwork(); else stopNetwork()
   })
+}
+
+// ---- published invites, and the knocks they bring ---------------------------
+/**
+ * A PUBLISHED invite is not the share modal's one-off link. That one hands your
+ * key to one person who hands theirs back by hand; this one is hung somewhere
+ * public and answers itself, because it carries an inbox secret that names a
+ * topic you listen on (DISCOVERY-PROPOSAL.md §2).
+ *
+ * One secret per invite, never shared between them: retiring an invite is
+ * unsubscribing from its topic, and a shared secret would mean retiring one
+ * retires them all (§4.1).
+ *
+ * A knock is a REQUEST and never a contact (§4.4). It reaches this list, a
+ * person reads the fingerprint, and only then does anything get written.
+ *
+ * The pending list lives in memory ON PURPOSE. It is filled by strangers over a
+ * topic anybody holding the link can publish to, so persisting it would be an
+ * attacker-fillable store on disk; and the Source's client re-knocks while it is
+ * open, so a request missed by a closed app is not a request lost. The UI says
+ * so rather than implying a queue that is not there.
+ */
+interface PubInvite { id: string; label: string; secret: string; created: number }
+interface PendingKnock { ik: string; name: string; note: string; at: number; inviteId: string }
+
+const invitesKey = () => 'ec-invites-' + (session?.idKey ?? '')
+let pubInvites: PubInvite[] = []
+let pendingKnocks: PendingKnock[] = []
+const inboxWatches = new Map<string, { stop(): void }>()
+
+function loadInvites(): PubInvite[] {
+  try { const v = JSON.parse(localStorage.getItem(invitesKey()) || 'null'); return Array.isArray(v) ? v : [] } catch { return [] }
+}
+function saveInvites() { try { localStorage.setItem(invitesKey(), JSON.stringify(pubInvites)) } catch {} }
+
+function paintInviteBadge() {
+  const b = $('inv-badge')
+  b.textContent = String(pendingKnocks.length)
+  b.hidden = pendingKnocks.length === 0
+}
+
+/** Listen on every invite this identity has published. Idempotent. */
+function startInboxWatches() {
+  if (!client) return
+  pubInvites = loadInvites()
+  for (const inv of pubInvites) {
+    if (inboxWatches.has(inv.id)) continue
+    const raw = inboxSecretBytes({ pub: '', name: '', inbox: inv.secret })
+    if (!raw) { ecLog(`invite ${inv.id}: unusable secret, not watched`); continue }
+    inboxWatches.set(inv.id, client.watchInbox(raw, {
+      onKnock: (k) => {
+        const ik = b64(k.ik)
+        // One request per key per invite: a Source that re-knocks while waiting
+        // must not stack up, and that is the ordinary case, not an attack.
+        if (pendingKnocks.some((p) => p.ik === ik && p.inviteId === inv.id)) return
+        pendingKnocks.unshift({ ik, name: k.name, note: k.note, at: nowMs(), inviteId: inv.id })
+        paintInviteBadge()
+        if (!$('pane-invites').hidden) renderInvites()
+        toast(tr('Ktoś puka do zaproszenia „{label}"', { label: inv.label }))
+      },
+      onLog: ecLog,
+    }))
+  }
+  paintInviteBadge()
+}
+
+function stopInboxWatches() {
+  for (const w of inboxWatches.values()) { try { w.stop() } catch {} }
+  inboxWatches.clear()
+}
+
+$('btn-new-invite')?.addEventListener('click', () => {
+  // Only the identity is required. Minting an invite is a LOCAL act - a random
+  // secret and a line in storage - and `startInboxWatches` is idempotent, so the
+  // listening starts when the transport arrives. Requiring the client here made
+  // the button dead for the seconds a connection takes, which reads as broken.
+  if (!session) { toast(tr('Najpierw się zaloguj')); return }
+  const inv: PubInvite = {
+    id: Math.random().toString(36).slice(2, 10),
+    label: tr('Zaproszenie z {date}', { date: new Date(nowMs()).toISOString().slice(0, 10) }),
+    secret: newInboxSecret(),
+    created: nowMs(),
+  }
+  pubInvites.unshift(inv)
+  saveInvites()
+  startInboxWatches()
+  renderInvites()
+})
+
+function inviteUrlFor(inv: PubInvite): string {
+  return inviteLink(
+    inAppShell ? CANONICAL_ORIGIN : location.origin,
+    inAppShell ? CANONICAL_PATH : location.pathname,
+    { pub: session!.pub, name: session!.handle, inbox: inv.secret })
+}
+
+async function acceptKnock(k: PendingKnock) {
+  if (!session) return
+  const name = (k.name || tr('Bez nazwy')).slice(0, 64)
+  if (!(await claimContact(name, k.ik))) return
+  await session.book.add(name, k.ik, true)
+  await refreshContacts()
+  pendingKnocks = pendingKnocks.filter((p) => p !== k)
+  paintInviteBadge(); renderInvites()
+  toast(tr('Dodano kontakt „{name}"', { name }))
+}
+
+function renderInvites() {
+  const pane = $('pane-invites')
+  pane.innerHTML = ''
+  if (!session) { pane.innerHTML = `<div class="pane-label">${escapeHtml(tr('Najpierw się zaloguj'))}</div>`; return }
+
+  if (pendingKnocks.length) {
+    const h = document.createElement('div')
+    h.className = 'pane-label'
+    h.textContent = tr('Ktoś puka — przyjmij dopiero po sprawdzeniu odcisku')
+    pane.appendChild(h)
+    for (const k of pendingKnocks) {
+      const row = document.createElement('div'); row.className = 'knock-row'
+      const inv = pubInvites.find((i) => i.id === k.inviteId)
+      const nm = document.createElement('div'); nm.className = 'k-name'
+      nm.textContent = k.name || tr('Bez nazwy')
+      const fp = document.createElement('div'); fp.className = 'k-fp'
+      fp.textContent = tr('odcisk: ') + '…'
+      void fingerprint(k.ik).then((f) => { fp.textContent = tr('odcisk: ') + f })
+      row.append(nm, fp)
+      if (k.note) { const n = document.createElement('div'); n.className = 'k-note'; n.textContent = k.note; row.appendChild(n) }
+      if (inv) { const w = document.createElement('div'); w.className = 'inv-when'; w.textContent = tr('przez: ') + inv.label; row.appendChild(w) }
+      const acts = document.createElement('div'); acts.className = 'inv-acts'
+      const yes = document.createElement('button'); yes.textContent = tr('Przyjmij')
+      yes.addEventListener('click', () => void acceptKnock(k))
+      const no = document.createElement('button'); no.className = 'danger'; no.textContent = tr('Zignoruj')
+      no.addEventListener('click', () => {
+        pendingKnocks = pendingKnocks.filter((p) => p !== k); paintInviteBadge(); renderInvites()
+      })
+      acts.append(yes, no); row.appendChild(acts)
+      pane.appendChild(row)
+    }
+  }
+
+  const h2 = document.createElement('div'); h2.className = 'pane-label'
+  h2.textContent = pubInvites.length
+    ? tr('Opublikowane — każde można wycofać osobno')
+    : tr('Nie masz opublikowanych zaproszeń. Takie zaproszenie możesz powiesić na stronie: kto je ma, może do Ciebie zapukać.')
+  pane.appendChild(h2)
+
+  for (const inv of pubInvites) {
+    const row = document.createElement('div'); row.className = 'inv-row'
+    const top = document.createElement('div'); top.className = 'inv-top'
+    const label = document.createElement('input'); label.className = 'inv-label'; label.value = inv.label
+    label.addEventListener('change', () => { inv.label = label.value.slice(0, 60); saveInvites() })
+    const when = document.createElement('span'); when.className = 'inv-when'
+    when.textContent = new Date(inv.created).toISOString().slice(0, 10)
+    top.append(label, when)
+    const acts = document.createElement('div'); acts.className = 'inv-acts'
+    const copy = document.createElement('button'); copy.textContent = tr('Kopiuj link')
+    copy.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(inviteUrlFor(inv)); toast(tr('Skopiowano')) }
+      catch { toast(tr('Nie udało się skopiować')) }
+    })
+    const kill = document.createElement('button'); kill.className = 'danger'; kill.textContent = tr('Wycofaj')
+    kill.addEventListener('click', async () => {
+      const { ok } = await ask(
+        tr('Wycofać „{label}"?', { label: inv.label }),
+        tr('Przestaniesz słuchać na tym zaproszeniu. Kto ma ten link, nie dopuka się już nigdy. Pozostałe zaproszenia działają dalej.'),
+        tr('Wycofaj'))
+      if (!ok) return
+      inboxWatches.get(inv.id)?.stop(); inboxWatches.delete(inv.id)
+      pubInvites = pubInvites.filter((i) => i !== inv)
+      pendingKnocks = pendingKnocks.filter((p) => p.inviteId !== inv.id)
+      saveInvites(); paintInviteBadge(); renderInvites()
+    })
+    acts.append(copy, kill)
+    row.append(top, acts)
+    pane.appendChild(row)
+  }
+
+  // Not a `pane-label`: that style is an uppercase mono heading, and a sentence
+  // set in it reads as shouting rather than as a footnote.
+  const foot = document.createElement('div'); foot.className = 'inv-foot'
+  foot.textContent = tr('Prośby nie są zapisywane na dysku. Jeśli zamkniesz aplikację, druga strona zapuka ponownie.')
+  pane.appendChild(foot)
 }
 
 // ---- Network tab: a live view of the transport, plus the node editor -------
