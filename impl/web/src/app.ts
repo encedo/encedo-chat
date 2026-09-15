@@ -2019,7 +2019,7 @@ for (const el of document.querySelectorAll('#tmode input')) {
   })
 }
 
-const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles(); paintTransportSetting(); paintNotifySetting(); void paintDiagSetting(); paintDiagnostics() }
+const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles(); paintTransportSetting(); paintNotifySetting(); void paintDiagSetting(); paintDiagnostics(); startNetwork() }
 
 /**
  * The diary's row in Settings: where the file is, and a way to take the log
@@ -2048,7 +2048,9 @@ $('btn-log-copy').addEventListener('click', async () => {
   }
   diagFlush()
 })
-const closeDrawer = () => { $('scrim').classList.remove('open'); $('drawer').classList.remove('open') }
+// The 2.5 s refresh belongs to whatever is showing the node list, and that is
+// the drawer now. Left running behind a closed drawer it would poll for ever.
+const closeDrawer = () => { $('scrim').classList.remove('open'); $('drawer').classList.remove('open'); stopNetwork() }
 // ---- invite: my profile as a link, and someone else's arriving as one -------
 /**
  * An invite read out of the URL and not yet dealt with.
@@ -3441,7 +3443,7 @@ $('me-avatar').addEventListener('keydown', (e: any) => {
 $('sess-id').addEventListener('dblclick', copyPub)     // double-click Tożsamość → copy pubkey
 
 // ---- placeholder tabs ----
-const TABS = [['tab-contacts', 'contacts'], ['tab-groups', 'groups'], ['tab-invites', 'invites'], ['tab-network', 'network']] as const
+const TABS = [['tab-contacts', 'contacts'], ['tab-groups', 'groups'], ['tab-invites', 'invites']] as const
 for (const [tab, pane] of TABS) {
   $(tab).addEventListener('click', () => {
     for (const [t] of TABS) $(t).classList.toggle('active', t === tab)
@@ -3453,7 +3455,6 @@ for (const [tab, pane] of TABS) {
     $('head-invites').hidden = pane !== 'invites'
     if (pane === 'groups') renderGroups()
     if (pane === 'invites') renderInvites()
-    if (pane === 'network') startNetwork(); else stopNetwork()
   })
 }
 
@@ -3878,7 +3879,7 @@ const NODES_NOTE = tr('Kolejność decyduje o wyborze: pierwszy aktywny węzeł 
  */
 function ensureNetworkShell() {
   if ($('net-live')) return
-  $('pane-network').innerHTML = `<div id="net-live"></div>
+  $('net-box').innerHTML = `<div id="net-live"></div>
     <div class="nodes-panel net-nodes">
       <div class="nodes-head"><span>${tr('Węzły sieci')}</span> <button class="node-add" id="net-node-add" type="button">${tr('+ dodaj')}</button></div>
       <div id="net-nodes-list"></div>
@@ -3897,7 +3898,7 @@ function ensureNetworkShell() {
     }, 'net-nodes-official')()
 }
 function renderNetwork() {
-  const pane = $('pane-network'); if (!pane) return
+  const pane = $('net-box'); if (!pane) return
   if (!client) { pane.innerHTML = `<div class="pane-label">${tr('Brak sesji — zaloguj się.')}</div>`; return }
   ensureNetworkShell()
   const s = client.netStatus()

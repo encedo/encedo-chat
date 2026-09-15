@@ -829,18 +829,18 @@ async function main() {
 
     if (FAILOVER) {
       // A's first node is unreachable, so EH-2 could only complete over the
-      // fallback — meeting B at all already proves failover. Confirm the Network
-      // tab agrees: the failover tag is up and the live node is 'dobry', not the
-      // dead 'martwy'. waitFor throws on timeout, so it is the assertion.
+      // fallback — meeting B at all already proves failover. Confirm the network
+      // panel agrees: the failover tag is up and the live node is 'dobry', not
+      // the dead 'martwy'. waitFor throws on timeout, so it is the assertion.
       scenario('failover (3b): A behind a dead first node reached B via the fallback')
-      await A.eval(`document.getElementById('tab-network').click(); return 1`)
-      await A.waitFor('A Network tab shows failover to the working node', `
-        const p = document.getElementById('pane-network');
+      await A.eval(`document.getElementById('btn-settings').click(); return 1`)
+      await A.waitFor('the network panel shows failover to the working node', `
+        const p = document.getElementById('net-box');
         const t = p ? p.textContent : '';
         return t.includes('failover') && /\\s*dobry/.test(t) && /\\s*martwy/.test(t);
       `, 15_000)
-      step('A is on the fallback node (Network tab: failover, dobry / martwy) — 3b end-to-end OK')
-      await A.eval(`document.getElementById('tab-contacts').click(); return 1`) // back to the chat
+      step('A is on the fallback node (Settings -> Network: failover, dobry / martwy) — 3b end-to-end OK')
+      await A.eval(`document.getElementById('btn-close-drawer').click(); return 1`) // back to the chat
     }
 
     let direct = false
@@ -2118,9 +2118,10 @@ async function main() {
       await A.eval(`document.getElementById('members-cluster')?.click(); return 1`)
       await sleep(400)
       await A.screenshot(`${dir}/group-view.png`)
-      await A.eval(`document.getElementById('members-pop').hidden = true; document.getElementById('tab-network').click(); return 1`)
+      await A.eval(`document.getElementById('members-pop').hidden = true; document.getElementById('btn-settings').click(); return 1`)
       await sleep(2700) // let a refresh tick populate the status
       await A.screenshot(`${dir}/network-view.png`)
+      await A.eval(`document.getElementById('btn-close-drawer').click(); return 1`)
       step(`screenshots -> ${dir}/{group-view,network-view}.png`)
     }
 
@@ -2242,7 +2243,7 @@ async function main() {
       const filtered = rows();
       box.value = ''; box.dispatchEvent(new Event('input'));
       const back = rows();
-      document.getElementById('tab-network').click();
+      document.getElementById('tab-invites').click();
       const hiddenOnNetwork = document.getElementById('head-contacts').hidden
                            && document.getElementById('head-groups').hidden;
       document.getElementById('tab-contacts').click();
@@ -2253,9 +2254,9 @@ async function main() {
     if (onGroups.all === 0) throw new Error('no groups to filter — the scenario is not testing anything')
     if (onGroups.filtered !== 0) throw new Error('the groups box does not filter groups')
     if (onGroups.back !== onGroups.all) throw new Error('clearing the box did not bring the groups back')
-    if (!onGroups.hiddenOnNetwork) throw new Error('a search box stayed on the Network tab, where it filters nothing')
+    if (!onGroups.hiddenOnNetwork) throw new Error('a search box stayed on the Invites tab, where it filters nothing')
     if (!onGroups.shownAgain) throw new Error('the box did not come back on the Contacts tab')
-    step('groups have their own box, and neither follows onto Network')
+    step('groups have their own box, and neither follows onto Invites')
 
     scenario('a group survives a reload (persisted crypto state)')
     // The group is in-memory only until persisted; a reload must bring it back
@@ -2753,8 +2754,8 @@ async function main() {
     // it — which no unit test can see.
     if (IPFS_RPC) {
       scenario('the official node list loads by CID')
-      await A.eval(`document.getElementById('tab-network').click(); return 1`)
-      await A.waitFor('the network tab', `return !!document.getElementById('net-nodes-official')`, 10_000)
+      await A.eval(`document.getElementById('btn-settings').click(); return 1`)
+      await A.waitFor('the network panel in Settings', `return !!document.getElementById('net-nodes-official')`, 10_000)
       await A.eval(`document.getElementById('net-nodes-official').click(); return 1`)
       await A.waitFor('the replace confirm', `
         return document.getElementById('ask-modal').classList.contains('open');

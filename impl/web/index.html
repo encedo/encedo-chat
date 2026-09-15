@@ -1171,7 +1171,6 @@
         <button class="tab active" id="tab-contacts" data-i18n="Kontakty">Kontakty</button>
         <button class="tab" id="tab-groups" data-i18n="Grupy">Grupy</button>
         <button class="tab" id="tab-invites" title="Zaproszenia, które opublikowałeś" data-i18n-title="Zaproszenia, które opublikowałeś" ><span data-i18n="Zaproszenia">Zaproszenia</span><span class="tab-badge" id="inv-badge" hidden>0</span></button>
-        <button class="tab" id="tab-network" title="Status węzła sieci" data-i18n-title="Status węzła sieci" data-i18n="Sieć">Sieć</button>
       </div>
       <!-- One box per list, each inside the tab it filters. It used to sit above
            the tabs, where its position claimed more than it did. Kept OUT of the
@@ -1200,7 +1199,6 @@
         <div class="add-row"><button class="add-btn" id="btn-new-invite" data-i18n="+ Nowe zaproszenie">+ Nowe zaproszenie</button></div>
       </div>
       <div class="pane" id="pane-invites" hidden></div>
-      <div class="pane" id="pane-network" hidden><div class="pane-label" data-i18n="Sieć — wkrótce (lista węzłów, latencje)">Sieć — wkrótce (lista węzłów, latencje)</div></div>
       <!-- The one strip that is on screen whenever the list is, on every
            platform — which is why the feedback button lives here and not in
            Settings. Same `.chip` as the transport one: the strip stays quiet. -->
@@ -1697,6 +1695,13 @@
     <!-- The profile list lives HERE and not on the login screen: naming who uses
          a device is something only that device's user should see. -->
     <button class="btn" id="btn-share" style="margin-top:10px;background:var(--accent-soft);color:var(--accent)" data-i18n="Udostępnij swój profil">Udostępnij swój profil</button>
+
+    <!-- The node list and the live link status used to be a fourth tab, beside
+         three lists of PEOPLE. It is neither a list nor something you read while
+         talking, it is what this session is running on — so it belongs here,
+         under Session, and the tab strip goes back to three. -->
+    <div class="d-section" style="margin-top:22px" data-i18n="Sieć">Sieć</div>
+    <div id="net-box"></div>
 
     <div class="d-section" style="margin-top:22px" data-i18n="Profile software na tym urządzeniu">Profile software na tym urządzeniu</div>
     <div class="hint" style="margin-bottom:8px" data-i18n="Każdy profil to osobna tożsamość, zaszyfrowana swoim hasłem. Usunięcie jest nieodwracalne — klucza nie da się odtworzyć.">Każdy profil to osobna tożsamość, zaszyfrowana swoim hasłem. Usunięcie jest nieodwracalne — klucza nie da się odtworzyć.</div>
