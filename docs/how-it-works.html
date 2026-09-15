@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>How onchato works</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=Public+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --paper: #f7f8f7;
+    --card: #ffffff;
+    --ink: #16211e;
+    --muted: #5d6b66;
+    --rule: #d7dedb;
+    --accent: #0f6b57;
+    --accent-soft: #e4f0ec;
+    --stop: #9a3b2f;
+    --stop-soft: #f6e7e4;
+
+    --serif: "Newsreader", Georgia, "Times New Roman", serif;
+    --sans: "Public Sans", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0f1513; --card: #16201d; --ink: #e6ece9; --muted: #96a5a0;
+      --rule: #2a3733; --accent: #35c99e; --accent-soft: #14312a;
+      --stop: #e09383; --stop-soft: #34211d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0f1513; --card: #16201d; --ink: #e6ece9; --muted: #96a5a0;
+    --rule: #2a3733; --accent: #35c99e; --accent-soft: #14312a;
+    --stop: #e09383; --stop-soft: #34211d;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 17px; line-height: 1.62;
+    padding-inline: 20px; padding-block: 56px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 46px; }
+  .col { max-width: 64ch; }
+
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 14px; }
+  h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(2rem, 5vw, 2.95rem);
+    line-height: 1.1; margin: 0 0 18px; text-wrap: balance; letter-spacing: -.01em; }
+  h2 { font-family: var(--serif); font-weight: 600; font-size: clamp(1.4rem, 3.2vw, 1.75rem);
+    line-height: 1.2; margin: 0; text-wrap: balance; }
+  p { margin: 0 0 14px; } p:last-child { margin-bottom: 0; }
+  .lead { font-size: 1.2rem; line-height: 1.5; color: var(--muted); }
+  code, .m { font-family: var(--mono); font-size: .88em; }
+  strong { font-weight: 600; }
+
+  section { display: flex; flex-direction: column; gap: 18px; }
+  .head { display: flex; gap: 16px; align-items: baseline; max-width: 64ch; }
+  .step { font-family: var(--mono); font-size: 13px; color: var(--accent);
+    border: 1px solid var(--accent); border-radius: 3px; padding: 2px 7px; flex: none; }
+
+  figure { margin: 0; display: flex; flex-direction: column; gap: 12px; }
+  .fig-frame { background: var(--card); border: 1px solid var(--rule); border-radius: 4px;
+    padding: 22px 20px; overflow-x: auto; }
+  .fig-frame svg { display: block; width: 100%; height: auto; min-width: 560px; }
+  figcaption { font-size: .875rem; color: var(--muted); max-width: 72ch;
+    border-left: 2px solid var(--accent); padding-left: 12px; }
+
+  /* A citation, not a clause: run inline it reads as the end of the sentence
+     it follows, which is exactly the confusion this page must not create. */
+  .spec { display: block; margin-top: 8px; font-family: var(--mono);
+    font-size: .78rem; color: var(--muted); }
+  .spec a { color: var(--accent); }
+  p.spec { margin-top: 0; }
+
+  .absent { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+  .absent div { border: 1px solid var(--rule); border-radius: 3px; padding: 13px 15px; background: var(--card); }
+  .absent b { display: block; font-family: var(--serif); font-size: 1.05rem; margin-bottom: 3px; }
+  .absent span { font-size: .875rem; color: var(--muted); }
+
+  .note { border-left: 2px solid var(--stop); padding-left: 14px; font-size: .95rem; max-width: 64ch; }
+  .note b { color: var(--stop); }
+
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 0; }
+  footer { font-family: var(--mono); font-size: .82rem; color: var(--muted); max-width: 72ch; }
+  footer a { color: var(--accent); }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; padding-block: 36px 64px; }
+    .fig-frame { padding: 14px 12px; }
+    .head { flex-direction: column; gap: 6px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="col">
+    <p class="eyebrow">onchato &middot; companion to the specification</p>
+    <h1>How onchato works</h1>
+    <p class="lead">Four steps take two people from a public key to a conversation
+      nobody else can read, and no server holds anything in between. This page
+      explains the mechanisms. <code>PROTOCOL.md</code> specifies them.</p>
+  </header>
+
+  <div class="note">
+    <p><b>This page explains; it does not specify.</b> Where it and
+      <code>docs/PROTOCOL.md</code> disagree, the specification is right and this
+      page is the bug. Nothing here is a wire format, a field layout or a key
+      schedule you should build against &mdash; each section names the numbered
+      section that is.</p>
+  </div>
+
+  <hr>
+
+  <!-- ============ 1 ============ -->
+  <section>
+    <div class="head"><span class="step">1</span><h2>An identity is a key you cannot copy</h2></div>
+    <div class="col">
+      <p>Your identity is one X25519 key pair. On the intended deployment the
+        private half lives inside a hardware security module and never comes out:
+        the app asks the device to perform one Diffie-Hellman and gets back a
+        shared secret, never the key. Copying the identity means stealing the
+        device.</p>
+      <p>There is a second tier for people without hardware &mdash; a
+        <strong>software profile</strong>, a key pair sealed in the browser under a
+        password. It is the same identity contract and interoperates with hardware
+        identities; what it gives up is that a copied profile can be attacked
+        offline forever, which is why the password has a floor rather than a
+        warning.</p>
+      <p class="spec">Specified in §4, software profiles in §4.5.</p>
+    </div>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section>
+    <div class="head"><span class="step">2</span><h2>Finding each other without a directory</h2></div>
+    <div class="col">
+      <p>There is no lookup, no registry, and no server that knows who talks to
+        whom. Two people who hold each other's public key both compute the same
+        shared secret, and that secret names the place they meet. Each derives it
+        from the opposite direction and arrives at the same answer, which is the
+        one piece of arithmetic the whole design rests on.</p>
+      <p>Nobody else can compute it, because it needs a private key that never
+        left either device. The meeting place also changes every day, and each pair
+        rolls over at its own moment rather than at midnight, so the whole user
+        base does not resubscribe at once.</p>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <svg viewBox="0 0 880 300" role="img" aria-label="Alice and Bob each combine their own private key with the other's public key, reach the same shared secret, and derive the same meeting place. An observer holding both public keys cannot.">
+          <defs>
+            <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+            </marker>
+          </defs>
+
+          <!-- Alice -->
+          <rect x="0" y="40" width="210" height="86" rx="4" fill="var(--card)" stroke="var(--rule)"/>
+          <text x="18" y="66" font-family="Newsreader, serif" font-size="17" font-weight="600" fill="var(--ink)">Alice</text>
+          <text x="18" y="90" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--muted)">her private key</text>
+          <text x="18" y="110" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--muted)">+ Bob's public key</text>
+
+          <!-- Bob -->
+          <rect x="670" y="40" width="210" height="86" rx="4" fill="var(--card)" stroke="var(--rule)"/>
+          <text x="688" y="66" font-family="Newsreader, serif" font-size="17" font-weight="600" fill="var(--ink)">Bob</text>
+          <text x="688" y="90" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--muted)">his private key</text>
+          <text x="688" y="110" font-family="IBM Plex Mono, monospace" font-size="12" fill="var(--muted)">+ Alice's public key</text>
+
+          <!-- arrows in -->
+          <g color="var(--accent)">
+            <line x1="210" y1="83" x2="332" y2="83" stroke="currentColor" stroke-width="1.8" marker-end="url(#a1)"/>
+            <line x1="670" y1="83" x2="548" y2="83" stroke="currentColor" stroke-width="1.8" marker-end="url(#a1)"/>
+          </g>
+
+          <!-- the same secret -->
+          <rect x="332" y="52" width="216" height="62" rx="4" fill="var(--accent-soft)"/>
+          <text x="440" y="78" text-anchor="middle" font-family="Public Sans, sans-serif" font-size="14" font-weight="600" fill="var(--accent)">the same secret</text>
+          <text x="440" y="99" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--muted)">computed twice, never sent</text>
+
+          <!-- down to the meeting place -->
+          <g color="var(--accent)">
+            <line x1="440" y1="114" x2="440" y2="160" stroke="currentColor" stroke-width="1.8" marker-end="url(#a1)"/>
+          </g>
+          <rect x="300" y="160" width="280" height="58" rx="4" fill="var(--card)" stroke="var(--accent)" stroke-width="1.5"/>
+          <text x="440" y="184" text-anchor="middle" font-family="Public Sans, sans-serif" font-size="14" font-weight="600" fill="var(--ink)">the meeting place for today</text>
+          <text x="440" y="205" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="var(--muted)">unguessable, and different tomorrow</text>
+
+          <!-- the observer -->
+          <rect x="0" y="236" width="880" height="54" rx="4" fill="var(--stop-soft)"/>
+          <circle cx="32" cy="263" r="10" fill="none" stroke="var(--stop)" stroke-width="2"/>
+          <line x1="25" y1="270" x2="39" y2="256" stroke="var(--stop)" stroke-width="2"/>
+          <text x="56" y="260" font-family="Public Sans, sans-serif" font-size="13.5" font-weight="600" fill="var(--stop)">Somebody holding both PUBLIC keys still cannot compute it</text>
+          <text x="56" y="279" font-family="Public Sans, sans-serif" font-size="12.5" fill="var(--muted)">the secret needs a private half, and neither private half has ever left its device</text>
+        </svg>
+      </div>
+      <figcaption>The same arithmetic run from two directions lands on one answer.
+        That is what replaces a directory: two people who already hold each other's
+        public key can meet, and nobody else can even name the place.
+        <span class="spec">Specified in §5, daily rotation in §5.4.</span></figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section>
+    <div class="head"><span class="step">3</span><h2>A handshake that assumes the future is hostile</h2></div>
+    <div class="col">
+      <p>Meeting is not trusting. In the meeting place the two run a handshake
+        that proves each is holding the identity key the other expects, and produces
+        a fresh session key that belongs to this conversation alone.</p>
+      <p>It mixes in a <strong>post-quantum key encapsulation</strong> alongside the
+        classical exchange. The reason is not that today's attacker can break
+        X25519; it is that traffic recorded today can be stored until something
+        can. Both have to fall for the session key to fall.</p>
+      <p class="spec">Specified in §6. It takes one and a half round trips and
+        rides the same meeting place, so no separate connection is opened.</p>
+    </div>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section>
+    <div class="head"><span class="step">4</span><h2>Every message gets its own key</h2></div>
+    <div class="col">
+      <p>The session key is not used to encrypt anything. It seeds a ratchet: a
+        chain that steps forward for every message and, periodically, mixes in a
+        fresh Diffie&ndash;Hellman from both sides. Each message is sealed under a
+        key derived once and then thrown away.</p>
+      <p>The consequence is the point. Compromise a device now and you get what it
+        currently holds. You do not get last week, because those keys are gone and
+        cannot be recomputed. You do not get next week either, because the next
+        exchange heals the chain past the point you saw.</p>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <svg viewBox="0 0 880 236" role="img" aria-label="A chain of per-message keys. A key captured at one point opens only that message: earlier keys are deleted and later ones are healed by a fresh exchange.">
+          <defs>
+            <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+            </marker>
+          </defs>
+
+          <text x="0" y="22" font-family="IBM Plex Mono, monospace" font-size="11.5" letter-spacing="1.4" fill="var(--muted)">TIME</text>
+          <g color="var(--muted)">
+            <line x1="46" y1="18" x2="868" y2="18" stroke="currentColor" stroke-width="1.2" marker-end="url(#a2)"/>
+          </g>
+
+          <!-- keys -->
+          <g font-family="IBM Plex Mono, monospace" font-size="11.5">
+            <rect x="24"  y="62" width="96" height="44" rx="3" fill="var(--card)" stroke="var(--rule)"/>
+            <text x="72"  y="89" text-anchor="middle" fill="var(--muted)">msg 1</text>
+            <rect x="148" y="62" width="96" height="44" rx="3" fill="var(--card)" stroke="var(--rule)"/>
+            <text x="196" y="89" text-anchor="middle" fill="var(--muted)">msg 2</text>
+            <rect x="272" y="62" width="96" height="44" rx="3" fill="var(--card)" stroke="var(--rule)"/>
+            <text x="320" y="89" text-anchor="middle" fill="var(--muted)">msg 3</text>
+
+            <rect x="396" y="62" width="96" height="44" rx="3" fill="var(--stop-soft)" stroke="var(--stop)" stroke-width="1.5"/>
+            <text x="444" y="89" text-anchor="middle" fill="var(--stop)">msg 4</text>
+
+            <rect x="520" y="62" width="96" height="44" rx="3" fill="var(--card)" stroke="var(--rule)"/>
+            <text x="568" y="89" text-anchor="middle" fill="var(--muted)">msg 5</text>
+            <rect x="644" y="62" width="96" height="44" rx="3" fill="var(--card)" stroke="var(--rule)"/>
+            <text x="692" y="89" text-anchor="middle" fill="var(--muted)">msg 6</text>
+            <rect x="768" y="62" width="96" height="44" rx="3" fill="var(--card)" stroke="var(--rule)"/>
+            <text x="816" y="89" text-anchor="middle" fill="var(--muted)">msg 7</text>
+          </g>
+
+          <!-- chain links -->
+          <g color="var(--muted)">
+            <line x1="120" y1="84" x2="142" y2="84" stroke="currentColor" stroke-width="1.4" marker-end="url(#a2)"/>
+            <line x1="244" y1="84" x2="266" y2="84" stroke="currentColor" stroke-width="1.4" marker-end="url(#a2)"/>
+            <line x1="368" y1="84" x2="390" y2="84" stroke="currentColor" stroke-width="1.4" marker-end="url(#a2)"/>
+            <line x1="492" y1="84" x2="514" y2="84" stroke="currentColor" stroke-width="1.4" marker-end="url(#a2)"/>
+            <line x1="616" y1="84" x2="638" y2="84" stroke="currentColor" stroke-width="1.4" marker-end="url(#a2)"/>
+            <line x1="740" y1="84" x2="762" y2="84" stroke="currentColor" stroke-width="1.4" marker-end="url(#a2)"/>
+          </g>
+
+          <!-- capture marker -->
+          <g color="var(--stop)">
+            <line x1="444" y1="140" x2="444" y2="110" stroke="currentColor" stroke-width="1.8" marker-end="url(#a2)"/>
+          </g>
+          <text x="444" y="158" text-anchor="middle" font-family="Public Sans, sans-serif" font-size="13" font-weight="600" fill="var(--stop)">a key captured here</text>
+
+          <!-- verdict bands -->
+          <rect x="24" y="176" width="344" height="46" rx="3" fill="var(--accent-soft)"/>
+          <text x="196" y="196" text-anchor="middle" font-family="Public Sans, sans-serif" font-size="13" font-weight="600" fill="var(--accent)">earlier stays shut</text>
+          <text x="196" y="214" text-anchor="middle" font-family="Public Sans, sans-serif" font-size="12" fill="var(--muted)">those keys were deleted, not stored</text>
+
+          <rect x="396" y="176" width="96" height="46" rx="3" fill="var(--stop-soft)"/>
+          <text x="444" y="203" text-anchor="middle" font-family="Public Sans, sans-serif" font-size="12.5" font-weight="600" fill="var(--stop)">this one opens</text>
+
+          <rect x="520" y="176" width="344" height="46" rx="3" fill="var(--accent-soft)"/>
+          <text x="692" y="196" text-anchor="middle" font-family="Public Sans, sans-serif" font-size="13" font-weight="600" fill="var(--accent)">later heals shut again</text>
+          <text x="692" y="214" text-anchor="middle" font-family="Public Sans, sans-serif" font-size="12" fill="var(--muted)">the next exchange mixes in new randomness</text>
+        </svg>
+      </div>
+      <figcaption>This is what "forward secrecy" and "post-compromise security" mean
+        in practice: the blast radius of a stolen key is one message, not a history
+        and not a future. A session is also retired on a timer, so even an
+        undetected compromise expires.
+        <span class="spec">Specified in §7; session lifetime in §7.3.</span></figcaption>
+    </figure>
+  </section>
+
+  <hr>
+
+  <!-- ============ transport ============ -->
+  <section>
+    <div class="head"><h2>Two ways a message travels, and what each costs</h2></div>
+    <div class="col">
+      <p>Once a conversation exists there are two routes, and neither is free.
+        Through the <strong>node</strong>, a message is ciphertext the operator
+        forwards; the operator learns that some topic was busy, when, and how large
+        the frames were. <strong>Directly</strong>, peer to peer, the node sees
+        nothing at all &mdash; but the two devices exchange network addresses to
+        find each other, so each learns roughly where the other is.</p>
+      <p>There is no setting that costs nothing, which is why the app states the
+        trade rather than choosing quietly. The default is the node, because
+        hiding your address from the person you are talking to is usually worth
+        more than hiding your timing from an operator who cannot read anything
+        anyway.</p>
+    </div>
+
+    <figure>
+      <div class="fig-frame">
+        <svg viewBox="0 0 880 250" role="img" aria-label="Two routes for a message: through the node, which sees timing and size but no content, or directly between devices, where the node sees nothing but the peers learn each other's addresses.">
+          <defs>
+            <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+            </marker>
+          </defs>
+
+          <!-- devices -->
+          <rect x="0" y="86" width="132" height="58" rx="4" fill="var(--card)" stroke="var(--rule)"/>
+          <text x="66" y="120" text-anchor="middle" font-family="Newsreader, serif" font-size="16" font-weight="600" fill="var(--ink)">Alice</text>
+          <rect x="748" y="86" width="132" height="58" rx="4" fill="var(--card)" stroke="var(--rule)"/>
+          <text x="814" y="120" text-anchor="middle" font-family="Newsreader, serif" font-size="16" font-weight="600" fill="var(--ink)">Bob</text>
+
+          <!-- node -->
+          <rect x="374" y="14" width="132" height="52" rx="4" fill="var(--card)" stroke="var(--rule)"/>
+          <text x="440" y="45" text-anchor="middle" font-family="Newsreader, serif" font-size="16" font-weight="600" fill="var(--ink)">node</text>
+
+          <!-- route via node -->
+          <g color="var(--accent)">
+            <line x1="132" y1="100" x2="368" y2="52" stroke="currentColor" stroke-width="1.8" marker-end="url(#a3)"/>
+            <line x1="512" y1="52" x2="744" y2="100" stroke="currentColor" stroke-width="1.8" marker-end="url(#a3)"/>
+          </g>
+          <text x="196" y="74" font-family="Public Sans, sans-serif" font-size="12.5" fill="var(--accent)">ciphertext</text>
+
+          <!-- direct route -->
+          <g color="var(--muted)">
+            <line x1="132" y1="132" x2="744" y2="132" stroke="currentColor" stroke-width="1.8" stroke-dasharray="6 5" marker-start="url(#a3)" marker-end="url(#a3)"/>
+          </g>
+          <text x="440" y="124" text-anchor="middle" font-family="Public Sans, sans-serif" font-size="12.5" fill="var(--muted)">direct, device to device</text>
+
+          <!-- what each observer learns -->
+          <rect x="0" y="176" width="430" height="66" rx="3" fill="var(--accent-soft)"/>
+          <text x="18" y="200" font-family="Public Sans, sans-serif" font-size="13" font-weight="600" fill="var(--accent)">Through the node, the operator learns</text>
+          <text x="18" y="220" font-family="Public Sans, sans-serif" font-size="12.5" fill="var(--ink)">that a topic was busy, when, and how big the frames were</text>
+          <text x="18" y="236" font-family="Public Sans, sans-serif" font-size="12.5" fill="var(--muted)">never the content, never who the people are</text>
+
+          <rect x="450" y="176" width="430" height="66" rx="3" fill="var(--stop-soft)"/>
+          <text x="468" y="200" font-family="Public Sans, sans-serif" font-size="13" font-weight="600" fill="var(--stop)">Directly, the node learns nothing &mdash; but</text>
+          <text x="468" y="220" font-family="Public Sans, sans-serif" font-size="12.5" fill="var(--ink)">the two devices exchange network addresses to connect</text>
+          <text x="468" y="236" font-family="Public Sans, sans-serif" font-size="12.5" fill="var(--muted)">so each learns roughly where the other is</text>
+        </svg>
+      </div>
+      <figcaption>Neither route is private in every direction at once. The app
+        says which one it is using rather than deciding quietly, and it only claims
+        the direct route once a liveness probe has come back, because a channel
+        that opens and then swallows traffic has lied before.
+        <span class="spec">Specified in §13; the metadata picture in §12.</span></figcaption>
+    </figure>
+  </section>
+
+  <hr>
+
+  <!-- ============ groups ============ -->
+  <section>
+    <div class="head"><h2>Groups without a group server</h2></div>
+    <div class="col">
+      <p>A group is a layer over the same one-to-one machinery, not a new
+        service. Each member has a sending chain of their own; the key to read it
+        is handed to the others over their existing encrypted one-to-one channels.
+        Membership lives with the members, so there is nothing to ask and no
+        operator who knows the roster.</p>
+      <p>Every message also carries a separate authentication tag for each
+        recipient, derived from a secret only that pair shares. A member who holds
+        somebody's sending chain can therefore read their messages but cannot forge
+        one to a third person &mdash; and because those tags are shared secrets
+        rather than signatures, nothing anyone receives can later be shown to an
+        outsider as proof of who wrote it.</p>
+      <p>Removing somebody rotates the group to a new epoch with a new meeting
+        place and fresh keys, distributed only to those who remain.</p>
+      <p class="spec">Specified in §8.</p>
+    </div>
+  </section>
+
+  <hr>
+
+  <!-- ============ absent ============ -->
+  <section>
+    <div class="head"><h2>What is deliberately missing</h2></div>
+    <div class="col">
+      <p>Several things this product does not have are decisions rather than
+        gaps, and each was cheaper to build than to leave out.</p>
+    </div>
+    <div class="absent">
+      <div><b>No directory</b><span>Nobody can be looked up. You reach people who handed you their key, and that is the whole address book.</span></div>
+      <div><b>No stored messages</b><span>Nothing queues anything for later. Two people have to be present at the same time, which is the price of nobody holding a copy.</span></div>
+      <div><b>No history</b><span>A transcript dies with the page. What survives a reload is what somebody deliberately pinned, sealed to their own identity.</span></div>
+      <div><b>No link previews</b><span>Fetching a thumbnail would mean the app contacting a stranger's server for every URL, before anyone clicked.</span></div>
+      <div><b>No read receipts to the operator</b><span>Delivery is confirmed between the two people, inside the encryption, not by a server that tracks state.</span></div>
+      <div><b>No account</b><span>There is nothing to sign up for and no password a server can be asked for, because there is no server holding one.</span></div>
+    </div>
+  </section>
+
+  <hr>
+
+  <footer>
+    <p>The specification is <a href="PROTOCOL.md">PROTOCOL.md</a>, normative for
+      what is on the wire. <a href="ARCHITECTURE.md">ARCHITECTURE.md</a> covers the
+      product and its infrastructure, <a href="THREAT-MODELS.md">THREAT-MODELS.md</a>
+      the deployment profiles and what each one does and does not defend.</p>
+    <p>This page is a companion and is kept beside them on purpose: a change to the
+      protocol and a change to this picture belong in the same commit.</p>
+  </footer>
+
+</div>
+</body>
+</html>
