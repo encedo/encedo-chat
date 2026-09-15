@@ -180,7 +180,24 @@ plain text, never markup, length-capped, and shown **next to the fingerprint of
 `IK_B`**, which is the only part a person can later compare against something
 else. Same rule as `re.au` in §7.4 and the invite import screen.
 
-### 4.4 The Journalist must be online. This is not a bug to route around
+### 4.4 A knock is a request, never a contact
+
+**The user's decision, 2026-09-15.** An accepted knock adds a contact; an
+unaccepted one adds nothing. There is no path on which a stranger's frame
+becomes an entry in somebody's contact book without a person having looked at
+it and said yes.
+
+This is also what makes the missing transcript binding acceptable (§9.2). The
+knock does not authenticate anybody and is not asked to: it carries a key that
+still has to prove itself through the ordinary EH-2 handshake, and in between
+sits a human being reading a fingerprint. A knock that lies costs the reader a
+glance and an Ignore.
+
+It follows that the pending list is attacker-fillable and must be built as
+such: capped, rate-limited, and cheap to clear. That is §7's problem, not this
+one's, but the two decisions have to be read together.
+
+### 4.5 The Journalist must be online. This is not a bug to route around
 
 GossipSub stores nothing (§1) and this proposal does not change that. A knock
 reaches a subscriber that is present, or it reaches nobody.
@@ -328,13 +345,26 @@ exist and are covered by tests today.
 1. ~~Is `HKDF(ECDH(eph, IK_A), "encedo-chat-invite-knock-v1", s)` the right
    schedule, with the invite secret as HKDF `info`?~~ **ANSWERED 2026-09-15:
    yes, and the binding matters.** Implemented as written.
-2. Is the one-shot sealed knock acceptable without any transcript binding, given
-   that the pair's real authentication is the EH-2 handshake that follows and
-   the knock only carries a key that must still prove itself?
+2. ~~Is the one-shot sealed knock acceptable without any transcript binding?~~
+   **SETTLED 2026-09-15 by the product decision in §4.4**: a knock is a request
+   a person accepts, never an automatic contact, so the frame is not asked to
+   authenticate anybody. Still worth a sanity read, but it is no longer a
+   blocking question.
 3. Does the unlinkability claim in §4.1 hold as stated against an adversary
-   holding several of one Journalist's invites?
+   holding several of one Journalist's invites? **Note, 2026-09-15:** the user
+   affirms the DENIABILITY of a single knock — anyone holding the invite could
+   have sent it, so no frame can be attributed to a person. That is true and it
+   is a different property from the one asked about here, which is whether
+   traffic on invite #1 can be correlated with traffic on invite #2. Both are
+   wanted; only the first is currently argued for.
 4. Is there any reason to prefer signing the knock over sealing it, given §8's
-   all-ECDH, deniable posture elsewhere in the protocol?
+   all-ECDH, deniable posture elsewhere in the protocol? **In plainer terms:**
+   sealing means only the recipient can read the frame and nobody can prove who
+   wrote it; signing would attach proof of authorship that anyone holding the
+   public key could verify — including whoever later seizes the Journalist's
+   device, who could then demonstrate that a particular person knocked. Sealing
+   is what this proposal does. The question is whether any argument favours the
+   other way, and none has been found.
 5. §6.1: does a padded, randomised decoy schedule on a public topic actually
    buy what it claims against an adversary who watches for months, or does the
    real-knock distribution leak through the decoy distribution over time? What
