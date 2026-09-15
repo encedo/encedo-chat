@@ -8,7 +8,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { encodeInvite, decodeInvite, inviteLink, MAX_NAME } from '../lib/invite.ts'
+import { encodeInvite, decodeInvite, inviteLink, newInboxSecret, inboxSecretBytes, MAX_NAME, INBOX_BYTES } from '../lib/invite.ts'
 
 const PUB = Buffer.alloc(32, 7).toString('base64')      // a well-formed 32-byte key
 const SHORT = Buffer.alloc(16, 7).toString('base64')
@@ -86,4 +86,50 @@ test('the reply marker survives a link that never had one', () => {
 
 test('a fragment that is not ours is left alone', () => {
   assert.equal(decodeInvite('#access_token=abc'), null)
+})
+
+// ---- the inbox secret (DISCOVERY-PROPOSAL.md) -------------------------------
+
+test('an inbox secret survives the round trip and yields its bytes', () => {
+  const s = newInboxSecret()
+  const got = decodeInvite('#' + encodeInvite({ pub: PUB, name: 'Dziennikarz', inbox: s }))
+  assert.equal(got!.inbox, s)
+  assert.equal(inboxSecretBytes(got!)!.length, INBOX_BYTES)
+})
+
+test('two invites never share an inbox — retiring one must not retire the rest', () => {
+  const seen = new Set<string>()
+  for (let i = 0; i < 64; i++) seen.add(newInboxSecret())
+  assert.equal(seen.size, 64)
+})
+
+test('an invite with no inbox is still a valid invite — every old link decodes', () => {
+  const got = decodeInvite('#' + encodeInvite({ pub: PUB, name: 'Alicja' }))
+  assert.deepEqual(got, { pub: PUB, name: 'Alicja' })
+  assert.equal(inboxSecretBytes(got!), null)
+})
+
+test('a present but broken inbox rejects the WHOLE invite, it does not decode to one without', () => {
+  // Dropping the field silently would hand the recipient a contact it can never
+  // announce to and no way to find out: it would knock nowhere and wait for an
+  // answer that was never possible.
+  const bad = (sv: unknown) => {
+    const o: any = { p: PUB, n: 'Ala', s: sv }
+    const frag = 'i=' + btoa(unescape(encodeURIComponent(JSON.stringify(o))))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    return decodeInvite('#' + frag)
+  }
+  assert.equal(bad(Buffer.alloc(16, 1).toString('base64')), null, 'too short')
+  assert.equal(bad(Buffer.alloc(64, 1).toString('base64')), null, 'too long')
+  assert.equal(bad('!!! not base64 !!!'), null, 'not decodable')
+  assert.equal(bad(7), null, 'not a string')
+  // and the control: the same shape with a good secret is accepted
+  assert.ok(bad(Buffer.alloc(INBOX_BYTES, 1).toString('base64')))
+})
+
+test('reply and inbox are independent fields', () => {
+  const s = newInboxSecret()
+  const got = decodeInvite('#' + encodeInvite({ pub: PUB, name: 'Ala', reply: true, inbox: s }))
+  assert.equal(got!.reply, true)
+  assert.equal(got!.inbox, s)
 })

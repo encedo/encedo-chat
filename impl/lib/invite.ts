@@ -22,16 +22,26 @@
  * passive observer, of data that is already public, while looking enough like a
  * safeguard to stop anyone checking the fingerprint that actually works.
  *
- * An expiry was rejected for a different reason: it defends nothing. A pair's
- * rendezvous topic is `ECDH(IK_a, IK_b)` (see `deriveRoom`), so someone who
- * imports your key unilaterally cannot reach you — they publish to a topic you
- * never subscribe to, because reaching it needs YOUR copy of THEIR key. An
- * invite that leaks is inert on its own.
+ * An expiry was rejected for a different reason, and half of that reason has
+ * since expired itself. A pair's rendezvous topic is `ECDH(IK_a, IK_b)` (see
+ * `deriveRoom`), so someone who imports a BARE invite unilaterally cannot reach
+ * you — they publish to a topic you never subscribe to, because reaching it
+ * needs YOUR copy of THEIR key. A bare invite that leaks is inert on its own.
+ *
+ * An invite carrying an INBOX is not inert, because being reachable is the
+ * whole of what it is for. What stands in for an expiry there is RETIREMENT:
+ * the publisher stops listening on that one topic. It needs no announcement,
+ * cannot be refused, tells nobody, and leaves every other invite alive — which
+ * an expiry, firing on a date chosen before anything happened, does not.
  */
 
 /** Longest display name accepted from a link. Long enough for a real name,
  *  short enough that it cannot be used to wreck the contact list. */
 export const MAX_NAME = 64
+
+/** An inbox secret is a full-width key's worth of randomness, like every other
+ *  secret that names a topic (`topicFromSecret`). */
+export const INBOX_BYTES = 32
 
 export interface Invite {
   pub: string
@@ -50,6 +60,46 @@ export interface Invite {
    * the middle of one.
    */
   reply?: boolean
+  /**
+   * The inbox this invite can be answered on: `INBOX_BYTES` of randomness,
+   * base64, minted by `newInboxSecret`.
+   *
+   * A bare invite is one-way by construction. The recipient can derive the pair
+   * topic — they hold the publisher's key — but the publisher holds nothing
+   * about the recipient and can derive nothing, so the only way back is a
+   * channel the two do not have, which is the channel this product exists to
+   * make unnecessary. This secret names a topic BOTH sides can compute: the
+   * publisher listens on it, the recipient knocks there with its own key sealed
+   * to the publisher, and after that the ordinary pair topic takes over.
+   *
+   * It is public by construction — it is printed wherever the link is — so the
+   * topic is unguessable only to somebody who has not seen the link. That is a
+   * real cost and it is written up in DISCOVERY-PROPOSAL.md §6.1 rather than
+   * hidden here.
+   *
+   * Absent means an invite with no inbox, which is exactly what this module
+   * produced before it existed: every old link still decodes, and its reply
+   * still travels by hand.
+   */
+  inbox?: string
+}
+
+/** A fresh inbox secret, base64. One per published invite — never shared
+ *  between them, or retiring one would have to retire the others
+ *  (DISCOVERY-PROPOSAL.md §4.1). */
+export function newInboxSecret(): string {
+  const b = new Uint8Array(INBOX_BYTES)
+  crypto.getRandomValues(b)
+  return btoa(String.fromCharCode(...b))
+}
+
+/** The 32 raw bytes behind an invite's inbox, or null if it has none. */
+export function inboxSecretBytes(inv: Invite): Uint8Array | null {
+  if (!inv.inbox) return null
+  try {
+    const raw = Uint8Array.from(atob(inv.inbox), (c) => c.charCodeAt(0))
+    return raw.length === INBOX_BYTES ? raw : null
+  } catch { return null }
 }
 
 const b64urlEncode = (s: string) =>
@@ -62,6 +112,7 @@ const b64urlDecode = (s: string) =>
 export function encodeInvite(inv: Invite): string {
   const o: any = { p: inv.pub, n: inv.name.slice(0, MAX_NAME) }
   if (inv.reply) o.r = 1
+  if (inv.inbox) o.s = inv.inbox
   return 'i=' + b64urlEncode(JSON.stringify(o))
 }
 
@@ -97,5 +148,24 @@ export function decodeInvite(hash: string): Invite | null {
   // characters arrives as a contact with no visible name at all.
   const name = obj.n.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '').trim().slice(0, MAX_NAME)
   if (!name) return null
-  return obj.r ? { pub: obj.p, name, reply: true } : { pub: obj.p, name }
+
+  // A present-but-broken inbox rejects the WHOLE invite rather than decoding to
+  // one without it. Dropping the field silently would hand the recipient a
+  // contact it can never announce to and no way to find out: it would knock
+  // nowhere and wait for an answer that was never possible. A missing field is
+  // a different thing entirely and stays valid — that is every link minted
+  // before this existed.
+  let inbox: string | undefined
+  if (obj.s !== undefined) {
+    if (typeof obj.s !== 'string') return null
+    let raw: Uint8Array
+    try { raw = Uint8Array.from(atob(obj.s), (c) => c.charCodeAt(0)) } catch { return null }
+    if (raw.length !== INBOX_BYTES) return null
+    inbox = obj.s
+  }
+
+  const out: Invite = { pub: obj.p, name }
+  if (obj.r) out.reply = true
+  if (inbox) out.inbox = inbox
+  return out
 }
