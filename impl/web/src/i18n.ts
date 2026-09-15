@@ -183,6 +183,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     // ---- published invites (DISCOVERY-PROPOSAL.md) ----
     'Zaproszenia': 'Invites',
     'CZEKAM': 'WAITING',
+    'Zapukaliśmy — czekamy, aż {name} przyjmie': 'Knocked — waiting for {name} to accept',
     'Zapukaliśmy i czekamy na przyjęcie. Nie ma potwierdzenia, że doręczono — ponawiamy, dopóki aplikacja jest otwarta.':
       'We knocked and are waiting to be let in. There is no confirmation of delivery — we keep retrying while the app is open.',
     'zapukaliśmy — brak potwierdzenia doręczenia': 'knocked — no delivery confirmation',

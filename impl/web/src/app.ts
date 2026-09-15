@@ -2288,6 +2288,11 @@ $('import-add').addEventListener('click', async () => {
     // why. The reason is that adding somebody is one-way — they still have
     // nothing of yours — so it is said in a sentence and left as a choice.
     if (inv.reply) toast(tr('Wymiana zakończona — możecie rozmawiać'))
+    // An inbox invite has already sent our key: that is what the knock IS.
+    // Asking to send it again right afterwards would read as the app not
+    // knowing what it just did, and answering yes would hand the person a
+    // second, manual copy of a thing already in flight.
+    else if (inv.inbox && store !== 'none') toast(tr('Zapukaliśmy — czekamy, aż {name} przyjmie', { name }))
     else if ((await ask(tr('Dodano {name}', { name }),
       tr('{name} nie ma jeszcze Twojego klucza — bez niego nie zobaczycie się nawzajem. Odesłać teraz swój kod?', { name }),
       tr('Odeślij mój kod'), undefined, undefined, tr('Nie teraz'), false)).ok) await openShare(true)
