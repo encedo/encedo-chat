@@ -150,24 +150,38 @@ export async function probeCapabilities(opts: { hostRtc?: boolean } = {}): Promi
   add('Notification', false, typeof (globalThis as any).Notification === 'function',
     'Brak powiadomień systemowych — o nowej wiadomości dowiesz się dopiero po wróceniu do aplikacji.')
 
-  // Recording needs both halves too, and WebKitGTK is exactly the platform
-  // where they can come apart. Without it the microphone button is hidden — the
-  // same rule as the QR scanner: an option that cannot do anything is worse
-  // than a missing one.
-  add('MediaRecorder', false,
-    typeof (globalThis as any).MediaRecorder === 'function'
-    && typeof navigator === 'object' && !!navigator.mediaDevices?.getUserMedia,
-    'Ta platforma nie umie nagrywać dźwięku — głosówek nie da się nagrać, ale przysłane można odsłuchać.')
+  /**
+   * Capture is the half these two share, so it gets computed once and NAMED.
+   *
+   * Both entries below are an AND of their own API and `getUserMedia`, and
+   * until now each reported one bare "this platform cannot" for either cause.
+   * That is not enough to act on, and it actively misleads: on WebKit
+   * `BarcodeDetector` never exists, so the QR line fails whatever the camera
+   * does, and reading the two lines together suggests a shared cause that may
+   * not be there. It cost a wrong guess on the macOS report of 2026-09-15,
+   * where the real fault was capture missing in the packaged app.
+   *
+   * So each note says which half is absent. `navigator.mediaDevices` missing in
+   * a packaged app is worth calling out by name: WKWebView hides capture
+   * entirely unless the bundle declares NSMicrophoneUsageDescription, and
+   * WebKitGTK is the other place the two halves come apart.
+   */
+  const canCapture = typeof navigator === 'object' && !!navigator.mediaDevices?.getUserMedia
+  const noCapture = ' Brak dostępu do mikrofonu i kamery (navigator.mediaDevices) — w paczce zwykle znaczy, że aplikacja go nie zadeklarowała.'
 
-  // Reading a QR needs both halves, and they fail apart: Shape Detection is
-  // absent on desktop Linux/Windows Chrome (it ships on Android, macOS and
-  // ChromeOS), while a camera may be missing anywhere. Showing a code always
-  // works — it is scanning that is conditional, and the app says so instead of
-  // opening a viewfinder that can never resolve anything.
-  add('BarcodeDetector', false,
-    typeof (globalThis as any).BarcodeDetector === 'function'
-    && typeof navigator === 'object' && !!(navigator as any).mediaDevices?.getUserMedia,
-    'Ta platforma nie umie czytać kodów QR (brak czytnika albo dostępu do kamery) — kod można pokazać, ale nie zeskanować; zostaje wklejenie linku.')
+  const hasRecorder = typeof (globalThis as any).MediaRecorder === 'function'
+  add('MediaRecorder', false, hasRecorder && canCapture,
+    'Ta platforma nie umie nagrywać dźwięku — głosówek nie da się nagrać, ale przysłane można odsłuchać.'
+    + (hasRecorder ? noCapture : ' Brak MediaRecorder.'))
+
+  // Showing a code always works — it is scanning that is conditional, and the
+  // app says so instead of opening a viewfinder that can never resolve
+  // anything. Shape Detection is absent on desktop Linux/Windows Chrome and on
+  // every WebKit; it ships on Android and ChromeOS.
+  const hasDetector = typeof (globalThis as any).BarcodeDetector === 'function'
+  add('BarcodeDetector', false, hasDetector && canCapture,
+    'Ta platforma nie umie czytać kodów QR — kod można pokazać, ale nie zeskanować; zostaje wklejenie linku.'
+    + (hasDetector ? noCapture : ' Brak czytnika kodów (BarcodeDetector).'))
 
   const missing = caps.filter((c) => c.required && !c.ok)
   const degraded = caps.filter((c) => !c.required && !c.ok)
