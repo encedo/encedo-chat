@@ -2468,6 +2468,120 @@ async function main() {
     if (looped) throw new Error('importing a reply offered another reply — the exchange loops')
     step('A imported the reply and was NOT asked to send its key again')
 
+    // ---- a published invite, and the knock that answers it --------------------
+    // The one path no screenshot can reach: it takes a second machine to knock
+    // from. What it proves is the whole loop - A publishes, B knocks, A sees a
+    // REQUEST rather than a contact, and only accepting makes one (§4.4).
+    //
+    // B gets a THIRD identity for it. A already holds `sim-b` from the seeding
+    // and from the reply above, so on that key "accepting is what creates the
+    // contact" cannot be told apart from "it was there all along" - the
+    // assertion would pass against an app that added the contact on the knock.
+    scenario('a published invite is answered by a knock, and a knock is a request')
+    await B.reload('about:blank')
+    await B.reload(APP_URL)
+    await B.waitFor('B back at the login form', `return !!document.getElementById('go-soft')`, 20_000)
+    await softProfile(B, 'sim-c')
+    await B.waitFor('B signed in as a stranger to A', `
+      return !document.getElementById('app').hidden;
+    `, 30_000)
+
+    const inv = await A.eval<any>(`
+      document.getElementById('tab-invites').click();
+      document.getElementById('btn-new-invite').click();
+      return new Promise((res) => setTimeout(() => {
+        const key = Object.keys(localStorage).find((k) => k.startsWith('ec-invites-'));
+        const rows = JSON.parse(localStorage.getItem(key) || '[]');
+        res({ secret: rows[0] && rows[0].secret, rows: rows.length,
+              shown: document.querySelectorAll('#pane-invites .inv-row').length });
+      }, 500));
+    `)
+    if (inv.rows !== 1 || inv.shown !== 1) throw new Error(`the invite was not created: ${JSON.stringify(inv)}`)
+    if (!inv.secret || Buffer.from(inv.secret, 'base64').length !== 32)
+      throw new Error(`the invite carries no usable inbox secret: ${JSON.stringify(inv.secret)}`)
+    step('A published an invite, and it carries 32 bytes of inbox secret')
+
+    // The link is built HERE rather than read back out of the app, so this
+    // asserts the format instead of trusting the function that wrote it.
+    const pubA2 = await A.eval<string>(`return window.__pub`)
+    const frag = 'i=' + Buffer.from(JSON.stringify({ p: pubA2, n: 'sim-a', s: inv.secret }), 'utf8').toString('base64url')
+
+    await B.eval(`location.hash = ${JSON.stringify(frag)}; return 1`)
+    await B.waitFor('B is shown the published invite', `
+      return document.getElementById('import-modal').classList.contains('open');
+    `, 15_000)
+    await B.eval(`document.getElementById('import-add').click(); return 1`)
+
+    await B.waitFor('B shows the contact as waiting, not as merely new', `
+      const row = [...document.querySelectorAll('#pane-contacts .contact')]
+        .find((c) => (c.textContent || '').includes('sim-a'));
+      return !!row && !!row.querySelector('.c-new.waiting');
+    `, 30_000)
+    // B is NOT asked to send its key back: the knock already did that, and the
+    // question would read as the app not knowing what it had just done.
+    await sleep(1_500)
+    const asked = await B.eval<boolean>(`
+      const m = document.getElementById('ask-modal');
+      return m.classList.contains('open') && /kod|code/i.test(document.getElementById('ask-body').textContent || '');
+    `)
+    if (asked) throw new Error('B was asked to send a key the knock had already sent')
+    step('B knocked, and its contact says so instead of claiming nothing happened')
+
+    // A is listening on that invite's topic, so the knock arrives as a request.
+    // The window is wide because a knock is sent once and then retried on the
+    // 90 s timer - a first frame lost to a cold mesh must not fail the run.
+    const knockDiag = async () => A.eval<any>(`
+      document.getElementById('tab-invites').click();
+      return { paneHtml: document.getElementById('pane-invites').innerHTML.slice(0, 400),
+               paneHidden: document.getElementById('pane-invites').hidden,
+               badge: document.getElementById('inv-badge').textContent,
+               badgeHidden: document.getElementById('inv-badge').hidden };
+    `)
+    // The gate is the load-bearing half of §4.4: a knock became a REQUEST, not a
+    // contact. Those facts are synchronous - the row, the name, the badge - so
+    // this does NOT touch the tab (a click re-renders the pane, which restarts
+    // the async fingerprint and would make any read in the same tick see the
+    // placeholder). The invites tab is already open from minting.
+    await A.waitFor('the knock reached A as a pending request', `
+      const row = document.querySelector('#pane-invites .knock-row');
+      return !!row && (row.textContent || '').includes('sim-c')
+        && document.getElementById('inv-badge').textContent === '1';
+    `, 100_000).catch(async (e) => { throw new Error(`${e.message} :: ${JSON.stringify(await knockDiag())}`) })
+    // The fingerprint is computed off-thread (SHA-256) and fills the row a beat
+    // later. It is asserted on its own so the gate above does not race it - the
+    // point of showing it is that a person decides on the KEY, not the name.
+    await A.waitFor('the request shows a fingerprint to check', `
+      const fp = document.querySelector('#pane-invites .knock-row .k-fp');
+      return !!fp && /[0-9A-F]{2}:[0-9A-F]{2}/.test(fp.textContent || '');
+    `, 15_000)
+    const req = await A.eval<any>(`
+      const row = document.querySelector('#pane-invites .knock-row');
+      return { fp: (row.querySelector('.k-fp') || {}).textContent || '',
+               contacts: [...document.querySelectorAll('#pane-contacts .contact')]
+                 .filter((c) => (c.textContent || '').includes('sim-c')).length };
+    `)
+    if (req.contacts !== 0) throw new Error('a knock added a contact by itself')
+    step(`A sees a request with a fingerprint, and no contact was created: ${req.fp}`)
+
+    await A.eval(`
+      document.querySelector('#pane-invites .knock-row .inv-acts button').click(); return 1;
+    `)
+    await A.waitFor('accepting makes the contact', `
+      return [...document.querySelectorAll('#pane-contacts .contact')]
+        .some((c) => (c.textContent || '').includes('sim-c'));
+    `, 20_000)
+    step('accepting the request is what creates the contact')
+
+    // And the wait ends by itself, with no reply channel: A now holds B's key,
+    // so A can reach the pair topic, and an Announce there is the whole answer.
+    await B.waitFor('B stops waiting once A can reach the pair topic', `
+      const row = [...document.querySelectorAll('#pane-contacts .contact')]
+        .find((c) => (c.textContent || '').includes('sim-a'));
+      return !!row && !row.querySelector('.c-new.waiting');
+    `, 60_000)
+    await A.eval(`document.getElementById('tab-contacts').click(); return 1`)
+    step('B stopped waiting when A appeared - no reply channel was needed')
+
     // ---- moving a profile out, and refusing to move it back on top of itself ---
     // A software identity is a RANDOM key sealed with a password, so losing a
     // browser's storage loses the identity itself — the same name and password
