@@ -43,5 +43,46 @@
 <dict>
   <key>LSAppNapIsDisabled</key>
   <true/>
+
+  <!--
+    Without this key WKWebView does not merely REFUSE the microphone - it does
+    not expose capture at all, so `navigator.mediaDevices` is undefined and the
+    app cannot even tell that a microphone exists. That is why the composer had
+    no record button on macOS while every other capability passed: the button is
+    shown only when MediaRecorder and getUserMedia are BOTH there, and the
+    second one can never appear for a bundle that has not said what it wants the
+    microphone for. Reported 2026-09-15 on macOS 27.0 (26A428), against an
+    installed 0.5.85 whose Info.plist carried only the key above.
+
+    MEASURED, not reasoned. Two .app bundles on that machine, the same compiled
+    WKWebView binary in both, both loading https://onchato.com/, differing in
+    this key alone:
+
+        no  NSMicrophoneUsageDescription -> navigator.mediaDevices  undefined
+        with NSMicrophoneUsageDescription -> navigator.mediaDevices  object
+
+    `MediaRecorder` was a function and `window.isSecureContext` was true in BOTH
+    runs, which rules out the two other suspects: the recorder was never absent,
+    and the custom scheme was never the problem.
+
+    The permission itself is already granted on our side of the fence: wry
+    answers WKUIDelegate's requestMediaCapturePermissionForOrigin with Grant
+    unconditionally. What was missing was the system's half.
+
+    No entitlement goes with it. `com.apple.security.device.audio-input` is an
+    App Sandbox key and these bundles are neither sandboxed nor signed
+    (.github/workflows/desktop.yml - signing needs a paid Apple account).
+
+    The string is what macOS shows in its own consent dialog, so it is written
+    for the person reading that dialog, in the app's default language. A single
+    Info.plist string cannot be localized without InfoPlist.strings files, which
+    is a deliberate omission rather than an oversight.
+
+    NSCameraUsageDescription is deliberately NOT here. Scanning a QR needs
+    BarcodeDetector, which no WebKit has ever shipped, so declaring the camera
+    would promise a feature that still could not work.
+  -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>onchato nagrywa glosowke tylko wtedy, gdy sam rozpoczniesz nagranie. Jest szyfrowana na tym urzadzeniu, zanim je opusci.</string>
 </dict>
 </plist>
