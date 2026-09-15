@@ -277,7 +277,19 @@ server {
 server {
     listen 80;
     server_name bs1.onchato.com;
-    return 301 https://$host$request_uri;
+
+    # Utwardzenie, nie naprawa awarii: ten certyfikat odnawia sie dzis wtyczka
+    # nginx (authenticator = nginx), ktora sama wstawia sobie location na czas
+    # wyzwania, wiec `return` na poziomie serwera mu nie przeszkadzal. Ale to
+    # uzaleznia odnowienie od tego, ze certbot zdola wyedytowac plik, ktory my
+    # i tak nadpisujemy przez scp - dokladnie ten argument stoi przy bloku
+    # onchato.com wyzej. Stala lokalizacja usuwa te zaleznosc i przezyje
+    # ewentualne przejscie na webroot.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+    location / { return 301 https://$host$request_uri; }
 }
 
 # --- HTTPS: bs1.onchato.com — libp2p relay ---
@@ -324,5 +336,12 @@ location /mqtt {
         return 200 "bs1 ok\n";
         add_header Content-Type text/plain;
     }
+
+    # Reszta to aplikacja. Bez tego bs1.onchato.com w przegladarce pokazywal
+    # strone powitalna nginx — gorzej niz 404, bo reklamuje serwer i wyglada
+    # jak maszyna, ktorej nikt nie skonfigurowal. /relay, /mqtt i /health sa
+    # osobnymi lokalizacjami i wygrywaja z ta. Ten sam ksztalt co catchall w
+    # infra/nginx/relay-node.conf, ktory renderuja bs2 i bs3.
+    location / { return 301 https://onchato.com$request_uri; }
 
 }
