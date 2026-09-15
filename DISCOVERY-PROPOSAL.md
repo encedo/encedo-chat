@@ -71,6 +71,12 @@ body = AES-256-GCM(k, { ik: IK_B_pub, name, note })
 wire = { eph: eph_pub, ct: body }
 ```
 
+**Confirmed by the cryptographer, 2026-09-15**: the schedule is right and the
+binding to `s` is important. It is therefore load-bearing rather than
+incidental — a knock sealed for one invite does not open under another even
+though both are addressed to the same identity key, and `test/knock.test.ts`
+fails if the `info` is dropped. Built in `lib/knock.ts`.
+
 The Journalist opens it with `ECDH(IK_A_priv, eph_pub)`.
 
 **The ephemeral key is not decoration.** Without it the Source's identity key
@@ -319,9 +325,9 @@ exist and are covered by tests today.
 
 ## 9. For the cryptographer
 
-1. Is `HKDF(ECDH(eph, IK_A), "encedo-chat-invite-knock-v1", s)` the right
-   schedule, with the invite secret as HKDF `info`? The intent is that a knock
-   is bound to the invite it came through as well as to the recipient.
+1. ~~Is `HKDF(ECDH(eph, IK_A), "encedo-chat-invite-knock-v1", s)` the right
+   schedule, with the invite secret as HKDF `info`?~~ **ANSWERED 2026-09-15:
+   yes, and the binding matters.** Implemented as written.
 2. Is the one-shot sealed knock acceptable without any transcript binding, given
    that the pair's real authentication is the EH-2 handshake that follows and
    the knock only carries a key that must still prove itself?
