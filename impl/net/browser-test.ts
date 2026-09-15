@@ -2498,35 +2498,51 @@ async function main() {
     await A.waitFor('the invite window opens instead of minting on the press', `
       return document.getElementById('invite-modal').classList.contains('open');
     `, 10_000)
-    const early = await A.eval<number>(`
-      const key = Object.keys(localStorage).find((k) => k.startsWith('ec-invites-'));
-      return JSON.parse(localStorage.getItem(key) || '[]').length;
-    `)
+    // The store is sealed, so nothing here reads localStorage: the pane IS the
+    // evidence of what exists.
+    const early = await A.eval<number>(`return document.querySelectorAll('#pane-invites .inv-row').length`)
     if (early !== 0) throw new Error(`an invite was written before Save: ${early}`)
+
+    // "Kopiuj link" is how a person gets the link out, and the clipboard is
+    // caught the way the export scenario catches a download. Reading the secret
+    // off localStorage is no longer possible — §10 reached that key, and this
+    // scenario broke on it, which is the storage-format lesson arriving again.
     const inv = await A.eval<any>(`
       document.getElementById('invite-label').value = 'dla informatorów';
       document.getElementById('invite-save').click();
       return new Promise((res) => setTimeout(() => {
-        const key = Object.keys(localStorage).find((k) => k.startsWith('ec-invites-'));
-        const rows = JSON.parse(localStorage.getItem(key) || '[]');
-        res({ secret: rows[0] && rows[0].secret, rows: rows.length, label: rows[0] && rows[0].label,
-              expires: rows[0] && rows[0].expires,
-              shown: document.querySelectorAll('#pane-invites .inv-row').length });
-      }, 500));
+        window.__copied = null;
+        // Headless does not always expose a clipboard, and the app's own copy
+        // path swallows that — so the stand-in is installed rather than assumed.
+        if (!navigator.clipboard) Object.defineProperty(navigator, 'clipboard', { value: {}, configurable: true });
+        try { navigator.clipboard.writeText = (t) => { window.__copied = t; return Promise.resolve(); }; }
+        catch (e) { Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } }, configurable: true }); }
+        const row = document.querySelector('#pane-invites .inv-row');
+        if (row) row.querySelector('.inv-acts button').click();
+        setTimeout(() => res({
+          link: window.__copied,
+          shown: document.querySelectorAll('#pane-invites .inv-row').length,
+          label: (document.querySelector('#pane-invites .inv-label') || {}).textContent,
+          // No end was the default, so the row shows the creation date rather
+          // than a deadline. The DOM is where that fact is readable now.
+          when: (document.querySelector('#pane-invites .inv-when') || {}).textContent || '',
+        }), 300);
+      }, 700));
     `)
+    if (inv.shown !== 1) throw new Error(`the invite was not created: ${JSON.stringify(inv)}`)
     if (inv.label !== 'dla informatorów') throw new Error(`the typed name did not survive: ${inv.label}`)
-    // No end is the default, and it has to STAY the default: an invite that dies
-    // by itself is a choice, not something that happens to you.
-    if (inv.expires) throw new Error(`an invite expired without anybody asking for it: ${inv.expires}`)
-    if (inv.rows !== 1 || inv.shown !== 1) throw new Error(`the invite was not created: ${JSON.stringify(inv)}`)
-    if (!inv.secret || Buffer.from(inv.secret, 'base64').length !== 32)
-      throw new Error(`the invite carries no usable inbox secret: ${JSON.stringify(inv.secret)}`)
-    step('A published an invite, and it carries 32 bytes of inbox secret')
+    if (/^do /.test(inv.when)) throw new Error(`an invite expired without anybody asking for it: ${inv.when}`)
+    if (!inv.link || !inv.link.includes('#i=')) throw new Error(`no invite link was copied: ${inv.link}`)
+    if (inv.link.split('#')[0].includes('i=')) throw new Error('the invite escaped the fragment')
 
-    // The link is built HERE rather than read back out of the app, so this
-    // asserts the format instead of trusting the function that wrote it.
-    const pubA2 = await A.eval<string>(`return window.__pub`)
-    const frag = 'i=' + Buffer.from(JSON.stringify({ p: pubA2, n: 'sim-a', s: inv.secret }), 'utf8').toString('base64url')
+    // Decoded rather than trusted: the fragment must carry the key, a name and
+    // 32 bytes of inbox secret, or the other side has nothing to knock on.
+    const frag = inv.link.slice(inv.link.indexOf('#') + 1)
+    const payload = JSON.parse(Buffer.from(frag.slice(2), 'base64url').toString('utf8'))
+    if (!payload.p || !payload.n) throw new Error(`the invite fragment is missing a field: ${JSON.stringify(payload)}`)
+    if (!payload.s || Buffer.from(payload.s, 'base64').length !== 32)
+      throw new Error(`the invite carries no usable inbox secret: ${JSON.stringify(payload.s)}`)
+    step('A published an invite, and its link carries 32 bytes of inbox secret')
 
     await B.eval(`location.hash = ${JSON.stringify(frag)}; return 1`)
     await B.waitFor('B is shown the published invite', `
