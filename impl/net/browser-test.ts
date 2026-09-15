@@ -2487,16 +2487,37 @@ async function main() {
       return !document.getElementById('app').hidden;
     `, 30_000)
 
-    const inv = await A.eval<any>(`
+    // Minting goes through a window now: the name and the lifetime are decided
+    // BEFORE anything exists. That nothing is written until Save is the point of
+    // the change, so it is asserted rather than stepped over.
+    await A.eval(`
       document.getElementById('tab-invites').click();
       document.getElementById('btn-new-invite').click();
+      return 1;
+    `)
+    await A.waitFor('the invite window opens instead of minting on the press', `
+      return document.getElementById('invite-modal').classList.contains('open');
+    `, 10_000)
+    const early = await A.eval<number>(`
+      const key = Object.keys(localStorage).find((k) => k.startsWith('ec-invites-'));
+      return JSON.parse(localStorage.getItem(key) || '[]').length;
+    `)
+    if (early !== 0) throw new Error(`an invite was written before Save: ${early}`)
+    const inv = await A.eval<any>(`
+      document.getElementById('invite-label').value = 'dla informatorów';
+      document.getElementById('invite-save').click();
       return new Promise((res) => setTimeout(() => {
         const key = Object.keys(localStorage).find((k) => k.startsWith('ec-invites-'));
         const rows = JSON.parse(localStorage.getItem(key) || '[]');
-        res({ secret: rows[0] && rows[0].secret, rows: rows.length,
+        res({ secret: rows[0] && rows[0].secret, rows: rows.length, label: rows[0] && rows[0].label,
+              expires: rows[0] && rows[0].expires,
               shown: document.querySelectorAll('#pane-invites .inv-row').length });
       }, 500));
     `)
+    if (inv.label !== 'dla informatorów') throw new Error(`the typed name did not survive: ${inv.label}`)
+    // No end is the default, and it has to STAY the default: an invite that dies
+    // by itself is a choice, not something that happens to you.
+    if (inv.expires) throw new Error(`an invite expired without anybody asking for it: ${inv.expires}`)
     if (inv.rows !== 1 || inv.shown !== 1) throw new Error(`the invite was not created: ${JSON.stringify(inv)}`)
     if (!inv.secret || Buffer.from(inv.secret, 'base64').length !== 32)
       throw new Error(`the invite carries no usable inbox secret: ${JSON.stringify(inv.secret)}`)
