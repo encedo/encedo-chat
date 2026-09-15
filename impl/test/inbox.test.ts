@@ -168,11 +168,14 @@ test('a decoy goes out on its own, and it is a real frame on the right topic', a
   const w = watchInbox(h.node, inbox, j, P, {
     now: c.now, tickMs: 5, decoyEveryMs: 1_000, onKnock: () => {},
   })
-  await sleep(40)
+  // Settle FIRST. `decoy()` awaits the watch's own setup chain, so after this
+  // the subscription and the seed exist and the measurement below is about the
+  // schedule rather than about how loaded the test runner is. Then start from
+  // a clean count. Waiting a plausible number of milliseconds instead is what
+  // made this file flaky under the full parallel suite.
+  await w.decoy()
   const topic = [...h.subscribed][0]
-  // Walk the clock across a few slots; each one owes exactly one decoy. The
-  // sleep is a MARGIN, not a plausible number: the watch does crypto on its own
-  // async chain, and under a loaded runner a tight wait measures the runner.
+  h.published.length = 0
   for (let i = 0; i < 20; i++) { c.add(200); await sleep(25) }
   const mine = h.published.filter((p) => p.topic === topic)
   assert.ok(mine.length >= 1, 'no cover traffic was published at all')
@@ -189,11 +192,12 @@ test('the decoy schedule is deterministic for one identity, and differs per invi
   const run = async (inbox: Uint8Array) => {
     const h = hub(); const c = clock()
     const w = watchInbox(h.node, inbox, j, P, { now: c.now, tickMs: 5, decoyEveryMs: 1_000, onKnock: () => {} })
-    await sleep(40)
+    await w.decoy()               // settle the setup chain, then measure the schedule
+    h.published.length = 0
     const at: number[] = []
     for (let i = 0; i < 20; i++) {
       const before = h.published.length
-      c.add(200); await sleep(25)   // margin, see the note in the decoy test above
+      c.add(200); await sleep(25)
       if (h.published.length > before) at.push(c.now())
     }
     w.stop()
@@ -205,4 +209,31 @@ test('the decoy schedule is deterministic for one identity, and differs per invi
   assert.deepEqual(a1, a2, 'the same identity and invite produced two different schedules')
   assert.ok(a1.length > 0, 'the schedule produced nothing to compare')
   assert.notDeepEqual(a1, b1, 'two invites of one identity shared a schedule')
+})
+
+test('the schedule depends on the IDENTITY too, not only on the invite', async () => {
+  // The mirror of the test above, and the one that proves the seed really is the
+  // self-ECDH (§4.6): the same invite watched by two different Journalists must
+  // not produce the same cover traffic. If the seed were the invite secret -
+  // which is public - these would line up, and every holder of the link could
+  // subtract the decoys and read off the real knocks.
+  const inbox = secret(6)
+  const run = async (j: Awaited<ReturnType<typeof generateX25519>>) => {
+    const h = hub(); const c = clock()
+    const w = watchInbox(h.node, inbox, j, P, { now: c.now, tickMs: 5, decoyEveryMs: 1_000, onKnock: () => {} })
+    await w.decoy()               // settle the setup chain, then measure the schedule
+    h.published.length = 0
+    const at: number[] = []
+    for (let i = 0; i < 20; i++) {
+      const before = h.published.length
+      c.add(200); await sleep(25)
+      if (h.published.length > before) at.push(c.now())
+    }
+    w.stop()
+    return at
+  }
+  const a = await run(await generateX25519())
+  const b = await run(await generateX25519())
+  assert.ok(a.length > 0, 'no cover traffic to compare')
+  assert.notDeepEqual(a, b, 'two identities sharing an invite produced the same schedule')
 })

@@ -24,6 +24,7 @@ import type { webrtcLink } from '../net/webrtc.ts'
 import { createXferSession, type XferSession, type XferEv, type FileLike, type OfferResult } from './xfer-session.ts'
 import { watchSelfSessionRotating, type SelfWatch } from './selfsession.ts'
 import { watchPresenceRotating, rendezvousDay, type PresenceWatch } from './presence.ts'
+import { watchInbox as startInboxWatch, type InboxWatch, type InboxKnock } from './inbox.ts'
 import { GroupManager, type AdminGk, type GkBackend } from './group.ts'
 import {
   SELF_PREFIX, buildPeerDescr, parsePeerDescr, parseSelfDescr, peerSearchPrefix, peerLabel, hemKid, descrText,
@@ -581,6 +582,23 @@ export interface ClientSession {
   }): Promise<void>
   /** Drop one contact's presence watch (e.g. it was removed). */
   unwatch(pub: string): void
+  /**
+   * Listen on one published invite's inbox (DISCOVERY-PROPOSAL.md §2).
+   *
+   * Unlike `watchContacts` this is not about people we know: the topic is named
+   * by a secret printed wherever the invite was published, so anybody who read
+   * it can knock. A knock is a REQUEST and never a contact (§4.4) — this hands
+   * one up, and whether it becomes a contact is the app's and the person's
+   * decision, made against the fingerprint.
+   *
+   * One watch per published invite, sharing this session's single transport.
+   * Retiring an invite is `stop()` on its watch: it unsubscribes, tells nobody,
+   * cannot be refused, and leaves the other invites alone (§4.1).
+   */
+  watchInbox(inboxSecret: Uint8Array, handlers: {
+    onKnock(k: InboxKnock): void
+    onLog?(m: string): void
+  }): InboxWatch
   /** This identity's group manager (Sender Keys, §8) — createGroup / applySkd /
    *  skdFor / rekey. Incoming SKDs on any 1:1 room are applied to it automatically. */
   readonly groups: GroupManager
@@ -835,6 +853,8 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // back to a watch.
   interface Watched { peer: Peer; watch: PresenceWatch }
   const presence = new Map<string, Watched>() // key = peer.pub
+  /** One per published invite; stopped with the session (DISCOVERY-PROPOSAL.md §2). */
+  const inboxes = new Set<InboxWatch>()
   // The day a contact's handshake arrived on, remembered until we open the room
   // so it lands on the exact rotating topic the handshake is using (see `open`).
   // Time-bounded: only an upgrade opened promptly should override today, never a
@@ -912,6 +932,8 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     if (closed) return
     closed = true
     log(`session closing: ${why}`)
+    for (const w of [...inboxes]) { try { w.stop() } catch {} }
+    inboxes.clear()
     for (const w of presence.values()) { try { w.watch.stop() } catch {} }
     presence.clear(); upgradeDate.clear()
     selfWatch?.stop()
@@ -1036,6 +1058,22 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       let peers = 0
       try { peers = node.getConnections().length } catch {}
       return { transport: viaMqtt ? 'mqtt' : 'libp2p', relay: viaMqtt ? (opts.broker ?? '') : activeRelay, self, link, connected: connected(), peers, topics }
+    },
+    watchInbox(inboxSecret, handlers) {
+      // The identity is both halves: it opens the knocks, and `dh(dh.pub)` is
+      // the self-ECDH that seeds the decoy schedule (§4.6). Nothing else needs
+      // passing in, and nothing about the schedule is stored.
+      const dh = dhFromEcdh(id.pub, (peerPubB64) => id.ecdh(peerPubB64))
+      const inner = startInboxWatch(node, inboxSecret, dh, params, {
+        onKnock: handlers.onKnock,
+        onLog: handlers.onLog ?? log,
+      })
+      const w: InboxWatch = {
+        decoy: () => inner.decoy(),
+        stop() { try { inner.stop() } catch {} ; inboxes.delete(w) },
+      }
+      inboxes.add(w)
+      return w
     },
     groups,
     async openGroup(gidHex: string, handlers: GroupRoomOpts) {
