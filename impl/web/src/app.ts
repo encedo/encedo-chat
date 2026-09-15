@@ -3818,6 +3818,11 @@ function renderInvites() {
     const row = document.createElement('div'); row.className = 'inv-row' + (dead ? ' expired' : '')
     const top = document.createElement('div'); top.className = 'inv-top'
     const label = document.createElement('span'); label.className = 'inv-label'; label.textContent = inv.label
+    // An expired invite offers NO pencil: the only thing left to do with it is
+    // delete it (the user's call). Editing it would mean reviving a link that
+    // has been hanging somewhere public, dead, for however long - a decision
+    // that deserves a new invite with a new secret, not an extension of one
+    // whose address strangers may have been collecting.
     const edit = document.createElement('button'); edit.className = 'inv-edit'; edit.textContent = '✎'
     edit.title = tr('Zmień nazwę i czas życia')
     edit.addEventListener('click', async () => {
@@ -3825,15 +3830,15 @@ function renderInvites() {
       if (!got) return
       inv.label = got.label; inv.expires = got.expires
       saveInvites()
-      // Editing can revive an expired invite or kill a live one, and both have
-      // to take effect on the subscription, not just on the row.
+      // Shortening a live invite can end it on the spot, so the subscription is
+      // resynced rather than only the row.
       startInboxWatches(); renderInvites()
     })
     const when = document.createElement('span'); when.className = dead ? 'inv-dead' : 'inv-when'
     when.textContent = dead ? tr('wygasło')
       : inv.expires ? tr('do {when}', { when: inviteWhen(inv.expires) })
       : new Date(inv.created).toISOString().slice(0, 10)
-    top.append(label, edit, when)
+    top.append(label, ...(dead ? [] : [edit]), when)
     const acts = document.createElement('div'); acts.className = 'inv-acts'
     const copy = document.createElement('button'); copy.textContent = tr('Kopiuj link')
     // Handing somebody a link nobody listens on is a trap: they knock into
