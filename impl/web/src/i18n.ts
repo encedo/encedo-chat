@@ -184,6 +184,9 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Zaproszenia': 'Invites',
     'CZEKAM': 'WAITING',
     'Zapukaliśmy — czekamy, aż {name} przyjmie': 'Knocked — waiting for {name} to accept',
+    'Notatka (opcjonalna)': 'Note (optional)',
+    'np. w sprawie materiału o…': 'e.g. about the story on…',
+    'Zobaczy ją tylko ta osoba, obok Twojego odcisku, decydując czy Cię przyjąć. To jeszcze nie jest rozmowa — nie pisz tu nic, czego nie powiedziałbyś przed przyjęciem.': 'Only that person sees it, beside your fingerprint, while deciding whether to accept you. This is not a conversation yet — do not write anything here you would not say before being let in.',
     'Zapukaliśmy i czekamy na przyjęcie. Nie ma potwierdzenia, że doręczono — ponawiamy, dopóki aplikacja jest otwarta.':
       'We knocked and are waiting to be let in. There is no confirmation of delivery — we keep retrying while the app is open.',
     'zapukaliśmy — brak potwierdzenia doręczenia': 'knocked — no delivery confirmation',

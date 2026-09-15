@@ -1452,6 +1452,15 @@
       <label class="store-opt"><input type="radio" name="istore" value="local"> <span class="store-local" data-i18n="💻 Tylko lokalnie — ta przeglądarka, nic nie trafia do HEM">💻 Tylko lokalnie — ta przeglądarka, nic nie trafia do HEM</span></label>
       <label class="store-opt"><input type="radio" name="istore" value="none"> <span data-i18n="⚡ Jednorazowo — po przeładowaniu kontakt zniknie">⚡ Jednorazowo — po przeładowaniu kontakt zniknie</span></label>
     </div>
+    <!-- Only for an invite that CAN be answered: a plain link has nowhere to put
+         this. The note travels inside the sealed knock, and that frame is a fixed
+         348 bytes whether it carries one or not - so the text costs nothing on
+         the wire and the byte budget is the only limit there is. -->
+    <div id="import-note-box" hidden>
+      <div class="label-row"><label data-i18n="Notatka (opcjonalna)">Notatka (opcjonalna)</label><span class="bytes-left" id="import-note-bytes"></span></div>
+      <textarea id="import-note" rows="2" placeholder="np. w sprawie materiału o…" data-i18n-placeholder="np. w sprawie materiału o…"></textarea>
+      <div class="hint" data-i18n="Zobaczy ją tylko ta osoba, obok Twojego odcisku, decydując czy Cię przyjąć. To jeszcze nie jest rozmowa — nie pisz tu nic, czego nie powiedziałbyś przed przyjęciem.">Zobaczy ją tylko ta osoba, obok Twojego odcisku, decydując czy Cię przyjąć. To jeszcze nie jest rozmowa — nie pisz tu nic, czego nie powiedziałbyś przed przyjęciem.</div>
+    </div>
     <div class="msg" id="import-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="import-add" style="flex:1;border-radius:8px" data-i18n="Dodaj kontakt">Dodaj kontakt</button><button class="btn-ghost" id="import-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
