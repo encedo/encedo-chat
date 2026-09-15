@@ -3566,7 +3566,9 @@ function resumeKnocking() {
  * open, so a request missed by a closed app is not a request lost. The UI says
  * so rather than implying a queue that is not there.
  */
-interface PubInvite { id: string; label: string; secret: string; created: number }
+/** `expires` is epoch ms, absent = never. It is LOCAL bookkeeping and never
+ *  travels: a knocker cannot tell an expired invite from one nobody is at. */
+interface PubInvite { id: string; label: string; secret: string; created: number; expires?: number }
 interface PendingKnock { ik: string; name: string; note: string; at: number; inviteId: string }
 
 /**
@@ -3591,6 +3593,71 @@ function ignoreKnock(ik: string) {
   if (ignoredOrder.length > IGNORED_MAX) ignoredKnocks.delete(ignoredOrder.shift()!)
 }
 
+/**
+ * Mint or edit an invite. One window for both, because the two questions are
+ * the same either way: what it is called, and how long you go on listening.
+ *
+ * Returns null for cancel. `expires` absent means never — which is the default,
+ * because an invite that dies on its own is a choice, not something to have
+ * happen to you by accident.
+ */
+function promptInvite(current?: PubInvite): Promise<{ label: string; expires?: number } | null> {
+  return new Promise((resolve) => {
+    const input = $('invite-label') as HTMLInputElement
+    const ttl = $('invite-ttl') as HTMLSelectElement
+    const when = $('invite-when') as HTMLInputElement
+    $('invite-title').textContent = current ? tr('Zaproszenie') : tr('Nowe zaproszenie')
+    clr('invite-msg')
+    input.value = current?.label ?? tr('Zaproszenie z {date}', { date: new Date(nowMs()).toISOString().slice(0, 10) })
+    // An existing deadline comes back as the exact instant, not as the preset it
+    // was picked from: the presets are shorthand for "from now", and reopening a
+    // week later would silently move the date if they were re-applied.
+    ttl.value = current?.expires ? 'custom' : '0'
+    when.value = current?.expires ? localInputValue(current.expires) : ''
+    $('invite-when-box').hidden = ttl.value !== 'custom'
+    $('scrim').classList.add('open'); $('invite-modal').classList.add('open')
+
+    const onTtl = () => { $('invite-when-box').hidden = ttl.value !== 'custom' }
+    const done = (v: { label: string; expires?: number } | null) => {
+      $('scrim').classList.remove('open'); $('invite-modal').classList.remove('open')
+      $('invite-save').removeEventListener('click', onSave)
+      $('invite-cancel').removeEventListener('click', onCancel)
+      ttl.removeEventListener('change', onTtl)
+      resolve(v)
+    }
+    const onSave = () => {
+      const label = input.value.trim().slice(0, 60)
+      if (!label) { setMsg('invite-msg', tr('Nazwa nie może być pusta.'), 'err'); return }
+      let expires: number | undefined
+      if (ttl.value === 'custom') {
+        if (!when.value) { setMsg('invite-msg', tr('Podaj datę i godzinę.'), 'err'); return }
+        const at = new Date(when.value).getTime()
+        if (!Number.isFinite(at)) { setMsg('invite-msg', tr('Podaj datę i godzinę.'), 'err'); return }
+        // A deadline already behind us would create an invite that is dead on
+        // arrival - which reads as the app having ignored what was typed.
+        if (at <= nowMs()) { setMsg('invite-msg', tr('Ta chwila już minęła.'), 'err'); return }
+        expires = at
+      } else if (ttl.value !== '0') expires = nowMs() + parseInt(ttl.value) * 1000
+      done({ label, expires })
+    }
+    const onCancel = () => done(null)
+    $('invite-save').addEventListener('click', onSave)
+    $('invite-cancel').addEventListener('click', onCancel)
+    ttl.addEventListener('change', onTtl)
+  })
+}
+
+/** Epoch ms -> the value a datetime-local input wants, in LOCAL time. */
+function localInputValue(t: number): string {
+  const d = new Date(t - new Date(t).getTimezoneOffset() * 60_000)
+  return d.toISOString().slice(0, 16)
+}
+
+const inviteExpired = (inv: PubInvite) => !!inv.expires && nowMs() >= inv.expires
+/** Local clock on purpose — this is the only date in the app a person sets. */
+const inviteWhen = (t: number) => new Date(t).toLocaleString(getLocale() === 'en' ? 'en-GB' : 'pl-PL',
+  { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+
 const invitesKey = () => 'ec-invites-' + (session?.idKey ?? '')
 let pubInvites: PubInvite[] = []
 let pendingKnocks: PendingKnock[] = []
@@ -3611,8 +3678,16 @@ function paintInviteBadge() {
 function startInboxWatches() {
   if (!client) return
   pubInvites = loadInvites()
+  // Expiry is enforced HERE rather than only in the view: an invite whose time
+  // is up must stop being a subscription, not merely stop looking like one.
+  for (const [id, w] of [...inboxWatches]) {
+    const inv = pubInvites.find((i) => i.id === id)
+    if (inv && !inviteExpired(inv)) continue
+    try { w.stop() } catch {}
+    inboxWatches.delete(id)
+  }
   for (const inv of pubInvites) {
-    if (inboxWatches.has(inv.id)) continue
+    if (inboxWatches.has(inv.id) || inviteExpired(inv)) continue
     const raw = inboxSecretBytes({ pub: '', name: '', inbox: inv.secret })
     if (!raw) { ecLog(`invite ${inv.id}: unusable secret, not watched`); continue }
     inboxWatches.set(inv.id, client.watchInbox(raw, {
@@ -3631,6 +3706,25 @@ function startInboxWatches() {
     }))
   }
   paintInviteBadge()
+  ensureInviteTimer()
+}
+
+/**
+ * An invite that expires while the app is open has to stop by itself, or the
+ * lifetime would only be honoured by a reload — which is exactly the promise a
+ * person is making when they set one.
+ */
+let inviteTimer: any = null
+function ensureInviteTimer() {
+  if (inviteTimer) return
+  inviteTimer = setInterval(() => {
+    const done = pubInvites.filter((i) => inviteExpired(i) && inboxWatches.has(i.id))
+    if (!done.length) return
+    startInboxWatches()                       // stops exactly those
+    if (!$('pane-invites').hidden) renderInvites()
+    for (const i of done) toast(tr('Zaproszenie „{label}" wygasło', { label: i.label }))
+  }, 30_000)
+  ;(inviteTimer as any).unref?.()
 }
 
 function stopInboxWatches() {
@@ -3638,17 +3732,20 @@ function stopInboxWatches() {
   inboxWatches.clear()
 }
 
-$('btn-new-invite')?.addEventListener('click', () => {
+$('btn-new-invite')?.addEventListener('click', async () => {
   // Only the identity is required. Minting an invite is a LOCAL act - a random
   // secret and a line in storage - and `startInboxWatches` is idempotent, so the
   // listening starts when the transport arrives. Requiring the client here made
   // the button dead for the seconds a connection takes, which reads as broken.
   if (!session) { toast(tr('Najpierw się zaloguj')); return }
+  const got = await promptInvite()
+  if (!got) return
   const inv: PubInvite = {
     id: Math.random().toString(36).slice(2, 10),
-    label: tr('Zaproszenie z {date}', { date: new Date(nowMs()).toISOString().slice(0, 10) }),
+    label: got.label,
     secret: newInboxSecret(),
     created: nowMs(),
+    expires: got.expires,
   }
   pubInvites.unshift(inv)
   saveInvites()
@@ -3716,15 +3813,32 @@ function renderInvites() {
   pane.appendChild(h2)
 
   for (const inv of pubInvites) {
-    const row = document.createElement('div'); row.className = 'inv-row'
+    const dead = inviteExpired(inv)
+    const row = document.createElement('div'); row.className = 'inv-row' + (dead ? ' expired' : '')
     const top = document.createElement('div'); top.className = 'inv-top'
-    const label = document.createElement('input'); label.className = 'inv-label'; label.value = inv.label
-    label.addEventListener('change', () => { inv.label = label.value.slice(0, 60); saveInvites() })
-    const when = document.createElement('span'); when.className = 'inv-when'
-    when.textContent = new Date(inv.created).toISOString().slice(0, 10)
-    top.append(label, when)
+    const label = document.createElement('span'); label.className = 'inv-label'; label.textContent = inv.label
+    const edit = document.createElement('button'); edit.className = 'inv-edit'; edit.textContent = '✎'
+    edit.title = tr('Zmień nazwę i czas życia')
+    edit.addEventListener('click', async () => {
+      const got = await promptInvite(inv)
+      if (!got) return
+      inv.label = got.label; inv.expires = got.expires
+      saveInvites()
+      // Editing can revive an expired invite or kill a live one, and both have
+      // to take effect on the subscription, not just on the row.
+      startInboxWatches(); renderInvites()
+    })
+    const when = document.createElement('span'); when.className = dead ? 'inv-dead' : 'inv-when'
+    when.textContent = dead ? tr('wygasło')
+      : inv.expires ? tr('do {when}', { when: inviteWhen(inv.expires) })
+      : new Date(inv.created).toISOString().slice(0, 10)
+    top.append(label, edit, when)
     const acts = document.createElement('div'); acts.className = 'inv-acts'
     const copy = document.createElement('button'); copy.textContent = tr('Kopiuj link')
+    // Handing somebody a link nobody listens on is a trap: they knock into
+    // silence and read it as being ignored.
+    copy.disabled = dead
+    if (dead) copy.title = tr('To zaproszenie wygasło — nikt się na nie nie dopuka. Przedłuż je albo zrób nowe.')
     copy.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(inviteUrlFor(inv)); toast(tr('Skopiowano')) }
       catch { toast(tr('Nie udało się skopiować')) }

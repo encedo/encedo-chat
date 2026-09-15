@@ -422,15 +422,23 @@
   .inv-row{display:flex;flex-direction:column;gap:7px;padding:11px 12px;border:1px solid var(--border);
     border-radius:8px;background:var(--card);margin-bottom:8px}
   .inv-row .inv-top{display:flex;gap:8px;align-items:center}
-  .inv-row input.inv-label{flex:1;min-width:0;background:transparent;border:none;color:var(--text);
-    font:inherit;font-weight:600;padding:2px 0}
-  .inv-row input.inv-label:focus{outline:none;border-bottom:1px solid var(--accent)}
+  .inv-row .inv-label{flex:1;min-width:0;font-weight:600;padding:2px 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* Always visible, unlike the contact row's pencil: an invite row is not
+     hovered on a phone and this is the only way into its settings. */
+  .inv-row .inv-edit{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:2px 4px;line-height:1;flex-shrink:0}
+  .inv-row .inv-edit:hover{color:var(--accent)}
+  .inv-row.expired{opacity:.62}
+  .inv-row .inv-dead{font-family:var(--mono);font-size:11px;color:var(--bad)}
   .inv-row .inv-when{font-family:var(--mono);font-size:11px;color:var(--muted)}
   .inv-acts{display:flex;gap:6px;flex-wrap:wrap}
   .inv-acts button{background:var(--card);border:1px solid var(--border);border-radius:14px;
     cursor:pointer;font-size:12px;padding:4px 10px;color:var(--text)}
   .inv-acts button:hover{border-color:var(--accent);color:var(--accent)}
   .inv-acts button.danger:hover{border-color:var(--bad);color:var(--bad)}
+  /* A dead link's copy button has to LOOK spent, or it reads as working and
+     hands somebody a link nobody is listening on. */
+  .inv-acts button:disabled{opacity:.4;cursor:not-allowed}
+  .inv-acts button:disabled:hover{border-color:var(--border);color:var(--text)}
   .knock-row{display:flex;flex-direction:column;gap:6px;padding:11px 12px;border:1px solid var(--accent);
     border-radius:8px;background:var(--accent-soft, transparent);margin-bottom:8px}
   .knock-row .k-name{font-weight:600}
@@ -1435,6 +1443,29 @@
     <div class="fp-box"><span class="fp-lbl" data-i18n="Twój odcisk">Twój odcisk</span><span class="fp-val" id="share-fp">—</span></div>
     <div class="hint" data-i18n="Podaj ten odcisk osobno — głosem albo osobiście. Odbiorca porówna go z tym, co zobaczy po kliknięciu linku; to jedyne, co wykrywa podmianę klucza po drodze.">Podaj ten odcisk osobno — głosem albo osobiście. Odbiorca porówna go z tym, co zobaczy po kliknięciu linku; to jedyne, co wykrywa podmianę klucza po drodze.</div>
     <div class="modal-actions"><button class="btn-send" id="share-copy" style="flex:1;border-radius:8px" data-i18n="Kopiuj link">Kopiuj link</button><button class="btn-ghost" id="share-close" data-i18n="Zamknij">Zamknij</button></div>
+  </div>
+
+  <!-- One window for minting and for editing, because both decisions are the
+       same two: what this invite is called, and how long you keep listening on
+       it. The lifetime is LOCAL bookkeeping — it never goes on the wire, and
+       nobody holding the link can tell when you stopped. -->
+  <div class="modal" id="invite-modal">
+    <h2 id="invite-title" data-i18n="Nowe zaproszenie">Nowe zaproszenie</h2>
+    <div class="msub" data-i18n="Ten link możesz powiesić publicznie. Kto go ma, może do Ciebie zapukać — a Ty decydujesz, kogo przyjmiesz.">Ten link możesz powiesić publicznie. Kto go ma, może do Ciebie zapukać — a Ty decydujesz, kogo przyjmiesz.</div>
+    <label data-i18n="Nazwa">Nazwa</label>
+    <input id="invite-label" type="text" placeholder="np. dla czytelników" data-i18n-placeholder="np. dla czytelników" autocomplete="off">
+    <label data-i18n="Czas życia">Czas życia</label>
+    <span class="sel-wrap"><select id="invite-ttl" class="sel">
+      <option value="0" data-i18n="Bez końca — dopóki sam nie wycofasz">Bez końca — dopóki sam nie wycofasz</option>
+      <option value="86400" data-i18n="24 godziny">24 godziny</option>
+      <option value="604800" data-i18n="7 dni">7 dni</option>
+      <option value="2592000" data-i18n="30 dni">30 dni</option>
+      <option value="custom" data-i18n="Do konkretnej daty i godziny">Do konkretnej daty i godziny</option>
+    </select></span>
+    <div id="invite-when-box" hidden style="margin-top:8px"><input id="invite-when" type="datetime-local"></div>
+    <div class="hint" data-i18n="Po tym czasie przestajesz słuchać na tym zaproszeniu. Link dalej istnieje, ale pukanie nie dojdzie już do nikogo — i nikt po drugiej stronie nie dowie się, kiedy to nastąpiło.">Po tym czasie przestajesz słuchać na tym zaproszeniu. Link dalej istnieje, ale pukanie nie dojdzie już do nikogo — i nikt po drugiej stronie nie dowie się, kiedy to nastąpiło.</div>
+    <div class="msg" id="invite-msg"></div>
+    <div class="modal-actions"><button class="btn-send" id="invite-save" style="flex:1;border-radius:8px" data-i18n="Zapisz">Zapisz</button><button class="btn-ghost" id="invite-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
   <div class="modal" id="import-modal">
