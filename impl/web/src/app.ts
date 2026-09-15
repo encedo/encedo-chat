@@ -3558,6 +3558,28 @@ function resumeKnocking() {
 interface PubInvite { id: string; label: string; secret: string; created: number }
 interface PendingKnock { ik: string; name: string; note: string; at: number; inviteId: string }
 
+/**
+ * Keys whose knocks this session will not show again.
+ *
+ * "Zignoruj" used to drop the row and nothing else, while the Source re-knocks
+ * every 90 s - so the request was back inside the minute and the button was
+ * really "remind me shortly". A decision somebody made has to hold.
+ *
+ * In memory, for the reason the pending list is: it is filled by strangers over
+ * a topic anybody holding the link can publish to, so it never touches disk.
+ * Bounded for the same reason - a flood of knocks under fresh keys must not
+ * grow it without limit. A reload is therefore a clean slate, and the button
+ * says so rather than implying a block list that is not there.
+ */
+const IGNORED_MAX = 512
+const ignoredKnocks = new Set<string>()
+const ignoredOrder: string[] = []
+function ignoreKnock(ik: string) {
+  if (ignoredKnocks.has(ik)) return
+  ignoredKnocks.add(ik); ignoredOrder.push(ik)
+  if (ignoredOrder.length > IGNORED_MAX) ignoredKnocks.delete(ignoredOrder.shift()!)
+}
+
 const invitesKey = () => 'ec-invites-' + (session?.idKey ?? '')
 let pubInvites: PubInvite[] = []
 let pendingKnocks: PendingKnock[] = []
@@ -3585,6 +3607,7 @@ function startInboxWatches() {
     inboxWatches.set(inv.id, client.watchInbox(raw, {
       onKnock: (k) => {
         const ik = b64(k.ik)
+        if (ignoredKnocks.has(ik)) return
         // One request per key per invite: a Source that re-knocks while waiting
         // must not stack up, and that is the ordinary case, not an attack.
         if (pendingKnocks.some((p) => p.ik === ik && p.inviteId === inv.id)) return
@@ -3665,7 +3688,9 @@ function renderInvites() {
       const yes = document.createElement('button'); yes.textContent = tr('Przyjmij')
       yes.addEventListener('click', () => void acceptKnock(k))
       const no = document.createElement('button'); no.className = 'danger'; no.textContent = tr('Zignoruj')
+      no.title = tr('Do końca tej sesji nie zobaczysz pukań tym kluczem. Po przeładowaniu strony mogą pojawić się znowu — nic nie jest zapisywane na dysku.')
       no.addEventListener('click', () => {
+        ignoreKnock(k.ik)
         pendingKnocks = pendingKnocks.filter((p) => p !== k); paintInviteBadge(); renderInvites()
       })
       acts.append(yes, no); row.appendChild(acts)
