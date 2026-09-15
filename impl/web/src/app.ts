@@ -3486,8 +3486,14 @@ async function knockOnce(pub: string, w: Waiting) {
   const raw = inboxSecretBytes({ pub: '', name: '', inbox: w.inbox })
   if (!raw) { ecLog(`knock: unusable inbox for ${pub.slice(0, 12)}…`); return }
   try {
-    await client.knock(raw, pub, { name: session.handle })
-    ecLog(`knock sent to ${pub.slice(0, 12)}… (no delivery confirmation exists)`)
+    const reach = await client.knock(raw, pub, { name: session.handle })
+    // "Sent" and "sent to nobody" look identical from here otherwise: publishing
+    // into a topic nothing carries succeeds quietly. Nobody listening is the
+    // ordinary case (§4.7 - they must be online), not a fault, so it is a line in
+    // the log rather than anything the Source is asked to do about it.
+    ecLog(reach === 0
+      ? `knock to ${pub.slice(0, 12)}… reached nobody — nothing is listening on that invite right now`
+      : `knock sent to ${pub.slice(0, 12)}… (no delivery confirmation exists)`)
   } catch (e: any) { ecLog(`knock failed: ${e?.message ?? e}`) }
 }
 

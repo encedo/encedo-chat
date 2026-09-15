@@ -7,11 +7,12 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { watchInbox, sendKnock } from '../lib/inbox.ts'
+import { watchInbox, sendKnock, DECOY_EVERY_MS } from '../lib/inbox.ts'
 import { sealKnock, decoyKnock, FRAME_LEN } from '../lib/knock.ts'
 import { topicFromSecret, rotationOffsetSec } from '../lib/rendezvous.ts'
 import { activeDatesForOffset } from '../lib/presence.ts'
 import { generateX25519 } from '../lib/x25519.ts'
+import { readFileSync } from 'node:fs'
 
 const P = { networkId: 'test', dateUTC: '2026-09-15' }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -277,4 +278,64 @@ test('sending a knock does not subscribe the Source to the topic', async () => {
   } } }
   await sendKnock(node, inbox, j.pub, P, { ik: src.pub, name: 'x' })
   assert.deepEqual(subs, [])
+})
+
+// ---- the decoy is the keepalive, so its WORST gap is what matters ----------
+// Both of these were green on a schedule that let live inboxes be evicted: the
+// average interval was well under the eviction TTL and the worst gap was almost
+// twice it. An evicted topic does not come back - the relay unsubscribes, our
+// publishes reach nobody, and no knock is ever routed to us again while this
+// side still reports that it is listening.
+
+test('the decoy interval leaves room for the worst gap, not the average', () => {
+  // Read the relay's own default rather than restating it: this is a coupling
+  // between two components in one repo, and a silent drift is the whole bug.
+  const src = readFileSync(new URL('../../relay/relay.mjs', import.meta.url), 'utf8')
+  const m = src.match(/--idle-ttl',\s*'(\d+)'/)
+  assert.ok(m, 'relay.mjs no longer states an --idle-ttl default where this can read it')
+  const idleTtlMs = parseInt(m![1]) * 1000
+
+  // One decoy per slot at a uniformly random instant in it: two consecutive
+  // decoys can fall late in one slot and early in the next, so the gap reaches
+  // almost 2x the slot. That is the number the TTL has to beat.
+  assert.ok(2 * DECOY_EVERY_MS < idleTtlMs,
+    `worst decoy gap ${2 * DECOY_EVERY_MS} ms is not under the relay's ${idleTtlMs} ms eviction`)
+})
+
+/** Run a watch on a driven clock and report when each decoy went out. */
+async function decoyTimes(everyMs: number, stepMs: number, slots: number) {
+  const j = await generateX25519()
+  const c = clock()
+  const h = hub()
+  const at: number[] = []
+  const inner = h.node.services.pubsub.publish
+  h.node.services.pubsub.publish = async (topic: string, data: Uint8Array) => {
+    at.push(c.now()); return inner(topic, data)
+  }
+  const w = watchInbox(h.node, secret(31), j, P, { now: c.now, tickMs: 1, decoyEveryMs: everyMs, onKnock: () => {} })
+  for (let i = 0; i < (slots * everyMs) / stepMs; i++) { c.add(stepMs); await sleep(4) }
+  w.stop()
+  return at
+}
+
+test('the decoys land one per slot, and never two slots apart', async () => {
+  const EVERY = 1_000, SLOTS = 10
+  const at = await decoyTimes(EVERY, EVERY / 20, SLOTS)
+  assert.ok(at.length >= SLOTS - 1, `only ${at.length} decoys in ${SLOTS} slots`)
+  assert.ok(at.length <= SLOTS + 1, `${at.length} decoys in ${SLOTS} slots - it fires more than once a slot`)
+  const gaps = at.slice(1).map((t, i) => t - at[i])
+  const worst = Math.max(...gaps)
+  assert.ok(worst <= 2 * EVERY, `two decoys fell ${worst} ms apart, over two slots`)
+})
+
+test('a decoy whose instant falls between two ticks is paid, not dropped', async () => {
+  // The clock steps a whole slot at a time, so no instant is ever landed on
+  // exactly - every decoy in here is an overdue one. Dropping them instead was
+  // worth up to three idle slots in a row, which is longer than the relay waits
+  // before evicting the topic, and an evicted inbox never recovers.
+  const EVERY = 1_000, SLOTS = 12
+  const at = await decoyTimes(EVERY, EVERY, SLOTS)
+  assert.ok(at.length >= SLOTS - 1, `${at.length} decoys in ${SLOTS} slots - overdue ones are being dropped`)
+  const gaps = at.slice(1).map((t, i) => t - at[i])
+  assert.ok(Math.max(...gaps) <= 2 * EVERY, `two decoys fell ${Math.max(...gaps)} ms apart`)
 })

@@ -607,7 +607,13 @@ export interface ClientSession {
    * pair topic, which this client could always derive. So "waiting" is an
    * ordinary contact that has not announced yet, and needs no new machinery.
    */
-  knock(inboxSecret: Uint8Array, toPub: string, body: { name: string; note?: string }): Promise<void>
+  /**
+   * Knock on a published invite. Resolves with how many peers carried the frame
+   * (null when the transport does not say). Zero is not an error - it means
+   * nothing is listening on that topic from here, which is §4.7 - but it is the
+   * difference between "sent" and "sent to nobody", so it is reported.
+   */
+  knock(inboxSecret: Uint8Array, toPub: string, body: { name: string; note?: string }): Promise<number | null>
   /** This identity's group manager (Sender Keys, §8) — createGroup / applySkd /
    *  skdFor / rekey. Incoming SKDs on any 1:1 room are applied to it automatically. */
   readonly groups: GroupManager
@@ -1069,7 +1075,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       return { transport: viaMqtt ? 'mqtt' : 'libp2p', relay: viaMqtt ? (opts.broker ?? '') : activeRelay, self, link, connected: connected(), peers, topics }
     },
     async knock(inboxSecret, toPub, body) {
-      await sendKnock(node, inboxSecret, unb64(toPub), params, {
+      return sendKnock(node, inboxSecret, unb64(toPub), params, {
         ik: unb64(id.pub), name: body.name, note: body.note,
       })
     },

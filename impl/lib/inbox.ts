@@ -34,9 +34,15 @@
  * when the decoys fall, subtract them, and read off the real knocks — leaving
  * a watcher better off than with no decoys at all (§4.6).
  *
- * The decoy is also the keepalive. The relay evicts a topic idle for 120 s, so
- * an inbox nobody knocks on would quietly stop being routed; the default
- * interval sits under that.
+ * The decoy is also the keepalive, and that is what sets the interval. The relay
+ * evicts a topic idle for 120 s (`relay.mjs` IDLE_TTL), and an evicted topic does
+ * not come back on its own: the relay unsubscribes, so nothing we publish there
+ * reaches anyone and no knock is ever routed to us again, while this side goes on
+ * reporting that it is listening. The arithmetic that matters is the WORST gap,
+ * not the average: one decoy per slot at a uniformly random instant in the slot
+ * means two consecutive decoys can be almost two slots apart (late in one slot,
+ * early in the next), so the slot has to be under HALF the eviction TTL. At 90 s
+ * it was not, and measured gaps of 102 s and 129 s evicted live inboxes.
  */
 
 import { hkdfBits } from './wc.ts'
@@ -50,8 +56,9 @@ const te = new TextEncoder()
 const SEED_LABEL = te.encode('encedo-chat-invite-decoy-v1')
 const SLOT_LABEL = te.encode('encedo-chat-invite-decoy-slot-v1')
 
-/** Under the relay's 120 s idle eviction, with room for a missed tick. */
-const DECOY_EVERY_MS = 90_000
+/** Half the relay's 120 s idle eviction, so the worst gap (just under two
+ *  slots) still refreshes the topic with margin for a missed tick. */
+export const DECOY_EVERY_MS = 45_000
 /** Knocks surfaced per minute before the rest are counted and dropped. */
 const MAX_PER_MIN = 20
 /** Ephemeral keys remembered, so one frame is surfaced once. */
@@ -159,11 +166,29 @@ export function watchInbox(
   let fireAt = 0
   let fired = false
 
+  // Reported once per change, never per decoy: a topic nobody carries is the
+  // difference between "listening" and "reachable", and it is invisible from
+  // here otherwise - publishing into an empty topic succeeds quietly
+  // (`allowPublishToZeroTopicPeers`), which is how an evicted inbox looks.
+  let carried: boolean | null = null
+
   const publishDecoy = async () => {
     if (stopped) return
     const topic = topics.get(activeDatesForOffset(now(), offsetMs, opts)[0])
     if (!topic) return
-    try { await node.services.pubsub.publish(topic, await decoyKnock(inbox, dh.pub)) } catch {}
+    try {
+      const res: any = await node.services.pubsub.publish(topic, await decoyKnock(inbox, dh.pub))
+      // Test doubles do not report recipients; absence is not evidence.
+      const reach = res?.recipients?.length
+      if (typeof reach !== 'number') return
+      const now = reach > 0
+      if (carried !== now) {
+        carried = now
+        log(now
+          ? `inbox: ${topic.slice(0, 12)}... is being carried again`
+          : `inbox: nobody is carrying ${topic.slice(0, 12)}... - no knock can reach us there`)
+      }
+    } catch {}
   }
 
   const planSlot = async (n: number) => {
@@ -199,7 +224,15 @@ export function watchInbox(
     }
 
     const n = slotOf(t)
-    if (n !== curSlot) await planSlot(n)
+    if (n !== curSlot) {
+      // A slot whose instant fell between two ticks must still be paid, or the
+      // gap to the next one spans three slots and the relay evicts the topic
+      // underneath us. Paying it late costs one frame close to another, which is
+      // cover traffic doing its job; dropping it costs the inbox.
+      const overdue = curSlot >= 0 && !fired
+      await planSlot(n)
+      if (overdue) await publishDecoy()
+    }
     if (!fired && t >= fireAt) { fired = true; await publishDecoy() }
   }
 
@@ -245,11 +278,27 @@ export async function sendKnock(
   journalistPub: Uint8Array,
   params: RvParams,
   body: { ik: Uint8Array; name: string; note?: string },
-  opts: RotationConfig & { now?(): number } = {},
-): Promise<void> {
+  opts: RotationConfig & { now?(): number; waitMs?: number } = {},
+): Promise<number | null> {
   const now = opts.now ?? nowMs
   const offsetMs = (await rotationOffsetSec(inbox, params)) * 1000
   const dateUTC = activeDatesForOffset(now(), offsetMs, opts)[0]
   const topic = await topicFromSecret(inbox, { ...params, dateUTC })
-  await node.services.pubsub.publish(topic, await sealKnock(inbox, journalistPub, body))
+
+  // A knock is usually the FIRST thing a fresh session does - somebody clicked a
+  // link, the app came up, and this runs seconds later. At that moment the node
+  // may not yet know that anyone carries this topic, and publishing then reaches
+  // nobody without failing (`allowPublishToZeroTopicPeers`), which costs the
+  // Source the whole 90 s until the next attempt. So wait, briefly, the way the
+  // room waits for the relay to join a topic before announcing.
+  const deadline = now() + (opts.waitMs ?? 8_000)
+  while (now() < deadline) {
+    try { if (node.services.pubsub.getSubscribers(topic).length > 0) break } catch { break }
+    await new Promise((r) => setTimeout(r, 250))
+  }
+
+  const res: any = await node.services.pubsub.publish(topic, await sealKnock(inbox, journalistPub, body))
+  // Absence is not evidence (test doubles report nothing); zero is.
+  const reach = res?.recipients?.length
+  return typeof reach === 'number' ? reach : null
 }
