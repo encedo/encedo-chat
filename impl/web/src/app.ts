@@ -73,6 +73,7 @@ import { enableProtoLog } from '../../lib/protolog.ts'
 import { cachePubKeys, traceHem } from '../../lib/hemwrap.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import { sealPins, openPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../../lib/pincache.ts'
+import { sealLocal, openLocal } from '../../lib/localstore.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
 // The published relay list, compiled in — see DEFAULT_NODES below for why.
@@ -1352,7 +1353,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
       $('peer-status').textContent = tr('sesja zamknięta (duplikat)')
     },
   })
-  clientReady.then((c) => { client = c; void restoreGroups(); startInboxWatches(); resumeKnocking() }, (e: any) => {
+  clientReady.then((c) => { client = c; void restoreGroups(); void startInboxWatches(); void resumeKnocking() }, (e: any) => {
     ecLog(`session failed to start: ${e?.message ?? e}`)
     toast(tr('Brak połączenia z przekaźnikiem — odśwież stronę'))
   })
@@ -3488,15 +3489,43 @@ let knockTimer: any = null
 /** Under a minute would be rude to the relay; over a few makes a Source wait. */
 const KNOCK_EVERY_MS = 90_000
 
-function loadWaiting() {
-  try {
-    const v = JSON.parse(localStorage.getItem(waitingKey()) || 'null')
-    waiting = new Map(Array.isArray(v) ? v : [])
-  } catch { waiting = new Map() }
+const WAITING_SALT = 'encedo-chat-waiting-v1'
+
+/**
+ * Read a store that may still be in the plain JSON this app wrote before §10
+ * reached these keys, and re-seal it on the spot.
+ *
+ * The migration is not politeness: `ec-invites` holds the secrets of links that
+ * are already hanging somewhere public, and dropping them means you stop
+ * listening on your own published invite with no way to get the secret back.
+ * A sealed blob is base64 of iv||ct and never parses as JSON, so the two
+ * formats tell themselves apart without a version byte or a second key.
+ */
+async function readSealed<T>(key: string, salt: string, isMine: (v: any) => boolean): Promise<T | null> {
+  const raw = localStorage.getItem(key)
+  if (!raw) return null
+  try { const v = JSON.parse(raw); if (isMine(v)) return v as T } catch {}
+  const base = await ensureCacheBase()
+  if (!base) { ecLog(`${key}: no cache base — cannot open the sealed store`, 'debug'); return null }
+  return openLocal<T>(base, salt, session?.idKey ?? '', raw)
 }
-function saveWaiting() {
-  try { localStorage.setItem(waitingKey(), JSON.stringify([...waiting])) } catch {}
+
+async function writeSealed(key: string, salt: string, value: unknown): Promise<void> {
+  const base = await ensureCacheBase()
+  // No base, no write. Falling back to plaintext would quietly undo the whole
+  // point of sealing these, so the record stays in memory for this session and
+  // the log says why.
+  if (!base) { ecLog(`${key}: no cache base — NOT persisted`, 'debug'); return }
+  try { localStorage.setItem(key, await sealLocal(base, salt, session?.idKey ?? '', value)) }
+  catch (e: any) { ecLog(`${key}: seal failed — ${e?.message ?? e}`, 'debug') }
 }
+
+async function loadWaiting() {
+  const v = await readSealed<any[]>(waitingKey(), WAITING_SALT, Array.isArray)
+  waiting = new Map(Array.isArray(v) ? v : [])
+  if (v) void saveWaiting()   // re-seals a plain list the moment it is read
+}
+function saveWaiting() { void writeSealed(waitingKey(), WAITING_SALT, [...waiting]) }
 
 async function knockOnce(pub: string, w: Waiting) {
   if (!client || !session) return
@@ -3539,8 +3568,8 @@ function stopKnocking(pub: string) {
 }
 
 /** After a reload: pick the waiting contacts back up and knock again. */
-function resumeKnocking() {
-  loadWaiting()
+async function resumeKnocking() {
+  await loadWaiting()
   if (!waiting.size) return
   for (const [pub, w] of waiting) void knockOnce(pub, w)
   ensureKnockTimer()
@@ -3586,11 +3615,13 @@ interface PendingKnock { ik: string; name: string; note: string; at: number; inv
  * says so rather than implying a block list that is not there.
  */
 const IGNORED_MAX = 512
-const ignoredKnocks = new Set<string>()
+/** The claimed name is kept beside the key so the list can be READ. It is not
+ *  evidence of anything - it is what that knock said it was called. */
+const ignoredKnocks = new Map<string, { name: string; at: number }>()
 const ignoredOrder: string[] = []
-function ignoreKnock(ik: string) {
+function ignoreKnock(ik: string, name: string) {
   if (ignoredKnocks.has(ik)) return
-  ignoredKnocks.add(ik); ignoredOrder.push(ik)
+  ignoredKnocks.set(ik, { name, at: nowMs() }); ignoredOrder.push(ik)
   if (ignoredOrder.length > IGNORED_MAX) ignoredKnocks.delete(ignoredOrder.shift()!)
 }
 
@@ -3664,10 +3695,23 @@ let pubInvites: PubInvite[] = []
 let pendingKnocks: PendingKnock[] = []
 const inboxWatches = new Map<string, { stop(): void }>()
 
-function loadInvites(): PubInvite[] {
-  try { const v = JSON.parse(localStorage.getItem(invitesKey()) || 'null'); return Array.isArray(v) ? v : [] } catch { return [] }
+const INVITES_SALT = 'encedo-chat-invites-v1'
+
+/**
+ * Loaded ONCE per session, then memory is the truth. Re-reading on every call
+ * would race the sealing writes, which are async by necessity — an ECDH stands
+ * between this list and the disk.
+ */
+let invitesReady: Promise<void> | null = null
+function loadInvites(): Promise<void> {
+  if (!invitesReady) invitesReady = (async () => {
+    const v = await readSealed<PubInvite[]>(invitesKey(), INVITES_SALT, Array.isArray)
+    pubInvites = Array.isArray(v) ? v : []
+    if (v) void writeSealed(invitesKey(), INVITES_SALT, pubInvites)
+  })()
+  return invitesReady
 }
-function saveInvites() { try { localStorage.setItem(invitesKey(), JSON.stringify(pubInvites)) } catch {} }
+function saveInvites() { void writeSealed(invitesKey(), INVITES_SALT, pubInvites) }
 
 function paintInviteBadge() {
   const b = $('inv-badge')
@@ -3676,9 +3720,9 @@ function paintInviteBadge() {
 }
 
 /** Listen on every invite this identity has published. Idempotent. */
-function startInboxWatches() {
+async function startInboxWatches() {
   if (!client) return
-  pubInvites = loadInvites()
+  await loadInvites()
   // Expiry is enforced HERE rather than only in the view: an invite whose time
   // is up must stop being a subscription, not merely stop looking like one.
   for (const [id, w] of [...inboxWatches]) {
@@ -3718,10 +3762,10 @@ function startInboxWatches() {
 let inviteTimer: any = null
 function ensureInviteTimer() {
   if (inviteTimer) return
-  inviteTimer = setInterval(() => {
+  inviteTimer = setInterval(async () => {
     const done = pubInvites.filter((i) => inviteExpired(i) && inboxWatches.has(i.id))
     if (!done.length) return
-    startInboxWatches()                       // stops exactly those
+    await startInboxWatches()                 // stops exactly those
     if (!$('pane-invites').hidden) renderInvites()
     for (const i of done) toast(tr('Zaproszenie „{label}" wygasło', { label: i.label }))
   }, 30_000)
@@ -3739,6 +3783,10 @@ $('btn-new-invite')?.addEventListener('click', async () => {
   // listening starts when the transport arrives. Requiring the client here made
   // the button dead for the seconds a connection takes, which reads as broken.
   if (!session) { toast(tr('Najpierw się zaloguj')); return }
+  // Before anything is added to the list: the read is async now (an ECDH stands
+  // between it and the disk) and it REPLACES the array, so minting into a list
+  // that has not arrived yet would be undone the moment it does.
+  await loadInvites()
   const got = await promptInvite()
   if (!got) return
   const inv: PubInvite = {
@@ -3750,7 +3798,7 @@ $('btn-new-invite')?.addEventListener('click', async () => {
   }
   pubInvites.unshift(inv)
   saveInvites()
-  startInboxWatches()
+  await startInboxWatches()
   renderInvites()
 })
 
@@ -3799,10 +3847,38 @@ function renderInvites() {
       const no = document.createElement('button'); no.className = 'danger'; no.textContent = tr('Zignoruj')
       no.title = tr('Do końca tej sesji nie zobaczysz pukań tym kluczem. Po przeładowaniu strony mogą pojawić się znowu — nic nie jest zapisywane na dysku.')
       no.addEventListener('click', () => {
-        ignoreKnock(k.ik)
+        ignoreKnock(k.ik, k.name)
         pendingKnocks = pendingKnocks.filter((p) => p !== k); paintInviteBadge(); renderInvites()
       })
       acts.append(yes, no); row.appendChild(acts)
+      pane.appendChild(row)
+    }
+  }
+
+  // Ignored keys are state that changes what you are shown, so they cannot sit
+  // where nobody can see them: without this, "Zignoruj" quietly stopped showing
+  // somebody and there was no way to find out, let alone change your mind.
+  if (ignoredKnocks.size) {
+    const hi = document.createElement('div'); hi.className = 'pane-label'
+    hi.textContent = tr('Zignorowane w tej sesji — po przeładowaniu lista znika')
+    pane.appendChild(hi)
+    for (const [ik, meta] of [...ignoredKnocks].reverse()) {
+      const row = document.createElement('div'); row.className = 'knock-row ignored'
+      const nm = document.createElement('div'); nm.className = 'k-name'
+      nm.textContent = meta.name || tr('Bez nazwy')
+      const fp = document.createElement('div'); fp.className = 'k-fp'
+      fp.textContent = tr('odcisk: ') + '…'
+      void fingerprint(ik).then((f) => { fp.textContent = tr('odcisk: ') + f })
+      const acts = document.createElement('div'); acts.className = 'inv-acts'
+      const back = document.createElement('button'); back.textContent = tr('Cofnij')
+      back.title = tr('Przestaniesz ignorować ten klucz. Jeśli ta osoba wciąż puka, prośba pojawi się przy kolejnym pukaniu.')
+      back.addEventListener('click', () => {
+        ignoredKnocks.delete(ik)
+        const i = ignoredOrder.indexOf(ik); if (i >= 0) ignoredOrder.splice(i, 1)
+        renderInvites()
+      })
+      acts.appendChild(back)
+      row.append(nm, fp, acts)
       pane.appendChild(row)
     }
   }
@@ -3832,7 +3908,7 @@ function renderInvites() {
       saveInvites()
       // Shortening a live invite can end it on the spot, so the subscription is
       // resynced rather than only the row.
-      startInboxWatches(); renderInvites()
+      await startInboxWatches(); renderInvites()
     })
     const when = document.createElement('span'); when.className = dead ? 'inv-dead' : 'inv-when'
     when.textContent = dead ? tr('wygasło')
