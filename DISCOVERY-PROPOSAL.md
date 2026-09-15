@@ -197,7 +197,54 @@ It follows that the pending list is attacker-fillable and must be built as
 such: capped, rate-limited, and cheap to clear. That is §7's problem, not this
 one's, but the two decisions have to be read together.
 
-### 4.5 The Journalist must be online. This is not a bug to route around
+### 4.5 Impersonation is out of scope, and saying so is the honest answer
+
+**The user's decision, 2026-09-15.** Anybody can claim any name in a knock, and
+a hostile web page can publish its own invite under a Journalist's name. The
+protocol does not try to harden either, because it cannot: there is nothing it
+could check a stranger's claim against. What it does instead is refuse to
+pretend — the name is rendered as the claim it is, the fingerprint is shown
+next to it, and verifying that fingerprint is an operational act on another
+channel.
+
+This is the same position §4.3 takes about names and §6 takes about a published
+link. It is written down as a decision rather than left implied, because the
+tempting thing to build here is a "verified" badge that means nothing.
+
+### 4.6 The decoy schedule is deterministic, seeded by what the watcher lacks
+
+**From the user's suggestion, 2026-09-15, with one correction that matters.**
+
+Deterministic is right, and for a reason beyond tidiness. If each device rolled
+its own random schedule, a Journalist running two clients would emit two
+independent decoy streams, so the topic's traffic rate would depend on how many
+devices are listening — which is itself a fact about the Journalist, leaking
+through the very mechanism meant to leak nothing. A schedule computed from a
+seed gives one stream no matter how many clients compute it, and it survives a
+restart without stored state.
+
+**The correction: the seed cannot be the invite secret.** That secret is
+printed on a web page. Derive the schedule from it and every holder of the link
+can compute exactly when the decoys fall, subtract them, and read off the real
+knocks — which is not a weakened mitigation but an inverted one, leaving the
+observer better off than with no decoys at all.
+
+So the seed comes from something only the Journalist can compute, bound to the
+invite so the schedules of two invites stay independent (§4.1):
+
+```
+seed_i = HKDF(ECDH(IK_J, IK_J_pub), "encedo-chat-invite-decoy-v1", s_i)
+```
+
+The ECDH of an identity against its own public key is the §9.1 self-topic
+trick, and it has the property wanted here: only the holder of that identity
+can compute it, on any device, without storing anything.
+
+Telling a decoy from a real knock is already solved inside the seal — the
+plaintext's first byte is the kind (`lib/knock.ts`) — so only the recipient can
+do it, which is the correct audience for that fact.
+
+### 4.7 The Journalist must be online. This is not a bug to route around
 
 GossipSub stores nothing (§1) and this proposal does not change that. A knock
 reaches a subscriber that is present, or it reaches nobody.
@@ -351,22 +398,26 @@ exist and are covered by tests today.
    authenticate anybody. Still worth a sanity read, but it is no longer a
    blocking question.
 3. Does the unlinkability claim in §4.1 hold as stated against an adversary
-   holding several of one Journalist's invites? **Note, 2026-09-15:** the user
-   affirms the DENIABILITY of a single knock — anyone holding the invite could
-   have sent it, so no frame can be attributed to a person. That is true and it
-   is a different property from the one asked about here, which is whether
-   traffic on invite #1 can be correlated with traffic on invite #2. Both are
-   wanted; only the first is currently argued for.
-4. Is there any reason to prefer signing the knock over sealing it, given §8's
-   all-ECDH, deniable posture elsewhere in the protocol? **In plainer terms:**
-   sealing means only the recipient can read the frame and nobody can prove who
-   wrote it; signing would attach proof of authorship that anyone holding the
-   public key could verify — including whoever later seizes the Journalist's
-   device, who could then demonstrate that a particular person knocked. Sealing
-   is what this proposal does. The question is whether any argument favours the
-   other way, and none has been found.
-5. §6.1: does a padded, randomised decoy schedule on a public topic actually
-   buy what it claims against an adversary who watches for months, or does the
-   real-knock distribution leak through the decoy distribution over time? What
-   schedule would you want — and is a constant rate better here than a
-   randomised one, given that the thing being hidden is a rare event?
+   holding several of one Journalist's invites? **Requirement stated by the
+   user, 2026-09-15: the invites must be independent and uncorrelated.** The
+   topics are, by construction — independent random secrets, so holding one
+   invite computes nothing about another. The correlation that remains is in
+   the TIMING, and §4.6 is what closes it: a decoy schedule shared across a
+   Journalist's invites would let an adversary holding two of them line the
+   streams up and recognise both as one person's. Per-invite seeds are
+   therefore not a refinement but part of the claim. The question left for the
+   cryptographer is whether per-invite seeding is sufficient, or whether the
+   arrival pattern of REAL knocks still links two invites over time.
+4. ~~Is there any reason to prefer signing the knock over sealing it?~~
+   **DECIDED 2026-09-15: sealing only.** Sealing means only the recipient can
+   read the frame and nobody can prove who wrote it; signing would attach proof
+   of authorship that anyone holding the public key could verify, including
+   whoever later seizes the Journalist's device, who could then demonstrate
+   that a particular person knocked. No argument was found for the other way.
+5. §6.1 and §4.6: the schedule is now deterministic, per invite, and seeded
+   from something only the Journalist can compute. Given that, does it buy what
+   it claims against an adversary who watches for months, or does the
+   real-knock distribution still show through over time? Concretely: is a
+   constant rate better here than a pseudo-random one, given that the event
+   being hidden is RARE and the cover is continuous — and what rate, against a
+   relay that evicts a topic idle for 120 s?
