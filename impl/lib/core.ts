@@ -24,7 +24,7 @@ import type { webrtcLink } from '../net/webrtc.ts'
 import { createXferSession, type XferSession, type XferEv, type FileLike, type OfferResult } from './xfer-session.ts'
 import { watchSelfSessionRotating, type SelfWatch } from './selfsession.ts'
 import { watchPresenceRotating, rendezvousDay, type PresenceWatch } from './presence.ts'
-import { watchInbox as startInboxWatch, type InboxWatch, type InboxKnock } from './inbox.ts'
+import { watchInbox as startInboxWatch, sendKnock, type InboxWatch, type InboxKnock } from './inbox.ts'
 import { GroupManager, type AdminGk, type GkBackend } from './group.ts'
 import {
   SELF_PREFIX, buildPeerDescr, parsePeerDescr, parseSelfDescr, peerSearchPrefix, peerLabel, hemKid, descrText,
@@ -599,6 +599,15 @@ export interface ClientSession {
     onKnock(k: InboxKnock): void
     onLog?(m: string): void
   }): InboxWatch
+  /**
+   * Knock on somebody else's published invite — the Source's half of §2.
+   *
+   * Publish-only: this side does not join the topic, and gets no answer on it.
+   * The reply, when there is one, is the other side simply appearing on the
+   * pair topic, which this client could always derive. So "waiting" is an
+   * ordinary contact that has not announced yet, and needs no new machinery.
+   */
+  knock(inboxSecret: Uint8Array, toPub: string, body: { name: string; note?: string }): Promise<void>
   /** This identity's group manager (Sender Keys, §8) — createGroup / applySkd /
    *  skdFor / rekey. Incoming SKDs on any 1:1 room are applied to it automatically. */
   readonly groups: GroupManager
@@ -1058,6 +1067,11 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       let peers = 0
       try { peers = node.getConnections().length } catch {}
       return { transport: viaMqtt ? 'mqtt' : 'libp2p', relay: viaMqtt ? (opts.broker ?? '') : activeRelay, self, link, connected: connected(), peers, topics }
+    },
+    async knock(inboxSecret, toPub, body) {
+      await sendKnock(node, inboxSecret, unb64(toPub), params, {
+        ik: unb64(id.pub), name: body.name, note: body.note,
+      })
     },
     watchInbox(inboxSecret, handlers) {
       // The identity is both halves: it opens the knocks, and `dh(dh.pub)` is

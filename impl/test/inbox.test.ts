@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { watchInbox } from '../lib/inbox.ts'
+import { watchInbox, sendKnock } from '../lib/inbox.ts'
 import { sealKnock, decoyKnock, FRAME_LEN } from '../lib/knock.ts'
 import { topicFromSecret, rotationOffsetSec } from '../lib/rendezvous.ts'
 import { activeDatesForOffset } from '../lib/presence.ts'
@@ -176,7 +176,7 @@ test('a decoy goes out on its own, and it is a real frame on the right topic', a
   await w.decoy()
   const topic = [...h.subscribed][0]
   h.published.length = 0
-  for (let i = 0; i < 20; i++) { c.add(200); await sleep(25) }
+  for (let i = 0; i < 20; i++) { c.add(300); await sleep(15) }   // 6 s of virtual time
   const mine = h.published.filter((p) => p.topic === topic)
   assert.ok(mine.length >= 1, 'no cover traffic was published at all')
   assert.ok(mine.length <= 8, `far too much cover traffic: ${mine.length}`)
@@ -197,7 +197,7 @@ test('the decoy schedule is deterministic for one identity, and differs per invi
     const at: number[] = []
     for (let i = 0; i < 20; i++) {
       const before = h.published.length
-      c.add(200); await sleep(25)
+      c.add(300); await sleep(15)
       if (h.published.length > before) at.push(c.now())
     }
     w.stop()
@@ -226,7 +226,7 @@ test('the schedule depends on the IDENTITY too, not only on the invite', async (
     const at: number[] = []
     for (let i = 0; i < 20; i++) {
       const before = h.published.length
-      c.add(200); await sleep(25)
+      c.add(300); await sleep(15)
       if (h.published.length > before) at.push(c.now())
     }
     w.stop()
@@ -236,4 +236,45 @@ test('the schedule depends on the IDENTITY too, not only on the invite', async (
   const b = await run(await generateX25519())
   assert.ok(a.length > 0, 'no cover traffic to compare')
   assert.notDeepEqual(a, b, 'two identities sharing an invite produced the same schedule')
+})
+
+test('a knock sent by the Source is the knock the Journalist opens', async () => {
+  // The two halves meet on the topic without agreeing on anything but the
+  // secret: each computes the day from its own clock and the rotation offset.
+  const inbox = secret(8)
+  const h = hub()
+  const j = await generateX25519()
+  const src = await generateX25519()
+  const got: any[] = []
+  const c = clock()
+  const w = watchInbox(h.node, inbox, j, P, { now: c.now, tickMs: 5, decoyEveryMs: 1_000, onKnock: (k) => got.push(k) })
+  await w.decoy()                       // settle, so the subscription exists
+  const topic = [...h.subscribed][0]
+
+  // The Source publishes; the hub delivers to whoever listens on that topic.
+  const sent: Array<{ topic: string; data: Uint8Array }> = []
+  const sourceNode = { services: { pubsub: { publish: async (t: string, d: Uint8Array) => { sent.push({ topic: t, data: d }) } } } }
+  await sendKnock(sourceNode, inbox, j.pub, P, { ik: src.pub, name: 'Informator', note: 'mam materialy' }, { now: c.now })
+
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].topic, topic, 'the Source published onto a different topic than the Journalist listens on')
+  h.deliver(sent[0].topic, sent[0].data)
+  await sleep(30)
+  assert.equal(got.length, 1)
+  assert.deepEqual([...got[0].ik], [...src.pub])
+  assert.equal(got[0].note, 'mam materialy')
+  w.stop()
+})
+
+test('sending a knock does not subscribe the Source to the topic', async () => {
+  // Subscribing would put the Source in the subscriber set for no gain.
+  const inbox = secret(9)
+  const j = await generateX25519(), src = await generateX25519()
+  const subs: string[] = []
+  const node = { services: { pubsub: {
+    publish: async () => {},
+    subscribe: (t: string) => subs.push(t),
+  } } }
+  await sendKnock(node, inbox, j.pub, P, { ik: src.pub, name: 'x' })
+  assert.deepEqual(subs, [])
 })

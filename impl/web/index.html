@@ -437,6 +437,9 @@
   .knock-row .k-fp{font-family:var(--mono);font-size:11.5px;color:var(--muted);word-break:break-all}
   .knock-row .k-note{font-size:13px;color:var(--muted)}
   .inv-foot{font-size:12px;line-height:1.5;color:var(--muted);padding:4px 2px 0}
+  /* Waiting is not an error and not an achievement: it is a state with an
+     outcome still pending, so it borrows the neutral-warm end of the palette. */
+  .c-new.waiting{background:var(--warn-soft);color:var(--warn);border-color:transparent}
   .b-react{display:none;gap:3px}
   /* Shown by PRESSING the bubble, on a mouse exactly as on a finger
      (`.tapped`, app.ts attachReveal). Hover used to reveal it on desktop,

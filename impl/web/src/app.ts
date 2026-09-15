@@ -1350,7 +1350,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
       $('peer-status').textContent = tr('sesja zamknięta (duplikat)')
     },
   })
-  clientReady.then((c) => { client = c; void restoreGroups(); startInboxWatches() }, (e: any) => {
+  clientReady.then((c) => { client = c; void restoreGroups(); startInboxWatches(); resumeKnocking() }, (e: any) => {
     ecLog(`session failed to start: ${e?.message ?? e}`)
     toast(tr('Brak połączenia z przekaźnikiem — odśwież stronę'))
   })
@@ -1465,6 +1465,9 @@ async function syncPresence() {
       // is proof they hold our key, which is the whole question a cold contact
       // raises.
       markSeen(p.pub)
+      // They announced, so they hold our key: the knock was let in and the wait
+      // is over. Nothing else signals acceptance, and nothing else needs to.
+      if (waiting.has(p.pub)) { stopKnocking(p.pub); renderContacts() }
       if (onlinePubs.has(p.pub)) return
       onlinePubs.add(p.pub); renderContacts()
       diag.note(`peer ${p.pub.slice(0, 12)} lit`)
@@ -1638,7 +1641,15 @@ function renderContacts() {
     // claiming to know which one it was (lib/seen.ts).
     const state = contactState(seenMap[c.pub], nowMs(), online || inRoom)
     const stamp = seenText(c.pub)
-    const mark = unseen ? '' // an unread message is louder than either of these
+    // Waiting beats `new` and `cold`: those say "has never answered", which is
+    // true here and useless - this contact came from an invite we knocked on,
+    // and the remedy they offer (send them your code) is exactly what the knock
+    // already did. Saying "not delivered yet" is the honest version, and for a
+    // Source an ambiguous screen is the dangerous outcome (§4.7).
+    const wait = waiting.get(c.pub)
+    const mark = wait
+      ? `<span class="c-new waiting" title="${escapeHtml(tr('Zapukaliśmy i czekamy na przyjęcie. Nie ma potwierdzenia, że doręczono — ponawiamy, dopóki aplikacja jest otwarta.'))}">${tr('CZEKAM')}</span>`
+      : unseen ? '' // an unread message is louder than either of these
       : state === 'new' ? `<span class="c-new" title="${escapeHtml(tr('Jeszcze się nie odezwał — jeśli nie ma Twojego klucza, wyślij mu swój kod (kliknij)'))}">${tr('NOWY')}</span>`
       : state === 'cold' ? `<span class="c-new cold" title="${escapeHtml(tr('Ani razu się nie odezwał. Albo go nie było, albo nie ma Twojego klucza — kliknij, żeby wysłać kod ponownie'))}">?</span>`
       : state === 'quiet' && stamp ? `<span class="c-seen">${escapeHtml(stamp)}</span>`
@@ -1649,7 +1660,7 @@ function renderContacts() {
       // phone, and the fingerprint losing its tail costs nothing next to the
       // sentence that says why the dot will never light.
       + `<div class="c-sub" title="${escapeHtml(c.kid ? `KID ${c.kid}` : c.pub)}">`
-      + `${state === 'cold' ? escapeHtml(tr('nigdy się nie odezwał')) + ' · ' : ''}`
+      + `${wait ? escapeHtml(tr('zapukaliśmy — brak potwierdzenia doręczenia')) + ' · ' : state === 'cold' ? escapeHtml(tr('nigdy się nie odezwał')) + ' · ' : ''}`
       + `🔑 ${escapeHtml(fpCache.get(c.pub) ?? '…')}${c.kid ? ' · KID ' + escapeHtml(shortKid(c.kid)) : ''}</div></div>`
       + mark + pill + `<button class="c-edit" title="${tr('Zmień nazwę')}">✎</button><span class="c-x" title="${tr('Usuń')}">×</span>`
     b.addEventListener('click', async (e: any) => {
@@ -2258,6 +2269,11 @@ $('import-add').addEventListener('click', async () => {
       await session.book.add(name, inv.pub, store !== 'local')
       await refreshContacts()
     }
+    // An invite carrying an inbox answers itself: this side knocks on it, and
+    // the contact stays marked as waiting until the other side announces. There
+    // is no reply channel to watch - the answer IS them appearing on the pair
+    // topic, which this client could always derive (DISCOVERY-PROPOSAL.md §2.2).
+    if (inv.inbox && store !== 'none') startKnocking(inv.pub, inv.inbox, name)
     pendingInvite = null
     closeImport()
     // Nothing was written, so the conversation is all there is: open it, or the
@@ -3425,6 +3441,87 @@ for (const [tab, pane] of TABS) {
     if (pane === 'invites') renderInvites()
     if (pane === 'network') startNetwork(); else stopNetwork()
   })
+}
+
+// ---- the Source's half: knock, then wait honestly ---------------------------
+/**
+ * A contact imported from an invite that carried an inbox is not a contact yet:
+ * we hold their key, they hold nothing of ours, and the knock is what tells them
+ * we exist. Until they accept it there is no channel and no way to know whether
+ * the frame was even delivered — GossipSub stores nothing, so a knock reaches a
+ * listener or reaches nobody (DISCOVERY-PROPOSAL.md §4.7).
+ *
+ * So this re-knocks while the app is open, and the contact carries a plain
+ * label saying there is no confirmation of delivery. For a Source an ambiguous
+ * screen is the dangerous outcome: "I clicked and something probably happened"
+ * must never be what is on display.
+ *
+ * Persisted, unlike the Journalist's pending list. This is OUR state about a
+ * contact WE chose to add, not a store strangers can fill: after a reload we
+ * must go on knocking, or a reload would silently end the attempt.
+ *
+ * Nothing here watches for a reply. The answer is the other side appearing on
+ * the pair topic, which this client could always derive — `onOnline` ends the
+ * wait, and that is the whole mechanism.
+ */
+interface Waiting { inbox: string; name: string; since: number }
+const waitingKey = () => 'ec-waiting-' + (session?.idKey ?? '')
+let waiting = new Map<string, Waiting>()
+let knockTimer: any = null
+/** Under a minute would be rude to the relay; over a few makes a Source wait. */
+const KNOCK_EVERY_MS = 90_000
+
+function loadWaiting() {
+  try {
+    const v = JSON.parse(localStorage.getItem(waitingKey()) || 'null')
+    waiting = new Map(Array.isArray(v) ? v : [])
+  } catch { waiting = new Map() }
+}
+function saveWaiting() {
+  try { localStorage.setItem(waitingKey(), JSON.stringify([...waiting])) } catch {}
+}
+
+async function knockOnce(pub: string, w: Waiting) {
+  if (!client || !session) return
+  const raw = inboxSecretBytes({ pub: '', name: '', inbox: w.inbox })
+  if (!raw) { ecLog(`knock: unusable inbox for ${pub.slice(0, 12)}…`); return }
+  try {
+    await client.knock(raw, pub, { name: session.handle })
+    ecLog(`knock sent to ${pub.slice(0, 12)}… (no delivery confirmation exists)`)
+  } catch (e: any) { ecLog(`knock failed: ${e?.message ?? e}`) }
+}
+
+function ensureKnockTimer() {
+  if (knockTimer || !waiting.size) return
+  knockTimer = setInterval(() => {
+    if (!waiting.size) { clearInterval(knockTimer); knockTimer = null; return }
+    for (const [pub, w] of waiting) void knockOnce(pub, w)
+  }, KNOCK_EVERY_MS)
+  ;(knockTimer as any).unref?.()
+}
+
+function startKnocking(pub: string, inbox: string, name: string) {
+  waiting.set(pub, { inbox, name, since: nowMs() })
+  saveWaiting()
+  renderContacts()
+  const w = waiting.get(pub)!
+  void knockOnce(pub, w)
+  ensureKnockTimer()
+}
+
+function stopKnocking(pub: string) {
+  if (!waiting.delete(pub)) return
+  saveWaiting()
+  if (!waiting.size && knockTimer) { clearInterval(knockTimer); knockTimer = null }
+}
+
+/** After a reload: pick the waiting contacts back up and knock again. */
+function resumeKnocking() {
+  loadWaiting()
+  if (!waiting.size) return
+  for (const [pub, w] of waiting) void knockOnce(pub, w)
+  ensureKnockTimer()
+  renderContacts()
 }
 
 // ---- published invites, and the knocks they bring ---------------------------

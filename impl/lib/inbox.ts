@@ -42,7 +42,7 @@
 import { hkdfBits } from './wc.ts'
 import { topicFromSecret, rotationOffsetSec, type RvParams } from './rendezvous.ts'
 import { activeDatesForOffset, type RotationConfig } from './presence.ts'
-import { openKnock, decoyKnock, type Knock } from './knock.ts'
+import { openKnock, decoyKnock, sealKnock, type Knock } from './knock.ts'
 import type { Dh } from './x25519.ts'
 import { nowMs } from './time.ts'
 
@@ -225,4 +225,31 @@ export function watchInbox(
       topics.clear()
     },
   }
+}
+
+/**
+ * Knock once on somebody's published invite — the Source's half.
+ *
+ * Publish-only, and deliberately: subscribing would put this client in the
+ * topic's subscriber set for no gain, and the frame reaches the Journalist
+ * through the relay, which is already subscribed because the Journalist is
+ * listening. If nobody is listening the relay has evicted the topic and the
+ * knock reaches nobody — that is §4.7, not a failure to handle here.
+ *
+ * The day is computed the same way the watch computes it, so both sides land on
+ * the same topic without agreeing on anything but the secret.
+ */
+export async function sendKnock(
+  node: any,
+  inbox: Uint8Array,
+  journalistPub: Uint8Array,
+  params: RvParams,
+  body: { ik: Uint8Array; name: string; note?: string },
+  opts: RotationConfig & { now?(): number } = {},
+): Promise<void> {
+  const now = opts.now ?? nowMs
+  const offsetMs = (await rotationOffsetSec(inbox, params)) * 1000
+  const dateUTC = activeDatesForOffset(now(), offsetMs, opts)[0]
+  const topic = await topicFromSecret(inbox, { ...params, dateUTC })
+  await node.services.pubsub.publish(topic, await sealKnock(inbox, journalistPub, body))
 }
