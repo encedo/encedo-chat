@@ -222,6 +222,83 @@ the Journalist's. A hostile web page can publish its own invite under a
 journalist's name, and no protocol fixes that. The fingerprint is what a
 second channel would be used to compare.
 
+### 6.1 The inbox topic is public, and that is the real cost
+
+Every other topic in this protocol is unguessable: it is the image of a secret
+that never leaves the two people who derive it. **The inbox topic is not.** Its
+secret is printed on a web page, so the topic is public knowledge to anyone who
+reads that page, and being publicly reachable is the entire point. The
+consequences should be stated rather than discovered.
+
+**Anyone holding the link can subscribe, and therefore can watch.** They learn
+that a knock happened, at what second, how many there were, and how large the
+frame was. This is the property the rest of the protocol does not give away,
+and here it is given away deliberately.
+
+**They do not learn who.** §2.1 holds: the only cleartext is a one-shot
+ephemeral public key, so an observer sees that *someone* knocked. The exposure
+is traffic analysis, not deanonymization — and for a Journalist and a Source
+traffic analysis can be enough on its own. "Somebody contacted this journalist
+at 14:32" is a small fact that becomes a large one next to network-level
+observation of a handful of suspects. Treat it as the headline risk of the
+whole feature.
+
+**The daily rotation buys nothing here, and §5.4 must not be read as if it
+did.** A pair topic rotates out of an adversary's reach because the adversary
+never had the pair secret. An inbox secret is public, so tomorrow's topic is
+computed by the watcher exactly as it is by the Source. Rotation still spreads
+load; it provides no unlinkability on this topic.
+
+**They also cannot tell whether the Journalist is listening.** The relay
+subscribes to any topic a client uses (`relay.mjs`, the `[+topic]` path), and
+browser clients are connected only to the relay, so the subscriber set a
+watcher can see contains the relay and nothing else. Being offline and being
+uninterested look the same from outside.
+
+**The mitigation that works is indistinguishable decoy traffic.** The
+Journalist's own client publishes well-formed decoy knocks on its own inbox, on
+a randomised schedule, padded to the same constant size as a real one. Then
+"a knock happened" carries no information, because it happens anyway. Two
+conditions make or break it:
+
+- **Padding is mandatory, decoys or not.** A knock must be a fixed size, or the
+  note's length distinguishes people, and a decoy is distinguishable from a
+  real knock on size alone, which defeats the whole exercise.
+- **The decoy must be a real ciphertext under a real ephemeral key.** Random
+  bytes are distinguishable from an AEAD frame by anyone who tries to open it
+  and by anyone who checks its structure.
+
+This also fixes a correctness problem the proposal otherwise has, and the two
+wants the same mechanism. **The relay evicts a topic that has been idle for
+120 s** (`[-topic] evicted ... (idle > 120s)`; 209 of them in one day on bs1).
+An inbox where the Journalist only listens and nobody knocks is exactly that:
+idle. A decoy on a schedule shorter than the eviction window is the keepalive,
+and it is cheap — a knock every 60 s is a quarter of what one presence watch
+already costs in Announce traffic.
+
+**What stays outside the protocol.** The Source's address reaches the relay on
+publish, like every other publish. A Source who needs that hidden needs Tor or
+a VPN, and the UI should say so at the moment of knocking rather than in
+documentation nobody reads. This is the same advice SecureDrop gives, for the
+same reason.
+
+**Rejected: rotating the invite as a defence.** An adversary who re-reads the
+page gets the new link with the next visitor. Rotation defends against somebody
+who scraped once and stopped looking, which is not the adversary this feature
+has.
+
+**Rejected: a per-visitor secret minted by the web page.** It would give every
+Source its own topic and remove correlation between them entirely — at the cost
+of the web server knowing, and logging, every visitor who took a link. For a
+Journalist that record is worse than the leak it removes: it is a list of
+candidate sources, held by the machine most exposed to a subpoena. §4.2's
+fragment property exists precisely so the web host learns nothing.
+
+**The honest comparison.** This is the trade a public email address or a
+published SecureDrop landing page already makes, and neither hides that
+somebody made contact. What this design keeps that a mailto: does not is the
+content of the knock and the identity behind it.
+
 ## 7. Abuse
 
 A public address attracts what public addresses attract.
@@ -252,3 +329,8 @@ exist and are covered by tests today.
    holding several of one Journalist's invites?
 4. Is there any reason to prefer signing the knock over sealing it, given §8's
    all-ECDH, deniable posture elsewhere in the protocol?
+5. §6.1: does a padded, randomised decoy schedule on a public topic actually
+   buy what it claims against an adversary who watches for months, or does the
+   real-knock distribution leak through the decoy distribution over time? What
+   schedule would you want — and is a constant rate better here than a
+   randomised one, given that the thing being hidden is a rare event?
