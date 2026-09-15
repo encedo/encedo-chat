@@ -49,6 +49,7 @@ import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
 import { newDiag } from '../../lib/diag.ts'
+import { NOTE_MAX } from '../../lib/knock.ts'
 import { contactState, seenLabel, noteSeen as foldSeen, noteAdded as foldAdded, PRESENCE_TTL_MS, type Seen } from '../../lib/seen.ts'
 import { bodyBytes, fitsOnWire, overBy, MAX_BODY, WARN_AT, kb } from '../../lib/msgsize.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
@@ -710,6 +711,7 @@ $('pass').addEventListener('keydown', (e: any) => { if (e.key === 'Enter') ($('g
 // and a contact's name. Both count against a real budget, so both show it.
 attachByteBudget($('handle') as HTMLInputElement, SELF_NAME_MAX, $('handle-bytes'))
 attachByteBudget($('add-name') as HTMLInputElement, PEER_NAME_MAX, $('add-name-bytes'))
+attachByteBudget($('import-note') as HTMLTextAreaElement, NOTE_MAX, $('import-note-bytes'))
 
 // dev / no-HEM: a persistent software X25519 identity (localStorage — one per
 // browser). For two peers, open two DIFFERENT browsers (or profiles).
@@ -1900,7 +1902,7 @@ async function claimContact(name: string, pub: string): Promise<boolean> {
  * simply stops taking characters, and the caret is put back where it was so a
  * paste that overflows does not also jump the cursor to the end.
  */
-function attachByteBudget(input: HTMLInputElement, max: number, out: HTMLElement) {
+function attachByteBudget(input: HTMLInputElement | HTMLTextAreaElement, max: number, out: HTMLElement) {
   const paint = () => {
     const used = byteLen(input.value)
     const left = max - used
@@ -2245,6 +2247,13 @@ async function showInvite(inv: Invite, nameOverride?: string) {
   clr('import-msg')
   ;($('import-name') as HTMLInputElement).value = nameOverride || inv.name
   paintStoreOptions('import-store')
+  // Nothing to answer on means nothing to say: an invite with no inbox has no
+  // knock to carry a note, so the field would be a box that swallows what you
+  // wrote. Cleared every time - a note is about one request, not a preference.
+  const note = $('import-note') as HTMLTextAreaElement
+  note.value = ''
+  note.dispatchEvent(new Event('input'))
+  $('import-note-box').hidden = !inv.inbox
   $('import-fp').textContent = await fingerprint(inv.pub)
   if (inv.pub === session?.pub) setMsg('import-msg', tr('To Twój własny profil.'), 'err')
 }
@@ -2273,7 +2282,7 @@ $('import-add').addEventListener('click', async () => {
     // the contact stays marked as waiting until the other side announces. There
     // is no reply channel to watch - the answer IS them appearing on the pair
     // topic, which this client could always derive (DISCOVERY-PROPOSAL.md §2.2).
-    if (inv.inbox && store !== 'none') startKnocking(inv.pub, inv.inbox, name)
+    if (inv.inbox && store !== 'none') startKnocking(inv.pub, inv.inbox, name, val('import-note'))
     pendingInvite = null
     closeImport()
     // Nothing was written, so the conversation is all there is: open it, or the
@@ -3469,7 +3478,9 @@ for (const [tab, pane] of TABS) {
  * the pair topic, which this client could always derive — `onOnline` ends the
  * wait, and that is the whole mechanism.
  */
-interface Waiting { inbox: string; name: string; since: number }
+/** `note` is OURS and travels with every re-knock, so the request says the same
+ *  thing whichever attempt is the one that lands. */
+interface Waiting { inbox: string; name: string; since: number; note?: string }
 const waitingKey = () => 'ec-waiting-' + (session?.idKey ?? '')
 let waiting = new Map<string, Waiting>()
 let knockTimer: any = null
@@ -3491,7 +3502,7 @@ async function knockOnce(pub: string, w: Waiting) {
   const raw = inboxSecretBytes({ pub: '', name: '', inbox: w.inbox })
   if (!raw) { ecLog(`knock: unusable inbox for ${pub.slice(0, 12)}…`); return }
   try {
-    const reach = await client.knock(raw, pub, { name: session.handle })
+    const reach = await client.knock(raw, pub, { name: session.handle, note: w.note })
     // "Sent" and "sent to nobody" look identical from here otherwise: publishing
     // into a topic nothing carries succeeds quietly. Nobody listening is the
     // ordinary case (§4.7 - they must be online), not a fault, so it is a line in
@@ -3511,8 +3522,8 @@ function ensureKnockTimer() {
   ;(knockTimer as any).unref?.()
 }
 
-function startKnocking(pub: string, inbox: string, name: string) {
-  waiting.set(pub, { inbox, name, since: nowMs() })
+function startKnocking(pub: string, inbox: string, name: string, note?: string) {
+  waiting.set(pub, { inbox, name, since: nowMs(), note: note || undefined })
   saveWaiting()
   renderContacts()
   const w = waiting.get(pub)!
