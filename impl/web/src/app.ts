@@ -2790,7 +2790,7 @@ $('pw-save').addEventListener('click', async () => {
 $('btn-settings').addEventListener('click', openDrawer)
 $('chip-profile').addEventListener('click', openDrawer)
 $('btn-close-drawer').addEventListener('click', closeDrawer)
-$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); closeWelcome(); pendingInvite = null; closeImport(); closeScan() })
+$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); closeWelcome(); pendingInvite = null; closeImport(); closeScan(); closeIgnored() })
 $('btn-logout').addEventListener('click', () => location.reload())
 // The same act, from the header rather than from inside Settings — but asked
 // first, because this one sits beside a button people press often. Logging out
@@ -3455,7 +3455,7 @@ for (const [tab, pane] of TABS) {
     $('head-groups').hidden = pane !== 'groups'
     $('head-invites').hidden = pane !== 'invites'
     if (pane === 'groups') renderGroups()
-    if (pane === 'invites') renderInvites()
+    if (pane === 'invites') { renderInvites(); void loadIgnored().then(paintIgnoredButton) }
   })
 }
 
@@ -3615,14 +3615,47 @@ interface PendingKnock { ik: string; name: string; note: string; at: number; inv
  * says so rather than implying a block list that is not there.
  */
 const IGNORED_MAX = 512
-/** The claimed name is kept beside the key so the list can be READ. It is not
- *  evidence of anything - it is what that knock said it was called. */
-const ignoredKnocks = new Map<string, { name: string; at: number }>()
-const ignoredOrder: string[] = []
-function ignoreKnock(ik: string, name: string) {
-  if (ignoredKnocks.has(ik)) return
-  ignoredKnocks.set(ik, { name, at: nowMs() }); ignoredOrder.push(ik)
-  if (ignoredOrder.length > IGNORED_MAX) ignoredKnocks.delete(ignoredOrder.shift()!)
+const IGNORED_SALT = 'encedo-chat-ignored-v1'
+const ignoredKey = () => 'ec-ignored-' + (session?.idKey ?? '')
+
+/**
+ * Two fields and no more (the user's call): the FINGERPRINT of the key, and
+ * when you dismissed it.
+ *
+ * Not the key itself, because a truncated hash is enough to recognise a knock
+ * we have already been told to drop and is a weaker thing to find on a seized
+ * device. Not the name either — that is a stranger's claim, typed by whoever
+ * knocked, and keeping somebody else's text on disk is the opposite of the
+ * point. The cost is that the list reads as fingerprints, which is also how you
+ * are asked to identify people everywhere else in this app.
+ */
+interface Ignored { fp: string; at: number }
+let ignored: Ignored[] = []
+let ignoredReady: Promise<void> | null = null
+
+function loadIgnored(): Promise<void> {
+  if (!ignoredReady) ignoredReady = (async () => {
+    const v = await readSealed<Ignored[]>(ignoredKey(), IGNORED_SALT, Array.isArray)
+    ignored = Array.isArray(v) ? v.filter((r) => r && typeof r.fp === 'string') : []
+  })()
+  return ignoredReady
+}
+function saveIgnored() { void writeSealed(ignoredKey(), IGNORED_SALT, ignored) }
+
+async function ignoreKnock(ik: string) {
+  const fp = await fingerprint(ik)
+  if (ignored.some((r) => r.fp === fp)) return
+  ignored.unshift({ fp, at: nowMs() })
+  // Oldest out first. A flood of knocks under fresh keys cannot grow this
+  // without limit, and the ones you dismissed most recently are the ones you
+  // are most likely to want back.
+  if (ignored.length > IGNORED_MAX) ignored.length = IGNORED_MAX
+  saveIgnored()
+}
+async function isIgnored(ik: string): Promise<boolean> {
+  await loadIgnored()
+  const fp = await fingerprint(ik)
+  return ignored.some((r) => r.fp === fp)
 }
 
 /**
@@ -3713,6 +3746,43 @@ function loadInvites(): Promise<void> {
 }
 function saveInvites() { void writeSealed(invitesKey(), INVITES_SALT, pubInvites) }
 
+/** The button only exists when there is something behind it. */
+function paintIgnoredButton() {
+  const b = $('btn-ignored'); if (!b) return
+  b.hidden = ignored.length === 0
+  $('ignored-count').textContent = String(ignored.length)
+}
+
+function renderIgnored() {
+  const box = $('ignored-list')
+  box.innerHTML = ''
+  if (!ignored.length) {
+    box.innerHTML = `<div class="hint">${escapeHtml(tr('Nikogo nie ignorujesz.'))}</div>`
+    return
+  }
+  for (const rec of ignored) {
+    const row = document.createElement('div'); row.className = 'ign-row'
+    const fp = document.createElement('div'); fp.className = 'ign-fp'; fp.textContent = rec.fp
+    const at = document.createElement('div'); at.className = 'ign-at'; at.textContent = inviteWhen(rec.at)
+    const back = document.createElement('button'); back.textContent = tr('Cofnij')
+    back.title = tr('Przestaniesz ignorować ten klucz. Jeśli ta osoba wciąż puka, prośba pojawi się przy kolejnym pukaniu.')
+    back.addEventListener('click', () => {
+      ignored = ignored.filter((r) => r !== rec)
+      saveIgnored(); renderIgnored(); paintIgnoredButton()
+    })
+    row.append(fp, at, back)
+    box.appendChild(row)
+  }
+}
+
+$('btn-ignored')?.addEventListener('click', async () => {
+  await loadIgnored()
+  renderIgnored()
+  $('scrim').classList.add('open'); $('ignored-modal').classList.add('open')
+})
+const closeIgnored = () => { $('scrim').classList.remove('open'); $('ignored-modal').classList.remove('open') }
+$('ignored-close')?.addEventListener('click', closeIgnored)
+
 function paintInviteBadge() {
   const b = $('inv-badge')
   b.textContent = String(pendingKnocks.length)
@@ -3736,17 +3806,20 @@ async function startInboxWatches() {
     const raw = inboxSecretBytes({ pub: '', name: '', inbox: inv.secret })
     if (!raw) { ecLog(`invite ${inv.id}: unusable secret, not watched`); continue }
     inboxWatches.set(inv.id, client.watchInbox(raw, {
-      onKnock: (k) => {
+      onKnock: (k) => void (async () => {
         const ik = b64(k.ik)
-        if (ignoredKnocks.has(ik)) return
         // One request per key per invite: a Source that re-knocks while waiting
-        // must not stack up, and that is the ordinary case, not an attack.
+        // must not stack up, and that is the ordinary case, not an attack. This
+        // runs BEFORE the await as well as after it, because the ignore check
+        // is a hash now and two frames can arrive inside one tick.
+        if (pendingKnocks.some((p) => p.ik === ik && p.inviteId === inv.id)) return
+        if (await isIgnored(ik)) return
         if (pendingKnocks.some((p) => p.ik === ik && p.inviteId === inv.id)) return
         pendingKnocks.unshift({ ik, name: k.name, note: k.note, at: nowMs(), inviteId: inv.id })
         paintInviteBadge()
         if (!$('pane-invites').hidden) renderInvites()
         toast(tr('Ktoś puka do zaproszenia „{label}"', { label: inv.label }))
-      },
+      })(),
       onLog: ecLog,
     }))
   }
@@ -3845,40 +3918,13 @@ function renderInvites() {
       const yes = document.createElement('button'); yes.textContent = tr('Przyjmij')
       yes.addEventListener('click', () => void acceptKnock(k))
       const no = document.createElement('button'); no.className = 'danger'; no.textContent = tr('Zignoruj')
-      no.title = tr('Do końca tej sesji nie zobaczysz pukań tym kluczem. Po przeładowaniu strony mogą pojawić się znowu — nic nie jest zapisywane na dysku.')
-      no.addEventListener('click', () => {
-        ignoreKnock(k.ik, k.name)
-        pendingKnocks = pendingKnocks.filter((p) => p !== k); paintInviteBadge(); renderInvites()
+      no.title = tr('Nie zobaczysz już pukań tym kluczem. Listę zignorowanych znajdziesz nad spisem zaproszeń i możesz ją cofnąć.')
+      no.addEventListener('click', async () => {
+        await ignoreKnock(k.ik)
+        pendingKnocks = pendingKnocks.filter((p) => p !== k)
+        paintInviteBadge(); renderInvites(); paintIgnoredButton()
       })
       acts.append(yes, no); row.appendChild(acts)
-      pane.appendChild(row)
-    }
-  }
-
-  // Ignored keys are state that changes what you are shown, so they cannot sit
-  // where nobody can see them: without this, "Zignoruj" quietly stopped showing
-  // somebody and there was no way to find out, let alone change your mind.
-  if (ignoredKnocks.size) {
-    const hi = document.createElement('div'); hi.className = 'pane-label'
-    hi.textContent = tr('Zignorowane w tej sesji — po przeładowaniu lista znika')
-    pane.appendChild(hi)
-    for (const [ik, meta] of [...ignoredKnocks].reverse()) {
-      const row = document.createElement('div'); row.className = 'knock-row ignored'
-      const nm = document.createElement('div'); nm.className = 'k-name'
-      nm.textContent = meta.name || tr('Bez nazwy')
-      const fp = document.createElement('div'); fp.className = 'k-fp'
-      fp.textContent = tr('odcisk: ') + '…'
-      void fingerprint(ik).then((f) => { fp.textContent = tr('odcisk: ') + f })
-      const acts = document.createElement('div'); acts.className = 'inv-acts'
-      const back = document.createElement('button'); back.textContent = tr('Cofnij')
-      back.title = tr('Przestaniesz ignorować ten klucz. Jeśli ta osoba wciąż puka, prośba pojawi się przy kolejnym pukaniu.')
-      back.addEventListener('click', () => {
-        ignoredKnocks.delete(ik)
-        const i = ignoredOrder.indexOf(ik); if (i >= 0) ignoredOrder.splice(i, 1)
-        renderInvites()
-      })
-      acts.appendChild(back)
-      row.append(nm, fp, acts)
       pane.appendChild(row)
     }
   }

@@ -428,6 +428,23 @@
   .inv-row .inv-edit{background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:2px 4px;line-height:1;flex-shrink:0}
   .inv-row .inv-edit:hover{color:var(--accent)}
   .inv-row.expired{opacity:.62}
+  /* An ignored row is a RECORD, not a request. It must not wear the accent the
+     pending ones do, or a list of people you already dismissed reads as a
+     queue still waiting on you. */
+  .knock-row.ignored{opacity:.75;border-color:var(--border);background:transparent;box-shadow:none}
+  .ign-row{display:flex;gap:8px;align-items:center;padding:8px 2px;border-bottom:1px solid var(--border)}
+  .ign-row .ign-fp{flex:1;min-width:0;font-family:var(--mono);font-size:11.5px;word-break:break-all}
+  .ign-row .ign-at{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
+  /* Two buttons in one header row: the primary action keeps the width, the
+     ignored-list button takes only what it needs. `.add-btn` is width:100%, so
+     without the flex row these stack and the strip doubles in height. */
+  .add-row.two{display:flex;gap:8px;align-items:stretch}
+  .add-row.two .add-btn{width:auto;flex:1}
+  /* Specificity, not order: `.add-row.two .add-btn` (0,2,1) beats a bare
+     `.add-btn.ghost` (0,2,0), so the ghost needs the row in its selector too or
+     it inherits flex:1 and the two buttons come out the same width. */
+  .add-row.two .add-btn.ghost{flex:0 0 auto;background:transparent;border:1px solid var(--border);color:var(--muted);padding:9px 12px;white-space:nowrap}
+  .add-row.two .add-btn.ghost:hover{border-color:var(--accent);color:var(--accent)}
   .inv-row .inv-dead{font-family:var(--mono);font-size:11px;color:var(--bad)}
   .inv-row .inv-when{font-family:var(--mono);font-size:11px;color:var(--muted)}
   .inv-acts{display:flex;gap:6px;flex-wrap:wrap}
@@ -1196,7 +1213,13 @@
            can be retired on its own — which is the whole point of one secret
            per invite (DISCOVERY-PROPOSAL.md §4.1). -->
       <div id="head-invites" hidden>
-        <div class="add-row"><button class="add-btn" id="btn-new-invite" data-i18n="+ Nowe zaproszenie">+ Nowe zaproszenie</button></div>
+        <div class="add-row two"><button class="add-btn" id="btn-new-invite" data-i18n="+ Nowe zaproszenie">+ Nowe zaproszenie</button>
+          <!-- The ignored list is durable now, so it is a setting rather than
+               this session's noise — and a setting nobody can find is the same
+               as one that does not exist. It lives beside the invites because
+               that is where the knocks it silences arrive. -->
+          <button class="add-btn ghost" id="btn-ignored" title="Zignorowane klucze" data-i18n-title="Zignorowane klucze" hidden>🚫 <span id="ignored-count">0</span></button>
+        </div>
       </div>
       <div class="pane" id="pane-invites" hidden></div>
       <!-- The one strip that is on screen whenever the list is, on every
@@ -1447,6 +1470,13 @@
        same two: what this invite is called, and how long you keep listening on
        it. The lifetime is LOCAL bookkeeping — it never goes on the wire, and
        nobody holding the link can tell when you stopped. -->
+  <div class="modal" id="ignored-modal">
+    <h2 data-i18n="Zignorowane klucze">Zignorowane klucze</h2>
+    <div class="msub" data-i18n="Pukania tymi kluczami nie są Ci pokazywane. Lista jest zaszyfrowana na tym urządzeniu i pamięta tylko odcisk oraz czas — nie nazwę, którą ktoś podał.">Pukania tymi kluczami nie są Ci pokazywane. Lista jest zaszyfrowana na tym urządzeniu i pamięta tylko odcisk oraz czas — nie nazwę, którą ktoś podał.</div>
+    <div id="ignored-list"></div>
+    <div class="modal-actions"><button class="btn-ghost" id="ignored-close" style="flex:1" data-i18n="Zamknij">Zamknij</button></div>
+  </div>
+
   <div class="modal" id="invite-modal">
     <h2 id="invite-title" data-i18n="Nowe zaproszenie">Nowe zaproszenie</h2>
     <div class="msub" data-i18n="Ten link możesz powiesić publicznie. Kto go ma, może do Ciebie zapukać — a Ty decydujesz, kogo przyjmiesz.">Ten link możesz powiesić publicznie. Kto go ma, może do Ciebie zapukać — a Ty decydujesz, kogo przyjmiesz.</div>
