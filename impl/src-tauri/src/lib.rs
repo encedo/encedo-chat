@@ -224,6 +224,42 @@ mod desk {
         }
     }
 
+    /// Keep the window off screen until the page has painted — DESKTOP ONLY.
+    ///
+    /// The reason is a desktop one: WebKitGTK paints its own white before the
+    /// page does, and on a dark desktop that is a flash of the wrong colour at
+    /// every launch. Android has no such flash, and applying the trick there
+    /// cost the whole app — the window is hidden by this, and the only things
+    /// that bring it back are a ping from module-level JS (line ~6514 of
+    /// app.ts, after six thousand lines that must all evaluate without
+    /// throwing) and a 4 s watchdog. On Android BOTH failed and 0.6.0 started
+    /// to a black screen with the service notification running, while the very
+    /// same bundle ran fine in Chrome on the same phone.
+    ///
+    /// So mobile never hides. Visibility there does not depend on the bundle
+    /// reaching a particular line, which is not something a window should ever
+    /// have depended on.
+    #[cfg(desktop)]
+    fn hide_until_painted<R: Runtime>(app: &AppHandle<R>) {
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.hide();
+        }
+        let h = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(4));
+            if !h
+                .state::<Shell>()
+                .booted
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                reveal(&h);
+            }
+        });
+    }
+
+    #[cfg(not(desktop))]
+    fn hide_until_painted<R: Runtime>(_app: &AppHandle<R>) {}
+
     fn reveal<R: Runtime>(app: &AppHandle<R>) {
         let shell = app.state::<Shell>();
         shell
@@ -1105,22 +1141,7 @@ mod desk {
                 // can ping: a window with an error on it beats an app that
                 // looks like it never started. `booted` keeps the watchdog
                 // from resurrecting a window somebody already hid to the tray.
-                if let Some(w) = app.get_webview_window("main") {
-                    let _ = w.hide();
-                }
-                {
-                    let h = app.handle().clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_secs(4));
-                        if !h
-                            .state::<Shell>()
-                            .booted
-                            .load(std::sync::atomic::Ordering::Relaxed)
-                        {
-                            reveal(&h);
-                        }
-                    });
-                }
+                hide_until_painted(app.handle());
 
                 let show = MenuItem::with_id(app, "show", "Show onchato", true, None::<&str>)?;
                 let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
