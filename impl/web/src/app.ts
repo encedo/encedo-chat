@@ -4453,6 +4453,15 @@ function refuse(rep: Awaited<ReturnType<typeof probeCapabilities>>) {
  *  The map is per-room now: a background handshake must not move the foreground
  *  badge. On switching in, `paintSecurity` repaints from the room's own map. */
 function noteSecurity(room: Room, peer: string, state: 'handshaking' | 'established' | 'failed') {
+  // A finished handshake is proof they hold our key — they could not have
+  // completed one without it — so the wait is over. Presence used to be the only
+  // thing that ended it, and the presence watch EXCLUDES the contact whose
+  // conversation is on screen: accept a knock, open the chat, and the row said
+  // CZEKAM for ever while the two of you were talking. Reported live; the
+  // harness missed it because its B never opens the room.
+  if (state === 'established' && room.contact && waiting.has(room.contact.pub)) {
+    stopKnocking(room.contact.pub)
+  }
   if (peer) room.security.set(peer, state)
   else { room.security.clear(); room.security.set('', state) }
   if (room === activeRoom()) { paintSecurity(room); paintKnockButton(); paintStatus() }
