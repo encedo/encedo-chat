@@ -958,9 +958,17 @@
      past to get there. The rule only ever HIDES — it never forces a paragraph
      visible — so an explanation the app hides for its own reasons stays hidden,
      and its button is hidden with it. */
-  .help-toggle{display:block;margin:0 16px 10px;padding:0;background:none;border:none;
-    color:var(--accent);font-size:11px;cursor:pointer;text-align:left}
-  .help-toggle:hover{text-decoration:underline}
+  /* The toggle sits BESIDE the section's name, as a question mark in a circle —
+     one shape, one place, every section the same. It is a sibling of the
+     heading and not a child: `applyDom` writes textContent on anything carrying
+     data-i18n, and a button inside the heading would be erased on every
+     language switch (it has happened once already, to the invites tab badge). */
+  .d-sec-row{display:flex;align-items:baseline;gap:7px}
+  .help-toggle{flex:0 0 auto;width:16px;height:16px;padding:0;border-radius:50%;
+    border:1px solid var(--border);background:none;color:var(--muted);
+    font-size:10px;line-height:14px;text-align:center;cursor:pointer}
+  .help-toggle:hover,.help-toggle:focus-visible{border-color:var(--accent);color:var(--accent);outline:none}
+  .help-toggle[aria-expanded="true"]{border-color:var(--accent);color:var(--accent)}
   .d-note.collapsible:not(.is-open),.hint.collapsible:not(.is-open){display:none}
   .opt{display:flex;gap:10px;padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px}
   .opt.ph{opacity:.5}

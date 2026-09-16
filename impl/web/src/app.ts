@@ -2057,32 +2057,52 @@ $('btn-log-copy').addEventListener('click', async () => {
 // The 2.5 s refresh belongs to whatever is showing the node list, and that is
 // the drawer now. Left running behind a closed drawer it would poll for ever.
 /**
- * Fold every long explanation in Settings behind its own button.
+ * One question mark beside each section's name, folding that section's
+ * explanations.
  *
- * Done here rather than in the markup so it covers the ones that are there now
- * and the ones added later, and so a paragraph the app hides for its own
- * reasons (no tray on this desktop, no HEM on this profile) does not leave
- * behind a button that opens nothing.
+ * Per section rather than per paragraph: a heading with several notes under it
+ * (the desktop block has three) would otherwise grow a row of buttons, and the
+ * point was one consistent affordance in one consistent place.
  *
- * Diagnostics are skipped: that whole block already sits behind one button, and
- * folding the prose inside it would be a second layer over the same thing.
+ * The button is a SIBLING of the heading, both wrapped in a flex row. It cannot
+ * be a child: `applyDom` writes textContent on anything carrying data-i18n, so
+ * a button inside the heading would vanish on the first language switch — which
+ * is exactly how the invites tab lost its badge once.
+ *
+ * Diagnostics are skipped: that block already sits behind one button.
  */
 function paintHelpToggles() {
-  for (const el of [...document.querySelectorAll('#drawer .d-note, #drawer .hint')] as HTMLElement[]) {
-    if (el.closest('#diag-more')) continue
-    let b = el.previousElementSibling as HTMLElement | null
-    if (!el.classList.contains('collapsible')) {
-      el.classList.add('collapsible')
+  for (const head of [...document.querySelectorAll('#drawer .d-section')] as HTMLElement[]) {
+    if (head.closest('#diag-more')) continue
+    // Everything explanatory until the next heading belongs to this one.
+    const notes: HTMLElement[] = []
+    for (let el = head.nextElementSibling; el && !el.classList.contains('d-section'); el = el.nextElementSibling) {
+      if (el.classList.contains('d-note') || el.classList.contains('hint')) notes.push(el as HTMLElement)
+    }
+    let row = head.parentElement
+    if (!row || !row.classList.contains('d-sec-row')) {
+      if (!notes.length) continue
+      row = document.createElement('div')
+      row.className = 'd-sec-row'
+      head.parentNode!.insertBefore(row, head)
+      row.appendChild(head)
       const btn = document.createElement('button')
       btn.type = 'button'; btn.className = 'help-toggle'
-      btn.textContent = tr('Potrzebujesz pomocy?')
+      btn.textContent = '?'
+      btn.setAttribute('aria-expanded', 'false')
+      btn.title = tr('Potrzebujesz pomocy?')
       btn.addEventListener('click', () => {
-        btn.textContent = el.classList.toggle('is-open') ? tr('Ukryj') : tr('Potrzebujesz pomocy?')
+        const open = btn.getAttribute('aria-expanded') !== 'true'
+        btn.setAttribute('aria-expanded', String(open))
+        for (const n of notes) n.classList.toggle('is-open', open)
       })
-      el.parentNode!.insertBefore(btn, el)
-      b = btn
+      for (const n of notes) n.classList.add('collapsible')
+      row.appendChild(btn)
     }
-    if (b && b.classList.contains('help-toggle')) b.hidden = el.hidden
+    // A section whose notes the app hides for its own reasons (no tray here, no
+    // HEM on this profile) must not keep a button that opens nothing.
+    const btn = row.querySelector('.help-toggle') as HTMLElement | null
+    if (btn) btn.hidden = notes.every((n) => n.hidden)
   }
 }
 
