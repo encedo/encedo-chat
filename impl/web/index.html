@@ -269,7 +269,11 @@
      it would do. Grey at rest, accent on hover and focus, like every other
      pressable icon. */
   .fp-row{display:flex;align-items:center;gap:6px;min-width:0}
-  .fp-row .fp{flex:1;min-width:0}
+  /* `flex:1` stretched the fingerprint and pushed the icon to the far edge,
+     which reads as a separate control. It belongs NEXT to the text, the way the
+     laptop glyph sits beside a peer's name — so the fingerprint takes only what
+     it needs and still truncates when it must. */
+  .fp-row .fp{flex:0 1 auto;min-width:0}
   .fp-share{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;
     width:22px;height:22px;padding:0;border:none;border-radius:6px;background:none;color:var(--muted);cursor:pointer}
   .fp-share:hover,.fp-share:focus-visible{background:var(--accent-soft);color:var(--accent);outline:none}
@@ -1214,7 +1218,7 @@
       </div>
       <div class="me">
         <div class="avatar" id="me-avatar" role="button" tabindex="0" title="Udostępnij swój profil" data-i18n-title="Udostępnij swój profil">··</div>
-        <div class="info"><div class="name" id="me-handle">—</div><div class="fp-row"><div class="fp" id="me-fp" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer"></div></div><button class="fp-share" id="btn-fp-share" title="Udostępnij swój profil" data-i18n-title="Udostępnij swój profil" aria-label="Udostępnij swój profil"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 10.8 15.7 6.6M8.3 13.2l7.4 4.2"/></svg></button></div>
+        <div class="info"><div class="name" id="me-handle">—</div><div class="fp-row"><div class="fp" id="me-fp" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer"></div><button class="fp-share" id="btn-fp-share" title="Udostępnij swój profil" data-i18n-title="Udostępnij swój profil" aria-label="Udostępnij swój profil"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 10.8 15.7 6.6M8.3 13.2l7.4 4.2"/></svg></button></div></div>
         <button class="icon-btn" id="btn-settings" title="Ustawienia" data-i18n-title="Ustawienia">⚙</button>
         <!-- Leaving was reachable only from inside Settings, which is not where
              anyone looks for the way out. Next to the gear, one click, and it
