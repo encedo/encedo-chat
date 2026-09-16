@@ -1647,8 +1647,13 @@ function renderContacts() {
     // Waiting beats `new` and `cold`: those say "has never answered", which is
     // true here and useless - this contact came from an invite we knocked on,
     // and the remedy they offer (send them your code) is exactly what the knock
-    // already did. Saying "not delivered yet" is the honest version, and for a
-    // Source an ambiguous screen is the dangerous outcome (§4.7).
+    // already did.
+    //
+    // The badge is ALL of it. A sentence under the name saying the same thing in
+    // engineering language was here and is gone (the user asked for none of it):
+    // this line's job on a list of people is to identify one, and the sentence
+    // pushed the fingerprint out of the row. What it said lives in the badge's
+    // tooltip, and in the toast that pressing the badge shows.
     const wait = waiting.get(c.pub)
     const mark = wait
       ? `<span class="c-new waiting" title="${escapeHtml(tr('Zapukaliśmy i czekamy na przyjęcie. Nie ma potwierdzenia, że doręczono — ponawiamy, dopóki aplikacja jest otwarta.'))}">${tr('CZEKAM')}</span>`
@@ -1663,7 +1668,7 @@ function renderContacts() {
       // phone, and the fingerprint losing its tail costs nothing next to the
       // sentence that says why the dot will never light.
       + `<div class="c-sub" title="${escapeHtml(c.kid ? `KID ${c.kid}` : c.pub)}">`
-      + `${wait ? escapeHtml(tr('zapukaliśmy — brak potwierdzenia doręczenia')) + ' · ' : state === 'cold' ? escapeHtml(tr('nigdy się nie odezwał')) + ' · ' : ''}`
+      + `${state === 'cold' && !wait ? escapeHtml(tr('nigdy się nie odezwał')) + ' · ' : ''}`
       + `🔑 ${escapeHtml(fpCache.get(c.pub) ?? '…')}${c.kid ? ' · KID ' + escapeHtml(shortKid(c.kid)) : ''}</div></div>`
       + mark + pill + `<button class="c-edit" title="${tr('Zmień nazwę')}">✎</button><span class="c-x" title="${tr('Usuń')}">×</span>`
     b.addEventListener('click', async (e: any) => {
