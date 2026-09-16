@@ -1667,6 +1667,18 @@
 
   <aside class="drawer" id="drawer" aria-label="Ustawienia">
     <div class="d-head"><div><h2 data-i18n="Ustawienia">Ustawienia</h2><div class="d-sub" data-i18n="Sesja i transport">Sesja i transport</div></div><button class="icon-btn" id="btn-close-drawer" title="Zamknij" data-i18n-title="Zamknij">✕</button></div>
+    <div class="d-section" data-i18n="Sesja">Sesja</div>
+    <div class="kv"><span class="k" data-i18n="Tożsamość">Tożsamość</span><span class="v" id="sess-id" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer">—</span></div>
+    <div class="kv"><span class="k" data-i18n="KID (klucz w HSM)">KID (klucz w HSM)</span><span class="v" id="sess-kid">—</span></div>
+    <div class="kv"><span class="k" data-i18n="Rozmówca (odcisk klucza)">Rozmówca (odcisk klucza)</span><span class="v" id="sess-peer">—</span></div>
+    <div class="kv" id="kv-peerid" hidden><span class="k" data-i18n="PeerId (efemeryczny)">PeerId (efemeryczny)</span><span class="v" id="sess-peerid">—</span></div>
+    <div class="kv"><span class="k" data-i18n="Historia">Historia</span><span class="v" data-i18n="brak — sesja efemeryczna">brak — sesja efemeryczna</span></div>
+    <!-- The node list and the live link status used to be a fourth tab, beside
+         three lists of PEOPLE. It is neither a list nor something you read while
+         talking, it is what this session is running on — so it belongs here,
+         under Session, and the tab strip goes back to three. -->
+    <div class="d-section" style="margin-top:22px" data-i18n="Sieć">Sieć</div>
+    <div id="net-box"></div>
     <!-- This replaced three profile names that named a policy the app could not
          enforce: of the seven rows in the threat-model matrix, only the
          transport is something the client decides at runtime. The rest are
@@ -1705,20 +1717,7 @@
       <label class="store-opt"><input type="checkbox" id="img-auto"> <span data-i18n="Pobieraj automatycznie obrazy i głosówki od kontaktów">Pobieraj automatycznie obrazy i głosówki od kontaktów</span></label>
     </div>
     <div class="d-note" data-i18n="Pokazanie obrazka i odtworzenie głosówki to za każdym razem POBRANIE — bajty lecą ze schowka plików dopiero wtedy. Dlatego przychodzące czekają na kliknięcie. To ustawienie pobiera je z góry, ale głosówki nadal nie odtwarzają się same.">Pokazanie obrazka i odtworzenie głosówki to za każdym razem POBRANIE — bajty lecą ze schowka plików dopiero wtedy. Dlatego przychodzące czekają na kliknięcie. To ustawienie pobiera je z góry, ale głosówki nadal nie odtwarzają się same.</div>
-    <div class="d-section" id="desk-section" hidden data-i18n="Aplikacja na komputerze">Aplikacja na komputerze</div>
-    <div class="store-opts" id="desk-opts" hidden style="padding:0 16px 12px">
-      <label class="store-opt"><input type="checkbox" id="desk-tray"> <span data-i18n="Zamknięcie okna chowa do zasobnika">Zamknięcie okna chowa do zasobnika</span></label>
-      <label class="store-opt"><input type="checkbox" id="desk-autostart"> <span data-i18n="Uruchamiaj przy starcie systemu">Uruchamiaj przy starcie systemu</span></label>
-    </div>
-    <div class="d-note" id="desk-mobile" hidden data-i18n="Na Androidzie aplikacja utrzymuje połączenie tak długo, jak jest uruchomiona — pokazuje wtedy stałe powiadomienie „onchato”. To jedyny sposób, żeby system nie zamroził jej w tle; nie ma tu skrzynki, która przechowa wiadomość na później.">Na Androidzie aplikacja utrzymuje połączenie tak długo, jak jest uruchomiona — pokazuje wtedy stałe powiadomienie „onchato”. To jedyny sposób, żeby system nie zamroził jej w tle; nie ma tu skrzynki, która przechowa wiadomość na później.</div>
-    <div class="d-note" id="desk-no-tray" hidden data-i18n="Ten pulpit nie pokazuje ikon w zasobniku (w GNOME rysuje je rozszerzenie, a ono nie działa), więc zamknięcie okna kończy aplikację — chowanie jej do niewidocznej ikony znaczyłoby, że nie da się do niej wrócić.">Ten pulpit nie pokazuje ikon w zasobniku (w GNOME rysuje je rozszerzenie, a ono nie działa), więc zamknięcie okna kończy aplikację — chowanie jej do niewidocznej ikony znaczyłoby, że nie da się do niej wrócić.</div>
-    <div class="d-note" id="desk-note" hidden data-i18n="Ta aplikacja nie przechowuje wiadomości po drodze — żeby ktoś mógł do Ciebie napisać, musi być uruchomiona. Dlatego zamknięcie okna chowa ją do zasobnika; wyjście jest w menu ikony.">Ta aplikacja nie przechowuje wiadomości po drodze — żeby ktoś mógł do Ciebie napisać, musi być uruchomiona. Dlatego zamknięcie okna chowa ją do zasobnika; wyjście jest w menu ikony.</div>
-    <div class="d-section" data-i18n="Sesja">Sesja</div>
-    <div class="kv"><span class="k" data-i18n="Tożsamość">Tożsamość</span><span class="v" id="sess-id" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer">—</span></div>
-    <div class="kv"><span class="k" data-i18n="KID (klucz w HSM)">KID (klucz w HSM)</span><span class="v" id="sess-kid">—</span></div>
-    <div class="kv"><span class="k" data-i18n="Rozmówca (odcisk klucza)">Rozmówca (odcisk klucza)</span><span class="v" id="sess-peer">—</span></div>
-    <div class="kv" id="kv-peerid" hidden><span class="k" data-i18n="PeerId (efemeryczny)">PeerId (efemeryczny)</span><span class="v" id="sess-peerid">—</span></div>
-    <div class="kv"><span class="k" data-i18n="Historia">Historia</span><span class="v" data-i18n="brak — sesja efemeryczna">brak — sesja efemeryczna</span></div>
+    <div class="d-section" style="margin-top:22px" data-i18n="Wygląd i język">Wygląd i język</div>
     <label data-i18n="Motyw">Motyw</label>
     <span class="sel-wrap"><select id="theme-select" class="sel">
       <option value="system" data-i18n="Jak w systemie">Jak w systemie</option>
@@ -1730,18 +1729,14 @@
       <option value="pl" data-i18n="Polski">Polski</option>
       <option value="en" data-i18n="English">English</option>
     </select></span>
-    <button class="btn" id="btn-logout" style="margin-top:18px;background:var(--accent-soft);color:var(--accent)" data-i18n="Wyloguj">Wyloguj</button>
-    <!-- The profile list lives HERE and not on the login screen: naming who uses
-         a device is something only that device's user should see. -->
-    <button class="btn" id="btn-share" style="margin-top:10px;background:var(--accent-soft);color:var(--accent)" data-i18n="Udostępnij swój profil">Udostępnij swój profil</button>
-
-    <!-- The node list and the live link status used to be a fourth tab, beside
-         three lists of PEOPLE. It is neither a list nor something you read while
-         talking, it is what this session is running on — so it belongs here,
-         under Session, and the tab strip goes back to three. -->
-    <div class="d-section" style="margin-top:22px" data-i18n="Sieć">Sieć</div>
-    <div id="net-box"></div>
-
+    <div class="d-section" id="desk-section" hidden data-i18n="Aplikacja na komputerze">Aplikacja na komputerze</div>
+    <div class="store-opts" id="desk-opts" hidden style="padding:0 16px 12px">
+      <label class="store-opt"><input type="checkbox" id="desk-tray"> <span data-i18n="Zamknięcie okna chowa do zasobnika">Zamknięcie okna chowa do zasobnika</span></label>
+      <label class="store-opt"><input type="checkbox" id="desk-autostart"> <span data-i18n="Uruchamiaj przy starcie systemu">Uruchamiaj przy starcie systemu</span></label>
+    </div>
+    <div class="d-note" id="desk-mobile" hidden data-i18n="Na Androidzie aplikacja utrzymuje połączenie tak długo, jak jest uruchomiona — pokazuje wtedy stałe powiadomienie „onchato”. To jedyny sposób, żeby system nie zamroził jej w tle; nie ma tu skrzynki, która przechowa wiadomość na później.">Na Androidzie aplikacja utrzymuje połączenie tak długo, jak jest uruchomiona — pokazuje wtedy stałe powiadomienie „onchato”. To jedyny sposób, żeby system nie zamroził jej w tle; nie ma tu skrzynki, która przechowa wiadomość na później.</div>
+    <div class="d-note" id="desk-no-tray" hidden data-i18n="Ten pulpit nie pokazuje ikon w zasobniku (w GNOME rysuje je rozszerzenie, a ono nie działa), więc zamknięcie okna kończy aplikację — chowanie jej do niewidocznej ikony znaczyłoby, że nie da się do niej wrócić.">Ten pulpit nie pokazuje ikon w zasobniku (w GNOME rysuje je rozszerzenie, a ono nie działa), więc zamknięcie okna kończy aplikację — chowanie jej do niewidocznej ikony znaczyłoby, że nie da się do niej wrócić.</div>
+    <div class="d-note" id="desk-note" hidden data-i18n="Ta aplikacja nie przechowuje wiadomości po drodze — żeby ktoś mógł do Ciebie napisać, musi być uruchomiona. Dlatego zamknięcie okna chowa ją do zasobnika; wyjście jest w menu ikony.">Ta aplikacja nie przechowuje wiadomości po drodze — żeby ktoś mógł do Ciebie napisać, musi być uruchomiona. Dlatego zamknięcie okna chowa ją do zasobnika; wyjście jest w menu ikony.</div>
     <div class="d-section" style="margin-top:22px" data-i18n="Profile software na tym urządzeniu">Profile software na tym urządzeniu</div>
     <div class="hint" style="margin-bottom:8px" data-i18n="Każdy profil to osobna tożsamość, zaszyfrowana swoim hasłem. Usunięcie jest nieodwracalne — klucza nie da się odtworzyć.">Każdy profil to osobna tożsamość, zaszyfrowana swoim hasłem. Usunięcie jest nieodwracalne — klucza nie da się odtworzyć.</div>
     <!-- Only while a software profile is open (renderProfiles). Two spans, not
@@ -1750,13 +1745,16 @@
     <div class="hint" id="hem-ask-settings" hidden style="margin-bottom:8px"><span data-i18n="Ten profil trzyma klucz w przeglądarce. W HEM klucz nigdy nie opuszcza urządzenia —">Ten profil trzyma klucz w przeglądarce. W HEM klucz nigdy nie opuszcza urządzenia —</span> <a id="hem-ask-settings-link" style="color:var(--accent);cursor:pointer" data-i18n="zapytaj o HEM →">zapytaj o HEM →</a></div>
     <div id="profiles-list"></div>
     <button class="btn" id="btn-passwd" hidden style="margin-top:8px;background:var(--accent-soft);color:var(--accent)" data-i18n="Zmień hasło aktywnego profilu">Zmień hasło aktywnego profilu</button>
-
+    <!-- The profile list lives HERE and not on the login screen: naming who uses
+         a device is something only that device's user should see. -->
+    <button class="btn" id="btn-share" style="margin-top:10px;background:var(--accent-soft);color:var(--accent)" data-i18n="Udostępnij swój profil">Udostępnij swój profil</button>
+    <button class="btn" id="btn-logout" style="margin-top:18px;background:var(--accent-soft);color:var(--accent)" data-i18n="Wyloguj">Wyloguj</button>
     <div class="d-section" style="margin-top:22px" data-i18n="Reset urządzenia">Reset urządzenia</div>
     <div class="hint" style="margin-bottom:8px" data-i18n="Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.">Wipeout kasuje lokalną tożsamość software, wszystkie kontakty i cały stan tej przeglądarki — jak nowy komputer (§10). Nieodwracalne. Kluczy w HSM nie dotyka.</div>
+    <button class="btn" id="btn-wipeout" style="margin-top:2px;background:none;color:var(--err);border:1px solid var(--err)" data-i18n="🧨 Wipeout — wyczyść wszystko">🧨 Wipeout — wyczyść wszystko</button>
     <div class="d-section" id="mig-section" style="margin-top:22px" data-i18n="Przeniesienie na inne urządzenie">Przeniesienie na inne urządzenie</div>
     <div class="hint" id="mig-hint" style="margin-bottom:8px" data-i18n="Zapiszesz plik z całym profilem: tożsamością, kontaktami, grupami i ustawieniami. Otwiera go to samo hasło, którym logujesz się do profilu.">Zapiszesz plik z całym profilem: tożsamością, kontaktami, grupami i ustawieniami. Otwiera go to samo hasło, którym logujesz się do profilu.</div>
     <button class="btn" id="btn-export" style="margin-top:2px;background:none;color:var(--accent);border:1px solid var(--accent)" data-i18n="Przenieś profil">Przenieś profil</button>
-    <button class="btn" id="btn-wipeout" style="margin-top:2px;background:none;color:var(--err);border:1px solid var(--err)" data-i18n="🧨 Wipeout — wyczyść wszystko">🧨 Wipeout — wyczyść wszystko</button>
     <!-- Diagnostics live behind ONE button at the very bottom (the user's call,
          2026-09-14). They used to sit behind ?debug=1, which a packaged app
          cannot type, so on the desktop the section did not exist — and that is
