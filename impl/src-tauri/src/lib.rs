@@ -1117,17 +1117,32 @@ mod desk {
                 // asks where with the platform's dialog (`on_download`) and
                 // the webview never learns a path. Everything that finds the
                 // window by its label is unchanged.
-                let main_cfg = app
-                    .config()
-                    .app
-                    .windows
-                    .iter()
-                    .find(|w| w.label == "main")
-                    .cloned()
-                    .ok_or("tauri.conf.json has no window labelled main")?;
-                tauri::WebviewWindowBuilder::from_config(app.handle(), &main_cfg)?
-                    .on_download(on_download)
-                    .build()?;
+                // DESKTOP ONLY. On Android the webview belongs to the Activity
+                // and Tauri attaches it itself while the app is built — before
+                // `setup` runs. Building the window here instead left the
+                // Activity with nothing in it: the process ran, the service
+                // ran, and the screen stayed empty, with not one WebView line
+                // in logcat. `tauri.android.conf.json` puts `create` back to
+                // true there, so Tauri does its normal thing.
+                //
+                // `on_download` is what forced the manual build in the first
+                // place, and it is a desktop concern: WebKitGTK and WKWebView
+                // have no save picker, so the host asks where. Android's
+                // download manager needs none of it.
+                #[cfg(desktop)]
+                {
+                    let main_cfg = app
+                        .config()
+                        .app
+                        .windows
+                        .iter()
+                        .find(|w| w.label == "main")
+                        .cloned()
+                        .ok_or("tauri.conf.json has no window labelled main")?;
+                    tauri::WebviewWindowBuilder::from_config(app.handle(), &main_cfg)?
+                        .on_download(on_download)
+                        .build()?;
+                }
 
                 // The webview's first frame is white — WebKitGTK paints before
                 // the page does — and on a dark desktop that is a flash of the
