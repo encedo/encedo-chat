@@ -51,13 +51,37 @@ export const PERMISSIONS = [
   'android.permission.CAMERA',
 ]
 
+/**
+ * Hardware this app can do WITHOUT, declared so Android stops insisting on it.
+ *
+ * Nobody wrote these into the manifest: Android derives a `<uses-feature>` from
+ * a permission (CAMERA -> android.hardware.camera, RECORD_AUDIO ->
+ * android.hardware.microphone) and defaults it to **required**. A device with
+ * no rear camera then refuses to run the app at all — the package installs and
+ * the launcher filters it, which presents as "Activity class does not exist".
+ * Seen for real in an emulator while chasing something else.
+ *
+ * Both are optional here: the camera only scans a QR code, the microphone only
+ * records voice notes, and `probeCapabilities` already tells the user plainly
+ * when a platform lacks either. A messenger should not become uninstallable
+ * over a feature it treats as a nicety.
+ */
+export const OPTIONAL_FEATURES = [
+  'android.hardware.camera',
+  'android.hardware.camera.any',
+  'android.hardware.microphone',
+]
+
 export function patchManifest(xml) {
   const anchor = '<uses-permission android:name="android.permission.INTERNET" />'
   if (!xml.includes(anchor)) throw new Error('manifest: the INTERNET permission anchor is gone')
   if (xml.includes('OnchatoService')) return xml // already patched
 
   const perms = PERMISSIONS.map((p) => `    <uses-permission android:name="${p}" />`).join('\n')
-  xml = xml.replace(anchor, anchor + '\n' + perms)
+  const feats = OPTIONAL_FEATURES
+    .map((f) => `    <uses-feature android:name="${f}" android:required="false" />`)
+    .join('\n')
+  xml = xml.replace(anchor, anchor + '\n' + perms + '\n' + feats)
 
   const close = '    </application>'
   if (!xml.includes(close)) throw new Error('manifest: no </application> to insert the service before')

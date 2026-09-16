@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { patchManifest, patchActivity, PERMISSIONS, patchIconBackground, RUNNING_STRING, stringsXml } from '../src-tauri/android/patch.mjs'
+import { patchManifest, patchActivity, PERMISSIONS, OPTIONAL_FEATURES, patchIconBackground, RUNNING_STRING, stringsXml } from '../src-tauri/android/patch.mjs'
 
 /**
  * The real templates, copied from tauri-cli 2.11.4 with its placeholders
@@ -195,4 +195,27 @@ test('the status-bar icon exists at every density and both notification paths na
   const conf = JSON.parse(readFileSync(new URL('tauri.android.conf.json', root), 'utf8'))
   assert.equal(conf.plugins?.notification?.icon, undefined,
     'the notification plugin config is diagnostically removed — see the bisect note above')
+
+  // Android creates its own window: the webview belongs to the Activity and
+  // Tauri attaches it before `setup` runs. The desktop config says
+  // `create: false` so the host can attach `on_download` by hand, and carrying
+  // that to Android left the Activity empty — an app that started, ran its
+  // service, and showed nothing (2026-09-16, broken since 68eb14b).
+  const win = (conf.app?.windows ?? []).find((w) => w.label === 'main')
+  assert.ok(win, 'the android config must carry the main window')
+  assert.equal(win.create, true, 'Android must let Tauri create the webview itself')
+})
+
+test('the camera and the microphone are declared OPTIONAL', () => {
+  // Android derives a <uses-feature> from a permission and defaults it to
+  // REQUIRED, so declaring CAMERA quietly makes a rear camera mandatory: a
+  // device without one installs the package and then filters the activity,
+  // which presents as "Activity class does not exist". Both are niceties here —
+  // the camera scans a QR code, the microphone records voice notes.
+  const xml = patchManifest(MANIFEST)
+  for (const f of OPTIONAL_FEATURES) {
+    assert.ok(
+      xml.includes(`<uses-feature android:name="${f}" android:required="false" />`),
+      `${f} must be declared optional, or a device without it cannot run the app`)
+  }
 })
