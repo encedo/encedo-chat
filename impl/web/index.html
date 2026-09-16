@@ -797,7 +797,13 @@
      invisible to the harness, which clicks elements directly and never hit-tests. */
   .scrim{position:fixed;inset:0;background:rgba(18,38,63,.35);display:none;z-index:30}
   .scrim.open{display:block}
-  .modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:400px;max-width:92vw;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.2);padding:22px;z-index:32;display:none}
+  /* `--app-h` is the VISIBLE height (app.ts tracks visualViewport) and `--vv-top`
+     where it starts. Centring on those instead of the layout viewport is what
+     keeps a window above the software keyboard; the max-height plus overflow is
+     what lets a tall one scroll instead of putting its buttons off screen. Both
+     are 100dvh/0 when nothing covers the screen, so the desktop is unchanged. */
+  .modal{position:fixed;top:calc(var(--vv-top,0px) + var(--app-h,100dvh)/2);left:50%;transform:translate(-50%,-50%);width:400px;max-width:92vw;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.2);padding:22px;z-index:32;display:none;
+    max-height:calc(var(--app-h,100dvh) - 24px);overflow-y:auto;overscroll-behavior:contain}
   .modal.open{display:block}
   /* Update download bar — the fix for "nic się nie działo i nagle restart":
      a small fixed card while the bundle downloads, percent when the server
@@ -906,7 +912,10 @@
   .build-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
   .home-link{margin-top:14px;font-family:var(--mono);font-size:10.5px;color:var(--muted);opacity:.75;text-decoration:none}
   .home-link:hover{color:var(--accent);opacity:1;text-decoration:underline}
-  .label-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  /* The row REPLACES a label, so it has to carry the label's own spacing:
+     `.label-row label{margin:0}` takes it away, and without this the counter
+     sits directly on the frame of the field below it. */
+  .label-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin:14px 0 6px}
   .label-row label{margin:0}
   .bytes-left{font-family:var(--mono);font-size:11px;color:var(--muted);font-weight:400;flex-shrink:0}
   .bytes-left.full{color:var(--err)}

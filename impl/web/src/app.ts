@@ -7828,6 +7828,11 @@ function trackViewport() {
     const typing = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement
     const covered = window.innerHeight - visible > 120
     document.documentElement.style.setProperty('--app-h', typing && covered ? `${visible}px` : '100dvh')
+    // Where the visible area STARTS. A fixed element is placed against the
+    // layout viewport, and the browser scrolls the page to reveal a focused
+    // field — so a window centred without this lands under the keyboard even
+    // when it is short enough to fit above it.
+    document.documentElement.style.setProperty('--vv-top', typing && covered ? `${Math.round(vv?.offsetTop ?? 0)}px` : '0px')
   }
   apply()
   vv?.addEventListener('resize', apply)
