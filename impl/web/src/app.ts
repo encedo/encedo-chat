@@ -3333,6 +3333,54 @@ document.addEventListener('paste', (e: ClipboardEvent) => {
  * looks untouched — so text meant for one peer, or a file picked for them, would
  * otherwise sit one Send away from the next. Both go.
  */
+/**
+ * What was typed and not sent, per room.
+ *
+ * Switching rooms used to throw it away, for a good reason that has not gone
+ * anywhere: text meant for one person must never sit one Send away from the
+ * next. A buffer per room keeps that property — every room gets ITS OWN text
+ * back, and the box is empty in a room you have not written in — while ending
+ * the thing the user reported: check something in another conversation and the
+ * half-written message is gone.
+ *
+ * In memory only. A draft is message content, and this device does not keep
+ * message content across a reload; that is the product, not an omission.
+ *
+ * The attachment and the recording still go. A file or a live microphone
+ * belongs to the conversation it was started in, and having either reappear
+ * silently is a far worse surprise than retyping a sentence.
+ */
+const drafts = new Map<string, string>()
+const draftKey = () => activeGid ? 'g:' + activeGid : activePub ? 'p:' + activePub : null
+
+function stashDraft() {
+  const k = draftKey(); if (!k) return
+  const v = ($('msg-input') as HTMLTextAreaElement).value
+  if (v.trim()) drafts.set(k, v); else drafts.delete(k)
+}
+
+function restoreDraft() {
+  const k = draftKey()
+  ;($('msg-input') as HTMLTextAreaElement).value = (k && drafts.get(k)) || ''
+  growComposer(); paintLength()
+}
+
+/**
+ * Opening a room puts the cursor where you are about to type.
+ *
+ * Fine pointers only — the same guard the add window uses. On a phone, focusing
+ * pops the software keyboard over the conversation you just asked to see, which
+ * is the opposite of helping.
+ */
+function focusComposer() {
+  if (!matchMedia('(pointer:fine)').matches) return
+  const inp = $('msg-input') as HTMLTextAreaElement | null
+  if (!inp || inp.hidden) return
+  inp.focus()
+  // After a restored draft the caret belongs at the END of what was written.
+  try { inp.selectionStart = inp.selectionEnd = inp.value.length } catch {}
+}
+
 function clearComposer() {
   ;($('msg-input') as HTMLTextAreaElement).value = ''
   growComposer(); paintLength() // an emptied box is one line again
@@ -3424,7 +3472,10 @@ $('btn-wipeout').addEventListener('click', async () => {
 
 // ---- resizable sidebar / chat splitter (desktop; hidden on phones) ----
 {
-  const SB_MIN = 260, SB_MAX = 560, SB_DEF = 330
+  // 420, not 330: measured, a contact's fingerprint plus its KID needs 420px to
+  // fit, and at the old default it was cut 72px short — so the line that
+  // identifies a person was the one thing the panel would not show.
+  const SB_MIN = 260, SB_MAX = 620, SB_DEF = 420
   const setW = (w: number) => document.documentElement.style.setProperty('--sidebar-w', w + 'px')
   const saved = parseInt(localStorage.getItem('ec-sidebar-w') || '', 10)
   if (saved >= SB_MIN && saved <= SB_MAX) setW(saved)
@@ -3493,6 +3544,10 @@ $('me-fp').addEventListener('dblclick', copyPub)       // double-click fingerpri
 // button, this only shortens the road to it. Keyboard gets the same door: the
 // circle is a div, so it needs role/tabindex in the markup and Enter/Space here.
 $('me-avatar').addEventListener('click', () => void openShare())
+// The icon beside the fingerprint is the DISCOVERABLE way to the same thing:
+// clicking an avatar and getting a share dialog reads as a non sequitur unless
+// you already know it does that (the user's report).
+$('btn-fp-share')?.addEventListener('click', () => void openShare())
 $('me-avatar').addEventListener('keydown', (e: any) => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openShare() }
 })
@@ -6628,8 +6683,10 @@ async function activateRoom(pub: string) {
   // already on screen (clicking the same peer, a repaint), and wiping a draft
   // then would be a bug rather than a precaution.
   const sameTarget = activePub === pub
+  if (!sameTarget) stashDraft() // belongs to the room being LEFT, so before the switch
   activePub = pub; activeGid = null // a 1:1 takes the screen — no group is active
-  if (!sameTarget) clearComposer()
+  if (!sameTarget) { clearComposer(); restoreDraft() }
+  focusComposer()
   $('members-cluster').hidden = true; $('members-pop').hidden = true // group-only UI
   closeEmojiPop() // the transcript is about to be replayed — its anchor is going away
   room.unseen = 0
@@ -7622,8 +7679,10 @@ async function activateGroup(gid: string) {
     return
   }
   const sameTarget = activeGid === gid // as in activateRoom: a new audience empties the composer, a repaint does not
+  if (!sameTarget) stashDraft() // belongs to the room being LEFT, so before the switch
   activeGid = gid; activePub = null // a group takes over — no 1:1 is "active"
-  if (!sameTarget) clearComposer()
+  if (!sameTarget) { clearComposer(); restoreDraft() }
+  focusComposer()
   gu.unseen = 0; gu.called = false
   $('chat-empty').hidden = true; $('chat-view').hidden = false
   showChatPane(true)

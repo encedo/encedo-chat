@@ -218,7 +218,7 @@
 
   /* app shell */
   .app{display:flex;gap:8px;max-width:1680px;margin:0 auto;padding:16px;height:100vh;min-height:560px}
-  .sidebar{width:var(--sidebar-w,330px);flex-shrink:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  .sidebar{width:var(--sidebar-w,420px);flex-shrink:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
   /* Draggable divider between the contact list and the chat (desktop only). */
   .splitter{flex:none;width:8px;align-self:stretch;cursor:col-resize;border-radius:6px;background:transparent;transition:background .15s}
   .splitter:hover,.splitter.drag{background:var(--border)}
@@ -264,6 +264,15 @@
   .me{display:flex;align-items:center;gap:10px;padding:16px;border-bottom:1px solid var(--border)}
   .me .info{flex:1;min-width:0}.me .name{font-weight:600;color:var(--text)}
   .fp{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* The share action sits ON the fingerprint, because that is the thing you
+     hand to somebody. Clicking the avatar still works; it just never said what
+     it would do. Grey at rest, accent on hover and focus, like every other
+     pressable icon. */
+  .fp-row{display:flex;align-items:center;gap:6px;min-width:0}
+  .fp-row .fp{flex:1;min-width:0}
+  .fp-share{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;
+    width:22px;height:22px;padding:0;border:none;border-radius:6px;background:none;color:var(--muted);cursor:pointer}
+  .fp-share:hover,.fp-share:focus-visible{background:var(--accent-soft);color:var(--accent);outline:none}
   .icon-btn{background:none;border:1px solid var(--border);color:var(--muted);width:34px;height:34px;border-radius:50%;flex-shrink:0;display:grid;place-items:center;font-size:15px}
   .icon-btn:hover{border-color:var(--accent);color:var(--accent)}
   .icon-btn svg{display:block}
@@ -1205,7 +1214,7 @@
       </div>
       <div class="me">
         <div class="avatar" id="me-avatar" role="button" tabindex="0" title="Udostępnij swój profil" data-i18n-title="Udostępnij swój profil">··</div>
-        <div class="info"><div class="name" id="me-handle">—</div><div class="fp" id="me-fp" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer"></div></div>
+        <div class="info"><div class="name" id="me-handle">—</div><div class="fp-row"><div class="fp" id="me-fp" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer"></div></div><button class="fp-share" id="btn-fp-share" title="Udostępnij swój profil" data-i18n-title="Udostępnij swój profil" aria-label="Udostępnij swój profil"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 10.8 15.7 6.6M8.3 13.2l7.4 4.2"/></svg></button></div>
         <button class="icon-btn" id="btn-settings" title="Ustawienia" data-i18n-title="Ustawienia">⚙</button>
         <!-- Leaving was reachable only from inside Settings, which is not where
              anyone looks for the way out. Next to the gear, one click, and it
