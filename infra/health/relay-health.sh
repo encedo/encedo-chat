@@ -17,11 +17,25 @@ PUSH="${PUSH_URL:-}"
 [ -n "$PUSH" ] || { echo "brak PUSH_URL — nic nie robię" >&2; exit 0; }
 
 ping_kuma() {  # $1=status $2=komunikat $3=wartość do wykresu (ms)
-  curl -fsS -m 10 --get \
+  # Ponawianie jest tu ważniejsze niż długi timeout: jedna zgubiona paczka po
+  # drodze do Kumy NIE znaczy, że węzeł padł, a bez `--retry` wystarczała, żeby
+  # pomalować go na czerwono. Krótka próba razy trzy mieści się w minutowym
+  # timerze z zapasem, czego jedna dziesięciosekundowa próba nie gwarantowała.
+  # `--retry-connrefused`, bo restart samej Kumy to odmowa połączenia, czyli
+  # dokładnie ten przypadek, który ma przeczekać, a nie alarmować.
+  curl -fsS -m 4 --retry 2 --retry-delay 2 --retry-connrefused --get \
     --data-urlencode "status=$1" \
     --data-urlencode "msg=$2" \
     --data-urlencode "ping=${3:-0}" \
-    "$PUSH" >/dev/null 2>&1 || true
+    "$PUSH" >/dev/null 2>&1
+  rc=$?
+  # Puknięcie, które nie doszło, nie zostawiało ŻADNEGO śladu: w Kumie węzeł
+  # robił się czerwony, a na samym węźle nie było czym odróżnić „sonda nie
+  # wystartowała" od „sonda działała, tylko Kuma jest nieosiągalna". Teraz
+  # journal mówi które — i z jakim kodem curla, bo 6 (DNS), 7 (połączenie)
+  # i 28 (timeout) prowadzą do trzech różnych miejsc.
+  [ "$rc" -eq 0 ] || echo "kuma: puknięcie '$1' nie doszło (curl $rc)" >&2
+  return 0
 }
 fail() { ping_kuma down "$1" 0; exit 0; }
 
