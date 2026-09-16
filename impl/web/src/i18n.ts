@@ -190,6 +190,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Cofnij': 'Undo',
     'Przestaniesz ignorować ten klucz. Jeśli ta osoba wciąż puka, prośba pojawi się przy kolejnym pukaniu.': 'You will stop ignoring this key. If that person is still knocking, the request appears on their next knock.',
     'Zignorowane klucze': 'Ignored keys',
+    'Potrzebujesz pomocy?': 'Need help?',
+    'Wygląd i język': 'Appearance and language',
     'Pukania tymi kluczami nie są Ci pokazywane. Lista jest zaszyfrowana na tym urządzeniu i pamięta tylko odcisk oraz czas — nie nazwę, którą ktoś podał.': 'Knocks from these keys are not shown to you. The list is encrypted on this device and remembers only the fingerprint and the time — not the name somebody claimed.',
     'Nikogo nie ignorujesz.': 'You are not ignoring anyone.',
     'Nie zobaczysz już pukań tym kluczem. Listę zignorowanych znajdziesz nad spisem zaproszeń i możesz ją cofnąć.': 'You will no longer see knocks from this key. The ignored list sits above the invites and you can undo it there.',

@@ -2025,7 +2025,7 @@ for (const el of document.querySelectorAll('#tmode input')) {
   })
 }
 
-const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles(); paintTransportSetting(); paintNotifySetting(); void paintDiagSetting(); paintDiagnostics(); startNetwork() }
+const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classList.add('open'); renderProfiles(); paintTransportSetting(); paintNotifySetting(); void paintDiagSetting(); paintDiagnostics(); startNetwork(); paintHelpToggles() }
 
 /**
  * The diary's row in Settings: where the file is, and a way to take the log
@@ -2056,6 +2056,36 @@ $('btn-log-copy').addEventListener('click', async () => {
 })
 // The 2.5 s refresh belongs to whatever is showing the node list, and that is
 // the drawer now. Left running behind a closed drawer it would poll for ever.
+/**
+ * Fold every long explanation in Settings behind its own button.
+ *
+ * Done here rather than in the markup so it covers the ones that are there now
+ * and the ones added later, and so a paragraph the app hides for its own
+ * reasons (no tray on this desktop, no HEM on this profile) does not leave
+ * behind a button that opens nothing.
+ *
+ * Diagnostics are skipped: that whole block already sits behind one button, and
+ * folding the prose inside it would be a second layer over the same thing.
+ */
+function paintHelpToggles() {
+  for (const el of [...document.querySelectorAll('#drawer .d-note, #drawer .hint')] as HTMLElement[]) {
+    if (el.closest('#diag-more')) continue
+    let b = el.previousElementSibling as HTMLElement | null
+    if (!el.classList.contains('collapsible')) {
+      el.classList.add('collapsible')
+      const btn = document.createElement('button')
+      btn.type = 'button'; btn.className = 'help-toggle'
+      btn.textContent = tr('Potrzebujesz pomocy?')
+      btn.addEventListener('click', () => {
+        btn.textContent = el.classList.toggle('is-open') ? tr('Ukryj') : tr('Potrzebujesz pomocy?')
+      })
+      el.parentNode!.insertBefore(btn, el)
+      b = btn
+    }
+    if (b && b.classList.contains('help-toggle')) b.hidden = el.hidden
+  }
+}
+
 const closeDrawer = () => { $('scrim').classList.remove('open'); $('drawer').classList.remove('open'); stopNetwork() }
 // ---- invite: my profile as a link, and someone else's arriving as one -------
 /**

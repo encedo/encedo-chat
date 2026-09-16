@@ -953,6 +953,15 @@
      starts to scroll. -20px alone would let it drop by the inset on a phone. */
   .d-head{display:flex;align-items:start;justify-content:space-between;position:sticky;top:calc(-20px - env(safe-area-inset-top));margin:calc(-20px - env(safe-area-inset-top)) -20px 0;padding:calc(20px + env(safe-area-inset-top)) 20px 4px;background:var(--card);z-index:1}
   .d-section{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:18px 0 8px}
+  /* Every long explanation folds behind its own button (the user's call). The
+     drawer is where you go to CHANGE something, and prose is what you scroll
+     past to get there. The rule only ever HIDES — it never forces a paragraph
+     visible — so an explanation the app hides for its own reasons stays hidden,
+     and its button is hidden with it. */
+  .help-toggle{display:block;margin:0 16px 10px;padding:0;background:none;border:none;
+    color:var(--accent);font-size:11px;cursor:pointer;text-align:left}
+  .help-toggle:hover{text-decoration:underline}
+  .d-note.collapsible:not(.is-open),.hint.collapsible:not(.is-open){display:none}
   .opt{display:flex;gap:10px;padding:12px;border:1px solid var(--border);border-radius:10px;margin-bottom:10px}
   .opt.ph{opacity:.5}
   .opt .o-name{font-weight:600;color:var(--text);font-size:13.5px}
