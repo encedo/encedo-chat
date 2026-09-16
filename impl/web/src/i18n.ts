@@ -216,7 +216,6 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Do końca tej sesji nie zobaczysz pukań tym kluczem. Po przeładowaniu strony mogą pojawić się znowu — nic nie jest zapisywane na dysku.': 'For the rest of this session you will not see knocks from this key. After a reload they can appear again — nothing is written to disk.',
     'Zapukaliśmy i czekamy na przyjęcie. Nie ma potwierdzenia, że doręczono — ponawiamy, dopóki aplikacja jest otwarta.':
       'We knocked and are waiting to be let in. There is no confirmation of delivery — we keep retrying while the app is open.',
-    'zapukaliśmy — brak potwierdzenia doręczenia': 'knocked — no delivery confirmation',
     'Zaproszenia, które opublikowałeś': 'Invites you have published',
     '+ Nowe zaproszenie': '+ New invite',
     'Zaproszenie z {date}': 'Invite from {date}',
