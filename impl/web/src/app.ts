@@ -6621,10 +6621,10 @@ async function activateRoom(pub: string) {
   // fingerprint (comparable out of band) plus the HSM key id when it has one.
   const peerFp = fpCache.get(room.contact.pub) ?? await fingerprint(room.contact.pub)
   fpCache.set(room.contact.pub, peerFp)
-  // No key glyph here: the row is labelled "odcisk klucza" already, and the two
-  // extra characters were enough to wrap the fingerprint's last one.
-  $('sess-peer').textContent = peerFp + (room.contact.kid ? ' · KID ' + shortKid(room.contact.kid) : '')
-  $('sess-peer').title = room.contact.kid ? `KID ${room.contact.kid}` : room.contact.pub
+  // The fingerprint is NOT repeated in Settings: it is already on the contact
+  // row and in the header's tooltip, and a third copy under "Sesja" told you
+  // nothing you could act on there (the user's call). `peerFp` stays — the
+  // tooltip below is what it is for.
   // The name leads the tooltip now that the header can cut it short; the
   // fingerprint (the out-of-band MITM check) follows, as before.
   $('peer-name').title = `${room.contact.name} · ` + tr('🔑 ') + peerFp + (room.contact.kid ? ` · KID ${room.contact.kid}` : '')
