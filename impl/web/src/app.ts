@@ -6749,8 +6749,17 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
     void flushPendingSkd(contact.pub)
     if (room === activeRoom()) $('sess-peerid').textContent = conv.peerId.slice(0, 16) + '…'
   } catch (e: any) {
-    record(room, { t: 'sys', text: tr('Błąd: ') + (e?.message ?? e) })
-    if (room === activeRoom()) $('peer-status').textContent = tr('błąd połączenia')
+    const why = String(e?.message ?? e)
+    record(room, { t: 'sys', text: tr('Błąd: ') + why })
+    // "błąd połączenia" named neither what failed nor where to look, and it is
+    // not a state of the network — it is this one conversation refusing to open.
+    // The reason is already in the transcript; the badge now says so and carries
+    // it, because a red badge you cannot act on only tells you to worry.
+    if (room === activeRoom()) {
+      const el = $('peer-status')
+      el.textContent = tr('nie udało się otworzyć rozmowy')
+      el.title = why
+    }
   }
 }
 

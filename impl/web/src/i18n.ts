@@ -117,6 +117,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Błąd': 'Error',
     'Błąd listy kontaktów: ': 'Contact list error: ',
     'błąd połączenia': 'connection error',
+    'nie udało się otworzyć rozmowy': 'could not open the conversation',
     'Błąd tożsamości software: ': 'Software identity error: ',
     'Błąd usuwania: ': 'Delete failed: ',
     'Błąd zapisu: ': 'Save failed: ',
