@@ -1,6 +1,6 @@
 {
   "name": "onchato-spike",
-  "version": "0.5.88",
+  "version": "0.5.89",
   "private": true,
   "type": "module",
   "description": "onchato v6 — the engine, web UI, CLI and test harnesses. EH-2 + Double Ratchet is the only content crypto; docs/PROTOCOL.md describes what ships.",
