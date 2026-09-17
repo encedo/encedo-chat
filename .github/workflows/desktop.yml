@@ -282,9 +282,42 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
+      # The first signed run died here with nothing but `failed to run sign`:
+      # Tauri swallows the tool's own output, so the one thing that could say
+      # WHY was thrown away. Three unknowns were in that one line — whether
+      # `sign` is on PATH for the step that spawns it, whether Tauri expands
+      # `%VAR%` in signCommand (it does not run it through a shell), and what
+      # the tool itself said. The wrapper removes all three: it is a .cmd file,
+      # so cmd expands `%VAR%` and `%1`; it calls sign by ABSOLUTE path, so PATH
+      # stops mattering; and it keeps stdout and stderr in a file the next step
+      # prints. A signing step that cannot say why it failed is not one to keep.
       - name: The signing tool Tauri will call
         if: runner.os == 'Windows' && vars.AZURE_CLIENT_ID != ''
-        run: dotnet tool install --global sign --prerelease
+        shell: pwsh
+        run: |
+          dotnet tool install --global sign --prerelease
+          $signExe = Join-Path $env:USERPROFILE ".dotnet\tools\sign.exe"
+          if (-not (Test-Path $signExe)) { throw "sign.exe not where dotnet puts it: $signExe" }
+          $wrapper = Join-Path $env:RUNNER_TEMP "ec-sign.cmd"
+          @"
+          @echo off
+          "$signExe" code trusted-signing ^
+            -tse %TRUSTED_SIGNING_ENDPOINT% ^
+            -tsa %TRUSTED_SIGNING_ACCOUNT% ^
+            -tscp %TRUSTED_SIGNING_PROFILE% ^
+            -d onchato -u https://onchato.com ^
+            --azure-credential-type azure-cli -v Information %1 >> "%RUNNER_TEMP%\sign.log" 2>&1
+          if errorlevel 1 (echo WRAPPER: sign exited %errorlevel% for %1 >> "%RUNNER_TEMP%\sign.log")
+          exit /b %errorlevel%
+          "@ | Set-Content -Path $wrapper -Encoding ascii
+          # The config is rewritten rather than committed with a placeholder,
+          # because the wrapper's path is only known on the runner.
+          $cfg = @{
+            '$schema' = 'https://schema.tauri.app/config/2'
+            bundle = @{ windows = @{ signCommand = "$wrapper %1" } }
+          } | ConvertTo-Json -Depth 6
+          Set-Content -Path impl/src-tauri/tauri.sign.conf.json -Value $cfg -Encoding utf8
+          Write-Host "signCommand -> $wrapper %1"
 
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -321,6 +354,15 @@ jobs:
           # way). The .sig files this build produces still upload with the
           # bundles; only the JSON assembly moves.
           includeUpdaterJson: false
+
+      # Runs even when the bundle failed — that is the whole point. `sign` writes
+      # here through the wrapper, and this is the only place its words survive.
+      - name: What the signing tool actually said
+        if: always() && runner.os == 'Windows' && vars.AZURE_CLIENT_ID != ''
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "sign.log"
+          if (Test-Path $log) { Get-Content $log } else { Write-Host "no sign.log — the wrapper was never called" }
 
       - uses: actions/upload-artifact@v5
         with:
