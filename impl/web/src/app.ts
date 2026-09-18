@@ -52,7 +52,6 @@ import { newDiag } from '../../lib/diag.ts'
 import { NOTE_MAX } from '../../lib/knock.ts'
 import { contactState, seenLabel, noteSeen as foldSeen, noteAdded as foldAdded, PRESENCE_TTL_MS, type Seen } from '../../lib/seen.ts'
 import { bodyBytes, fitsOnWire, overBy, MAX_BODY, WARN_AT, kb } from '../../lib/msgsize.ts'
-import { qrDecodeAvailable } from '../../lib/capabilities.ts'
 import { MAX_OFFER_BODY } from '../../lib/xfer.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
@@ -1930,14 +1929,7 @@ function attachByteBudget(input: HTMLInputElement | HTMLTextAreaElement, max: nu
   paint()
 }
 
-const paintScanButton = () => {
-  $('btn-scan').hidden = !scanSupported()
-  // And ask again, because the answer is not fixed for the life of the page:
-  // the probe is asynchronous, so the first paint after boot may run before it
-  // has answered at all. Cheap -- a local query -- and this is a human opening
-  // a window, not a loop.
-  void refreshQrDecode()
-}
+const paintScanButton = () => { $('btn-scan').hidden = !scanSupported() }
 // Focus only where a keyboard is already on the desk: on a phone, focusing
 // the field pops the software keyboard OVER the modal before the person can
 // reach the scan button — and scan is the primary door there.
@@ -2542,49 +2534,36 @@ function knockReceived(room: Room) {
  *   does NOT match a contact of the same name is the interesting case and is
  *   reported as such, not folded into "new contact".
  *
- * Scanning needs a camera AND a reader that can actually decode a QR code.
- * The second half is `qrDecode` below, and it is a real question rather than a
- * formality: desktop Linux has no reader at all, while Chrome on macOS has one
- * that cannot do this format. Everywhere else, pasting the link stays the way in.
+ * Scanning is a PHONE feature, and that is a decision rather than a capability
+ * test (the user's call, 2026-09-19). Two attempts at asking the platform both
+ * failed, and the second failure is the instructive one:
+ *
+ *   - `typeof BarcodeDetector === 'function'` says yes on Chrome for macOS,
+ *     which cannot use it. That shipped a button that opened a camera and
+ *     resolved nothing.
+ *   - `getSupportedFormats()` -- the spec's own answer -- ALSO says `qr_code`
+ *     there. Reported from a Mac the same day: the button was still offered,
+ *     the permission prompt appeared and the camera came on.
+ *
+ * So the platform advertises the format and does not deliver it, and no probe
+ * can tell the two apart. What is left is where scanning makes sense at all:
+ * a handheld with a rear camera, pointed at somebody else's screen. On a
+ * laptop, pasting the link is the way in and always was.
+ *
+ * The packaged mobile app answers for itself (`nativeScanAvailable`, CameraX).
+ * A browser is judged by shape rather than by user-agent: a coarse pointer AND
+ * a narrow screen. Both, because a touchscreen laptop is not a phone.
  */
+const onPhoneBrowser = () =>
+  matchMedia('(pointer:coarse)').matches && matchMedia('(max-width:900px)').matches
 const scanSupported = () => nativeScanAvailable()
-  || (qrDecode && !!navigator.mediaDevices?.getUserMedia)
-
-/**
- * Whether the reader can decode a QR code HERE, asked once and remembered.
- *
- * It starts false and stays false until the probe says otherwise, which is the
- * right way round: the button is hidden until we know, rather than offered
- * until we find out. `paintScanButton` runs every time the add-contact modal
- * opens, so a probe that resolves after boot is picked up by the next open.
- */
-let qrDecode = false
-
-/**
- * Re-ask, and repaint only if the answer moved.
- *
- * It repaints the button directly rather than calling `paintScanButton`, which
- * calls this -- that way round there is no loop, and the guard means a stable
- * answer costs one query and no DOM work.
- */
-async function refreshQrDecode() {
-  const ok = await qrDecodeAvailable((globalThis as any).BarcodeDetector)
-  if (ok === qrDecode) return
-  qrDecode = ok
-  $('btn-scan').hidden = !scanSupported()
-}
-void refreshQrDecode()
+  || (onPhoneBrowser() && !!navigator.mediaDevices?.getUserMedia)
 let scanStream: MediaStream | null = null
 let scanTimer: any = null
 /** The native scanner is running: `closeScan` has a camera to stop. */
 let scanNative = false
 
 async function openScan() {
-  // The cached answer paints the button; PRESSING it is the moment to be sure.
-  // Asking again here costs one local query on a deliberate action, and it
-  // closes the gap where the button is already on screen while the probe that
-  // justifies it has not answered yet -- or has since changed its mind.
-  if (!nativeScanAvailable()) await refreshQrDecode()
   if (!scanSupported()) return
   clr('scan-msg')
   $('scrim').classList.add('open'); $('scan-modal').classList.add('open')
@@ -2606,7 +2585,18 @@ async function openScan() {
     return
   }
   setupScanZoom(scanStream)
-  const detector = new (globalThis as any).BarcodeDetector({ formats: ['qr_code'] })
+  // A phone browser is not a promise of a reader: Safari and Firefox for
+  // Android have none, and `new undefined(...)` throws. The camera is already
+  // running by this point, so it goes out before anything is said.
+  let detector: any
+  try {
+    detector = new (globalThis as any).BarcodeDetector({ formats: ['qr_code'] })
+  } catch (e: any) {
+    ecLog('qr reader missing: ' + (e?.message ?? e))
+    stopScanCamera()
+    setMsg('scan-msg', tr('Ta przeglądarka nie odczyta kodu QR — wklej link zamiast skanować.'), 'err')
+    return
+  }
   // A frame that cannot be READ resolves to an empty list; `detect` THROWING is
   // a different thing, and treating the two alike is what left a live camera
   // pointed at a code it would never resolve, saying nothing, for ever. A few
@@ -2626,10 +2616,6 @@ async function openScan() {
       // deserves to be told, rather than have it vanish.
       stopScanCamera()
       setMsg('scan-msg', tr('Ta przeglądarka nie odczyta kodu QR — wklej link zamiast skanować.'), 'err')
-      // It said it could and it could not. Believe the failure over the probe,
-      // and stop offering the button for the rest of this session.
-      qrDecode = false
-      paintScanButton()
     }
   }, 250)
 }

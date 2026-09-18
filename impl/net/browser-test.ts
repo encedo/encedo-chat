@@ -343,9 +343,17 @@ class Browser extends Page {
     } catch { return false }
   }
 
-  /** Resize the viewport — layout rules that only apply at some widths need it. */
-  async resize(width: number, height: number) {
-    await this.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false }, true)
+  /**
+   * Resize the viewport — layout rules that only apply at some widths need it.
+   *
+   * `phone` additionally turns on touch emulation, which is what makes
+   * `(pointer:coarse)` match. Width alone is not a phone and the app knows it:
+   * since 2026-09-19 the scan button asks for BOTH, so that a touchscreen
+   * laptop and a narrow window are each refused on their own.
+   */
+  async resize(width: number, height: number, phone = false) {
+    await this.send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: phone }, true)
+    await this.send('Emulation.setTouchEmulationEnabled', { enabled: phone }, true)
     await sleep(200)
   }
 
@@ -507,7 +515,9 @@ class Firefox extends Page {
     return plain(r.result) as T
   }
 
-  async resize(width: number, height: number) {
+  /** `phone` is ignored here: BiDi has no touch emulation, and no scenario
+   *  that needs one runs on the Firefox side. */
+  async resize(width: number, height: number, _phone = false) {
     await this.send('browsingContext.setViewport', { context: this.context, viewport: { width, height } })
     await sleep(200)
   }
@@ -1571,32 +1581,22 @@ async function main() {
     step(`the invite link is drawn as a version-${(side - 8 - 17) / 4} QR, quiet zone included`)
     await A.eval(`document.getElementById('share-close').click(); return 1`)
 
-    // Desktop Linux has no Shape Detection: the control must be ABSENT rather
-    // than present and unable to do anything.
+    // A DESKTOP is not offered scanning, and the reader installed here is a
+    // WORKING one on purpose. That is the whole point of the rule: Chrome for
+    // macOS advertises `qr_code` and then cannot use it, so a button gated on
+    // what the platform CLAIMS opened a camera that resolved nothing (reported
+    // 2026-09-19, twice over -- once for the constructor check and again for
+    // the format check). If this ever goes green with the button VISIBLE,
+    // somebody has gone back to trusting the platform.
     const scanHidden = await A.eval<boolean>(`
-      document.getElementById('btn-add-peer').click();
-      const b = document.getElementById('btn-scan');
-      const hidden = b.hidden;
-      document.getElementById('add-cancel').click();
-      return hidden || typeof BarcodeDetector === 'function'`)
-    if (!scanHidden) throw new Error('the scan button is offered on a platform that cannot scan')
-    step('no scan control where the platform cannot read a code')
-
-    // The case that shipped: a reader that EXISTS and cannot do this format.
-    // Chrome on macOS is exactly that, and asking `typeof BarcodeDetector`
-    // answered yes -- so the button appeared, the camera came on, and nothing
-    // was ever resolved. The question has to be about formats.
-    const wrongFormat = await A.eval<boolean>(`
       window.BarcodeDetector = class { constructor() {} async detect() { return [] } };
-      window.BarcodeDetector.getSupportedFormats = async () => ['ean_13', 'code_128'];
+      window.BarcodeDetector.getSupportedFormats = async () => ['qr_code'];
       document.getElementById('btn-add-peer').click();
-      return new Promise((r) => setTimeout(() => {
-        const hidden = document.getElementById('btn-scan').hidden;
-        document.getElementById('add-cancel').click();
-        r(hidden);
-      }, 300));`)
-    if (!wrongFormat) throw new Error('a reader that cannot decode QR still offered the scan button')
-    step('a reader that decodes other formats but not QR is not offered either')
+      const hidden = document.getElementById('btn-scan').hidden;
+      document.getElementById('add-cancel').click();
+      return hidden`)
+    if (!scanHidden) throw new Error('a desktop was offered the scan button, reader or not')
+    step('a desktop is not offered scanning, even by a reader that claims QR')
 
     // With a reader present, scanning B's own code has to come out as
     // verification — not as an offer to add a contact already held.
@@ -1606,6 +1606,17 @@ async function main() {
         const v = document.getElementById('share-link').value;
         document.getElementById('share-close').click(); r(v);
       }, 300))`)
+    // A phone, properly: a narrow viewport AND a coarse pointer. Width alone
+    // is not a phone, which is exactly why the app asks for both.
+    await A.resize(390, 780, true)
+    const scanOnPhone = await A.eval<boolean>(`
+      document.getElementById('btn-add-peer').click();
+      const shown = !document.getElementById('btn-scan').hidden;
+      document.getElementById('add-cancel').click();
+      return shown`)
+    if (!scanOnPhone) throw new Error('a phone was NOT offered the scan button')
+    step('a phone is offered it')
+
     await A.eval(`
       // A faithful double: the app asks the CONSTRUCTOR what formats the
       // platform can do before it offers the button, because Chrome on macOS
@@ -1637,6 +1648,7 @@ async function main() {
         && document.getElementById('scan-video').srcObject === null`)
     if (!cameraOff) throw new Error('the viewfinder stayed open (and the camera with it) after a successful scan')
     step('a known key reads as verification, and the camera is released')
+    await A.resize(1200, 800) // back to a desktop for everything after this
 
     // A knock is the answer to the one problem a synchronous messenger cannot
     // solve with delivery guarantees: both people have to be here at once.

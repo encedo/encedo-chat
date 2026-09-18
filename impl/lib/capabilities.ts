@@ -212,6 +212,13 @@ export async function probeCapabilities(opts: { hostRtc?: boolean } = {}): Promi
   // tell the two failures apart, because they call for different answers: a
   // platform with no reader will never gain one, while a reader that decodes
   // nothing usable is a browser-version fact that may change under the user.
+  //
+  // This line and the app's scan BUTTON deliberately answer different
+  // questions, and the difference is not a bug to be tidied away. Here: what
+  // does this platform claim it can do. There: where does scanning make sense,
+  // which since 2026-09-19 is a phone and nothing else -- because Chrome for
+  // macOS claims `qr_code` and then does not deliver it, so the claim below
+  // cannot be trusted to gate a camera.
   const hasDetector = typeof (globalThis as any).BarcodeDetector === 'function'
   const canDecode = await qrDecodeAvailable((globalThis as any).BarcodeDetector)
   add('BarcodeDetector', false, canDecode && canCapture,
