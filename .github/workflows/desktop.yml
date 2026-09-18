@@ -499,6 +499,33 @@ jobs:
           echo "$json" | jq . > latest.json
           echo "platforms:"; jq -r '.platforms | keys[]' latest.json
 
+          # The gate runs BEFORE the upload, and that order is the whole point.
+          # No manifest at all is SAFE: the updater gets a 404 and offers
+          # nothing. An incomplete manifest is not: the platforms it omits are
+          # told nothing is available, for ever, and nobody finds out — which is
+          # exactly how a release without Windows reached a draft on 2026-09-17.
+          # A red job is not enough on its own, because a draft can be published
+          # while it is red; so the half manifest must never be written.
+          #
+          # The list is every key the five matrix legs produce, suffixed ones
+          # included: `windows-x86_64` present while `windows-x86_64-msi` is
+          # missing means the .msi never landed, and checking only the bare keys
+          # would wave that through. One line per matrix leg, so a leg that
+          # stops producing a bundle is one line to edit here.
+          printf '%s\n' \
+            darwin-aarch64 darwin-aarch64-app \
+            linux-x86_64 linux-x86_64-appimage linux-x86_64-deb linux-x86_64-rpm \
+            linux-aarch64 linux-aarch64-appimage linux-aarch64-deb linux-aarch64-rpm \
+            windows-x86_64 windows-x86_64-msi windows-x86_64-nsis \
+            windows-aarch64 windows-aarch64-nsis \
+            | sort > want.txt
+          jq -r '.platforms | keys[]' latest.json | sort > have.txt
+          MISSING=$(comm -23 want.txt have.txt | tr '\n' ' ')
+          if [ -n "${MISSING// /}" ]; then
+            echo "::error::latest.json would ship without: $MISSING — not uploading it; fix the platform and rerun"
+            exit 1
+          fi
+
           # Replace, never append: a manifest the old path (or a previous
           # repair) left behind would otherwise shadow this one.
           OLD=$(echo "$REL" | jq -r '.assets[] | select(.name == "latest.json") | .id')
@@ -508,10 +535,3 @@ jobs:
             -H "Content-Type: application/json" \
             --data-binary @latest.json \
             "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RID/assets?name=latest.json" > /dev/null
-
-          # With the manifest safely uploaded, fail loudly if a matrix
-          # platform is missing — the quiet gap is the bug this job exists for.
-          jq -e '.platforms | has("linux-x86_64") and has("linux-aarch64")
-                 and has("darwin-aarch64") and has("windows-x86_64")
-                 and has("windows-aarch64")' latest.json > /dev/null \
-            || { echo "::error::latest.json is missing a matrix platform"; exit 1; }
