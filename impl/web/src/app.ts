@@ -5671,18 +5671,34 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
   sub.textContent = humanSize(env.size) + (fileGone(env) ? ' · ' + tr('wygasł') : '')
   info.append(name, sub)
   const act = document.createElement('button'); act.className = 'f-act'
-  const direct = directFiles.get(env)
+  const direct = directBlobs.has(env)
   if (direct) {
-    // Same bubble on both sides — name, size, when — and the same two actions,
-    // because both sides hold the bytes: the receiver from the channel, the
-    // sender from the file it picked. Nothing expires and nothing is fetched.
+    // Same bubble on both sides — name, size, when — and ONE action, the same
+    // one every other file bubble has. It says "Zapisz" rather than "Pobierz"
+    // because both sides already hold the bytes (the receiver from the channel,
+    // the sender from the file it picked): nothing expires and nothing is
+    // fetched. That difference in the word is the only difference left.
+    //
+    // There WAS an "Otwórz" here, opening the blob in a new tab. It died
+    // silently in the packaged app — the webview hands every `window.open` to
+    // the host as a new-window request and the shell installs no handler (see
+    // `desk_open_url` in lib.rs, which exists because this trap had already
+    // eaten two other buttons). It could not be routed through that command
+    // either: it refuses anything that is not http/https, deliberately, and a
+    // blob: URL means nothing outside the webview anyway. Reported on macOS
+    // 2026-09-18; removed rather than left as a button that does nothing on
+    // three platforms out of four. Opening a file without writing it to disk
+    // stays on the list as a nice-to-have; doing it honestly needs either an
+    // in-app viewer or a temporary file written by the host.
+    //
+    // Nothing is lost for a picture or a voice note: `paintPreview` drew those
+    // inline and removed this button on sight, so it only ever survived on the
+    // files it could not show.
     sub.textContent = humanSize(env.size) + ' \u00b7 ' + tr('bezpośrednio')
     act.textContent = tr('Zapisz')
     act.addEventListener('click', () => { void saveDirect(env, act) })
-    const open = document.createElement('button'); open.className = 'f-see'; open.textContent = tr('Otwórz')
-    open.addEventListener('click', () => { window.open(direct, '_blank', 'noopener') })
-    fileEls.set(env, { act, sub, see: open })
-    wrap.append(ico, info, open, act)
+    fileEls.set(env, { act, sub })
+    wrap.append(ico, info, act)
     bub.appendChild(wrap)
     paintPreview(env)   // a picture or a voice note shows inline, like a sent one does
   } else {
@@ -5841,22 +5857,24 @@ const AUTO_MEDIA_MAX = 2 * 1024 * 1024
 const previews = new WeakMap<FileEnv, string>()
 /**
  * Files that came (or went) over the direct channel (`lib/xfer.ts`): the bytes
- * are in THIS tab and nowhere else, so the bubble's actions are an object URL,
- * not a fetch. Keyed by the envelope object like `previews`, and for the same
- * reason: the room log holds that object, so a replay finds the file again.
+ * are in THIS tab and nowhere else, so Save writes what is already here rather
+ * than fetching anything. Keyed by the envelope object like `previews`, and for
+ * the same reason: the room log holds that object, so a replay finds the file
+ * again. Holding the blob is also what tells the bubble renderer which of the
+ * two kinds of file it is drawing.
  *
  * An in-memory file cannot outlive its bubble — the transcript dies with the
  * page and files are not pinnable — which is what makes a bubble honest here.
  */
-const directFiles = new WeakMap<FileEnv, string>()
 const directBlobs = new WeakMap<FileEnv, Blob>()
 /** The platform's two ways to save (lib/saveas.ts): a picker where there is one, the anchor elsewhere. */
 const saveEnv = browserSaveEnv()
 
 /**
  * Save a transferred file. Where to is asked FIRST — the click is the gesture
- * the picker wants — and a closed dialog is an answer, not an error. Save and
- * Open used to do the same download, which is what the remark was about.
+ * the picker wants — and a closed dialog is an answer, not an error. That
+ * question is the whole point: before it, Save and Open did the same silent
+ * download, which is what the remark was about.
  */
 async function saveDirect(env: FileEnv, btn: HTMLButtonElement) {
   const blob = directBlobs.get(env)
@@ -5877,7 +5895,6 @@ async function saveDirect(env: FileEnv, btn: HTMLButtonElement) {
  */
 const xferMsgId = (id: number) => 'x' + (id >>> 0).toString(16).padStart(8, '0')
 function directFileEnv(f: { name: string; size: number; mime: string }, blob: Blob, xferId: number, body?: string): FileEnv {
-  const url = URL.createObjectURL(blob)
   const env = {
     v: 1, t: 'file', id: xferMsgId(xferId), ts: nowMs(), seq: 0,
     cid: '', name: f.name, size: f.size, mime: f.mime || 'application/octet-stream',
@@ -5886,9 +5903,12 @@ function directFileEnv(f: { name: string; size: number; mime: string }, blob: Bl
     // draws the caption without knowing which transport brought it.
     ...(body ? { body } : {}),
   } as unknown as FileEnv
-  directFiles.set(env, url)
   directBlobs.set(env, blob)
-  if (isPreviewable(env.mime)) previews.set(env, url)
+  // The object URL is made only for something that will actually be drawn.
+  // It used to be made for every transfer, because the Open button read it;
+  // with that button gone an unpreviewable file was minting a URL nobody would
+  // ever read, and an object URL lives until the page does.
+  if (isPreviewable(env.mime)) previews.set(env, URL.createObjectURL(blob))
   return env
 }
 

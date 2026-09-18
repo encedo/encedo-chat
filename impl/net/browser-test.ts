@@ -1733,19 +1733,25 @@ async function main() {
 
       await B.eval(`document.getElementById('xfer-yes').click(); return 1`)
       // The file lands in the conversation as a bubble — the same one on both
-      // sides, with Open and Save — and the window closes by itself. The bytes
-      // live in the tab, so the bubble is honest for exactly as long as the
-      // transcript is, which is the same lifetime.
+      // sides, with ONE action, Save — and the window closes by itself. The
+      // bytes live in the tab, so the bubble is honest for exactly as long as
+      // the transcript is, which is the same lifetime.
+      //
+      // `proba.bin` is deliberately a type with no preview, which is the only
+      // case where the old "Otwórz" button used to survive (`paintPreview`
+      // removed it on sight for a picture or a voice note). So this is the
+      // bubble that proves it is gone: it died silently in the packaged app,
+      // where `window.open` on a blob reaches a host with no handler.
       const BUBBLE = `
         const b = [...document.querySelectorAll('.mrow')].find(e => /proba\.bin/.test(e.textContent || ''));
         if (!b) return null;
         return { side: b.classList.contains('out') ? 'out' : 'in',
-                 open: !!b.querySelector('.f-see'), save: !!b.querySelector('.f-act'),
+                 see: !!b.querySelector('.f-see'), save: !!b.querySelector('.f-act'),
                  cap: (b.querySelector('.b-caption') || {}).textContent || '',
                  sub: (b.querySelector('.f-sub') || {}).textContent || '' };`
       await B.waitFor('the receiver has a file bubble', `const r = (() => {${BUBBLE}})(); return !!r;`, 60_000)
       const rb = await B.eval<any>(BUBBLE)
-      if (rb.side !== 'in' || !rb.open || !rb.save) throw new Error(`receiver bubble is wrong: ${JSON.stringify(rb)}`)
+      if (rb.side !== 'in' || rb.see || !rb.save) throw new Error(`receiver bubble is wrong: ${JSON.stringify(rb)}`)
       if (!/bezpo|direct/i.test(rb.sub)) throw new Error(`the bubble does not say it came direct: ${rb.sub}`)
       if (rb.cap !== XFER_NOTE) throw new Error(`the note did not arrive with the file: ${JSON.stringify(rb.cap)}`)
       await B.waitFor('the receiver window closed itself',
@@ -1754,9 +1760,9 @@ async function main() {
 
       await A.waitFor('the sender has the same bubble', `const r = (() => {${BUBBLE}})(); return !!r;`, 20_000)
       const sb = await A.eval<any>(BUBBLE)
-      if (sb.side !== 'out' || !sb.open || !sb.save) throw new Error(`sender bubble is wrong: ${JSON.stringify(sb)}`)
+      if (sb.side !== 'out' || sb.see || !sb.save) throw new Error(`sender bubble is wrong: ${JSON.stringify(sb)}`)
       if (sb.cap !== XFER_NOTE) throw new Error(`the sender's own bubble lost the note: ${JSON.stringify(sb.cap)}`)
-      step('the sender sees the same file, the same two actions and the same note')
+      step('the sender sees the same file, the same one action and the same note')
 
       // A transferred file is a message like any other, so it can be reacted
       // to — which needs the SAME id on both sides, and nothing about a direct
