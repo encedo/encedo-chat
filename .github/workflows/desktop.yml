@@ -167,13 +167,30 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
     needs: draft
     runs-on: ${{ matrix.os }}
-    # The OIDC subject Azure's federated credential matches against. Without
-    # an environment the subject carries the REF — `ref:refs/tags/v0.5.34` —
-    # which is different for every tag, and federated credentials have no
-    # wildcards: the sign-in would work exactly once, for whichever tag got
-    # hard-coded. With an environment the subject is the stable
-    # `environment:release`, one credential for ever. The environment itself
-    # is plain (no protection rules); it exists for its name.
+    # This is the job that holds the Azure credential and SIGNS, so the
+    # environment does two jobs at once.
+    #
+    # First, the OIDC subject Azure's federated credential matches against.
+    # Without an environment the subject carries the REF —
+    # `ref:refs/tags/v0.5.34` — which is different for every tag, and federated
+    # credentials have no wildcards: the sign-in would work exactly once, for
+    # whichever tag got hard-coded. With an environment the subject is the
+    # stable `environment:release`, one credential for ever.
+    #
+    # Second, since 2026-09-18 it is also the gate in front of the signing
+    # credential, configured in the repository rather than here:
+    #
+    #   - required reviewers (the owner): a release nobody started waits for a
+    #     human instead of signing itself. One owner reviewing his own runs is
+    #     a confirmation, not four eyes — and `prevent self-review` has to stay
+    #     OFF, or there is nobody left who could ever approve.
+    #   - deployment refs limited to `tag: v*`. That closes this job's own back
+    #     door: the `if` above lets a workflow_dispatch with an EMPTY tag build
+    #     and sign, and without the policy that ran from any branch.
+    #
+    # So a tagged build now PAUSES until it is approved; a run that is merely
+    # waiting is not a hung one. The repair dispatch is unaffected — it skips
+    # this job, and `updater-json` names no environment.
     environment: release
     strategy:
       fail-fast: false # one platform failing should not hide the others' artifacts
