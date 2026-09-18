@@ -5694,7 +5694,13 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
     // Nothing is lost for a picture or a voice note: `paintPreview` drew those
     // inline and removed this button on sight, so it only ever survived on the
     // files it could not show.
-    sub.textContent = humanSize(env.size) + ' \u00b7 ' + tr('bezpośrednio')
+    // The word carries the whole difference between the two ways a file can
+    // arrive, and as grey text the size line swallowed it. A span rather than
+    // the whole line: the size stays quiet, the transport is the news.
+    sub.textContent = humanSize(env.size) + ' \u00b7 '
+    const how = document.createElement('span'); how.className = 'f-direct'
+    how.textContent = tr('bezpośrednio')
+    sub.appendChild(how)
     act.textContent = tr('Zapisz')
     act.addEventListener('click', () => { void saveDirect(env, act) })
     fileEls.set(env, { act, sub })
