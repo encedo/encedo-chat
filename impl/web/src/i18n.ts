@@ -590,6 +590,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Kanał bezpośredni nie stoi — wyślij plik przez czat': 'No direct channel — send the file through the chat',
     'Jeden transfer naraz — poczekaj, aż ten się skończy': 'One transfer at a time — wait for this one to finish',
     'Plik jest za duży — limit transferu to 512 MB': 'The file is too big — the transfer limit is 512 MB',
+    'Notatka przy transferze może mieć najwyżej {n} — skróć ją albo wyślij plik przez czat': 'A note on a transfer can be at most {n} — shorten it, or send the file through the chat',
     'Pusty plik': 'Empty file',
     'do: {who}': 'to: {who}',
     'Plik pójdzie prosto do drugiej przeglądarki. Nie trafi na żaden serwer i nie da się go pobrać później — musicie oboje zostać w rozmowie.': 'The file goes straight to the other browser. It reaches no server and cannot be fetched later — you both have to stay in the conversation.',

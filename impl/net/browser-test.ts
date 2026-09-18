@@ -1686,6 +1686,7 @@ async function main() {
       // the file is supplied separately — the point is that the REAL change
       // handler runs, with the mode the menu just set.
       const XFER_BYTES = 300 * 1024
+      const XFER_NOTE = 'to ten skan, o ktory prosilas'
       await A.eval(`document.getElementById('xfer-menu').querySelectorAll('button')[1].click(); return 1`)
       await A.eval(`
         const input = document.getElementById('file-input');
@@ -1697,6 +1698,22 @@ async function main() {
         input.dispatchEvent(new Event('change'));
         return 1;
       `)
+      // Picking must NOT send. Before 0.6.4 the direct entry fired the offer
+      // the instant the picker closed, so there was never a moment in which to
+      // type anything — the whole point of this change is that the file waits
+      // in the chip exactly as it does on the way through the store.
+      const chip = await A.eval<any>(`
+        const c = document.getElementById('attach-chip');
+        return { shown: !!c && !c.hidden,
+                 modal: document.getElementById('xfer-modal').classList.contains('open'),
+                 name: (document.getElementById('attach-name') || {}).textContent || '' };`)
+      if (!chip.shown || chip.modal || !/proba\.bin/.test(chip.name)) {
+        throw new Error(`picking a direct file should fill the chip and send nothing: ${JSON.stringify(chip)}`)
+      }
+      step('picking for a direct transfer fills the chip instead of sending')
+
+      await A.eval(`document.getElementById('msg-input').value = ${JSON.stringify(XFER_NOTE)};
+                    document.getElementById('send').click(); return 1`)
       await A.waitFor('the sender is waiting for consent',
         `return document.getElementById('xfer-modal').classList.contains('open')
                 && /czekam|waiting/.test(document.getElementById('xfer-left').textContent || '')`, 15_000)
@@ -1706,6 +1723,13 @@ async function main() {
         `return document.getElementById('xfer-modal').classList.contains('open')
                 && /proba\.bin/.test(document.getElementById('xfer-file').textContent || '')`, 20_000)
       step('the receiver is asked, with the name and size the sender claimed')
+
+      // The prompt asks one question. Sender-supplied text there would be a way
+      // to say things to somebody who has agreed to nothing yet, so the note
+      // must not be anywhere in that window.
+      const askText = await B.eval<string>(`return document.getElementById('xfer-modal').textContent || ''`)
+      if (askText.includes(XFER_NOTE)) throw new Error('the consent window is showing the sender note')
+      step('the consent window carries no text from the sender')
 
       await B.eval(`document.getElementById('xfer-yes').click(); return 1`)
       // The file lands in the conversation as a bubble — the same one on both
@@ -1717,11 +1741,13 @@ async function main() {
         if (!b) return null;
         return { side: b.classList.contains('out') ? 'out' : 'in',
                  open: !!b.querySelector('.f-see'), save: !!b.querySelector('.f-act'),
+                 cap: (b.querySelector('.b-caption') || {}).textContent || '',
                  sub: (b.querySelector('.f-sub') || {}).textContent || '' };`
       await B.waitFor('the receiver has a file bubble', `const r = (() => {${BUBBLE}})(); return !!r;`, 60_000)
       const rb = await B.eval<any>(BUBBLE)
       if (rb.side !== 'in' || !rb.open || !rb.save) throw new Error(`receiver bubble is wrong: ${JSON.stringify(rb)}`)
       if (!/bezpo|direct/i.test(rb.sub)) throw new Error(`the bubble does not say it came direct: ${rb.sub}`)
+      if (rb.cap !== XFER_NOTE) throw new Error(`the note did not arrive with the file: ${JSON.stringify(rb.cap)}`)
       await B.waitFor('the receiver window closed itself',
         `return !document.getElementById('xfer-modal').classList.contains('open')`, 10_000)
       step(`received as a bubble: ${rb.sub}`)
@@ -1729,7 +1755,8 @@ async function main() {
       await A.waitFor('the sender has the same bubble', `const r = (() => {${BUBBLE}})(); return !!r;`, 20_000)
       const sb = await A.eval<any>(BUBBLE)
       if (sb.side !== 'out' || !sb.open || !sb.save) throw new Error(`sender bubble is wrong: ${JSON.stringify(sb)}`)
-      step('the sender sees the same file, with the same two actions')
+      if (sb.cap !== XFER_NOTE) throw new Error(`the sender's own bubble lost the note: ${JSON.stringify(sb.cap)}`)
+      step('the sender sees the same file, the same two actions and the same note')
 
       // A transferred file is a message like any other, so it can be reacted
       // to — which needs the SAME id on both sides, and nothing about a direct

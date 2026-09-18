@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   createSender, createReceiver, openOffer, decodeOffer, isXfer, receiptEvery,
-  encodeChunk, newId, CHUNK, DC_MAX_MESSAGE, MAX_DIRECT, ACCEPT_MS, STALL_MS, T, CTRL,
+  encodeChunk, encodeOffer, newId, CHUNK, DC_MAX_MESSAGE, MAX_DIRECT, MAX_OFFER_BODY,
+  ACCEPT_MS, STALL_MS, T, CTRL,
 } from '../lib/xfer.ts'
 
 test('a full chunk frame fits the message ceiling a peer that advertises no max-message-size imposes', () => {
@@ -187,4 +188,66 @@ test('the channel keeps its own ping and pong', () => {
   assert.equal(isXfer(new Uint8Array([CTRL, 0x4f])), false)
   assert.equal(isXfer(new Uint8Array([0x10, T.OFFER, 0, 0, 0, 0])), false)
   assert.equal(isXfer(new Uint8Array([CTRL, T.CHUNK, 0, 0, 0, 0])), true)
+})
+
+// ---- the note that travels with the file ----------------------------------
+
+test('a note typed with the file crosses inside the offer', () => {
+  const s = createSender({ ...file(3 * CHUNK), body: 'to ten raport, o ktory prosilas' })
+  const opened = openOffer(s.open(1000))
+  assert.ok(opened && 'offer' in opened)
+  assert.equal(opened.offer.body, 'to ten raport, o ktory prosilas')
+})
+
+test('no note means no field on the wire, not an empty one', () => {
+  // The common case has to put exactly the bytes there that 0.6.3 put there,
+  // or every transfer to an older peer would be testing new code for nothing.
+  const frame = createSender(file(CHUNK)).open(1000)
+  const json = JSON.parse(new TextDecoder().decode(frame.subarray(6)))
+  assert.equal('body' in json, false, 'a captionless offer should carry no body key')
+})
+
+test('an offer from a peer that never heard of notes is still an offer', () => {
+  // Exactly the JSON 0.6.3 emitted, byte for byte.
+  const id = newId()
+  const size = 2 * CHUNK
+  const body = new TextEncoder().encode(JSON.stringify(
+    { name: 'stary.pdf', size, mime: 'application/pdf', chunk: CHUNK, chunks: 2 }))
+  const frame = new Uint8Array(6 + body.length)
+  frame[0] = CTRL; frame[1] = T.OFFER
+  new DataView(frame.buffer).setUint32(2, id)
+  frame.set(body, 6)
+  const o = decodeOffer(frame)
+  assert.ok(o, 'an offer without a note must still decode')
+  assert.equal(o.body, undefined)
+  assert.equal(o.name, 'stary.pdf')
+})
+
+test('a note at the ceiling still builds a frame the channel will carry', () => {
+  // Worst case on purpose: control characters, which JSON escapes to six bytes
+  // each. A note that passes the check must not be able to push the offer past
+  // the ceiling — that is the 2026-09-14 failure shape, one frame too large and
+  // every transfer dying as a dead channel.
+  let note = ''
+  while (new TextEncoder().encode(JSON.stringify(note + '\u0001')).length <= MAX_OFFER_BODY) note += '\u0001'
+  const frame = encodeOffer({
+    id: newId(), name: 'x'.repeat(200), size: MAX_DIRECT,
+    mime: 'y'.repeat(100), chunk: CHUNK, chunks: Math.ceil(MAX_DIRECT / CHUNK), body: note,
+  })
+  assert.ok(frame.length < DC_MAX_MESSAGE, `offer frame ${frame.length} must stay under ${DC_MAX_MESSAGE}`)
+})
+
+test('a note longer than the ceiling is cut when read, never trusted whole', () => {
+  const id = newId()
+  const size = CHUNK
+  const huge = 'z'.repeat(MAX_OFFER_BODY * 3)
+  const body = new TextEncoder().encode(JSON.stringify(
+    { name: 'a.bin', size, mime: 'application/octet-stream', chunk: CHUNK, chunks: 1, body: huge }))
+  const frame = new Uint8Array(6 + body.length)
+  frame[0] = CTRL; frame[1] = T.OFFER
+  new DataView(frame.buffer).setUint32(2, id)
+  frame.set(body, 6)
+  const o = decodeOffer(frame)
+  assert.ok(o)
+  assert.equal(o.body?.length, MAX_OFFER_BODY, 'a peer must not be able to hand us an unbounded note')
 })

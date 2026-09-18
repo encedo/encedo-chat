@@ -57,6 +57,22 @@ export const CHUNK_HEADER = 10
  */
 export const CHUNK = DC_MAX_MESSAGE - CHUNK_HEADER
 /**
+ * The note that travels WITH the file, in the offer frame itself — so it is one
+ * message, it cannot arrive out of order, and it cannot arrive at all if the
+ * file does not.
+ *
+ * Bounded far below `DC_MAX_MESSAGE` on purpose. The offer is JSON, and JSON
+ * escaping can turn one character into six (`\uXXXX`), so a note that merely
+ * "fits" measured in bytes could still push the frame past the ceiling — the
+ * exact shape of the 2026-09-14 bug, where ten bytes over made every transfer
+ * fail as a dead channel. 4 KiB keeps the worst case under 25 KiB.
+ *
+ * It is deliberately much smaller than `MAX_BODY` for a chat message: this is a
+ * caption on a file, and a refusal that says so is better than a frame nobody
+ * can send.
+ */
+export const MAX_OFFER_BODY = 4096
+/**
  * 512 MiB. The receiver holds the whole file in memory until it is saved, so
  * this is a memory limit, not a policy one — it moves when the receiving side
  * streams to disk (File System Access, Chromium only, hence not in v1).
@@ -83,6 +99,8 @@ export interface Offer {
   mime: string
   chunk: number
   chunks: number
+  /** The note typed with the file. Absent when none was. */
+  body?: string
 }
 
 export type Why =
@@ -120,7 +138,11 @@ export function isXfer(b: Uint8Array): boolean {
 
 export const encodeOffer = (o: Offer) =>
   frame(T.OFFER, o.id, enc.encode(JSON.stringify(
-    { name: o.name, size: o.size, mime: o.mime, chunk: o.chunk, chunks: o.chunks })))
+    // `body` is left OUT when there is none, not sent as "": a transfer without
+    // a note then puts exactly the bytes on the wire that 0.6.3 put there, so
+    // the common case cannot regress against an older peer.
+    { name: o.name, size: o.size, mime: o.mime, chunk: o.chunk, chunks: o.chunks,
+      ...(o.body ? { body: o.body } : {}) })))
 
 export function decodeOffer(b: Uint8Array): Offer | null {
   if (!isXfer(b) || b[1] !== T.OFFER) return null
@@ -131,6 +153,12 @@ export function decodeOffer(b: Uint8Array): Offer | null {
       name: String(j.name ?? '').slice(0, 200),
       size: Number(j.size), mime: String(j.mime ?? 'application/octet-stream').slice(0, 100),
       chunk: Number(j.chunk), chunks: Number(j.chunks),
+      // An offer from 0.6.3 or earlier carries no `body` at all, which is the
+      // same thing as an empty one. The cap is in UTF-16 units rather than
+      // bytes because this is the defensive read: it bounds what a peer can
+      // make us hold and draw, and 4096 units is still far inside the frame.
+      ...(typeof j.body === 'string' && j.body
+        ? { body: j.body.slice(0, MAX_OFFER_BODY) } : {}),
     }
     // A wrong geometry is not a rounding difference — it means the two sides
     // would disagree about where the file ends.
@@ -170,9 +198,12 @@ export interface Sender {
   acked(): number
 }
 
-export function createSender(file: { name: string; size: number; mime: string }, id = newId()): Sender {
+export function createSender(file: { name: string; size: number; mime: string; body?: string }, id = newId()): Sender {
   const chunks = Math.max(1, Math.ceil(file.size / CHUNK))
-  const offer: Offer = { id, name: file.name, size: file.size, mime: file.mime || 'application/octet-stream', chunk: CHUNK, chunks }
+  const offer: Offer = {
+    id, name: file.name, size: file.size, mime: file.mime || 'application/octet-stream',
+    chunk: CHUNK, chunks, ...(file.body ? { body: file.body } : {}),
+  }
   let state: Sender['state'] = 'offering'
   let sentIdx = 0, ackedIdx = -1, last = 0
 

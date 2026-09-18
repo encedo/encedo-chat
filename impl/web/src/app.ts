@@ -52,6 +52,7 @@ import { newDiag } from '../../lib/diag.ts'
 import { NOTE_MAX } from '../../lib/knock.ts'
 import { contactState, seenLabel, noteSeen as foldSeen, noteAdded as foldAdded, PRESENCE_TTL_MS, type Seen } from '../../lib/seen.ts'
 import { bodyBytes, fitsOnWire, overBy, MAX_BODY, WARN_AT, kb } from '../../lib/msgsize.ts'
+import { MAX_OFFER_BODY } from '../../lib/xfer.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { webrtcLinkTauri, tauriRtcAvailable, tauriRtcSelftest } from '../../net/webrtc-tauri.ts'
@@ -2864,12 +2865,20 @@ $('btn-signout').addEventListener('click', async () => {
  * cannot do if the send has already left.
  */
 let pendingAttach: File | null = null
+/**
+ * Which door the pending file is going through. The paperclip's menu is where
+ * that is chosen, and the answer has to survive until Send — before this, the
+ * direct entry sent the file the instant it was picked, so there was never a
+ * moment in which to type anything.
+ */
+let pendingDirect = false
 
 /** The chip is the whole of the pending state's UI, so this is the only place
  *  the variable and the DOM can drift apart — set them together, always. */
-function showAttach(f: File | null) {
+function showAttach(f: File | null, direct = false) {
   if (f) cancelEdit() // a correction is text; the chip would take the send from it
   pendingAttach = f
+  pendingDirect = !!f && direct
   $('attach-chip').hidden = !f
   const thumb = $('attach-thumb') as HTMLImageElement
   // Whatever the chip was showing stops being anybody's business the moment it
@@ -2911,6 +2920,8 @@ type XferUi = {
   room: Room
   dir: 'in' | 'out'
   name: string; size: number; mime: string
+  /** The note typed with it, for the sender's own bubble. */
+  body?: string
   /** The sender's own file, so its bubble can offer the same actions as the receiver's. */
   file?: File
   t0: number
@@ -2937,19 +2948,42 @@ function xferButtons(yes: string | null, no: string | null) {
   if (no) n.textContent = no
 }
 
-/** Start one: pick was made through the direct entry in the paperclip menu. */
+/**
+ * Start one: the chip was filled through the direct entry in the paperclip menu
+ * and Send was pressed.
+ *
+ * Whatever is in the composer travels WITH the file, exactly as it does on the
+ * way through the store (`attachFile`) — one message, not a note chasing a
+ * file. The quote bar is the one thing that does NOT come along: a direct
+ * transfer has nowhere on the wire to put a reply reference, so the bar is left
+ * standing for the next message rather than silently spent on this one.
+ */
 function startTransfer(f: File | null | undefined) {
   const room = activeRoom()
   if (!f || !room?.conv) return
-  const r = room.conv.offerFile(f)
+  const inp = $('msg-input') as HTMLTextAreaElement
+  const note = inp.value.trim()
+  // Checked before anything is cleared. The offer frame is one DataChannel
+  // message and its ceiling is `MAX_OFFER_BODY`, far under a chat body's —
+  // so this refusal is common enough to be worth being gentle about.
+  if (note && bodyBytes(note) > MAX_OFFER_BODY) {
+    toast(tr('Notatka przy transferze może mieć najwyżej {n} — skróć ją albo wyślij plik przez czat', { n: kb(MAX_OFFER_BODY) }))
+    return
+  }
+  const r = room.conv.offerFile(f, note || undefined)
   if (r !== 'ok') {
     toast(r === 'no-channel' ? tr('Kanał bezpośredni nie stoi — wyślij plik przez czat')
       : r === 'busy' ? tr('Jeden transfer naraz — poczekaj, aż ten się skończy')
       : r === 'too-big' ? tr('Plik jest za duży — limit transferu to 512 MB')
+      : r === 'note-too-big' ? tr('Notatka przy transferze może mieć najwyżej {n} — skróć ją albo wyślij plik przez czat', { n: kb(MAX_OFFER_BODY) })
       : tr('Pusty plik'))
     return
   }
-  xfer = { room, dir: 'out', name: f.name, size: f.size, mime: f.type, file: f, t0: nowMs(), markAt: nowMs(), markBytes: 0, rate: 0 }
+  // Taken only now, when the engine has accepted the offer: every refusal above
+  // leaves the chip and the text untouched.
+  showAttach(null)
+  inp.value = ''; growComposer(); paintLength()
+  xfer = { room, dir: 'out', name: f.name, size: f.size, mime: f.type, file: f, body: note || undefined, t0: nowMs(), markAt: nowMs(), markBytes: 0, rate: 0 }
   $('xfer-title').textContent = tr('Transfer bezpośredni')
   $('xfer-sub').textContent = tr('do: {who}', { who: room.contact.name })
   $('xfer-file').textContent = `${f.name} · ${humanSize(f.size)}`
@@ -3017,7 +3051,7 @@ function onXferEvent(room: Room, e: any) {
     case 'progress': return xferProgress(e.done, e.total)
     case 'done': {
       if (xfer?.file) {
-        const env = directFileEnv({ name: xfer.name, size: xfer.size, mime: xfer.mime }, xfer.file, e.id)
+        const env = directFileEnv({ name: xfer.name, size: xfer.size, mime: xfer.mime }, xfer.file, e.id, xfer.body)
         record(room, { t: 'file', kind: 'me', ts: nowMs(), file: env, au: session?.pub })
       }
       xferClose()
@@ -3028,7 +3062,7 @@ function onXferEvent(room: Room, e: any) {
       // The file lands in the conversation as a bubble with the same two
       // actions the sender's has, and the window closes: a modal that only
       // repeats what the bubble offers is a modal that is in the way.
-      const env = directFileEnv({ name: e.name, size: e.blob.size, mime: e.mime }, e.blob, e.id)
+      const env = directFileEnv({ name: e.name, size: e.blob.size, mime: e.mime }, e.blob, e.id, e.body)
       record(room, { t: 'file', kind: 'peer', ts: nowMs(), file: env, au: room.contact.pub })
       xferClose()
       toast(tr('Odebrano'))
@@ -3083,7 +3117,7 @@ $('xfer-no').addEventListener('click', () => {
   xferClose()
 })
 
-function offerFile(f: File | null | undefined, count = 1) {
+function offerFile(f: File | null | undefined, count = 1, direct = false) {
   if (!f) return
   // Paste and drop can happen with no conversation on screen, which the clip
   // cannot — the composer is not there to click.
@@ -3091,7 +3125,7 @@ function offerFile(f: File | null | undefined, count = 1) {
   // Refused at PICK time rather than at Send: the limit is a property of the
   // file alone, and finding out after writing a caption is a worse way to learn.
   if (f.size > MAX_FILE) { toast(tr('Plik jest za duży — limit to {mb} MB', { mb: Math.floor(MAX_FILE / 1024 / 1024) })); return }
-  showAttach(f)
+  showAttach(f, direct)
   // The composer holds one file, so say which one was taken rather than
   // silently dropping the rest of a multi-file drop on the floor.
   if (count > 1) toast(tr('Jeden plik naraz — wziąłem {name}', { name: f.name }))
@@ -3155,8 +3189,8 @@ document.addEventListener('click', (e: any) => {
   const files: FileList | undefined = e.target.files
   const f = files?.[0]
   e.target.value = '' // so picking the same file twice still fires
-  if (pickMode === 'direct') { pickMode = 'store'; startTransfer(f); return }
-  offerFile(f, files?.length ?? 1)
+  const direct = pickMode === 'direct'; pickMode = 'store'
+  offerFile(f, files?.length ?? 1, direct)
 })
 $('attach-drop').addEventListener('click', () => showAttach(null))
 
@@ -5842,12 +5876,15 @@ async function saveDirect(env: FileEnv, btn: HTMLButtonElement) {
  * it out of the space of ordinary message ids.
  */
 const xferMsgId = (id: number) => 'x' + (id >>> 0).toString(16).padStart(8, '0')
-function directFileEnv(f: { name: string; size: number; mime: string }, blob: Blob, xferId: number): FileEnv {
+function directFileEnv(f: { name: string; size: number; mime: string }, blob: Blob, xferId: number, body?: string): FileEnv {
   const url = URL.createObjectURL(blob)
   const env = {
     v: 1, t: 'file', id: xferMsgId(xferId), ts: nowMs(), seq: 0,
     cid: '', name: f.name, size: f.size, mime: f.mime || 'application/octet-stream',
     key: '', chunk: 0, chunks: 0, alg: 'direct',
+    // Same field a file sent through the store uses, so the bubble renderer
+    // draws the caption without knowing which transport brought it.
+    ...(body ? { body } : {}),
   } as unknown as FileEnv
   directFiles.set(env, url)
   directBlobs.set(env, blob)
@@ -6897,7 +6934,15 @@ function sendComposer() {
   // of this same input and clears it, so the text goes once, with the file —
   // and the chip is dropped BEFORE the awaits, so what is sent is what the user
   // saw when they pressed Send.
-  if (pendingAttach) { const f = pendingAttach; showAttach(null); void attachFile(f); return }
+  if (pendingAttach) {
+    const f = pendingAttach
+    // startTransfer() reads and clears the composer itself, because every one
+    // of its refusals has to leave the chip and the text exactly where they
+    // are — its note has a much smaller ceiling than a chat message, and the
+    // person needs what they wrote in order to shorten it.
+    if (pendingDirect) { startTransfer(f); return }
+    showAttach(null); void attachFile(f); return
+  }
   const t = inp.value.trim(); if (!t) return
   if (activeGid) { // a group is on screen — broadcast to it
     const gu = groupsUI.get(activeGid); if (!gu?.room) return

@@ -18,7 +18,8 @@
  *   would enjoy debugging, and the UI says "poczekaj" perfectly well.
  */
 import {
-  createSender, createReceiver, decodeOffer, isXfer, CHUNK, MAX_DIRECT, T,
+  createSender, createReceiver, decodeOffer, isXfer, CHUNK, MAX_DIRECT,
+  MAX_OFFER_BODY, T,
   type Offer, type Sender, type Receiver, type Why,
 } from './xfer.ts'
 
@@ -58,13 +59,23 @@ export type XferEv =
   | { t: 'accepted' }
   | { t: 'progress'; dir: 'in' | 'out'; done: number; total: number }
   | { t: 'done'; dir: 'out'; id: number }
-  | { t: 'received'; id: number; name: string; mime: string; blob: Blob }
+  /**
+   * `body` is the note the sender typed with the file. It rides here and NOT on
+   * the `offer` event above, and that is a rule rather than an oversight: the
+   * offer event draws the consent prompt, which asks one question — take a file
+   * from this person, yes or no. Handing that prompt arbitrary sender text
+   * would turn it into a surface for saying things to somebody who has not
+   * agreed to anything yet. The note appears on the file's bubble, after the
+   * transfer the person accepted.
+   */
+  | { t: 'received'; id: number; name: string; mime: string; blob: Blob; body?: string }
   | { t: 'failed'; dir: 'in' | 'out'; why: Why }
 
-export type OfferResult = 'ok' | 'busy' | 'no-channel' | 'too-big' | 'empty'
+export type OfferResult = 'ok' | 'busy' | 'no-channel' | 'too-big' | 'empty' | 'note-too-big'
 
 export interface XferSession {
-  offer(file: FileLike): OfferResult
+  /** `body` is the note typed with the file; it travels in the offer frame. */
+  offer(file: FileLike, body?: string): OfferResult
   /** Frames arriving off the channel (`WebRTCPlane.onControl`). */
   onFrame(bytes: Uint8Array): void
   accept(): void
@@ -129,14 +140,23 @@ export function createXferSession(host: XferHost, onEvent: (e: XferEv) => void):
   return {
     busy: () => !!(send || recv),
     pending: () => (recv && recv.state === 'offered' ? recv.offer : null),
-    offer(f) {
+    offer(f, body) {
       if (send || recv) return 'busy'
       const d = host.direct()
       if (!d) return 'no-channel'
       if (f.size > MAX_DIRECT) return 'too-big'
       if (f.size === 0) return 'empty'
+      // Refused, never trimmed. A note silently cut in half is worse than a
+      // refusal, and the frame it would build is the one the channel throws on.
+      // Measured as it will sit in the frame: JSON-encoded, in bytes. The same
+      // measure `lib/msgsize.ts` uses for a chat body, for the same reason —
+      // a newline costs two characters once stringified.
+      if (body && new TextEncoder().encode(JSON.stringify(body)).length > MAX_OFFER_BODY) return 'note-too-big'
       file = f
-      send = createSender({ name: f.name, size: f.size, mime: f.type || 'application/octet-stream' })
+      send = createSender({
+        name: f.name, size: f.size, mime: f.type || 'application/octet-stream',
+        ...(body ? { body } : {}),
+      })
       d.send(send.open(now()))
       return 'ok'
     },
@@ -195,10 +215,10 @@ export function createXferSession(host: XferHost, onEvent: (e: XferEv) => void):
         const finished = out.evs.some((e) => e.t === 'done')
         emit(out.evs.filter((e) => e.t !== 'done'), 'in')
         if (finished && recv) {
-          const { id, name, mime } = recv.offer
+          const { id, name, mime, body } = recv.offer
           const blob = new Blob(recv.parts() as BlobPart[], { type: mime })
           clear()
-          onEvent({ t: 'received', id, name, mime, blob })
+          onEvent({ t: 'received', id, name, mime, blob, ...(body ? { body } : {}) })
         }
       }
     },

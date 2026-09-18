@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createXferSession, type XferEv, type Direct } from '../lib/xfer-session.ts'
-import { CHUNK, MAX_DIRECT } from '../lib/xfer.ts'
+import { CHUNK, MAX_DIRECT, MAX_OFFER_BODY } from '../lib/xfer.ts'
 
 /**
  * A file that slices like the browser's does, WITHOUT allocating itself: the
@@ -165,5 +165,53 @@ test('a refusal reaches the sender as a refusal', async () => {
   B.reject(); await flush()
   assert.deepEqual(evs.a.at(-1), { t: 'failed', dir: 'out', why: 'rejected' })
   assert.equal(A.busy(), false)
+  stop()
+})
+
+// ---- the note that travels with the file ----------------------------------
+
+test('the note reaches the receiver with the file', async () => {
+  const { A, B, evs, flush, stop } = pair()
+  assert.equal(A.offer(fakeFile(2 * CHUNK), 'skan umowy, strona 3 jest wazna'), 'ok')
+  await flush()
+  B.accept()
+  await flush()
+  const got = evs.b.find((e) => e.t === 'received') as any
+  assert.ok(got, 'the file should have arrived')
+  assert.equal(got.body, 'skan umowy, strona 3 jest wazna')
+  stop()
+})
+
+test('the note is NOT on the event that draws the consent prompt', async () => {
+  // The prompt asks one question: take a file from this person, yes or no.
+  // Sender-supplied text there would be a way to say things to somebody who
+  // has agreed to nothing — so the note rides on `received`, after the answer.
+  const { A, B, evs, flush, stop } = pair()
+  assert.equal(A.offer(fakeFile(CHUNK), 'kliknij tutaj, to pilne'), 'ok')
+  await flush()
+  const ask = evs.b.find((e) => e.t === 'offer') as any
+  assert.ok(ask, 'the receiver should have been asked')
+  assert.equal('body' in ask, false, 'the consent prompt must not carry the sender text')
+  stop()
+})
+
+test('a note past the ceiling is refused, and nothing is offered', async () => {
+  const { A, B, evs, flush, stop } = pair()
+  assert.equal(A.offer(fakeFile(CHUNK), 'z'.repeat(MAX_OFFER_BODY + 1)), 'note-too-big')
+  await flush()
+  assert.equal(evs.b.length, 0, 'a refused note must not put an offer on the wire')
+  assert.equal(A.busy(), false, 'a refused offer must not leave the session busy')
+  stop()
+})
+
+test('a transfer with no note behaves exactly as it did before notes existed', async () => {
+  const { A, B, evs, flush, stop } = pair()
+  assert.equal(A.offer(fakeFile(2 * CHUNK)), 'ok')
+  await flush()
+  B.accept()
+  await flush()
+  const got = evs.b.find((e) => e.t === 'received') as any
+  assert.ok(got)
+  assert.equal(got.body, undefined)
   stop()
 })

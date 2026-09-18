@@ -539,7 +539,7 @@ export interface Conversation {
    * not already going direct — a transfer never falls back to the relay, where
    * it would be a slower copy of the store at ~1 MB/s of relay bandwidth.
    */
-  offerFile(f: FileLike): OfferResult
+  offerFile(f: FileLike, body?: string): OfferResult
   /** Answer an incoming offer (`onXfer` reported it). */
   acceptFile(): void
   rejectFile(): void
@@ -1245,7 +1245,7 @@ async function openRoom(
     },
     who: () => room.who(),
     secured: () => room.secured(),
-    offerFile: (f) => xfer.offer(f),
+    offerFile: (f, body) => xfer.offer(f, body),
     acceptFile: () => xfer.accept(),
     rejectFile: () => xfer.reject(),
     cancelFile: () => xfer.cancel(),
