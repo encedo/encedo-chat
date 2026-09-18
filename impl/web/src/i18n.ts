@@ -585,6 +585,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Wyślij (Enter)': 'Send (Enter)',
     'Wyślij plik': 'Send a file',
     'przez czat — do {mb} MB, znika po 5 minutach': 'through the chat — up to {mb} MB, gone after 5 minutes',
+    'Druga strona potwierdziła cały plik — inaczej transfer by się nie zakończył': 'The other side confirmed the whole file — the transfer could not have finished otherwise',
     'Transfer bezpośredni': 'Direct transfer',
     'prosto do drugiej przeglądarki, nic nie trafia na serwer': 'straight to the other browser, nothing reaches a server',
     'Kanał bezpośredni nie stoi — wyślij plik przez czat': 'No direct channel — send the file through the chat',

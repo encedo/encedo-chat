@@ -5758,6 +5758,35 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
   }
 
   const meta = document.createElement('div'); meta.className = 'b-meta'; stampTime(meta, ts)
+  // Delivery, the same contract a sentence gets. The engine has ALWAYS run it
+  // for files -- the receiver confirms a `file` envelope exactly as it confirms
+  // a `msg` (`lib/room.ts`), and `sendFile` tracks and re-sends it -- but
+  // nothing here drew the marker, so `setDelivery` looked the id up in
+  // `stateEls`, found nothing and returned. The whole mechanism was talking to
+  // an empty room.
+  //
+  // The half that actually cost something: `setDelivery` is also what puts the
+  // RESEND button behind a failure. The bytes stay in `resendable`, so a file
+  // that did not arrive was one click from going again -- with nothing to
+  // click. It simply vanished. (Reported 2026-09-19.)
+  if (kind === 'me') {
+    const st = document.createElement('span'); st.className = 'b-state'
+    if (direct) {
+      // A direct transfer knows MORE than an ack does. This bubble is built on
+      // the sender's `done`, and that arrives because the RECEIVER sent DONE,
+      // which it sends only once it holds every chunk (`lib/xfer.ts`). So it is
+      // proof of the whole payload rather than receipt of one frame, and it is
+      // already true when the bubble appears -- hence no "wysylam..." stage and
+      // nothing for `setDelivery` to update later.
+      st.textContent = tr(' · ✓ ') + tr('dostarczone')
+      st.title = tr('Druga strona potwierdziła cały plik — inaczej transfer by się nie zakończył')
+      st.dataset.settled = '1'
+    } else {
+      st.textContent = tr(' · wysyłam…')
+      st.title = tr('Czekam na potwierdzenie od klienta rozmówcy')
+    }
+    meta.appendChild(st)
+  }
   // Reactions need both halves: somewhere to draw them, and an entry in msgEls
   // so an incoming reaction can find this bubble. appendFile had neither, which
   // is why files could not be reacted to at all.
@@ -5796,6 +5825,13 @@ function wireBubbleId(row: HTMLElement, id: string) {
   row.dataset.mid = id        // what a reply and a scroll-to-quote look for
   attachReactionBar(row, id)  // the controls
   attachReveal(row, bub)      // and the press that shows them
+  // And the delivery marker, for the same reason the rest of this helper
+  // exists: a file we send is drawn BEFORE its id is minted, so registering it
+  // at draw time would file it under the empty string and every later
+  // confirmation would miss it. A direct transfer's marker is already final
+  // (`settled`) and no delivery event will ever name its id, so it stays out.
+  const st = row.querySelector('.b-state') as HTMLElement | null
+  if (st && !st.dataset.settled) stateEls.set(id, st)
 }
 
 

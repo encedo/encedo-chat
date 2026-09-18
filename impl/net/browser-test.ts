@@ -1224,6 +1224,19 @@ async function main() {
       if (!bubble.hasReactions || !bubble.hasReactBar) throw new Error('the file bubble cannot be reacted to')
       step('the caption is in the same bubble, and the bubble takes reactions')
 
+      // Delivery. The engine confirmed and tracked files all along, but the
+      // bubble drew no marker, so every confirmation was looked up in `stateEls`
+      // and dropped -- taking the resend button with it, which is the half that
+      // lost files outright. The wait is the assertion: it has to REACH
+      // delivered, not merely have a marker.
+      await A.waitFor('the sent file is confirmed delivered', `
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(fileTok)}));
+        const st = row && row.querySelector('.b-state');
+        return !!st && /dostarcz|delivered/i.test(st.textContent || '');
+      `, 40_000)
+      step('the sender is told the file was delivered, as it is for a sentence')
+
       // The SENDER's own bubble, which is the half that was broken: it is drawn
       // before the message has an id, because the send has not happened yet, so
       // the reaction bar was never attached. Received files were fine, which is
@@ -1747,6 +1760,7 @@ async function main() {
         if (!b) return null;
         return { side: b.classList.contains('out') ? 'out' : 'in',
                  see: !!b.querySelector('.f-see'), save: !!b.querySelector('.f-act'),
+                 state: ((b.querySelector('.b-state') || {}).textContent || ''),
                  cap: (b.querySelector('.b-caption') || {}).textContent || '',
                  sub: (b.querySelector('.f-sub') || {}).textContent || '' };`
       await B.waitFor('the receiver has a file bubble', `const r = (() => {${BUBBLE}})(); return !!r;`, 60_000)
@@ -1762,7 +1776,16 @@ async function main() {
       const sb = await A.eval<any>(BUBBLE)
       if (sb.side !== 'out' || sb.see || !sb.save) throw new Error(`sender bubble is wrong: ${JSON.stringify(sb)}`)
       if (sb.cap !== XFER_NOTE) throw new Error(`the sender's own bubble lost the note: ${JSON.stringify(sb.cap)}`)
-      step('the sender sees the same file, the same one action and the same note')
+      // A direct transfer's proof is stronger than an ack and arrives earlier:
+      // this bubble exists BECAUSE the receiver sent DONE, and it sends that
+      // only holding every chunk. So the marker is final at once -- never
+      // "wysylam...", which would be a stage that cannot end here.
+      if (!/dostarcz|delivered/i.test(sb.state)) throw new Error(`the sender's transfer bubble does not say delivered: ${JSON.stringify(sb.state)}`)
+      if (/wysy|sending/i.test(sb.state)) throw new Error(`a direct transfer must not sit on "sending": ${JSON.stringify(sb.state)}`)
+      // And the RECEIVER's copy carries no delivery marker at all: it is not
+      // ours, so there is nothing about it we could be waiting to hear.
+      if (rb.state.trim()) throw new Error(`the receiver's bubble should carry no delivery marker: ${JSON.stringify(rb.state)}`)
+      step('the sender sees the same file, one action, the note, and a delivered mark')
 
       // A transferred file is a message like any other, so it can be reacted
       // to — which needs the SAME id on both sides, and nothing about a direct
