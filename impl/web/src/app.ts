@@ -52,6 +52,7 @@ import { newDiag } from '../../lib/diag.ts'
 import { NOTE_MAX } from '../../lib/knock.ts'
 import { contactState, seenLabel, noteSeen as foldSeen, noteAdded as foldAdded, PRESENCE_TTL_MS, type Seen } from '../../lib/seen.ts'
 import { bodyBytes, fitsOnWire, overBy, MAX_BODY, WARN_AT, kb } from '../../lib/msgsize.ts'
+import { qrDecodeAvailable } from '../../lib/capabilities.ts'
 import { MAX_OFFER_BODY } from '../../lib/xfer.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
@@ -1929,7 +1930,14 @@ function attachByteBudget(input: HTMLInputElement | HTMLTextAreaElement, max: nu
   paint()
 }
 
-const paintScanButton = () => { $('btn-scan').hidden = !scanSupported() }
+const paintScanButton = () => {
+  $('btn-scan').hidden = !scanSupported()
+  // And ask again, because the answer is not fixed for the life of the page:
+  // the probe is asynchronous, so the first paint after boot may run before it
+  // has answered at all. Cheap -- a local query -- and this is a human opening
+  // a window, not a loop.
+  void refreshQrDecode()
+}
 // Focus only where a keyboard is already on the desk: on a phone, focusing
 // the field pops the software keyboard OVER the modal before the person can
 // reach the scan button — and scan is the primary door there.
@@ -2534,18 +2542,49 @@ function knockReceived(room: Room) {
  *   does NOT match a contact of the same name is the interesting case and is
  *   reported as such, not folded into "new contact".
  *
- * Scanning needs Shape Detection and a camera, and desktop Linux has neither —
- * so the button appears only where the probe says both exist, and pasting the
- * link stays the way in everywhere else.
+ * Scanning needs a camera AND a reader that can actually decode a QR code.
+ * The second half is `qrDecode` below, and it is a real question rather than a
+ * formality: desktop Linux has no reader at all, while Chrome on macOS has one
+ * that cannot do this format. Everywhere else, pasting the link stays the way in.
  */
 const scanSupported = () => nativeScanAvailable()
-  || (typeof (globalThis as any).BarcodeDetector === 'function' && !!navigator.mediaDevices?.getUserMedia)
+  || (qrDecode && !!navigator.mediaDevices?.getUserMedia)
+
+/**
+ * Whether the reader can decode a QR code HERE, asked once and remembered.
+ *
+ * It starts false and stays false until the probe says otherwise, which is the
+ * right way round: the button is hidden until we know, rather than offered
+ * until we find out. `paintScanButton` runs every time the add-contact modal
+ * opens, so a probe that resolves after boot is picked up by the next open.
+ */
+let qrDecode = false
+
+/**
+ * Re-ask, and repaint only if the answer moved.
+ *
+ * It repaints the button directly rather than calling `paintScanButton`, which
+ * calls this -- that way round there is no loop, and the guard means a stable
+ * answer costs one query and no DOM work.
+ */
+async function refreshQrDecode() {
+  const ok = await qrDecodeAvailable((globalThis as any).BarcodeDetector)
+  if (ok === qrDecode) return
+  qrDecode = ok
+  $('btn-scan').hidden = !scanSupported()
+}
+void refreshQrDecode()
 let scanStream: MediaStream | null = null
 let scanTimer: any = null
 /** The native scanner is running: `closeScan` has a camera to stop. */
 let scanNative = false
 
 async function openScan() {
+  // The cached answer paints the button; PRESSING it is the moment to be sure.
+  // Asking again here costs one local query on a deliberate action, and it
+  // closes the gap where the button is already on screen while the probe that
+  // justifies it has not answered yet -- or has since changed its mind.
+  if (!nativeScanAvailable()) await refreshQrDecode()
   if (!scanSupported()) return
   clr('scan-msg')
   $('scrim').classList.add('open'); $('scan-modal').classList.add('open')
@@ -2568,12 +2607,30 @@ async function openScan() {
   }
   setupScanZoom(scanStream)
   const detector = new (globalThis as any).BarcodeDetector({ formats: ['qr_code'] })
+  // A frame that cannot be READ resolves to an empty list; `detect` THROWING is
+  // a different thing, and treating the two alike is what left a live camera
+  // pointed at a code it would never resolve, saying nothing, for ever. A few
+  // throws in a row are allowed because the first frames can arrive before the
+  // video is ready; past that it is the platform, not the picture.
+  let misfires = 0
   scanTimer = setInterval(async () => {
     try {
       const codes = await detector.detect(video)
+      misfires = 0
       const raw = codes?.[0]?.rawValue
       if (raw) handleScanned(String(raw))
-    } catch { /* a frame that cannot be read is simply the next frame */ }
+    } catch (e: any) {
+      if (++misfires < 4) return // the video is probably not ready yet
+      ecLog('qr scan unavailable: ' + (e?.message ?? e))
+      // The camera goes out, the window stays: somebody is looking at it and
+      // deserves to be told, rather than have it vanish.
+      stopScanCamera()
+      setMsg('scan-msg', tr('Ta przeglądarka nie odczyta kodu QR — wklej link zamiast skanować.'), 'err')
+      // It said it could and it could not. Believe the failure over the probe,
+      // and stop offering the button for the rest of this session.
+      qrDecode = false
+      paintScanButton()
+    }
   }, 250)
 }
 
@@ -2700,13 +2757,24 @@ function setupScanZoom(stream: MediaStream) {
   apply(plan.start)
 }
 
-function closeScan() {
+/**
+ * Everything except closing the window: the camera goes out, the loop stops.
+ *
+ * Separate from `closeScan` because one case needs exactly this half -- a
+ * reader that turns out not to work has to stop looking WITHOUT taking the
+ * window away, or the explanation would close on the same tick it appeared.
+ */
+function stopScanCamera() {
   closeScanNative()
   clearInterval(scanTimer); scanTimer = null
   ;($('scan-zoom-row') as HTMLElement).hidden = true // the next camera may have no zoom
   for (const t of scanStream?.getTracks() ?? []) t.stop() // the camera light goes out
   scanStream = null
   ;($('scan-video') as HTMLVideoElement).srcObject = null
+}
+
+function closeScan() {
+  stopScanCamera()
   $('scrim').classList.remove('open'); $('scan-modal').classList.remove('open')
 }
 

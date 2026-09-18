@@ -33,6 +33,36 @@
 const REQUIRED_TRIES = 3
 const RETRY_MS = 150
 
+/**
+ * Can this platform actually DECODE a QR code?
+ *
+ * `typeof BarcodeDetector === 'function'` is NOT that question, and answering
+ * it as though it were shipped a broken button: Chrome on macOS defines the
+ * constructor and then supports no format we can use, so the viewfinder opened
+ * on a live camera that could never resolve anything (reported 2026-09-19).
+ * WKWebView is the easy case -- no constructor at all -- which is why the
+ * packaged app looked correct while the browser did not.
+ *
+ * `getSupportedFormats()` is the spec's own answer and is static and async,
+ * which is the whole reason this is not a one-line check. A constructor
+ * without it is treated as "cannot": the method has been in the API from the
+ * start, so its absence says the implementation is not one we can interrogate,
+ * and guessing in favour of a camera that may never read anything is the wrong
+ * way to be wrong here.
+ *
+ * Takes the constructor rather than reading the global, so a test can hand it
+ * a platform that does not exist on the machine running the test.
+ */
+export async function qrDecodeAvailable(ctor: unknown): Promise<boolean> {
+  if (typeof ctor !== 'function') return false
+  const get = (ctor as { getSupportedFormats?: unknown }).getSupportedFormats
+  if (typeof get !== 'function') return false
+  try {
+    const formats = await (get as () => Promise<unknown>).call(ctor)
+    return Array.isArray(formats) && formats.includes('qr_code')
+  } catch { return false }
+}
+
 export interface Capability {
   id: string
   /** Missing this means the app cannot work at all. */
@@ -178,10 +208,17 @@ export async function probeCapabilities(opts: { hostRtc?: boolean } = {}): Promi
   // app says so instead of opening a viewfinder that can never resolve
   // anything. Shape Detection is absent on desktop Linux/Windows Chrome and on
   // every WebKit; it ships on Android and ChromeOS.
+  // Formats, not the constructor -- see `qrDecodeAvailable`. The note has to
+  // tell the two failures apart, because they call for different answers: a
+  // platform with no reader will never gain one, while a reader that decodes
+  // nothing usable is a browser-version fact that may change under the user.
   const hasDetector = typeof (globalThis as any).BarcodeDetector === 'function'
-  add('BarcodeDetector', false, hasDetector && canCapture,
+  const canDecode = await qrDecodeAvailable((globalThis as any).BarcodeDetector)
+  add('BarcodeDetector', false, canDecode && canCapture,
     'Ta platforma nie umie czytać kodów QR — kod można pokazać, ale nie zeskanować; zostaje wklejenie linku.'
-    + (hasDetector ? noCapture : ' Brak czytnika kodów (BarcodeDetector).'))
+    + (!hasDetector ? ' Brak czytnika kodów (BarcodeDetector).'
+      : !canDecode ? ' Czytnik kodów jest, ale nie obsługuje formatu QR na tej platformie.'
+      : noCapture))
 
   const missing = caps.filter((c) => c.required && !c.ok)
   const degraded = caps.filter((c) => !c.required && !c.ok)

@@ -496,6 +496,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'To tożsamość, na której jesteś zalogowany. Znikną jej klucze, kontakty i grupy, a aplikacja wróci do ekranu logowania. Nieodwracalne — klucza nie da się odtworzyć.':
       'This is the identity you are signed in with. Its keys, contacts and groups go, and the app returns to the login screen. Irreversible — the key cannot be recovered.',
     'To Ty — ktoś zwrócił się do Ciebie ({hint})': 'That is you — somebody called your name ({hint})',
+    'Ta przeglądarka nie odczyta kodu QR — wklej link zamiast skanować.': 'This browser cannot read a QR code — paste the link instead of scanning.',
     'To nie jest kod zaproszenia — pokaż kod z okna „Udostępnij swój profil”':
       'That is not an invite code — show the one from the “Share your profile” window',
     'To Twój własny kod': 'That is your own code',

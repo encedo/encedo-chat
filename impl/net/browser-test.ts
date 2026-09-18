@@ -1582,6 +1582,22 @@ async function main() {
     if (!scanHidden) throw new Error('the scan button is offered on a platform that cannot scan')
     step('no scan control where the platform cannot read a code')
 
+    // The case that shipped: a reader that EXISTS and cannot do this format.
+    // Chrome on macOS is exactly that, and asking `typeof BarcodeDetector`
+    // answered yes -- so the button appeared, the camera came on, and nothing
+    // was ever resolved. The question has to be about formats.
+    const wrongFormat = await A.eval<boolean>(`
+      window.BarcodeDetector = class { constructor() {} async detect() { return [] } };
+      window.BarcodeDetector.getSupportedFormats = async () => ['ean_13', 'code_128'];
+      document.getElementById('btn-add-peer').click();
+      return new Promise((r) => setTimeout(() => {
+        const hidden = document.getElementById('btn-scan').hidden;
+        document.getElementById('add-cancel').click();
+        r(hidden);
+      }, 300));`)
+    if (!wrongFormat) throw new Error('a reader that cannot decode QR still offered the scan button')
+    step('a reader that decodes other formats but not QR is not offered either')
+
     // With a reader present, scanning B's own code has to come out as
     // verification — not as an offer to add a contact already held.
     const bLink = await B.eval<string>(`
@@ -1591,7 +1607,12 @@ async function main() {
         document.getElementById('share-close').click(); r(v);
       }, 300))`)
     await A.eval(`
+      // A faithful double: the app asks the CONSTRUCTOR what formats the
+      // platform can do before it offers the button, because Chrome on macOS
+      // defines the class and then cannot decode a QR (reported 2026-09-19).
+      // A stub without this says "no reader" and the scanner never opens.
       window.BarcodeDetector = class { constructor() {} async detect() { return [{ rawValue: ${JSON.stringify(bLink)} }] } };
+      window.BarcodeDetector.getSupportedFormats = async () => ['qr_code'];
       // A camera stub has to answer what the app actually asks a stream: the
       // tracks to stop, AND the video track the zoom control is built from.
       // Answering only the first hid a crash in the scanner for three releases.

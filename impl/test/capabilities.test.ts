@@ -15,7 +15,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { probeCapabilities, formatReport } from '../lib/capabilities.ts'
+import { probeCapabilities, formatReport, qrDecodeAvailable } from '../lib/capabilities.ts'
 
 /** Swap `crypto.subtle` for the duration of one probe, then put it back. */
 async function withSubtle<T>(fake: any, fn: () => Promise<T>): Promise<T> {
@@ -104,4 +104,50 @@ test('the probe tests what the app actually does, not a cheaper subset', async (
   for (const step of ['generateKey', 'exportKey', 'importKey', 'deriveBits']) {
     assert.ok(calls.includes(step), `the X25519 probe must ${step}; saw ${calls.join(', ')}`)
   }
+})
+
+// ---- can this platform actually decode a QR code? -------------------------
+//
+// The question the app used to ask was "does the constructor exist", and on
+// Chrome for macOS the answer is yes while the answer to the real question is
+// no: the button appeared, the camera came on, and nothing was ever resolved
+// (reported 2026-09-19). These pin the decision itself, since the platform
+// that exposed it cannot be reproduced on the machine running this test.
+
+test('no reader at all is no', async () => {
+  assert.equal(await qrDecodeAvailable(undefined), false)
+  assert.equal(await qrDecodeAvailable({}), false)          // not even callable
+})
+
+test('a reader that cannot be asked what it supports is no', async () => {
+  // The method has been in the API from the start, so a constructor without it
+  // is not an implementation we can interrogate -- and a camera that may never
+  // read anything is the wrong way to be wrong.
+  const ctor = function () {} as any
+  assert.equal(await qrDecodeAvailable(ctor), false)
+})
+
+test('a reader that supports other formats but not QR is no', async () => {
+  // Chrome on macOS, the case that shipped a broken button.
+  const ctor = function () {} as any
+  ctor.getSupportedFormats = async () => ['ean_13', 'code_128']
+  assert.equal(await qrDecodeAvailable(ctor), false)
+})
+
+test('a reader that lists qr_code is yes', async () => {
+  const ctor = function () {} as any
+  ctor.getSupportedFormats = async () => ['qr_code', 'ean_13']
+  assert.equal(await qrDecodeAvailable(ctor), true)
+})
+
+test('a reader that throws when asked is no, not a crash', async () => {
+  const ctor = function () {} as any
+  ctor.getSupportedFormats = async () => { throw new Error('nope') }
+  assert.equal(await qrDecodeAvailable(ctor), false)
+})
+
+test('a reader that answers with something that is not a list is no', async () => {
+  const ctor = function () {} as any
+  ctor.getSupportedFormats = async () => 'qr_code'   // a string CONTAINS it
+  assert.equal(await qrDecodeAvailable(ctor), false)
 })
