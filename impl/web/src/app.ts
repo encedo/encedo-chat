@@ -6699,16 +6699,29 @@ function renderBody(into: HTMLElement, text: string) {
   }
 }
 
+/**
+ * Did somebody just send us something?
+ *
+ * ONE rule, because the two places that ask were three lines apart and gave
+ * different answers: the banner counted a file as an arrival and the unread
+ * pill did not, so a file sent to a background room notified and then left the
+ * contact list looking untouched (reported 2026-09-18). A file IS a message
+ * here — it is how a photo, a scan or a voice note travels — and the only
+ * thing that differs is what its bubble draws.
+ */
+const isArrival = (ev: Ev): boolean =>
+  (ev.t === 'msg' || ev.t === 'file') && ev.kind === 'peer'
+
 /** Record one event on a room's log; render it if that room is on screen,
  *  otherwise (background) just count it and light the dot. Replaying the log
  *  through applyEv reconstructs the transcript exactly. */
 const record = (room: Room, ev: Ev) => {
   room.log.push(ev); if (room.log.length > LOG_CAP) room.log.shift()
   if (isViewing(room)) applyEv(ev)
-  else if (ev.t === 'msg' && ev.kind === 'peer') { room.unseen++; renderContacts() }
+  else if (isArrival(ev)) { room.unseen++; renderContacts() }
   // Independent of which room is on screen: what decides a notification is
   // whether the WINDOW is, and an open room in a hidden window is still missed.
-  if ((ev.t === 'msg' || ev.t === 'file') && ev.kind === 'peer') notifyArrival(ev, { pub: room.contact.pub, name: room.contact.name })
+  if (isArrival(ev)) notifyArrival(ev, { pub: room.contact.pub, name: room.contact.name })
 }
 function applyEv(ev: Ev) {
   if (ev.t === 'msg') appendMsg(ev)
@@ -7521,9 +7534,13 @@ function recordGroup(gu: GroupUI, ev: Ev) {
   // case worth interrupting for — being named — already lights `called` on the
   // group row. If that changes, this is the line, and `mentionsPub` is the test.
   if (activeGid === gu.gid && $('app').classList.contains('chat-open')) applyEv(ev)
-  else if (ev.t === 'msg' && ev.kind === 'peer') {
+  else if (isArrival(ev)) {
     gu.unseen++
-    if (session && mentionsPub(ev.text, session.pub)) gu.called = true
+    // A file's caption is a body like any other and goes through the same
+    // `closeMentions` on the way out, so "@Ala popatrz" attached to a scan has
+    // to light the group the way the sentence alone would.
+    const said = ev.t === 'msg' ? ev.text : (ev.file as any).body ?? ''
+    if (session && said && mentionsPub(said, session.pub)) gu.called = true
     renderGroups()
   }
   // A send must be durable at once (a spent counter cannot be reused after a fast

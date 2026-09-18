@@ -1896,6 +1896,31 @@ async function main() {
     if (!pillGone) throw new Error('unread pill did not clear after opening the conversation')
     step('opening the conversation replayed the buffered message and cleared the dot')
 
+    // A FILE is an arrival too, and that was the bug: the notification banner
+    // counted one and the unread pill did not, so a file sent to a background
+    // room announced itself and then left the contact list looking untouched
+    // (reported 2026-09-18). The two rules sat three lines apart in `record`.
+    if (IPFS_RPC) {
+      await openContact(A, 'ghost')        // look away again
+      await sleep(500)
+      const fileTok = `tlo-${Date.now().toString(36)}`
+      await B.eval(`
+        const dt = new DataTransfer();
+        dt.items.add(new File(['x'.repeat(200)], ${JSON.stringify(fileTok + '.txt')}, { type: 'text/plain' }));
+        const i = document.getElementById('file-input');
+        i.files = dt.files; i.dispatchEvent(new Event('change'));
+        return 1;
+      `)
+      await B.eval(`document.getElementById('send').click(); return 1`)
+      await A.waitFor('unread pill on sim-b for a FILE', `
+        const c = [...document.querySelectorAll('#pane-contacts .contact')].find((x) => x.textContent.includes('sim-b'));
+        return !!(c && c.querySelector('.c-unread'));
+      `, 40_000)
+      step('a file sent to a background room lights the unread pill, like a sentence does')
+      await openContact(A, 'sim-b')
+      await sleep(500)
+    }
+
     scenario('returning to a mobile room does not tear it down')
     // Reported from a split-screen phone: tapping the back-arrow to the peer
     // list and then back into the room rebuilt the whole conversation — a
