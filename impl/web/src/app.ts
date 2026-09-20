@@ -1815,6 +1815,45 @@ function promptName(title: string, sub: string, current: string, label = 'Nazwa'
 }
 
 /**
+ * Escape leaves any window that has a way out.
+ *
+ * Every modal ends in a `.modal-actions` row whose ghost button is that way
+ * out, and each of those buttons carries its own TEARDOWN: `scan-cancel`
+ * releases the camera, `rec-cancel` drops the take, `identity-cancel` reloads
+ * the page because the derived key must not outlive the decision. So Escape
+ * presses that button rather than hiding the box - hiding it would leave the
+ * camera running behind a window that looks closed.
+ *
+ * Which button: the id, not the position. `fb-modal` has a SECOND ghost button
+ * (`fb-copy`, unhidden only after a failed send), so "the ghost one" would pick
+ * the wrong one exactly when the user most wants out.
+ *
+ * Two sets stay out of it:
+ *  - `ask`, `rename` and `identity` bind Escape themselves while they are open,
+ *    because each resolves a promise and the answer is part of the teardown.
+ *    Their handlers happen to be idempotent, so a double press would be
+ *    harmless, but one owner per window is the reason there is no bug to have.
+ *  - `xfer-modal` is not a dialog with a Cancel. Its ghost button ABORTS a
+ *    transfer that is already moving bytes, and a key hit by reflex must not be
+ *    able to do that. Leaving it is a click, deliberately.
+ */
+const ESC_SELF_OWNED = new Set(['ask-modal', 'rename-modal', 'identity-modal', 'xfer-modal'])
+document.addEventListener('keydown', (e: KeyboardEvent) => {
+  if (e.key !== 'Escape') return
+  // Document order is stacking order here, so the LAST open one is the one on
+  // top - the rare case being a modal opened from another.
+  const open = Array.from(document.querySelectorAll('.modal.open'))
+    .filter((m) => !ESC_SELF_OWNED.has(m.id)).pop()
+  if (!open) return
+  const out = open.querySelector(
+    '.modal-actions [id$="-cancel"]:not([hidden]),.modal-actions [id$="-close"]:not([hidden])',
+  ) as HTMLElement | null
+  if (!out) return
+  e.preventDefault()
+  out.click()
+})
+
+/**
  * Rename a contact. Local to this device by design: the name is how YOU refer
  * to a key, it is not part of anyone's identity, and telling the peer would
  * leak a label they never chose. The key, its KID and every open room survive —
