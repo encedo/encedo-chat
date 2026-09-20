@@ -52,7 +52,7 @@ import { newDiag } from '../../lib/diag.ts'
 import { NOTE_MAX } from '../../lib/knock.ts'
 import { contactState, seenLabel, noteSeen as foldSeen, noteAdded as foldAdded, PRESENCE_TTL_MS, type Seen } from '../../lib/seen.ts'
 import { bodyBytes, fitsOnWire, overBy, MAX_BODY, WARN_AT, kb } from '../../lib/msgsize.ts'
-import { MAX_OFFER_BODY } from '../../lib/xfer.ts'
+import { MAX_DIRECT, MAX_OFFER_BODY } from '../../lib/xfer.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { webrtcLinkTauri, tauriRtcAvailable, tauriRtcSelftest } from '../../net/webrtc-tauri.ts'
@@ -3028,7 +3028,7 @@ function startTransfer(f: File | null | undefined) {
   if (r !== 'ok') {
     toast(r === 'no-channel' ? tr('Kanał bezpośredni nie stoi — wyślij plik przez czat')
       : r === 'busy' ? tr('Jeden transfer naraz — poczekaj, aż ten się skończy')
-      : r === 'too-big' ? tr('Plik jest za duży — limit transferu to 512 MB')
+      : r === 'too-big' ? tr('Plik jest za duży — limit to {mb} MB', { mb: Math.floor(MAX_DIRECT / 1024 / 1024) })
       : r === 'note-too-big' ? tr('Notatka przy transferze może mieć najwyżej {n} — skróć ją albo wyślij plik przez czat', { n: kb(MAX_OFFER_BODY) })
       : tr('Pusty plik'))
     return
@@ -3178,7 +3178,16 @@ function offerFile(f: File | null | undefined, count = 1, direct = false) {
   if (!activeGid && !activeRoom()) { toast(tr('Najpierw otwórz rozmowę')); return }
   // Refused at PICK time rather than at Send: the limit is a property of the
   // file alone, and finding out after writing a caption is a worse way to learn.
-  if (f.size > MAX_FILE) { toast(tr('Plik jest za duży — limit to {mb} MB', { mb: Math.floor(MAX_FILE / 1024 / 1024) })); return }
+  //
+  // The two doors have DIFFERENT ceilings, so this gate has to ask which one
+  // was chosen. `MAX_FILE` is the store's - the file is chunked, encrypted and
+  // parked on a node. `MAX_DIRECT` is the direct channel's, four times larger,
+  // because nothing is stored. Until 0.6.10 this line charged every pick the
+  // store's 128 MB even when the direct row had been clicked, so a 306 MB file
+  // was refused by a limit that did not apply to it (reported 2026-09-20) - and
+  // refused before the transfer it WAS allowed to use could say otherwise.
+  const cap = direct ? MAX_DIRECT : MAX_FILE
+  if (f.size > cap) { toast(tr('Plik jest za duży — limit to {mb} MB', { mb: Math.floor(cap / 1024 / 1024) })); return }
   showAttach(f, direct)
   // The composer holds one file, so say which one was taken rather than
   // silently dropping the rest of a multi-file drop on the floor.
@@ -3222,7 +3231,10 @@ function openXferMenu(anchor: HTMLElement) {
     m.appendChild(b)
   }
   row(tr('Wyślij plik'), tr('przez czat — do {mb} MB, znika po 5 minutach', { mb: Math.floor(MAX_FILE / 1024 / 1024) }), '', () => pickFile('store'))
-  row(tr('Transfer bezpośredni'), tr('prosto do drugiej przeglądarki, nic nie trafia na serwer'), tr('🟢 Direct'), () => pickFile('direct'))
+  // Both rows name their own ceiling. They differ by a factor of four, and the
+  // menu is the one moment where the choice is being made - a limit learned
+  // afterwards, from a refusal, is a limit learned too late.
+  row(tr('Transfer bezpośredni'), tr('prosto do drugiej przeglądarki — do {mb} MB, nic nie trafia na serwer', { mb: Math.floor(MAX_DIRECT / 1024 / 1024) }), tr('🟢 Direct'), () => pickFile('direct'))
   // Anchored to the button and flipped above it, like the emoji popover: the
   // composer sits at the bottom edge, so below is never where this fits.
   const r = anchor.getBoundingClientRect()
