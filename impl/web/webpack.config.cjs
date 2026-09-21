@@ -172,7 +172,10 @@ module.exports = (_env, argv) => {
       // and Android builds, which load dist/index.html, are untouched by this.
       // Which page is served at `/` is a decision for the WEB deploy alone; see
       // infra/README.md for the nginx mapping.
-      new HtmlWebpackPlugin({ template: './landing.html', filename: 'landing.html', chunks: [], inject: false, minify: false }),
+      new HtmlWebpackPlugin({ template: './landing.html', filename: 'landing.html', chunks: [], inject: false, minify: false,
+        // The one substitution the landing takes: the version is known HERE, at
+        // build time, so the page does not have to ask a third party what it is.
+        templateParameters: { version: VERSION } }),
     ],
     // Every build was cold, and the work is not small: the .js/.mjs rule below
     // has no `exclude`, so ~920 node_modules files (libp2p, 3.3 MiB) go through
