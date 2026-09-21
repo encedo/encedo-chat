@@ -2244,6 +2244,19 @@ function hasStoredGroups(): boolean {
 const closeWelcome = () => { $('scrim').classList.remove('open'); $('welcome-modal').classList.remove('open') }
 $('welcome-close').addEventListener('click', closeWelcome)
 $('welcome-share').addEventListener('click', () => { closeWelcome(); void openShare() })
+// The other two doors the card names. Each hands off to the surface that already
+// owns that job rather than growing a second one here -- the invites tab mints
+// and lists, and the paste window reads. Onboarding points; it does not perform.
+$('welcome-invite')?.addEventListener('click', () => {
+  closeWelcome()
+  $('tab-invites').click()
+  $('btn-new-invite').click()
+})
+$('welcome-have')?.addEventListener('click', () => {
+  closeWelcome()
+  $('tab-invites').click()
+  $('btn-have-invite').click()
+})
 
 /**
  * -----------------------------------------------------------------------------

@@ -2954,9 +2954,51 @@ async function main() {
     // ELSE did. Per-identity state is keyed by the KID, and the KID is
     // SHA-1(pub), so a rename must leave every one of those keys where it was.
     // If that ever stops holding, a rename silently orphans someone's contacts.
-    scenario('an identity can be renamed, and takes nothing with it')
+    // ---- the first screen -----------------------------------------------
+    // The moment the product is most often lost: an identity exists, and the
+    // person is looking for a "find a user" box that does not exist because
+    // there is no directory. Every door the card names has to actually open.
+    scenario('the first screen names the three ways in, and each one opens')
     const made = await createProfile('stara-nazwa')
     if (!made.entered) throw new Error(`the profile to rename was not created: ${JSON.stringify(made)}`)
+    await B.waitFor('the first-run card', `
+      return document.getElementById('welcome-modal').classList.contains('open')`, 15_000)
+    const card = await B.eval<any>(`
+      const ways = [...document.querySelectorAll('#welcome-modal .ways .way')];
+      return {
+        n: ways.length,
+        ids: ways.map((w) => w.id),
+        // Every row has to SAY something. A title-only row is a mechanism name,
+        // which is exactly what a first run cannot use.
+        described: ways.every((w) => (w.querySelector('small')?.textContent ?? '').length > 30),
+      };
+    `)
+    if (card.n !== 3) throw new Error(`the card offers ${card.n} ways in, not 3: ${JSON.stringify(card.ids)}`)
+    if (!card.described) throw new Error('a way in is offered with no description of when to use it')
+    // Each door, one at a time, back to the card in between. What is asserted is
+    // the DESTINATION: onboarding points at the surface that owns the job, and a
+    // button that quietly stopped pointing anywhere would still look fine.
+    const door = async (id: string, opens: string) => {
+      await B.eval(`document.getElementById(${JSON.stringify(id)}).click(); return 1`)
+      await B.waitFor(`${id} opens ${opens}`, `
+        return document.getElementById(${JSON.stringify(opens)}).classList.contains('open')`, 10_000)
+      await B.eval(`
+        document.getElementById(${JSON.stringify(opens)}).classList.remove('open');
+        document.getElementById('scrim').classList.remove('open');
+        document.getElementById('welcome-modal').classList.add('open');
+        return 1;
+      `)
+    }
+    await door('welcome-share', 'share-modal')
+    await door('welcome-invite', 'invite-modal')
+    await door('welcome-have', 'paste-modal')
+    await B.eval(`document.getElementById('welcome-close').click(); return 1`)
+    const gone = await B.eval<boolean>(`
+      return !document.getElementById('welcome-modal').classList.contains('open')`)
+    if (!gone) throw new Error('the first-run card cannot be dismissed')
+    step('three ways in, each described, each opening the surface that owns it')
+
+    scenario('an identity can be renamed, and takes nothing with it')
     await B.waitFor('the header', `return !!document.getElementById('me-handle').textContent`, 10_000)
     const before = await B.eval<any>(`return {
       handle: document.getElementById('me-handle').textContent,

@@ -851,6 +851,26 @@
   .xfer-menu button:hover{background:var(--accent-soft)}
   .xfer-menu .hd{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13.5px;font-weight:600}
   .xfer-menu small{color:var(--muted);font-size:11.5px;line-height:1.4}
+
+  /* ---- the first-run card: three ways in, side by side ---------------------
+     Somebody who has just made an identity is looking for a "find a user" box
+     and will not find one, because there is no directory to search. So the card
+     names the three doors there ARE, and each row describes a SITUATION rather
+     than a mechanism -- "for somebody you know", not "asymmetric key exchange". */
+  .ways{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+  .way{display:block;width:100%;text-align:left;background:var(--bg);border:1px solid var(--border);
+       border-radius:10px;padding:11px 13px;cursor:pointer;color:var(--text)}
+  .way:hover{border-color:var(--accent);background:var(--accent-soft)}
+  .way .w-hd{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600}
+  .way small{display:block;color:var(--muted);font-size:11.5px;line-height:1.45;margin-top:3px}
+  /* The one that is offered first, not the only one that works. */
+  .way.lead{border-color:var(--accent)}
+  /* A quieter third row: it answers "somebody handed me a link", which is a
+     different question from the two above it. */
+  .way.quiet{background:none;border-style:dashed}
+  /* A tall card on a short screen (a phone on its side) must scroll INSIDE
+     itself rather than growing off both ends of the viewport. */
+  #welcome-modal{max-height:calc(var(--app-h,100dvh) - 28px);overflow-y:auto}
   .xfer-track{height:6px;border-radius:3px;background:var(--accent-soft);overflow:hidden;margin:10px 0 6px}
   .xfer-fill{height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width .2s ease}
   .xfer-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted)}
@@ -1531,10 +1551,31 @@
        otherwise an empty list with no clue what to do, and the thing to do is
        not guessable — a conversation needs BOTH sides to hold the other's key,
        so the first move is always an exchange. -->
+  <!-- The first thing somebody sees after making an identity, and the moment
+       the product is most often lost: they are looking for a "find a user" box
+       and there is no directory to search. So the card says why, and then names
+       the three doors that exist. Each row describes a SITUATION -- "for
+       somebody you know" -- because "which key-exchange model do you prefer" is
+       a quiz nobody passes on their first run. -->
   <div class="modal" id="welcome-modal">
-    <h2 data-i18n="Zacznij od wymiany kluczy">Zacznij od wymiany kluczy</h2>
-    <div class="msub" data-i18n="Rozmowa wymaga, żeby obie strony miały swoje klucze publiczne — bez tego nie ma nawet gdzie się spotkać. Wyślij komuś swój link, a on odeśle swój. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie zobaczy.">Rozmowa wymaga, żeby obie strony miały swoje klucze publiczne — bez tego nie ma nawet gdzie się spotkać. Wyślij komuś swój link, a on odeśle swój. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie zobaczy.</div>
-    <div class="modal-actions"><button class="btn-send" id="welcome-share" style="flex:1;border-radius:8px" data-i18n="Udostępnij mój profil">Udostępnij mój profil</button><button class="btn-ghost" id="welcome-close" data-i18n="Zamknij">Zamknij</button></div>
+    <h2 data-i18n="Jesteś w środku. Teraz potrzebujesz drugiej osoby.">Jesteś w środku. Teraz potrzebujesz drugiej osoby.</h2>
+    <div class="msub" data-i18n="Nie ma tu listy użytkowników, której można by poszukać — kontakt powstaje dopiero wtedy, gdy obie strony mają swoje klucze publiczne. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie widzi.">Nie ma tu listy użytkowników, której można by poszukać — kontakt powstaje dopiero wtedy, gdy obie strony mają swoje klucze publiczne. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie widzi.</div>
+    <div class="ways">
+      <button type="button" class="way lead" id="welcome-share">
+        <span class="w-hd"><span data-i18n="Wyślij swój profil">Wyślij swój profil</span></span>
+        <small data-i18n="Dla kogoś, kogo znasz. Wymieniacie się kluczami i każde z Was sprawdza odcisk drugiego. Nikt się do Ciebie nie odezwie, dopóki sam nie weźmiesz jego klucza.">Dla kogoś, kogo znasz. Wymieniacie się kluczami i każde z Was sprawdza odcisk drugiego. Nikt się do Ciebie nie odezwie, dopóki sam nie weźmiesz jego klucza.</small>
+      </button>
+      <button type="button" class="way" id="welcome-invite">
+        <span class="w-hd"><span data-i18n="Opublikuj zaproszenie">Opublikuj zaproszenie</span></span>
+        <small data-i18n="Jeden link, który możesz gdziekolwiek powiesić. Kto go ma, może zapukać — zobaczysz odcisk i notatkę, i zdecydujesz. Pukanie odbierzesz, gdy aplikacja jest otwarta; druga strona ponawia.">Jeden link, który możesz gdziekolwiek powiesić. Kto go ma, może zapukać — zobaczysz odcisk i notatkę, i zdecydujesz. Pukanie odbierzesz, gdy aplikacja jest otwarta; druga strona ponawia.</small>
+      </button>
+      <button type="button" class="way quiet" id="welcome-have">
+        <span class="w-hd"><span data-i18n="Mam czyjeś zaproszenie">Mam czyjeś zaproszenie</span></span>
+        <small data-i18n="Wklej link albo sam kod, który ktoś Ci podał.">Wklej link albo sam kod, który ktoś Ci podał.</small>
+      </button>
+    </div>
+    <div class="modal-actions"><button class="btn-ghost" id="welcome-close" style="flex:1" data-i18n="Później">Później</button></div>
+  </div>
   </div>
 
   <!-- Invite: a link carrying a public key, and the fingerprint that says the
