@@ -1114,6 +1114,10 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       })
       const w: InboxWatch = {
         decoy: () => inner.decoy(),
+        // Forwarded, not dropped: nothing here type-checks at build time (Node
+        // strips types, Babel transpiles), so a member left out of this wrapper
+        // is not an error anywhere - it is `undefined` at the call site.
+        pump: () => inner.pump(),
         stop() { try { inner.stop() } catch {} ; inboxes.delete(w) },
       }
       inboxes.add(w)

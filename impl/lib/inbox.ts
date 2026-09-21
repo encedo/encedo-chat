@@ -87,6 +87,19 @@ export interface InboxOpts extends RotationConfig {
 export interface InboxWatch {
   /** Publish one decoy now, whatever the schedule says. Tests and a first run. */
   decoy(): Promise<void>
+  /**
+   * Run one pass NOW and settle it.
+   *
+   * The interval fires the same pass and forgets the promise, which is right in
+   * production and impossible to test against: a test that drives the clock has
+   * to know when the pass that clock triggered has FINISHED, and `step` awaits
+   * a key derivation on the way. Waiting a few milliseconds of real time
+   * instead is what made `inbox.test.ts` fail twice in CI on a loaded runner
+   * while passing on every desk -- the pass simply had not run yet. Give the
+   * watch a `tickMs` longer than the test and drive it through here, and no
+   * real time is involved at all.
+   */
+  pump(): Promise<void>
   stop(): void
 }
 
@@ -250,6 +263,7 @@ export function watchInbox(
 
   return {
     async decoy() { await chain; await publishDecoy() },
+    async pump() { tick(); await chain },
     stop() {
       stopped = true
       clearInterval(timer)

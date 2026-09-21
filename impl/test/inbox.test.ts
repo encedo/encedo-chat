@@ -302,7 +302,23 @@ test('the decoy interval leaves room for the worst gap, not the average', () => 
     `worst decoy gap ${2 * DECOY_EVERY_MS} ms is not under the relay's ${idleTtlMs} ms eviction`)
 })
 
-/** Run a watch on a driven clock and report when each decoy went out. */
+/**
+ * Run a watch on a driven clock and report when each decoy went out.
+ *
+ * NO REAL TIME IS INVOLVED, and that is the point. This used to advance the
+ * fake clock and then `sleep(4)` in the hope that the 1 ms interval had fired
+ * and the pass -- which awaits a key derivation -- had finished. On a loaded
+ * runner it had not, so decoys went uncounted and the assertion blamed the
+ * decoy logic: CI failed on 2026-09-20 with "9 decoys in 12 slots" and again on
+ * 2026-09-21 with "two decoys fell 2050 ms apart", both green on a rerun and
+ * both green on every desk. The shape to recognise: a test that drives a clock
+ * and then waits a fixed number of MILLISECONDS for the effect.
+ *
+ * So the interval is set beyond the test's reach and every pass is driven by
+ * `pump()`, which settles the pass it starts. The clock moves, the pass runs,
+ * the assertion reads a finished state -- the same three steps every time,
+ * whatever else the machine is doing.
+ */
 async function decoyTimes(everyMs: number, stepMs: number, slots: number) {
   const j = await generateX25519()
   const c = clock()
@@ -312,8 +328,13 @@ async function decoyTimes(everyMs: number, stepMs: number, slots: number) {
   h.node.services.pubsub.publish = async (topic: string, data: Uint8Array) => {
     at.push(c.now()); return inner(topic, data)
   }
-  const w = watchInbox(h.node, secret(31), j, P, { now: c.now, tickMs: 1, decoyEveryMs: everyMs, onKnock: () => {} })
-  for (let i = 0; i < (slots * everyMs) / stepMs; i++) { c.add(stepMs); await sleep(4) }
+  const w = watchInbox(h.node, secret(31), j, P,
+    { now: c.now, tickMs: 60 * 60_000, decoyEveryMs: everyMs, onKnock: () => {} })
+  // The first pass derives the offset and the seed before it can plan a slot;
+  // `pump` waits for that chain too, so the clock only starts moving once the
+  // watch knows what it is watching.
+  await w.pump()
+  for (let i = 0; i < (slots * everyMs) / stepMs; i++) { c.add(stepMs); await w.pump() }
   w.stop()
   return at
 }
