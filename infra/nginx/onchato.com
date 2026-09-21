@@ -86,6 +86,30 @@ server {
         try_files /landing.html =404;
     }
 
+    # ── /how — strona "jak to działa", szczebel między landingiem a specyfikacją ──
+    # Plik nazywa się how.html i landing linkuje do /how.html, więc ten blok jest
+    # wygodą, nie wymogiem — obie ścieżki mają działać i obie tu są.
+    #
+    # Nagłówki POWTÓRZONE z tego samego powodu co w bloku "= /" wyżej:
+    # add_header NIE dziedziczy się do bloku, który ma własne. Pominięcie ich
+    # tutaj zabrałoby tej jednej stronie COOP/COEP, po cichu.
+    #
+    # Cache-Control jak przy landingu: nazwa pliku nie ma hasha, więc przeglądarka
+    # musi pytać, czy się zmienił — inaczej czytelnik zostaje z wersją sprzed
+    # wydania i nie ma jak się o tym dowiedzieć.
+    location = /how {
+        add_header Cross-Origin-Opener-Policy   "same-origin";
+        add_header Cross-Origin-Embedder-Policy "require-corp";
+        add_header Cache-Control "no-cache";
+        try_files /how.html =404;
+    }
+    location = /how.html {
+        add_header Cross-Origin-Opener-Policy   "same-origin";
+        add_header Cross-Origin-Embedder-Policy "require-corp";
+        add_header Cache-Control "no-cache";
+        try_files /how.html =404;
+    }
+
     # ── NOWE: /chat/ ze slashem musi wrócić na /chat ───────────────────────
     # Bez tego bazą dokumentu staje się "/chat/", więc względne ścieżki bundla
     # celują w /chat/app.<hash>.bundle.js → try_files oddaje index.html jako
