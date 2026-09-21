@@ -1,10 +1,20 @@
 # Public invites — the return channel (proposal)
 
-**Status:** PROPOSAL, 2026-09-15. Nothing here is built and nothing is on the
-wire yet. It is protocol-meaningful, so it needs the user's GO and the external
-cryptographer's read before a line of it is written. `docs/PROTOCOL.md` stays
-normative for what ships; this file is the reasoning and the rejected
-alternatives, in the shape of `GROUPS-DESIGN.md`.
+**Status: BUILT AND SHIPPED since v0.6.0** (`impl/lib/inbox.ts`,
+`impl/lib/knock.ts`, the Zaproszenia tab). It was written as a proposal on
+2026-09-15 and implemented the same day, and this header went on saying
+"nothing is built" for six days — corrected 2026-09-21.
+
+**Normative text is `docs/PROTOCOL.md` §5.7-5.9** (the inbox topic, the 348-byte
+knock frame, the cover-traffic schedule), with the exposure in §11.3 S14 and
+`THREAT-MODELS.md` F4b. Those sections were written from the shipped code, not
+from this file. This one keeps what a specification does not: the reasoning,
+the rejected alternatives and the numbers behind the decisions, in the shape of
+`GROUPS-DESIGN.md`.
+
+⚠️ **This file has not been re-read line by line against the shipped code.** It
+is a design record from the day of writing; where it and `PROTOCOL.md` disagree,
+the specification is right and this file is the older thought.
 
 **The two roles, and they are the whole design brief.** The **Journalist** is
 the inviter: they publish one link on a web page, nothing else, and they change

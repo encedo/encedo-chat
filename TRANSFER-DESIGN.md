@@ -1,8 +1,17 @@
 # Transfer — design record
 
-**Status:** proposal, nothing built. Written 2026-09-13 after measuring what the
-relay can actually carry. `docs/PROTOCOL.md` stays normative for the wire; this
-file keeps the reasoning and the numbers behind it.
+**Status: BUILT AND SHIPPED since v0.5.74** (`impl/lib/xfer.ts`,
+`impl/lib/xfer-session.ts`). Written as a proposal on 2026-09-13 and implemented
+the same day; this header went on saying "nothing built" until 2026-09-21.
+
+**Normative text is `docs/PROTOCOL.md` §13.1** — frames, subtypes, the
+reliability model it inherits from the channel, and the consent and timeout
+rules. This file keeps the reasoning and the measurements behind them.
+
+⚠️ **Numbers here are from the day of writing and some have moved since.** The
+shipped ceiling is `MAX_DIRECT` = 512 MiB, measured at 500 MB / ~41 MB/s over a
+LAN on 2026-09-21; a caption travels in the offer frame (`MAX_OFFER_BODY` =
+4 KiB). Where this file and the code disagree, the code and §13.1 are right.
 
 **What it is:** sending a file **straight to the other browser over the WebRTC
 DataChannel**, as part of the conversation, with no store in the middle — no
