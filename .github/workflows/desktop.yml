@@ -275,6 +275,35 @@ jobs:
           workspaces: impl/src-tauri
           key: ${{ matrix.label }}
 
+      # Windows bundling fetches its own toolchain from GitHub release assets on
+      # EVERY run - NSIS for the installer, WiX for the .msi on x64. That fetch
+      # is a single point of failure nobody here controls, and it is not
+      # theoretical: 0.6.14 lost two consecutive runs to `http status: 504` on
+      # nsis-3.11.zip while the x64 job beside it, doing the same download,
+      # succeeded. `tauri-action` does not retry, so each loss cost a fresh
+      # approval of the signing gate. Cached, the download happens once per
+      # toolchain version instead of once per run.
+      #
+      # The version is READ OUT of the installed CLI rather than written here: a
+      # version in two places drifts, and the resolved one is already on disk
+      # after `npm ci`. It belongs in the key because it decides WHICH tools get
+      # fetched, so a CLI bump takes a fresh set instead of reusing a stale one.
+      # There is deliberately no `restore-keys`: a near-miss would restore
+      # exactly the wrong toolchain, which is worse than downloading.
+      - name: Which bundler toolchain
+        if: runner.os == 'Windows'
+        id: bundler
+        shell: bash
+        run: echo "cli=$(node -p "require('./impl/node_modules/@tauri-apps/cli/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the Windows bundling toolchain
+        if: runner.os == 'Windows'
+        id: tauri-tools
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\tauri
+          key: tauri-tools-${{ matrix.label }}-${{ steps.bundler.outputs.cli }}
+
       # Signing, and it is off until the Azure side exists.
       #
       # Turned on by repository VARIABLES, not secrets, because there is no key
@@ -371,6 +400,19 @@ jobs:
           # way). The .sig files this build produces still upload with the
           # bundles; only the JSON assembly moves.
           includeUpdaterJson: false
+
+      # A cache path that is silently WRONG looks exactly like one that works:
+      # green every time, downloading every time. So say what is actually on
+      # disk. If this prints the warning, the bundler keeps its tools somewhere
+      # else and the cache above is decoration - which is the only way to find
+      # that out, since nothing fails when it happens.
+      - name: What the bundler toolchain cache holds
+        if: always() && runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "cache hit: ${{ steps.tauri-tools.outputs.cache-hit || 'no' }} (key: tauri-tools-${{ matrix.label }}-${{ steps.bundler.outputs.cli }})"
+          ls -la ~/AppData/Local/tauri 2>/dev/null \
+            || echo "::warning::no ~/AppData/Local/tauri after the build - the cached path is wrong and the toolchain is still downloaded every run"
 
       # Runs even when the bundle failed — that is the whole point. `sign` writes
       # here through the wrapper, and this is the only place its words survive.
