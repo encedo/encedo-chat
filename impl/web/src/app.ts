@@ -2329,7 +2329,15 @@ function inviteFromPaste(text: string): Invite | null {
   const whole = t.startsWith('#') || t.startsWith('i=') ? decodeInvite(t) : null
   if (whole) return whole
   const m = t.match(/#(i=[A-Za-z0-9\-_]+)/)
-  return m ? decodeInvite(m[1]) : null
+  if (m) return decodeInvite(m[1])
+  // The bare code: what someone reads out loud, or copies out of a link by
+  // hand, with nothing in front of it. Its SHAPE buys it nothing - the check is
+  // the same `decodeInvite` every other form goes through, which demands
+  // base64url that parses as JSON carrying a 32-byte key and a name with no
+  // invisible characters in it. A public key pasted into the add window cannot
+  // be mistaken for one: 32 bytes of key do not parse as JSON, and this branch
+  // is reached last in any case.
+  return /^[A-Za-z0-9\-_]+$/.test(t) ? decodeInvite('i=' + t) : null
 }
 
 /**
@@ -2939,7 +2947,7 @@ $('pw-save').addEventListener('click', async () => {
 $('btn-settings').addEventListener('click', openDrawer)
 $('chip-profile').addEventListener('click', openDrawer)
 $('btn-close-drawer').addEventListener('click', closeDrawer)
-$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); closeWelcome(); pendingInvite = null; closeImport(); closeScan(); closeIgnored() })
+$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); closeWelcome(); pendingInvite = null; closeImport(); closeScan(); closeIgnored(); closePaste() })
 $('btn-logout').addEventListener('click', () => location.reload())
 // The same act, from the header rather than from inside Settings — but asked
 // first, because this one sits beside a button people press often. Logging out
@@ -4122,6 +4130,42 @@ $('btn-new-invite')?.addEventListener('click', async () => {
   saveInvites()
   await startInboxWatches()
   renderInvites()
+})
+
+/**
+ * "Mam zaproszenie" - the other half of the invites tab.
+ *
+ * Redeeming an invite somebody handed you lived inside "Dodaj peera", under a
+ * label about adding a peer by key. That is the wrong place to look for it, and
+ * in the packaged app it was the ONLY place, because there is no address bar
+ * there to open a link with. You mint an invite in this tab; this is where you
+ * look to answer one.
+ *
+ * A door, not a path. Whatever is pasted goes through the same
+ * `inviteFromPaste` and lands in the same import window, with the same
+ * fingerprint to compare against what the person told you by another channel.
+ * There is deliberately no shortcut past that comparison - it is the only thing
+ * standing between a link and a man in the middle.
+ */
+const closePaste = () => { $('scrim').classList.remove('open'); $('paste-modal').classList.remove('open') }
+$('btn-have-invite')?.addEventListener('click', () => {
+  ;($('paste-input') as HTMLTextAreaElement).value = ''
+  clr('paste-msg')
+  $('scrim').classList.add('open'); $('paste-modal').classList.add('open')
+  // Same rule as the add window: a phone pops its keyboard over the modal.
+  if (matchMedia('(pointer:fine)').matches) $('paste-input').focus()
+})
+$('paste-cancel')?.addEventListener('click', closePaste)
+$('paste-go')?.addEventListener('click', async () => {
+  const text = val('paste-input')
+  if (!text) { setMsg('paste-msg', tr('Wklej link albo kod zaproszenia.'), 'err'); return }
+  const inv = inviteFromPaste(text)
+  // Refused HERE, with the text still in the field, so a truncated paste can be
+  // fixed rather than retyped. The window it would open has no way to say this:
+  // by then there is nothing to show a fingerprint for.
+  if (!inv) { setMsg('paste-msg', tr('To nie wygląda na zaproszenie — sprawdź, czy skopiowałeś całość.'), 'err'); return }
+  closePaste()
+  await showInvite(inv)
 })
 
 function inviteUrlFor(inv: PubInvite): string {

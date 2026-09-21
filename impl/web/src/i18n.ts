@@ -218,6 +218,12 @@ const CATALOG: Record<string, Record<string, Entry>> = {
       'We knocked and are waiting to be let in. There is no confirmation of delivery — we keep retrying while the app is open.',
     'Zaproszenia, które opublikowałeś': 'Invites you have published',
     '+ Nowe zaproszenie': '+ New invite',
+    'Mam zaproszenie': 'I have an invite',
+    'Wklej to, co dostałeś — cały adres albo sam kod.': 'Paste what you were given — the whole address, or just the code.',
+    'Link albo kod zaproszenia': 'Invite link or code',
+    'https://onchato.com/chat#i=… albo sam kod': 'https://onchato.com/chat#i=… or just the code',
+    'Wklej link albo kod zaproszenia.': 'Paste an invite link or code.',
+    'To nie wygląda na zaproszenie — sprawdź, czy skopiowałeś całość.': 'That does not look like an invite — check you copied all of it.',
     'Zaproszenie z {date}': 'Invite from {date}',
     'Opublikowane — każde można wycofać osobno': 'Published — each can be retired on its own',
     'Nie masz opublikowanych zaproszeń. Takie zaproszenie możesz powiesić na stronie: kto je ma, może do Ciebie zapukać.':

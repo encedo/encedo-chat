@@ -2522,6 +2522,58 @@ async function main() {
     await B.eval(`document.getElementById('import-cancel').click(); return 1`)
     step('a pasted link lands in the same import window, with a choice of where to keep it')
 
+    // The same journey from the tab where invites are MINTED. Someone handed an
+    // invite looks where invites live, not under "add a peer by key" -- and in
+    // the packaged app, which has no address bar, this is the only door that
+    // does not mean retyping a key.
+    await B.eval(`document.getElementById('tab-invites').click(); return 1`)
+    await B.waitFor('the invites tab', `return !document.getElementById('head-invites').hidden`, 10_000)
+    const redeem = async (what: string, text: string) => {
+      await B.eval(`
+        document.getElementById('btn-have-invite').click();
+        document.getElementById('paste-input').value = ${JSON.stringify(text)};
+        document.getElementById('paste-go').click();
+        return 1;
+      `)
+      await B.waitFor(what, `return document.getElementById('import-modal').classList.contains('open')`, 10_000)
+      const got = await B.eval<any>(`return {
+        fp: document.getElementById('import-fp').textContent,
+        pasteOpen: document.getElementById('paste-modal').classList.contains('open'),
+      }`)
+      // The point of the whole detour: this door reaches the SAME check. If a
+      // fingerprint ever differs between the doors, one of them is the soft way in.
+      if (got.fp !== share.fp) throw new Error(`${what}: fingerprint ${got.fp} != ${share.fp}`)
+      if (got.pasteOpen) throw new Error(`${what}: the paste window stayed open behind the import window`)
+      await B.eval(`document.getElementById('import-cancel').click(); return 1`)
+    }
+    await redeem('a whole link redeemed from the invites tab', share.link)
+    // Nothing is trusted for its shape. This is the identical decoder, handed
+    // the payload with the `#i=` worn off -- what someone reads out loud.
+    await redeem('a BARE code redeemed from the invites tab', share.link.slice(share.link.indexOf('#i=') + 3))
+    // ...and a refusal happens where the text is, with the window still open to
+    // fix. The import window cannot say this: it has no fingerprint to show.
+    const junk = await B.eval<any>(`
+      document.getElementById('btn-have-invite').click();
+      document.getElementById('paste-input').value = 'i=to-nie-jest-zaproszeniem';
+      document.getElementById('paste-go').click();
+      return {
+        stillOpen: document.getElementById('paste-modal').classList.contains('open'),
+        importOpen: document.getElementById('import-modal').classList.contains('open'),
+        msg: document.getElementById('paste-msg').textContent,
+        kept: document.getElementById('paste-input').value,
+      };
+    `)
+    if (junk.importOpen) throw new Error('rubbish reached the import window')
+    if (!junk.stillOpen) throw new Error('the paste window closed on rubbish, taking the text with it')
+    if (!junk.msg) throw new Error('rubbish was refused silently')
+    if (!junk.kept) throw new Error('a refusal cleared the field, so a truncated paste has to be retyped')
+    await B.eval(`
+      document.getElementById('paste-cancel').click();
+      document.getElementById('tab-contacts').click();
+      return 1;
+    `)
+    step('an invite is redeemed where invites live -- whole link or bare code, same fingerprint check')
+
     // Now the cold case: a genuinely fresh document, which is what happens when
     // the link is opened from mail. about:blank first — navigating straight to a
     // URL differing only by fragment would not reload at all.

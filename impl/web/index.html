@@ -1261,6 +1261,11 @@
            per invite (DISCOVERY-PROPOSAL.md §4.1). -->
       <div id="head-invites" hidden>
         <div class="add-row two"><button class="add-btn" id="btn-new-invite" data-i18n="+ Nowe zaproszenie">+ Nowe zaproszenie</button>
+          <!-- The other half of the same tab. You MINT an invite here, so this
+               is where you look to redeem one somebody handed you — and on the
+               desktop it was reachable only from inside "Dodaj peera", because
+               the packaged app has no address bar to open a link with. -->
+          <button class="add-btn" id="btn-have-invite" data-i18n="Mam zaproszenie">Mam zaproszenie</button>
           <!-- The ignored list is durable now, so it is a setting rather than
                this session's noise — and a setting nobody can find is the same
                as one that does not exist. It lives beside the invites because
@@ -1541,6 +1546,21 @@
     <div class="hint" data-i18n="Po tym czasie przestajesz słuchać na tym zaproszeniu. Link dalej istnieje, ale pukanie nie dojdzie już do nikogo — i nikt po drugiej stronie nie dowie się, kiedy to nastąpiło.">Po tym czasie przestajesz słuchać na tym zaproszeniu. Link dalej istnieje, ale pukanie nie dojdzie już do nikogo — i nikt po drugiej stronie nie dowie się, kiedy to nastąpiło.</div>
     <div class="msg" id="invite-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="invite-save" style="flex:1;border-radius:8px" data-i18n="Zapisz">Zapisz</button><button class="btn-ghost" id="invite-cancel" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
+  <!-- One field, because from the outside there is one thing to give it: what
+       that person sent you. A whole address, the fragment on its own, or the
+       bare code read off a screen — `inviteFromPaste` sorts that out and
+       `decodeInvite` is what says yes, exactly as it does for a clicked link.
+       This window adds a DOOR, never a path: everything still lands in the
+       import window below, with the fingerprint to compare. -->
+  <div class="modal" id="paste-modal">
+    <h2 data-i18n="Mam zaproszenie">Mam zaproszenie</h2>
+    <div class="msub" data-i18n="Wklej to, co dostałeś — cały adres albo sam kod.">Wklej to, co dostałeś — cały adres albo sam kod.</div>
+    <label data-i18n="Link albo kod zaproszenia">Link albo kod zaproszenia</label>
+    <textarea id="paste-input" placeholder="https://onchato.com/chat#i=… albo sam kod" data-i18n-placeholder="https://onchato.com/chat#i=… albo sam kod"></textarea>
+    <div class="msg" id="paste-msg"></div>
+    <div class="modal-actions"><button class="btn-send" id="paste-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="paste-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
   <div class="modal" id="import-modal">
