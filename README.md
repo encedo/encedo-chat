@@ -103,7 +103,6 @@ impl/         the app: engine (lib/, eh2/, net/), web UI (web/), CLI (cli/),
               Tauri desktop + Android shell (src-tauri/), tests (test/)
 relay/        the rendezvous/transport node (bs1/bs2 run this)
 infra/        node list, tag-driven deploy units, nginx config, IPFS TTL sweeper
-skin/         the original UI mockups (the shipped UI is impl/web/, long diverged)
 hem-sdk-js/   Encedo HEM SDK (git submodule)
 .github/      CI + release workflows (desktop, Android, tests)
 ```

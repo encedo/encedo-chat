@@ -39,7 +39,6 @@ left alone. When a log line changes, the docs that quote it change with it —
 ## Repo layout (this repo — `encedo/encedo-chat`)
 
 - `docs/` — the three specs (PROTOCOL, ARCHITECTURE, THREAT-MODELS), kept 1:1 with the code.
-- `skin/` — UI mockups (`ui-mockup.html`, `ui-mockup-hacker.html`); the shipped UI is `impl/web/` and has long diverged.
 - `impl/` — the app: engine (`lib/`, `eh2/`, `net/`), web UI (`web/`), CLI (`cli/`), Tauri desktop + Android shell (`src-tauri/`), tests (`test/`).
 - `infra/` — `nodes.json` (the compiled-in node list), `deploy-on-tag.sh` + systemd units (tag-driven web deploy), `nginx/onchato.com` (the versioned nginx config of the web host — scp to sites-available), `nginx/relay-node.conf` + `nginx/relay-limits.conf` (the template every relay-only node renders), IPFS TTL sweeper, `feedback/` (the in-app 💬 Feedback sink — zero-dep Node, appends JSONL, its own systemd unit), `stun/` (our own STUN, below).
 - `MVP.md`, `MOBILE-PLAN.md`, `EMBED-PLAN.md`, `GROUPS-DESIGN.md`, `performance.md`, `hem_usage.md` — plans and measured records at root.
@@ -1290,7 +1289,7 @@ automatically (`buildDependencies`).
 content hash must change; if it did not, the build did not land where nginx
 serves from. Bundle names are hashed but `index.html` is not, so keep its
 cache short (users otherwise keep requesting the previous hash). The build now
-emits two entries plus `landing.html` (`app` and `webrtc-test`).
+emits one entry (`app`) plus `landing.html`.
 
 **Deploy lessons paid for once (2026-07-29):** a stale relay silently refused
 every new topic and looked exactly like a broken client — always check the
@@ -1315,7 +1314,8 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
 - **CLI as a full-product client** (a terminal alternative to the web GUI over
   the same protocol) — noted, **parallel, last step**; do not focus here now.
 - **Web GUI** — `web/index.html` began as the dashboard skin from
-  `skin/ui-mockup.html` and is now the full product: sign-in card (software
+  a dashboard mockup (`skin/`, removed once it had nothing left to say — `git
+  log -- skin/` has it) and is now the full product: sign-in card (software
   profiles + HEM), contacts with presence + QR/invite import, 1:1 and **groups
   (fully wired)**, files/images/voice notes, pins, migration, i18n pl/en,
   settings, and a **Network tab that drives the real node list**. The remaining
