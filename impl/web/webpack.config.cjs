@@ -32,7 +32,7 @@ module.exports = (_env, argv) => {
   if (prod && !allowKeys) console.log('[build] ?keys=1 disabled — no key material can be printed by this bundle')
   return {
     context: path.resolve(__dirname),
-    entry: { app: './src/app.ts', 'webrtc-test': './src/webrtc-test.ts' },
+    entry: { app: './src/app.ts' },
     // content-hash in prod so every deploy busts the browser cache (index.html,
     // served fresh, points at the new name); stable name in dev for clean HMR.
     output: { filename: prod ? '[name].[contenthash].bundle.js' : '[name].bundle.js', path: path.resolve(__dirname, 'dist'), clean: true },
@@ -160,7 +160,11 @@ module.exports = (_env, argv) => {
           })
         },
       },
-      new HtmlWebpackPlugin({ template: './webrtc-test.html', filename: 'webrtc-test.html', chunks: ['webrtc-test'] }),
+      // The companion page, beside the landing rather than in `docs/`: pages
+      // that get SERVED live where the build looks for them, and `docs/` holds
+      // the three specifications that go to the cryptographer. It was in the
+      // wrong tree, which is why it had no URL for six days.
+      new HtmlWebpackPlugin({ template: './how.html', filename: 'how.html', chunks: [], inject: false, minify: false }),
       // The public landing page, carried through verbatim: no chunks, no
       // injection, no minifier. It has no bundle — the whole point is that a
       // first-time visitor downloads a few KB of HTML rather than 1.2 MiB of

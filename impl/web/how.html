@@ -4,9 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>How onchato works</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,600&family=Public+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-linecap%3D%22round%22%20stroke-width%3D%2210%22%20style%3D%22color%3A%2335c99e%22%20viewBox%3D%220%200%20100%20100%22%3E%3Cstyle%3E%40media%20(prefers-color-scheme%3Alight)%7B%3Aroot%7Bcolor%3A%230f6b57%7D%7D%3C%2Fstyle%3E%3Cpath%20stroke-width%3D%228%22%20d%3D%22M38.8%2019.6V42m0%2020.8v22.4m22.4-65.6v19.2C50%2043.6%2050%2061.2%2061.2%2066v19.2%22%2F%3E%3C%2Fsvg%3E">
 <style>
   :root {
     --paper: #f7f8f7;
@@ -19,9 +17,15 @@
     --stop: #9a3b2f;
     --stop-soft: #f6e7e4;
 
-    --serif: "Newsreader", Georgia, "Times New Roman", serif;
-    --sans: "Public Sans", "Helvetica Neue", Arial, sans-serif;
-    --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  /* System faces only. A page arguing that nothing should learn who reads
+       what cannot fetch its own typography from a third party: a webfont link
+       tells that host the reader's IP, their agent and the moment they opened
+       this, before a single word is rendered. The three roles survive - the
+       serif for prose, the sans for furniture, the mono for keys and code -
+       they are just served by faces the reader already has. */
+    --serif: Charter, "Bitstream Charter", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
