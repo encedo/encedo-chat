@@ -27,7 +27,7 @@ import { watchPresenceRotating, rendezvousDay, type PresenceWatch } from './pres
 import { watchInbox as startInboxWatch, sendKnock, type InboxWatch, type InboxKnock } from './inbox.ts'
 import { GroupManager, type AdminGk, type GkBackend } from './group.ts'
 import {
-  SELF_PREFIX, buildPeerDescr, parsePeerDescr, parseSelfDescr, peerSearchPrefix, peerLabel, hemKid, descrText,
+  SELF_PREFIX, buildSelfDescr, selfLabel, buildPeerDescr, parsePeerDescr, parseSelfDescr, peerSearchPrefix, peerLabel, hemKid, descrText,
 } from './descr.ts'
 import { MARKER_SEARCH } from './gmarker.ts'
 import { joinGroup, type GroupRoom, type GroupRoomOpts } from './grouproom.ts'
@@ -53,6 +53,30 @@ export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: stri
       // Local / one-off contact (no kid): raw peer pubkey.
       return peerKid ? hem.ecdhKid(t, kid, peerKid) : hem.ecdh(t, kid, peerPubB64)
     },
+  }
+}
+
+/**
+ * Rewrite the handle on a HEM identity.
+ *
+ * One `updateKey` on the IK: the label its owner reads in the device, and the
+ * §4.2 self-DESCR the sign-in picker parses. Nothing else moves, and that is
+ * the whole reason this is cheap - `KID = SHA-1(pub)` is a function of the KEY,
+ * so the contacts scoped to this identity, its group markers and every local
+ * record keyed by it stay exactly where they were. It is the dividend of having
+ * moved per-identity state off the handle and onto the KID.
+ *
+ * What it does NOT do is tell anybody. A contact holds the name THEY gave you,
+ * locally, by the same rule that makes `renameContact` a local act - so this
+ * changes the header, the name inside invites and knocks sent from now on, and
+ * the device label. People who already added you go on calling you what they
+ * called you.
+ */
+export function hemRenameIdentity(hem: any, kid: string) {
+  return async (handle: string) => {
+    const descr = buildSelfDescr(handle) // byte-safe: the handle is sliced to SELF_NAME_MAX
+    const tok = await hem.authorizePassword(null, 'keymgmt:upd')
+    await hem.updateKey(tok, kid, selfLabel(handle), b64(new TextEncoder().encode(descr)))
   }
 }
 

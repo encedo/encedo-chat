@@ -15,7 +15,7 @@
  */
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
-import { hemIdentityFrom, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
+import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import { exportProfile, openBundle, applyBundle, conflictsWith, localKV, FILE_EXT } from '../../lib/migrate.ts'
 import { decodeInvite, inviteLink, type Invite } from '../../lib/invite.ts'
@@ -563,6 +563,19 @@ $('toggle').addEventListener('click', () => {
 })
 
 /**
+ * How THIS identity rewrites its own handle, set by whichever door signed in.
+ *
+ * The two kinds differ in what it costs, not in what it means. A HEM identity
+ * is one `updateKey` on the IK. A software profile keeps its handle INSIDE the
+ * sealed blob, so the rename has to unseal and re-seal it - which means the
+ * password, and that is right rather than a nuisance: rewriting your own
+ * identity record should cost what changing its password costs.
+ *
+ * Null until somebody is signed in; the pencil is hidden until then.
+ */
+let renameIdentity: ((next: string) => Promise<boolean>) | null = null
+
+/**
  * Sign in as one identity on an authorised HEM. Everything per-identity hangs
  * off its KID from here on: the contact book is scoped to it, and so is every
  * local key (`identityKey`).
@@ -573,6 +586,8 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   const pubkey = await pubKeyReader(hem)(id.kid)
   rememberMethod('hem')
   const hemId = hemIdentityFrom(hem, id.kid, id.handle, pubkey)
+  const renameOnHem = hemRenameIdentity(hem, id.kid)
+  renameIdentity = async (next: string) => { await renameOnHem(next); return true }
   const idKey = await identityKey(pubkey, id.kid)
   loadSeen(idKey) // per identity, like every other local record
   const local = await makeLocalBook(idKey, localStorage, hemId)
@@ -1022,6 +1037,24 @@ async function softLogin() {
     }
     closeSoftModal()
     activeSoftProfile = name
+    // The handle lives INSIDE the sealed blob, and the blob's own storage key is
+    // the name - so a rename is unseal, rewrite, re-seal, move, and only then is
+    // it safe to forget the old copy. Sealed under the new name BEFORE the old
+    // entry goes, so a failure anywhere in here leaves a profile that still opens.
+    renameIdentity = async (next: string) => {
+      const pw = await promptName(tr('Potwierdź hasłem'),
+        tr('Nazwa siedzi w zapieczętowanym profilu, więc zmiana wymaga hasła.'), '', tr('Hasło'), true)
+      if (pw === null) return false // backed out at the password: nothing written
+      const blob = JSON.parse(localStorage.getItem(softKey(activeSoftProfile)) ?? 'null')
+      if (!isSealedProfile(blob)) throw new Error(tr('Nie znaleziono profilu do zmiany.'))
+      const inner = JSON.parse(await unseal(pw, blob))
+      inner.handle = next
+      localStorage.setItem(softKey(next), JSON.stringify(await seal(pw, JSON.stringify(inner))))
+      if (next !== activeSoftProfile) localStorage.removeItem(softKey(activeSoftProfile))
+      localStorage.setItem(LAST_PROFILE, next)
+      activeSoftProfile = next
+      return true
+    }
     rememberMethod('soft')
     localStorage.setItem(LAST_PROFILE, name)
     const idKey2 = await identityKey(id.pub)
@@ -1781,18 +1814,23 @@ function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string, h
   })
 }
 
-function promptName(title: string, sub: string, current: string, label = 'Nazwa'): Promise<string | null> {
+function promptName(title: string, sub: string, current: string, label = 'Nazwa', secret = false): Promise<string | null> {
   return new Promise((resolve) => {
     $('rename-title').textContent = title
     $('rename-sub').textContent = sub
     $('rename-label').textContent = label
     clr('rename-msg')
     const input = $('rename-input') as HTMLInputElement
+    // One window for "give me one string", so a password reuses it rather than
+    // growing a second form to keep in step. Put back on the way out, always -
+    // the next caller is a contact name and must not be typed into dots.
+    input.type = secret ? 'password' : 'text'
     input.value = current
     $('members-pop').hidden = true; closeEmojiPop()
     $('scrim').classList.add('open'); $('rename-modal').classList.add('open')
     const done = (v: string | null) => {
       $('scrim').classList.remove('open'); $('rename-modal').classList.remove('open')
+      input.type = 'text'
       $('rename-save').removeEventListener('click', onSave)
       $('rename-cancel').removeEventListener('click', onCancel)
       $('scrim').removeEventListener('click', onCancel)
@@ -3695,6 +3733,51 @@ $('me-avatar').addEventListener('click', () => void openShare())
 // clicking an avatar and getting a share dialog reads as a non sequitur unless
 // you already know it does that (the user's report).
 $('btn-fp-share')?.addEventListener('click', () => void openShare())
+
+/**
+ * Change the name this identity goes by.
+ *
+ * The KID does not move - it is `SHA-1(pub)`, a function of the key - so every
+ * contact, group and local record scoped to this identity survives untouched.
+ * What changes is the header, the name inside invites and knocks sent from now
+ * on, and the label in the device. `renameIdentity` knows how, per kind.
+ *
+ * Nobody is told. A contact holds the name THEY chose for you, locally, which
+ * is the same rule that makes renaming a contact a private act - so the window
+ * says so rather than letting someone believe they have announced anything.
+ */
+$('btn-rename-me')?.addEventListener('click', async () => {
+  const doRename = renameIdentity
+  if (!session || !doRename) return
+  const was = session.handle
+  const next = await promptName(tr('Zmień nazwę tożsamości'),
+    tr('Zmieni się u Ciebie i w nowych zaproszeniach. Kontakty, które już Cię mają, dalej widzą nazwę, którą sami Ci nadali.'),
+    was, tr('Nazwa'))
+  if (next === null || next === was) return
+  // The device caps the DESCR, so a name that does not fit would come back
+  // silently shortened - said here instead, before anything is written.
+  if (byteLen(next) > SELF_NAME_MAX) {
+    toast(tr('Nazwa jest za długa — limit to {n} bajtów', { n: SELF_NAME_MAX })); return
+  }
+  // A software profile IS its storage key, so two of them cannot share a name.
+  if (activeSoftProfile && localStorage.getItem(softKey(next))) {
+    toast(tr('Profil o tej nazwie już tu jest — wybierz inną.')); return
+  }
+  try {
+    if (!await doRename(next)) return
+  } catch (e: any) {
+    toast(e instanceof BadPassword ? tr('Złe hasło.') : tr('Nie udało się zmienić nazwy: ') + (e?.message ?? e))
+    return
+  }
+  session.handle = next
+  ;(session.id as any).handle = next // the Identity is what invites and knocks read
+  $('me-avatar').textContent = initials(next)
+  $('me-handle').textContent = next
+  // Settings lists the profiles on this device and marks the open one; the name
+  // it prints is the storage key that just moved.
+  if (activeSoftProfile) renderProfiles()
+  toast(tr('Nazwa zmieniona na {name}', { name: next }))
+})
 $('me-avatar').addEventListener('keydown', (e: any) => {
   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openShare() }
 })

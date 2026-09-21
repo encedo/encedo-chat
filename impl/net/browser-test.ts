@@ -2949,6 +2949,87 @@ async function main() {
     if (leftover) throw new Error(`a refused profile still left ${leftover} keys behind`)
     step('refused inline, nothing written, the form still open')
 
+    // ---- renaming the identity you are signed in as --------------------------
+    // The claim being tested is not "the label changed" -- it is that NOTHING
+    // ELSE did. Per-identity state is keyed by the KID, and the KID is
+    // SHA-1(pub), so a rename must leave every one of those keys where it was.
+    // If that ever stops holding, a rename silently orphans someone's contacts.
+    scenario('an identity can be renamed, and takes nothing with it')
+    const made = await createProfile('stara-nazwa')
+    if (!made.entered) throw new Error(`the profile to rename was not created: ${JSON.stringify(made)}`)
+    await B.waitFor('the header', `return !!document.getElementById('me-handle').textContent`, 10_000)
+    const before = await B.eval<any>(`return {
+      handle: document.getElementById('me-handle').textContent,
+      fp: document.getElementById('me-fp').textContent,
+      pencil: !!document.getElementById('btn-rename-me'),
+      keys: Object.keys(localStorage).filter((k) => k.startsWith('ec-')).sort(),
+    }`)
+    if (!before.pencil) throw new Error('there is no way to rename an identity in the header')
+
+    // Two windows, one after the other: the new name, then the password that
+    // the sealed profile costs.
+    const renameTo = async (name: string, pass: string) => {
+      await B.eval(`document.getElementById('btn-rename-me').click(); return 1`)
+      await B.waitFor('the rename window', `
+        return document.getElementById('rename-modal').classList.contains('open')
+          && document.getElementById('rename-input').type === 'text';
+      `, 10_000)
+      await B.eval(`
+        document.getElementById('rename-input').value = ${'PLACEHOLDER_NAME'};
+        document.getElementById('rename-save').click();
+        return 1;
+      `.replace('PLACEHOLDER_NAME', JSON.stringify(name)))
+      // The SAME window comes back asking for the password, with what is typed
+      // hidden -- that type flip is the assertion, or a password could be shown
+      // in clear on screen.
+      await B.waitFor('the password window', `
+        return document.getElementById('rename-modal').classList.contains('open')
+          && document.getElementById('rename-input').type === 'password';
+      `, 10_000)
+      await B.eval(`
+        document.getElementById('rename-input').value = ${'PLACEHOLDER_PASS'};
+        document.getElementById('rename-save').click();
+        return 1;
+      `.replace('PLACEHOLDER_PASS', JSON.stringify(pass)))
+      await sleep(1500)
+    }
+
+    // A wrong password must change NOTHING -- not the header, not the store.
+    await renameTo('po-zlym-hasle', 'to-nie-jest-haslo')
+    const afterBad = await B.eval<any>(`return {
+      handle: document.getElementById('me-handle').textContent,
+      keys: Object.keys(localStorage).filter((k) => k.startsWith('ec-')).sort(),
+    }`)
+    if (afterBad.handle !== before.handle) throw new Error(`a wrong password renamed the identity anyway: ${afterBad.handle}`)
+    if (afterBad.keys.join('|') !== before.keys.join('|')) {
+      throw new Error(`a refused rename still touched the store: ${JSON.stringify(afterBad.keys)}`)
+    }
+    step('a wrong password leaves the identity and the store exactly as they were')
+
+    await renameTo('nowa-nazwa', SOFT_PASS)
+    const after = await B.eval<any>(`return {
+      handle: document.getElementById('me-handle').textContent,
+      fp: document.getElementById('me-fp').textContent,
+      last: localStorage.getItem('ec-last-profile'),
+      hasNew: !!localStorage.getItem('ec-soft-id-nowa-nazwa'),
+      hasOld: !!localStorage.getItem('ec-soft-id-stara-nazwa'),
+      keys: Object.keys(localStorage).filter((k) => k.startsWith('ec-')).sort(),
+    }`)
+    if (after.handle !== 'nowa-nazwa') throw new Error(`the header still says ${after.handle}`)
+    if (!after.hasNew || after.hasOld) throw new Error('the sealed profile did not move to the new name')
+    if (after.last !== 'nowa-nazwa') throw new Error(`the last-profile marker still points at ${after.last}`)
+    // The identity is the KEY, and the key did not change -- so neither did the
+    // fingerprint anybody compares against.
+    if (after.fp !== before.fp) throw new Error(`the fingerprint moved: ${before.fp} -> ${after.fp}`)
+    // ...and every OTHER ec-* key is the same one it was. Only the profile blob
+    // is named after the handle; if a second key ever is, this catches it before
+    // somebody's contacts go missing.
+    const moved = (ks: string[]) => ks.filter((k) => !k.startsWith('ec-soft-id-') && k !== 'ec-last-profile')
+    if (moved(after.keys).join('|') !== moved(before.keys).join('|')) {
+      throw new Error(`a rename moved per-identity state: ${JSON.stringify(before.keys)} -> ${JSON.stringify(after.keys)}`)
+    }
+    step('renamed, same key, same fingerprint, and no per-identity record moved with it')
+
     // ---- the published node list, fetched by its compiled-in CID -------------
     // LAST, on A, and only with a node to read from: it replaces the relay list
     // and re-dials, so anything after it would be running against production

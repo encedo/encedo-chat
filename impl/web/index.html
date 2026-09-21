@@ -262,7 +262,11 @@
   .m-add-list .m-add-pub:hover{background:var(--bubble-out)}
   .m-add-list .m-add-empty{padding:8px;font-size:12px;color:var(--muted)}
   .me{display:flex;align-items:center;gap:10px;padding:16px;border-bottom:1px solid var(--border)}
-  .me .info{flex:1;min-width:0}.me .name{font-weight:600;color:var(--text)}
+  .me .info{flex:1;min-width:0}.me .name{font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* The pencil sits with the name and shrinks for nobody: a long handle elides,
+     the control it belongs to does not move off the edge. */
+  .me .name-row{display:flex;align-items:center;gap:6px;min-width:0}
+  .me .name-edit{flex:none}
   .fp{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* The share action sits ON the fingerprint, because that is the thing you
      hand to somebody. Clicking the avatar still works; it just never said what
@@ -1254,7 +1258,7 @@
       </div>
       <div class="me">
         <div class="avatar" id="me-avatar" role="button" tabindex="0" title="Udostępnij swój profil" data-i18n-title="Udostępnij swój profil">··</div>
-        <div class="info"><div class="name" id="me-handle">—</div><div class="fp-row"><div class="fp" id="me-fp" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer"></div><button class="fp-share" id="btn-fp-share" title="Udostępnij swój profil" data-i18n-title="Udostępnij swój profil" aria-label="Udostępnij swój profil"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 10.8 15.7 6.6M8.3 13.2l7.4 4.2"/></svg></button></div></div>
+        <div class="info"><div class="name-row"><div class="name" id="me-handle">—</div><!-- Beside the NAME, not in the fingerprint row below it: that row is hidden on a short screen (a phone on its side), and this is the one control there that would vanish with it. --><button class="fp-share name-edit" id="btn-rename-me" title="Zmień nazwę tożsamości" data-i18n-title="Zmień nazwę tożsamości" aria-label="Zmień nazwę tożsamości"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/><path d="M14.5 6.5 17.5 9.5"/></svg></button></div><div class="fp-row"><div class="fp" id="me-fp" title="Dwuklik = kopiuj klucz publiczny" data-i18n-title="Dwuklik = kopiuj klucz publiczny" style="cursor:pointer"></div><button class="fp-share" id="btn-fp-share" title="Udostępnij swój profil" data-i18n-title="Udostępnij swój profil" aria-label="Udostępnij swój profil"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.3 10.8 15.7 6.6M8.3 13.2l7.4 4.2"/></svg></button></div></div>
         <button class="icon-btn" id="btn-settings" title="Ustawienia" data-i18n-title="Ustawienia">⚙</button>
         <!-- Leaving was reachable only from inside Settings, which is not where
              anyone looks for the way out. Next to the gear, one click, and it
