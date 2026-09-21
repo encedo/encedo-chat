@@ -288,6 +288,71 @@ Operator-run libp2p nodes (two in production: bs1, bs2; a third precomputed) —
 
 **The node list** ships **compiled into the client** (`infra/nodes.json`) and can be refreshed at runtime by fetching a **compiled-in IPFS CID** — content addressing is the whole of the list's integrity (a new list means a new build); there is no signature on it. The client dials the list in order and fails over down it; the user can reorder or override locally. Full node-operations detail in `relay/README.md` and `ARCHITECTURE.md`.
 
+### 5.7 Published invites — the one topic that is public
+
+Every topic above is the image of a secret two parties already share. **This one is the image of a secret printed on a web page**, and every property below follows from that.
+
+An identity may mint any number of **invites**, each a random 32-byte `invite_secret` carried in a link and retirable on its own. The link is hung wherever its owner likes; whoever reads it can answer it without holding anything of the owner's beforehand. The two roles are the design brief: the **inviter** publishes and listens, the **answerer** reads the link and knocks.
+
+```
+topic_material = HKDF-SHA256(
+                   ikm  = invite_secret,               // public: it is in the link
+                   salt = "encedo-chat-rendezvous-v1", // §5.1, unchanged
+                   info = network_id || 0x00 || date_UTC,
+                   L    = 32)
+topic          = base32(topic_material)[0:52]
+```
+
+The construction is §5.1's, the rotation is §5.4's with `offset = rotationOffsetSec(invite_secret)`, and both sides compute the day the same way — so an invite reaches its owner without either party learning anything about the other first.
+
+**What is different, and it is not a detail:** anyone who read the page can **subscribe to this topic and publish to it**. The client therefore treats hostile input as the ordinary case rather than the exception — a frame that does not open is dropped without a word, at most **20 knocks per minute** are surfaced and the rest counted and dropped, and the last **512** ephemeral keys are remembered so one frame is surfaced once. None of these is a security boundary; they protect attention, which is the thing an unwanted contact would try to take.
+
+### 5.8 The knock frame (normative)
+
+One frame, published on the inbox topic, **always exactly 348 bytes**:
+
+```
+frame = eph_pub (32) || AES-256-GCM ciphertext (300) || tag (16)
+
+k || nonce = HKDF-SHA256(
+               ikm  = ECDH(eph_priv, IK_inviter_pub),   // answerer
+                    = ECDH(IK_priv,  eph_pub),          // inviter
+               salt = "encedo-chat-invite-knock-v1",
+               info = invite_secret,
+               L    = 44)                               // 32 B key || 12 B nonce
+
+plaintext (300 B, fixed, zero-padded) =
+    kind (1) || ik (32) || nameLen (1) || name (64) || noteLen (2) || note (200)
+    kind: 0x00 decoy, 0x01 real
+```
+
+Its shape is EH-2's `msg1`: a one-shot ephemeral in the clear, everything else sealed to the recipient's identity key. That is the whole reason the frame exists — the answerer's `ik` is the one thing the inviter cannot derive, and putting it in the clear would tell the first person to scrape the invite who answered it.
+
+- **The nonce is derived, not carried.** A fresh ephemeral per frame means this key seals exactly once — the same argument §8 makes for a sender key's single-use MK — and it keeps twelve bytes off a frame whose length is load-bearing.
+- **`info` is the invite secret**, so a knock is bound to the invite it came through as well as to the recipient: a frame sealed for one invite does not open under another, even though both are addressed to the same identity key.
+- **Every frame is the same length**, and the plaintext is padded to reach it. Two properties die the moment that varies: a decoy stops being indistinguishable from a real knock, and the length of what somebody wrote stops being private. The padding is not an optimisation to revisit.
+- `name` (≤64 B) and `note` (≤200 B) are **claimed, never verified**. The UI shows them beside a fingerprint, never instead of one; accepting a knock is what creates the contact, and §4.4's out-of-band comparison is unchanged by any of this.
+- Opening returns **nothing on every failure and never raises** — malformed, replayed and hostile frames are all one case here.
+
+### 5.9 Cover traffic on the inbox
+
+The inviter's own client publishes indistinguishable frames (`kind = 0x00`) on its own inbox, so that **"somebody knocked" stops carrying information** — it happens anyway.
+
+```
+seed    = HKDF-SHA256(ikm  = ECDH(IK_priv, IK_pub),          // the §5.2 self-DH
+                      salt = "encedo-chat-invite-decoy-v1",
+                      info = invite_secret, L = 32)
+instant = slot * 45_000 + (u32be(HKDF-SHA256(seed,
+                      salt = "encedo-chat-invite-decoy-slot-v1",
+                      info = u32be(slot), L = 4)) mod 45_000)
+```
+
+- **The seed must not be the invite secret**, and this is the one place an implementer can destroy the mitigation while the code still works. The secret is public, so every holder of the link could otherwise compute when the decoys fall, subtract them, and read off the real knocks — leaving an observer *better* off than with no cover traffic at all. Deriving it from the self-DH means only the identity holder can compute the schedule.
+- **Deterministic**, so two clients of one identity produce **one** stream rather than two (the rate would otherwise reveal how many devices are listening) and a restart resumes the same schedule with nothing stored.
+- **45 s is half the relay's 120 s idle eviction** (§5.6), and the arithmetic that matters is the *worst* gap, not the average: one decoy per slot at a uniformly random instant means two consecutive decoys can fall almost two slots apart. The decoy is also the keepalive — an evicted topic does not come back on its own, and the client would go on reporting that it is listening.
+
+**What an observer on this topic learns:** that a frame was published, when, and that it was 348 bytes. Not who — the identity is sealed and the ephemeral is fresh. This is traffic analysis, not deanonymization, and it is stated plainly rather than claimed away (§11.3 S11).
+
 ---
 
 ## 6. Handshake — EH-2
@@ -421,7 +486,7 @@ Consequences worth stating, because a correction is easy to mistake for a deleti
 - A correction that does not arrive leaves the two sides displaying different text. The sender is shown the delivery state of the correction itself (it is acknowledged under its own `id`), so the divergence is visible to the party that caused it.
 - Neither `re` nor `edit` changes the key schedule, the header, or the AEAD's AAD.
 
-**Knock — `knock`.** An empty envelope: "I am here, are you?". It exists because §1's synchronous model has no push and no queue — two people have to be present at the same time, and nothing else in this protocol can turn "online but looking elsewhere" into a conversation. It is deliberately **not tracked for delivery, not re-sent and not acknowledged**: a knock that arrives ten minutes late is worse than one that never arrived, so it either reaches a peer in the room now or it does nothing. Rate-limited at both ends (the sender's own control locks for 10 s; a receiver ignores a second knock from the same peer within 5 s), because attention is precisely what an unwanted contact would try to take. 1:1 only — in a group it would be a room-wide alarm.
+**Knock — `knock`.** An empty envelope: "I am here, are you?". ⚠️ **Not the knock of §5.8**, which shares the word and nothing else: that one is a 348-byte sealed frame from a stranger on a public inbox topic, carrying an identity key the recipient does not yet hold. This one is an empty envelope between two parties who are already contacts, sealed by the ratchet like any other. A reader comparing this section with `lib/knock.ts` is looking at the second mechanism, not this one. It exists because §1's synchronous model has no push and no queue — two people have to be present at the same time, and nothing else in this protocol can turn "online but looking elsewhere" into a conversation. It is deliberately **not tracked for delivery, not re-sent and not acknowledged**: a knock that arrives ten minutes late is worse than one that never arrived, so it either reaches a peer in the room now or it does nothing. Rate-limited at both ends (the sender's own control locks for 10 s; a receiver ignores a second knock from the same peer within 5 s), because attention is precisely what an unwanted contact would try to take. 1:1 only — in a group it would be a room-wide alarm.
 
 **Signalling — `rtc`.** `rtc = { to, sig }` carries one WebRTC signal — an offer, an answer, or an ICE candidate — towards the direct plane of §13. Two properties are the reason it is an ordinary envelope rather than a side channel: it is **sealed by the same ratchet as a message**, so the relay carrying it learns that a pair is negotiating and nothing about the addresses being exchanged; and it is **addressed** (`to`), so a signal meant for another peer on a topic that can hold more than two (§9.1, a second window of one identity) is reported rather than acted on.
 
@@ -640,6 +705,7 @@ A pin blob cannot be opened as a group-cache blob even by its own author — the
 - **S11 — the file store sees file metadata (§7.5).** The operator IPFS node and any public gateway observe blob size, timing, uploader/downloader IPs and the fetch pattern of a CID for the blob's ~5-minute life. Content is covered by the AEAD; this is a metadata concession the text path does not make, taken for the product value of files. Mitigation: TTL, ciphertext-only storage, verifiability (`file-decrypt`).
 - **S12 — software-identity assurance (§4.5).** The IK of a software profile is a password-sealed blob on disk: offline-guessable after theft, no hardware bound on the §9.3 timer, and the §10 export file carries the whole identity under the same password. Accepted as the explicit trade of the zero-hardware onboarding path; the HEM path is the assurance tier.
 - **S13 — the pair secret transits client RAM on current firmware (§4.3).** Rendezvous-only material; exposure is pair-linkability metadata, not content. Closes when HKDF-in-HSM firmware ships.
+- **S14 — a published invite topic is public by construction (§5.7).** The secret naming it is printed on a web page, so anyone who read the page can subscribe and publish. An observer learns that a 348-byte frame was published and when, never by whom — the answerer's identity is sealed under a fresh ephemeral. Cover traffic (§5.9) removes the signal in "a knock happened"; what remains is traffic analysis against an inbox somebody chose to publish. **The one way to destroy this is to seed the decoy schedule from the invite secret** — public, therefore subtractable — which is why the seed is the self-DH.
 
 ### 11.4 Considered and rejected
 
@@ -709,6 +775,9 @@ A file may travel **on the DataChannel itself**, as its own frames, with no stor
 | HKDF labels (pair/self/announce/rotation) | `encedo-chat-rendezvous-v1`, `encedo-chat-announce-mac-v1`, `encedo-chat-rotation-v1` |
 | HKDF labels (handshake/ratchet) | `encedo-handshake-v2`, `encedo-ratchet-dh-v1`, `encedo-msg-key`, `encedo-chain-key`, `encedo-aead-nonce` |
 | HKDF labels (groups) | `encedo-chat-group-rendezvous-v1`, `encedo-group-msg`, `encedo-group-chain`, `encedo-group-msg-mac`, `encedo-chat-group-roster-mac` |
+| HKDF labels (published invites, §5.7-5.9) | `encedo-chat-invite-knock-v1`, `encedo-chat-invite-decoy-v1`, `encedo-chat-invite-decoy-slot-v1` |
+| Knock frame | **348 B always** — `eph_pub` 32 + ct 300 + tag 16; plaintext `kind` 1 + `ik` 32 + `nameLen` 1 + `name` 64 + `noteLen` 2 + `note` 200 |
+| Inbox cover traffic | one frame per **45 s** slot at a derived instant; **20** knocks/min surfaced, **512** ephemerals remembered |
 | HKDF labels (local stores, §10) | `encedo-chat-group-cache-v1`, `encedo-chat-pin-cache-v1`, `encedo-chat-contact-book-v1` |
 | Frame type bytes | `0x01`–`0x03` EH-2 msg1–3 · `0x10` 1:1 ratchet content · `0x20` group message · `0x21` group keepalive |
 | Ratchet content header (§7.2) | 42 B = `0x10` ‖ ver ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be); all 42 B are the AAD |

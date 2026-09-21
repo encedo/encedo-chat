@@ -190,6 +190,16 @@ returns. The ±30 min overlap window absorbs ordinary skew, not sabotage.
 a key you already hold, the app answers with verification; against a first
 contact there is nothing to verify against except a fingerprint read aloud.
 
+**F4b. An inbox nobody was invited to.** A published invite (`PROTOCOL.md`
+§5.7) names a topic from a secret printed on a page, so everyone who read the
+page can subscribe to it and publish to it — by design, since that is what
+makes it answerable by a stranger. What an observer gets is that a fixed-size
+frame arrived and when, never from whom, and cover traffic (§5.9) empties even
+that of meaning. What a flooder gets is the recipient's attention: bounded at
+20 surfaced knocks a minute, which protects attention and is not a security
+boundary. The answer to an unwanted inbox is to retire that invite, which is
+why there are several and why each dies alone.
+
 **F5. A cryptanalytically relevant quantum computer.** Confidentiality is
 PQ-hybrid from day one, so recorded traffic stays shut. Authentication is
 classical until Phase 3 (S9): such an adversary could impersonate users in

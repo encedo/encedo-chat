@@ -63,6 +63,7 @@ Key properties (`PROTOCOL.md` §4):
 - **IK never signs anything** — mutual authentication is MAC-based on the handshake transcript (deniability); groups too (ECDH-HMAC, §8). No dual-use, no curve conversion; on a HEM the purpose flag is enforced by hardware. (The HEM `x25519` dual key type ships in firmware as a platform capability, but Chat's IK does not use it.)
 - Chat's HSM crypto surface is **one call** — raw `ecdh` — plus key management. Current firmware has no in-HSM HKDF, so IK-derived derivations run client-side over the raw output; the exposure and its closure are recorded in `PROTOCOL.md` §4.3/S13. Zero firmware changes needed for Phase 1.
 - Contacts are imported **out-of-band** (QR / invite link + fingerprint verification); the stored book is MAC'd against key swaps (`PROTOCOL.md` §4.4).
+- A **published invite** is the second door (`PROTOCOL.md` §5.7-5.9): one long-lived link its owner may hang anywhere, naming a **public** topic that strangers can knock on. Several per identity, each retirable alone. It trades an exposed topic for reachability without a prior exchange — the fingerprint comparison above is unchanged, and accepting a knock is what creates the contact.
 - **Single active session per identity** (`PROTOCOL.md` §9): a duplicate is detected on the self-topic and **both copies stand down** — the user re-enters one deliberately; a stolen device without the HSM dies at the next forced re-handshake.
 - Identity is proven inside the session layer (EH-2 MACs), never at the transport layer. The transport knows only throwaway PeerIds.
 
