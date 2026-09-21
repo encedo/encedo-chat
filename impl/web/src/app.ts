@@ -1424,9 +1424,6 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   // It takes precedence over the welcome card: someone arriving with a link has
   // already been told what to do, and being told again first would be noise.
   if (pendingInvite) void showInvite(pendingInvite)
-  else if (!contactsCache.length && !hasStoredGroups()) {
-    $('scrim').classList.add('open'); $('welcome-modal').classList.add('open')
-  }
 }
 
 // ---- contacts (HEM-backed book; in-memory cache keeps re-renders cheap) ----
@@ -1652,7 +1649,16 @@ function renderContacts() {
   // for why neither can live inside something that is rebuilt on every keystroke.
   const filter = val('contact-search').toLowerCase()
   const list = contactsCache.filter((c) => !filter || c.name.toLowerCase().includes(filter))
-  if (!list.length) { const e = document.createElement('div'); e.className = 'pane-label'; e.textContent = filter ? tr('(brak dopasowań)') : tr('(brak kontaktów — dodaj peera)'); pane.appendChild(e); return }
+  if (!list.length) {
+    // A search that matched nothing is not an empty address book, and must not
+    // be answered with a tutorial: that person knows perfectly well what they have.
+    if (filter) {
+      const e = document.createElement('div'); e.className = 'pane-label'
+      e.textContent = tr('(brak dopasowań)'); pane.appendChild(e); return
+    }
+    paintWays(pane)
+    return
+  }
   for (const c of list) {
     const room = rooms.get(c.pub)
     const inRoom = !!room?.inRoom
@@ -2228,35 +2234,56 @@ window.addEventListener('hashchange', () => {
 })
 
 /**
- * Whether this device holds any group state for the signed-in handle.
+ * The three ways a conversation can start, drawn where there is nobody to talk
+ * to yet.
  *
- * Read straight from storage rather than from `groupsUI`, because the cache
- * restore is asynchronous: asked at login time, the map is still empty on a
- * device that has several groups and is a second away from showing them — and
- * the onboarding card would greet a returning user as a new one.
+ * It lives IN the empty contact list rather than in a window over it. The
+ * question "what now" is asked by the emptiness itself, so the answer belongs
+ * in the same place - and it leaves by itself when the first contact arrives.
+ * A card had to be dismissed, and dismissing it put the person back on the
+ * blank list that prompted the question, which is where this started.
+ *
+ * `hasStoredGroups` went with the card. It existed to tell a returning user
+ * from a new one so the greeting would not patronise the former; an empty
+ * contact list is an empty contact list whoever is looking at it, and somebody
+ * who has groups but nobody to message still needs to know how to get one.
+ *
+ * Each row describes a SITUATION, not a mechanism: "for somebody you know" is
+ * answerable on a first run, "which key-exchange model do you prefer" is a
+ * quiz. And none of them performs anything - each opens the surface that owns
+ * the job, because this points rather than does.
  */
-function hasStoredGroups(): boolean {
-  const p = gcachePrefix()
-  for (let i = 0; i < localStorage.length; i++) if (localStorage.key(i)?.startsWith(p)) return true
-  return false
-}
+function paintWays(host: HTMLElement) {
+  const intro = document.createElement('div'); intro.className = 'ways-intro'
+  const h = document.createElement('h3')
+  h.textContent = tr('Nie masz jeszcze żadnego kontaktu')
+  const p = document.createElement('p')
+  // The sentence that answers the question somebody actually just asked: they
+  // are looking for a box to search users in, and there is no directory.
+  p.textContent = tr('Nie ma tu listy użytkowników, której można by poszukać — kontakt powstaje dopiero wtedy, gdy obie strony mają swoje klucze publiczne. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie widzi.')
+  intro.append(h, p)
 
-const closeWelcome = () => { $('scrim').classList.remove('open'); $('welcome-modal').classList.remove('open') }
-$('welcome-close').addEventListener('click', closeWelcome)
-$('welcome-share').addEventListener('click', () => { closeWelcome(); void openShare() })
-// The other two doors the card names. Each hands off to the surface that already
-// owns that job rather than growing a second one here -- the invites tab mints
-// and lists, and the paste window reads. Onboarding points; it does not perform.
-$('welcome-invite')?.addEventListener('click', () => {
-  closeWelcome()
-  $('tab-invites').click()
-  $('btn-new-invite').click()
-})
-$('welcome-have')?.addEventListener('click', () => {
-  closeWelcome()
-  $('tab-invites').click()
-  $('btn-have-invite').click()
-})
+  const ways = document.createElement('div'); ways.className = 'ways'
+  const way = (id: string, cls: string, title: string, sub: string, go: () => void) => {
+    const b = document.createElement('button'); b.type = 'button'; b.id = id; b.className = cls
+    const hd = document.createElement('span'); hd.className = 'w-hd'; hd.textContent = title
+    const s2 = document.createElement('small'); s2.textContent = sub
+    b.append(hd, s2)
+    b.addEventListener('click', go)
+    ways.appendChild(b)
+  }
+  way('way-share', 'way lead', tr('Wyślij swój profil'),
+    tr('Dla kogoś, kogo znasz. Wymieniacie się kluczami i każde z Was sprawdza odcisk drugiego. Nikt się do Ciebie nie odezwie, dopóki sam nie weźmiesz jego klucza.'),
+    () => void openShare())
+  way('way-invite', 'way', tr('Opublikuj zaproszenie'),
+    tr('Jeden link, który możesz gdziekolwiek powiesić. Kto go ma, może zapukać — zobaczysz odcisk i notatkę, i zdecydujesz. Pukanie odbierzesz, gdy aplikacja jest otwarta; druga strona ponawia.'),
+    () => { $('tab-invites').click(); $('btn-new-invite').click() })
+  way('way-have', 'way quiet', tr('Mam czyjeś zaproszenie'),
+    tr('Wklej link albo sam kod, który ktoś Ci podał.'),
+    () => { $('tab-invites').click(); $('btn-have-invite').click() })
+
+  host.append(intro, ways)
+}
 
 /**
  * -----------------------------------------------------------------------------
@@ -2998,7 +3025,7 @@ $('pw-save').addEventListener('click', async () => {
 $('btn-settings').addEventListener('click', openDrawer)
 $('chip-profile').addEventListener('click', openDrawer)
 $('btn-close-drawer').addEventListener('click', closeDrawer)
-$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); closeWelcome(); pendingInvite = null; closeImport(); closeScan(); closeIgnored(); closePaste() })
+$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); pendingInvite = null; closeImport(); closeScan(); closeIgnored(); closePaste() })
 $('btn-logout').addEventListener('click', () => location.reload())
 // The same act, from the header rather than from inside Settings — but asked
 // first, because this one sits beside a button people press often. Logging out

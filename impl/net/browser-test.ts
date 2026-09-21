@@ -2954,30 +2954,39 @@ async function main() {
     // ELSE did. Per-identity state is keyed by the KID, and the KID is
     // SHA-1(pub), so a rename must leave every one of those keys where it was.
     // If that ever stops holding, a rename silently orphans someone's contacts.
-    // ---- the first screen -----------------------------------------------
-    // The moment the product is most often lost: an identity exists, and the
+    // ---- what an empty contact list says ---------------------------------
+    // The moment this product is most often lost: an identity exists, and the
     // person is looking for a "find a user" box that does not exist because
-    // there is no directory. Every door the card names has to actually open.
-    scenario('the first screen names the three ways in, and each one opens')
+    // there is no directory. The answer lives IN the empty list rather than in
+    // a window over it -- a window has to be dismissed, and dismissing it put
+    // them back on the blank list that raised the question.
+    scenario('an empty contact list says how to stop being empty')
     const made = await createProfile('stara-nazwa')
     if (!made.entered) throw new Error(`the profile to rename was not created: ${JSON.stringify(made)}`)
-    await B.waitFor('the first-run card', `
-      return document.getElementById('welcome-modal').classList.contains('open')`, 15_000)
+    await B.waitFor('the empty contact list', `
+      return !!document.querySelector('#pane-contacts .ways .way')`, 15_000)
     const card = await B.eval<any>(`
-      const ways = [...document.querySelectorAll('#welcome-modal .ways .way')];
+      const ways = [...document.querySelectorAll('#pane-contacts .ways .way')];
       return {
         n: ways.length,
         ids: ways.map((w) => w.id),
-        // Every row has to SAY something. A title-only row is a mechanism name,
+        // Every row has to SAY something. A title-only row names a mechanism,
         // which is exactly what a first run cannot use.
         described: ways.every((w) => (w.querySelector('small')?.textContent ?? '').length > 30),
+        // ...and the sentence that answers the question actually being asked.
+        says: (document.querySelector('#pane-contacts .ways-intro p')?.textContent ?? ''),
+        modal: !!document.getElementById('welcome-modal'),
       };
     `)
-    if (card.n !== 3) throw new Error(`the card offers ${card.n} ways in, not 3: ${JSON.stringify(card.ids)}`)
+    if (card.n !== 3) throw new Error(`the empty list offers ${card.n} ways in, not 3: ${JSON.stringify(card.ids)}`)
     if (!card.described) throw new Error('a way in is offered with no description of when to use it')
-    // Each door, one at a time, back to the card in between. What is asserted is
-    // the DESTINATION: onboarding points at the surface that owns the job, and a
-    // button that quietly stopped pointing anywhere would still look fine.
+    if (!/listy u\u017cytkownik\u00f3w|directory of users/i.test(card.says)) {
+      throw new Error(`the empty list never says why searching is hopeless: ${JSON.stringify(card.says)}`)
+    }
+    if (card.modal) throw new Error('the dismissible card came back alongside the pane -- two copies, one over the other')
+    // Each door, one at a time. What is asserted is the DESTINATION: this points
+    // at the surface that owns the job, and a button that quietly stopped
+    // pointing anywhere would still look perfectly fine.
     const door = async (id: string, opens: string) => {
       await B.eval(`document.getElementById(${JSON.stringify(id)}).click(); return 1`)
       await B.waitFor(`${id} opens ${opens}`, `
@@ -2985,17 +2994,15 @@ async function main() {
       await B.eval(`
         document.getElementById(${JSON.stringify(opens)}).classList.remove('open');
         document.getElementById('scrim').classList.remove('open');
-        document.getElementById('welcome-modal').classList.add('open');
+        document.getElementById('tab-contacts').click();
         return 1;
       `)
+      await B.waitFor('back on the contact list', `
+        return !!document.querySelector('#pane-contacts .ways .way')`, 10_000)
     }
-    await door('welcome-share', 'share-modal')
-    await door('welcome-invite', 'invite-modal')
-    await door('welcome-have', 'paste-modal')
-    await B.eval(`document.getElementById('welcome-close').click(); return 1`)
-    const gone = await B.eval<boolean>(`
-      return !document.getElementById('welcome-modal').classList.contains('open')`)
-    if (!gone) throw new Error('the first-run card cannot be dismissed')
+    await door('way-share', 'share-modal')
+    await door('way-invite', 'invite-modal')
+    await door('way-have', 'paste-modal')
     step('three ways in, each described, each opening the surface that owns it')
 
     scenario('an identity can be renamed, and takes nothing with it')
