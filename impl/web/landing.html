@@ -269,10 +269,12 @@
           nothing behind.<br>
           <span class="soft">Not even with us.</span></h1>
         <p class="lede">
-          onchato has <strong>no message store</strong> — not encrypted, not anywhere. Your key lives in
-          your hardware module or sealed in your browser, the conversation goes
-          <strong>straight between the two of you</strong>, and every handshake has been
-          post-quantum since the first line of code.
+          Closer to a whisper than to a letter. A letter is stored, copied and filed on
+          its way; a whisper goes <strong>straight between two people who are both
+          there</strong> — and passes through nobody.
+          onchato has <strong>no message store</strong> — not encrypted, not anywhere.
+          Your key lives in your hardware module or sealed in your browser, and every
+          handshake has been post-quantum since the first line of code.
         </p>
         <div class="cta">
           <a class="btn" href="/chat">Open onchato</a>
@@ -297,7 +299,7 @@
       </div>
 
       <section id="how">
-        <p class="sec-label">Four claims, and what backs each one</p>
+        <p class="sec-label">Eight claims, and what backs each one</p>
         <div class="claims">
           <article class="claim">
             <h2>Post-quantum already, not "on the roadmap"</h2>
@@ -318,6 +320,16 @@
             <p class="metric">0.42 ms to seal and open a message</p>
           </article>
           <article class="claim">
+            <h2>Both of you have to be here</h2>
+            <p>
+              There is no queue and no mailbox — a conversation happens while both people
+              are in it, the way a spoken one does. That is not a missing feature: it is
+              what removes the server that would otherwise hold your messages until you
+              log in, and with it every reason such a server could be asked for them.
+            </p>
+            <p class="metric">no store-and-forward, by construction</p>
+          </article>
+          <article class="claim">
             <h2>No account, no phone number, no directory</h2>
             <p>
               You are a key, not a row in a table. Nobody operates a lookup of who may talk
@@ -335,11 +347,45 @@
             </p>
             <p class="metric">Direct WebRTC, relay only as fallback</p>
           </article>
+          <article class="claim">
+            <h2>Groups with nobody hosting them</h2>
+            <p>
+              A group here is not a room on somebody's machine — it is a key its members
+              hold between them. Adding or removing somebody re-keys the whole group, so a
+              person you removed cannot read what comes next, and there is no operator who
+              could quietly add themselves to the list.
+            </p>
+            <p class="metric">up to 10 members &middot; the roster fits in 128 bytes</p>
+          </article>
+          <article class="claim">
+            <h2>A link a stranger can answer</h2>
+            <p>
+              Hang one link wherever you like — a page, a profile, a business card. Whoever
+              has it can knock, and you see a fingerprint and a sentence before you decide;
+              nothing joins your contacts until you say so. Every knock is the same size,
+              and your own app publishes decoys among them, so watching the channel does
+              not tell anybody that somebody real got in touch.
+            </p>
+            <p class="metric">348 bytes per knock — real or cover, identical</p>
+          </article>
+          <article class="claim">
+            <h2>A file that never lands anywhere</h2>
+            <p>
+              When the direct channel is up, a file goes from one browser to the other and
+              touches nothing in between — no upload, no link to expire, nothing an operator
+              could hand over afterwards. The other side is asked before a single byte moves.
+            </p>
+            <p class="metric">500 MB at 41 MB/s, measured over a LAN</p>
+          </article>
         </div>
         <p class="limits">
+          Every claim above rests on a mechanism, and the mechanisms are written for a
+          reader rather than for an auditor.
+          <a href="/how.html">How it works, in seven steps →</a>
           And what a node <em>can</em> still observe — timing, addresses, that two parties met —
-          is written down rather than glossed over.
-          <a href="https://github.com/encedo/encedo-chat/blob/main/docs/THREAT-MODELS.md">Read the threat models →</a>
+          is written down rather than glossed over:
+          <a href="https://github.com/encedo/encedo-chat/blob/main/docs/THREAT-MODELS.md">the threat models</a>,
+          <a href="https://github.com/encedo/encedo-chat/blob/main/docs/PROTOCOL.md">the protocol</a>.
         </p>
       </section>
 
@@ -388,7 +434,7 @@
             </div>
           </div>
           <div class="get-foot">
-            <span id="get-ver">latest release</span>
+            <span id="get-ver">v<%= version %></span>
             <span>No iOS yet.</span>
             <a href="https://github.com/encedo/encedo-chat/releases/latest">All files &amp; signatures →</a>
           </div>
@@ -617,6 +663,29 @@ if (location.hash.startsWith('#i=')) location.replace('/chat' + location.hash);
     if (mine) mine.classList.add('mine')
   } catch (e) {}
 
+  // Deferred until a reader reaches the downloads, rather than fired on load.
+  // It is the only outbound request this page makes, and firing it for everyone
+  // would have every visitor announce themselves to GitHub before they have
+  // shown any intent to download anything — which is an odd first act for a
+  // page about not being observed. Nothing depends on it: the version is
+  // compiled in above, and every link below already points at the release.
+  var asked = false
+  var wanted = function () {
+    if (asked) return
+    asked = true
+    grab()
+  }
+  try {
+    var box = document.getElementById('get')
+    if ('IntersectionObserver' in window && box) {
+      var io2 = new IntersectionObserver(function (es) {
+        if (es.some(function (e) { return e.isIntersecting })) { io2.disconnect(); wanted() }
+      }, { rootMargin: '200px' })
+      io2.observe(box)
+    } else { wanted() }  // no observer: behave as it always did
+  } catch (e) { wanted() }
+
+  function grab() {
   fetch('https://api.github.com/repos/encedo/encedo-chat/releases/latest')
     .then(function (r) { return r.ok ? r.json() : null })
     .then(function (rel) {
@@ -636,6 +705,7 @@ if (location.hash.startsWith('#i=')) location.replace('/chat' + location.hash);
       }
     })
     .catch(function () {})
+  }
 })()
 </script>
 </body>
