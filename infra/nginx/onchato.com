@@ -251,12 +251,42 @@ server {
         add_header Cache-Control "public, max-age=31536000, immutable";
     }
 
+    # ── Aplikacja: JEDYNA ścieżka, która potrzebuje index.html nie mając pliku ──
+    # Wyodrębniona z "location /", bo fallback niżej przestał oddawać index.html
+    # nieznanym adresom. Dopasowanie dokładne ("=") wygrywa z prefiksowym, więc
+    # ten blok łapie /chat zanim tamten zdąży. CANONICAL_PATH w app.ts to '/chat'
+    # i aplikacja nigdy nie zmienia ścieżki (replaceState zdejmuje tylko fragment),
+    # więc żadna inna ścieżka aplikacji nie istnieje.
+    location = /chat {
+        add_header Cross-Origin-Opener-Policy   "same-origin";
+        add_header Cross-Origin-Embedder-Policy "require-corp";
+        add_header Cache-Control "no-cache";
+        try_files /index.html =404;
+    }
+
     # index.html + reszta: zawsze rewaliduj → deploy łapany natychmiast
     location / {
         add_header Cross-Origin-Opener-Policy   "same-origin";
         add_header Cross-Origin-Embedder-Policy "require-corp";
         add_header Cache-Control "no-cache";
-        try_files $uri $uri/ /index.html;
+        try_files $uri $uri/ @landing;
+    }
+
+    # ── Zły adres wraca na stronę główną ───────────────────────────────────
+    # Wcześniej KAŻDA nieistniejąca ścieżka dostawała index.html z kodem 200, co
+    # jest cichą złą odpowiedzią: /how oddawało aplikację zamiast strony, dopóki
+    # nie dostało własnego bloku, a /webrtc-test.html odpowiadało 200 jeszcze
+    # długo po tym, jak plik zniknął z dysku przy budowaniu.
+    #
+    # 302, nie 301: 301 przeglądarka zapamiętuje na stałe, a adres, który dziś
+    # jest pomyłką, jutro może być stroną — tak właśnie było z /how.
+    #
+    # Zahashowane bundle NIE trafiają tutaj: łapie je regex wyżej, który nie ma
+    # try_files, więc brakujący plik daje czyste 404. To celowe — przekierowanie
+    # żądania o JavaScript na stronę HTML wraca jako błąd składni w konsoli,
+    # czyli dokładnie ta awaria, przed którą ostrzega blok /chat/ na górze.
+    location @landing {
+        return 302 /;
     }
 }
 
