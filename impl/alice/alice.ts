@@ -70,7 +70,7 @@ switch (cmd) {
     console.log(`DESCR:  ${descr}`)
     console.log(`kid:    ${kid}`)
     console.log(`pubkey: ${pubkey}`)
-    console.log(`\n-> give this pubkey to Bob:  node bob/bob.ts add-peer ${handle} ${pubkey}`)
+    console.log(`\n-> give this pubkey to Bob:  node cli/peer.ts bob add-peer ${handle} ${pubkey}`)
     break
   }
   case 'pubkey':

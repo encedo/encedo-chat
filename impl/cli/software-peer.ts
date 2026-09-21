@@ -1,7 +1,7 @@
 /**
  * software-peer.ts — shared CLI for a software-identity peer (Bob, Carl, ...).
- * Thin per-profile entrypoints (bob/bob.ts, carl/carl.ts) call this with their
- * own keystore path + name. Key stays in a local file; ECDH via node X25519.
+ * `cli/peer.ts <name>` calls this with that name's keystore path; the name is an
+ * argument, not a directory. Key stays in a local file; ECDH via node X25519.
  *
  *   init [--handle <h>]                            generate identity, print pubkey
  *   pubkey                                          print pubkey (base64) to hand out
@@ -14,7 +14,7 @@
  * as a contact) -> `add-peer <them> <their_pub>` -> `join <them>`.
  */
 
-import { Keystore } from '../bob/keystore.ts'
+import { Keystore } from './keystore.ts'
 import { topicFromSecret, todayUTC } from '../lib/rendezvous.ts'
 import { softwareIdentity } from './identity.ts'
 import { runChatSession } from './chat-session.ts'

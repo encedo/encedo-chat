@@ -7,7 +7,7 @@
 
 import { HEM } from '../../hem-sdk-js/hem-sdk.js'
 import { diffieHellman } from 'node:crypto'
-import { Keystore, rawToPriv, rawToPub } from '../bob/keystore.ts'
+import { Keystore, rawToPriv, rawToPub } from './keystore.ts'
 import { hemIdentityFrom, type Identity } from '../lib/core.ts'
 import { SELF_PREFIX, buildSelfDescr, parseSelfDescr, selfLabel } from '../lib/descr.ts'
 

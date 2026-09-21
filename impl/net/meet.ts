@@ -10,7 +10,7 @@
 
 import { diffieHellman, createPublicKey } from 'node:crypto'
 import { multiaddr } from '@multiformats/multiaddr'
-import { rawToPriv } from '../bob/keystore.ts'
+import { rawToPriv } from '../cli/keystore.ts'
 import { topicFromSecret, announceMacKey } from '../lib/rendezvous.ts'
 import { joinRoom } from '../lib/rendezvous-net.ts'
 import { createPeer } from './peer.ts'
