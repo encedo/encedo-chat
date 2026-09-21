@@ -1073,6 +1073,38 @@
   /* A short screen has no room for a wrapped header: keep it on one line. */
   @media (max-height:560px){
     .chat-head{flex-wrap:nowrap;overflow-x:auto;padding:8px 12px}
+
+    /* ---- and no room for the sidebar's chrome either -----------------------
+       Measured on a Galaxy S24 turned sideways (780x360): identity header 76,
+       tabs 66, add button + search 120, profile strip 63 -- 325 of 360 px,
+       leaving the contact list 33 px for the 720 it wanted. It DID scroll; it
+       scrolled inside a slit no finger can aim at, which is why this came in
+       as "the left menu will not scroll in landscape". The fault is not the
+       scrolling, it is that the furniture takes the whole room.
+
+       Specificity, not order: the `pointer:coarse` block below sets the same
+       properties on `.tab` and `.add-btn` and comes later, so every rule here
+       is reached through `.sidebar`. */
+    .sidebar .me{padding:5px 12px;gap:8px}
+    .sidebar .me .avatar{width:30px;height:30px;font-size:11px}
+    /* The fingerprint goes first. It is reassurance, not a control, and the
+       same string is in Settings -- where someone checking it would look. */
+    .sidebar .me .fp-row{display:none}
+    .sidebar .me .icon-btn{width:34px;height:34px;min-width:34px;min-height:34px}
+    .sidebar .tabs{padding:5px 12px;gap:4px}
+    .sidebar .tab{padding:4px 0;min-height:30px}
+    /* Add and search share ONE row. The button keeps a finger-sized target and
+       gives up only its label, which the "+" was already saying. */
+    #head-contacts,#head-groups{display:flex;align-items:center;gap:8px;padding:5px 12px}
+    #head-contacts .search-wrap,#head-groups .search-wrap{padding:0;flex:1;min-width:0;order:1}
+    #head-contacts .add-row,#head-groups .add-row{padding:0;flex:none;order:2}
+    .sidebar .add-row .add-btn{width:40px;padding:0;min-height:36px;font-size:0}
+    .sidebar .add-row .add-btn::before{content:"+";font-size:19px;line-height:1}
+    .sidebar .search-wrap input{min-height:36px;padding:6px 10px}
+    /* The bottom inset still has to be paid -- it is a real gesture bar in the
+       packaged app, and 0 in a browser. */
+    .sidebar .profile-strip{padding:5px 12px calc(5px + env(safe-area-inset-bottom))}
+    .sidebar .profile-strip .chip{min-height:30px;padding:3px 9px}
   }
 
   /* Touch: no hover, so the reaction bar is revealed by TAPPING the bubble
