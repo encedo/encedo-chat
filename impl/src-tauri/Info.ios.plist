@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated iOS bundle by Tauri, ON TOP of the sibling
+  Info.plist, which both platforms share.
+
+  Measured on 2026-09-22, because the merge is easy to mis-read: after
+  `tauri ios init` the generated `gen/apple/onchato_iOS/Info.plist` carries
+  NEITHER file's keys and looks broken. The merge happens at BUILD time. A key
+  placed here came out in the bundle after `tauri ios build`, alongside the
+  ones from Info.plist.
+
+  This file exists for exactly one key, and the reason is a difference between
+  the two Apple platforms rather than a preference.
+
+  NSCameraUsageDescription is deliberately ABSENT from the shared Info.plist,
+  and the comment there says why: on macOS, scanning a QR code goes through
+  the web platform's BarcodeDetector, which no WebKit has ever shipped, so
+  declaring the camera would promise a feature that still could not work.
+
+  On iOS none of that holds. Scanning does not go through the webview at all —
+  it goes through the native `tauri-plugin-barcode-scanner` (our fork, which is
+  `#![cfg(mobile)]`), the same path Android takes, and the Android manifest
+  declares CAMERA for the same reason. So on iOS the camera is a capability the
+  app really has and really uses, and the key belongs here and only here.
+
+  Without it the app does not merely get refused: iOS terminates a process that
+  touches capture with no declared purpose. That is a crash on the first scan,
+  not a denied permission.
+
+  The string is what iOS shows in its own consent dialog, so it is written for
+  the person reading that dialog, in the app's default language, and matches
+  the microphone string next door in tone and in spelling without diacritics.
+  A single Info.plist string cannot be localized without InfoPlist.strings
+  files, which is a deliberate omission here as it is there.
+-->
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>onchato uzywa aparatu tylko do zeskanowania kodu QR kontaktu. Obraz nie jest nigdzie zapisywany ani wysylany.</string>
+</dict>
+</plist>
