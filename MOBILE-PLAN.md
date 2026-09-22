@@ -3,11 +3,12 @@
 Working notes, not a spec. This file is implementation reality, like `CLAUDE.md`
 and `GROUPS-DESIGN.md`.
 
-Written 2026-08-04; brought up to reality 2026-08-30. **Android is no longer a
-plan** — a signed APK ships from CI on every tag, the foreground service keeps
-it reachable in a pocket (confirmed on a device), and the decisions the 2026-08
-draft framed as open are recorded below as decisions. iOS remains the plan it
-was.
+Written 2026-08-04; brought up to reality 2026-08-30 and again 2026-09-22.
+**Android is no longer a plan** — a signed APK ships from CI on every tag, the
+foreground service keeps it reachable in a pocket (confirmed on a device), and
+the decisions the 2026-08 draft framed as open are recorded below as decisions.
+**iOS is no longer a plan either**: it builds and runs on the simulator. It is
+not yet released — no CI workflow, no device test, no signing.
 
 ---
 
@@ -128,29 +129,92 @@ template text in `test/android-patch.test.ts`.
 
 ---
 
-## iOS
+## iOS — it runs. This section records what that took.
 
-A MacBook Air M5 is available, which changes the economics from what was
-assumed earlier.
+Built and launched on the simulator 2026-09-22. Not released: there is no CI
+workflow yet (see the open items at the end of this section).
 
 | | |
 |---|---|
-| Build | **locally on the Mac**, Xcode. Not possible from the Linux VM — and note the VM is a guest on that same Mac. |
+| Build machine | **macMini** (`ssh macmini`), macOS 27, Xcode 27, CocoaPods 1.17. Not possible from the Linux VM. **No GitHub credentials live there** — the tree goes over `rsync`. |
 | Test on your own iPhone | **free** — free provisioning with an ordinary Apple ID; the signature expires after 7 days and is re-signed. |
 | 99 USD/yr | only for **TestFlight / App Store**, i.e. shipping to anyone else. |
 | WebRTC | **present** in WKWebView — unlike desktop WebKitGTK, so the direct plane should live on iOS. |
-| Crypto | Safari 17 added X25519 to WebCrypto. Do not trust the version number — this is the WebKitGTK lesson; run the probe. |
+| Crypto | **Measured, not assumed.** WKWebView on iOS 26.3 has X25519 and the app reaches sign-in. On iOS 17.2 it does not: the capability gate fires `NotSupportedError` and sign-in is disabled. |
 | Export compliance | E2E encryption requires the declaration at publication. |
 
 ```bash
-npm run tauri -- ios init          # npm run, not npx — the Android trap applies
-npm run tauri -- ios dev           # device or simulator
-npm run tauri -- ios build
+npm run tauri -- ios init                          # npm run, not npx — the Android trap applies
+node src-tauri/ios/patch.mjs src-tauri/gen/apple   # see below — REQUIRED
+npm run tauri -- ios build --debug --target aarch64-sim
 ```
 
-**Sequencing:** open onchato.com in mobile Safari first. It is the same WebKit
-WKWebView uses, so a green probe there means the packaging is a formality and a
-red one saves the whole exercise.
+The third line is the **simulator** build; a device build has not been run yet.
+
+**`minimumSystemVersion` is 26.0**, in `tauri.conf.json`. Without a floor the
+app installs on systems where it cannot be used at all — no X25519 means no
+shared room and no identity — so the floor exists to refuse the install rather
+than ship a dead app. Verified on both sides: iOS 17.2 answers *"You need to
+update this iPhone to iOS 26.0 to install this app"*, iOS 26.3 reaches sign-in.
+The exact boundary is unmeasurable on this Mac — its simulator runtimes jump
+from 17.2 straight to 26.3, with nothing in between.
+
+### The four traps, all of which cost real time
+
+1. **A black screen, and not one line of error.** The main window is
+   `"create": false` in `tauri.conf.json`, because only the builder takes the
+   `on_download` hook, and the hand-built window in `lib.rs` is `#[cfg(desktop)]`
+   — which iOS is not. Android is rescued by `tauri.android.conf.json`; iOS had
+   no such file until `tauri.ios.conf.json`, which is byte for byte the same.
+   **This is the same bug Android had in 68eb14b**, on a platform where nobody
+   had looked for it yet.
+2. **`ios init` does not overwrite an existing `gen/apple`.** Change the config,
+   re-run init, and the old `IPHONEOS_DEPLOYMENT_TARGET` stays while the build
+   succeeds. `rm -rf src-tauri/gen/apple` first, then verify the value landed.
+3. **`swift-rs` 1.0.7 does not compile under Xcode 27** (clang module scanning,
+   AppKit). 1.0.8 does. It is a build-dependency of tauri on Apple targets only —
+   `cargo tree -i swift-rs` finds nothing on Linux — so the bump is inert
+   everywhere else.
+4. **`failed to rename app … Directory not empty (os error 66)`** is a leftover
+   `gen/apple/build/arm64-sim/onchato.app` from the previous run, not a code
+   failure. `rm -rf src-tauri/gen/apple/build`.
+
+### `Info.plist` — merged by Tauri, not by a script
+
+`src-tauri/Info.plist` (shared with macOS) and `src-tauri/Info.ios.plist` are
+both merged into the bundle **at build time, not at `init`** — after an `init`
+alone the generated plist carries neither file's keys and looks broken, which is
+a good way to waste an hour. So the usage descriptions are declared in those
+tracked files and `patch.mjs` must never grow a competing copy.
+
+The split is not a preference. `NSMicrophoneUsageDescription` is shared.
+`NSCameraUsageDescription` is **iOS-only**: on macOS a QR scan would need
+`BarcodeDetector`, which no WebKit ships, so declaring the camera there would
+promise a feature that cannot work — while on iOS scanning goes through the
+native `tauri-plugin-barcode-scanner`, exactly as on Android. Without the key
+iOS does not refuse the camera, it **terminates the process**.
+
+### `patch.mjs` — the iOS half, and it is small on purpose
+
+`src-tauri/gen/apple` is generated and gitignored like its Android counterpart,
+so nothing can be edited there by hand. `src-tauri/ios/patch.mjs` runs after
+`ios init` and does **one** thing: installs `icons/ios` over the template's
+AppIcon set, because `ios init` ignores our icons entirely and the app otherwise
+wears **Tauri's logo** — the same bug Android shipped at 0.4.5, found here
+before release. It asserts in both directions (a file the template wants and we
+lack; a file we carry that the template never references, which is the dangerous
+one, because copying it looks like success and changes nothing on the home
+screen). Unit-tested against the real generated file list in
+`test/ios-patch.test.ts`, so a template change breaks on a laptop rather than on
+the Mac.
+
+### Still open
+
+- **No `.github/workflows/ios.yml`.** Until there is one, `patch.mjs` runs only
+  when a human remembers, and the first CI build would ship Tauri's logo again.
+- **Nothing tested on a physical device yet** — a paired iPhone is visible from
+  the macMini, so this is the next step, not a blocked one.
+- **No release plumbing**: signing, `latest.json`, export compliance.
 
 ---
 
@@ -160,7 +224,9 @@ red one saves the whole exercise.
 2. ~~**iPhone, mobile Safari**~~ — **done 2026-08-04, green.**
 3. ~~**Android toolchain** → APK~~ — **done: signed APK from CI on every tag.**
 4. ~~**Decide the background model**~~ — **decided and built: foreground service.**
-5. **iOS packaging on the Mac** — the one remaining step; step 2 was green.
+5. **iOS packaging on the Mac** — **built 2026-09-22**: the app runs on the
+   simulator, wearing our own icon, with the camera and microphone declared.
+   What remains is a CI workflow, a physical device, and release plumbing.
 6. ~~macOS bundle~~ — **done: `desktop.yml` builds macOS alongside Linux/Windows.**
 
 ## What is NOT in scope here
