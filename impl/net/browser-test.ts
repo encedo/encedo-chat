@@ -2997,6 +2997,33 @@ async function main() {
       return !document.getElementById('welcome-modal').classList.contains('open')`)
     if (!gone) throw new Error('the first-run card cannot be dismissed')
 
+    // ---- "open" is a class; VISIBLE is a box -------------------------------
+    // 0.6.18 shipped with an unclosed <div> on this very card, which nested the
+    // Settings drawer and every modal after it INSIDE a display:none element.
+    // Everything still reported `classList.contains('open')`, so every
+    // assertion in this file passed while the drawer rendered at 0x0 and
+    // Settings was unusable. A class says what we intended; only a rectangle
+    // says what the user got.
+    const box = async (id: string, what: string) => {
+      const r = await B.eval<any>(`
+        const el = document.getElementById(${JSON.stringify(id)});
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { w: Math.round(b.width), h: Math.round(b.height) };
+      `)
+      if (!r) throw new Error(`${what}: #${id} is not in the document`)
+      if (r.w < 80 || r.h < 60) {
+        throw new Error(`${what}: #${id} reports open but renders ${r.w}x${r.h}`
+          + ' — something above it in the DOM is hidden (an unclosed tag will do it)')
+      }
+    }
+    await B.eval(`document.getElementById('btn-settings').click(); return 1`)
+    await B.waitFor('the settings drawer', `
+      return document.getElementById('drawer').classList.contains('open')`, 10_000)
+    await box('drawer', 'settings')
+    await B.eval(`document.getElementById('btn-close-drawer').click(); return 1`)
+    step('settings opens as a panel with a real size, not just a class')
+
     // EVERY sign-in with an empty book, not just the first. The name "first-run
     // card" is what invites somebody to add a seen-once flag, and that flag is
     // exactly wrong: a person returning to a profile they have not used still
