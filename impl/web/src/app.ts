@@ -1424,6 +1424,17 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   // It takes precedence over the welcome card: someone arriving with a link has
   // already been told what to do, and being told again first would be noise.
   if (pendingInvite) void showInvite(pendingInvite)
+  // Shown on EVERY sign-in with an empty contact book, not only a first run:
+  // somebody returning to a profile they have not used still has nobody to
+  // write to, and the old rule also suppressed it for anyone holding groups,
+  // which is exactly a person who can have groups and still no contacts.
+  //
+  // Sign-in is the ONLY trigger. Removing your last contact deliberately shows
+  // nothing: a window that reappears on an ordinary delete is a window that
+  // punishes tidying up. It comes back the next time you log in (user's call).
+  else if (!contactsCache.length) {
+    $('scrim').classList.add('open'); $('welcome-modal').classList.add('open')
+  }
 }
 
 // ---- contacts (HEM-backed book; in-memory cache keeps re-renders cheap) ----
@@ -1656,8 +1667,9 @@ function renderContacts() {
       const e = document.createElement('div'); e.className = 'pane-label'
       e.textContent = tr('(brak dopasowań)'); pane.appendChild(e); return
     }
-    paintWays(pane)
-    return
+    const e = document.createElement('div'); e.className = 'pane-label'
+    e.textContent = tr('(brak kontaktów — dodaj peera)')
+    pane.appendChild(e); return
   }
   for (const c of list) {
     const room = rooms.get(c.pub)
@@ -2233,57 +2245,6 @@ window.addEventListener('hashchange', () => {
   if (session) void showInvite(inv) // otherwise the login screen hands it over
 })
 
-/**
- * The three ways a conversation can start, drawn where there is nobody to talk
- * to yet.
- *
- * It lives IN the empty contact list rather than in a window over it. The
- * question "what now" is asked by the emptiness itself, so the answer belongs
- * in the same place - and it leaves by itself when the first contact arrives.
- * A card had to be dismissed, and dismissing it put the person back on the
- * blank list that prompted the question, which is where this started.
- *
- * `hasStoredGroups` went with the card. It existed to tell a returning user
- * from a new one so the greeting would not patronise the former; an empty
- * contact list is an empty contact list whoever is looking at it, and somebody
- * who has groups but nobody to message still needs to know how to get one.
- *
- * Each row describes a SITUATION, not a mechanism: "for somebody you know" is
- * answerable on a first run, "which key-exchange model do you prefer" is a
- * quiz. And none of them performs anything - each opens the surface that owns
- * the job, because this points rather than does.
- */
-function paintWays(host: HTMLElement) {
-  const intro = document.createElement('div'); intro.className = 'ways-intro'
-  const h = document.createElement('h3')
-  h.textContent = tr('Nie masz jeszcze żadnego kontaktu')
-  const p = document.createElement('p')
-  // The sentence that answers the question somebody actually just asked: they
-  // are looking for a box to search users in, and there is no directory.
-  p.textContent = tr('Nie ma tu listy użytkowników, której można by poszukać — kontakt powstaje dopiero wtedy, gdy obie strony mają swoje klucze publiczne. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie widzi.')
-  intro.append(h, p)
-
-  const ways = document.createElement('div'); ways.className = 'ways'
-  const way = (id: string, cls: string, title: string, sub: string, go: () => void) => {
-    const b = document.createElement('button'); b.type = 'button'; b.id = id; b.className = cls
-    const hd = document.createElement('span'); hd.className = 'w-hd'; hd.textContent = title
-    const s2 = document.createElement('small'); s2.textContent = sub
-    b.append(hd, s2)
-    b.addEventListener('click', go)
-    ways.appendChild(b)
-  }
-  way('way-share', 'way lead', tr('Wyślij swój profil'),
-    tr('Dla kogoś, kogo znasz. Wymieniacie się kluczami i każde z Was sprawdza odcisk drugiego. Nikt się do Ciebie nie odezwie, dopóki sam nie weźmiesz jego klucza.'),
-    () => void openShare())
-  way('way-invite', 'way', tr('Opublikuj zaproszenie'),
-    tr('Jeden link, który możesz gdziekolwiek powiesić. Kto go ma, może zapukać — zobaczysz odcisk i notatkę, i zdecydujesz. Pukanie odbierzesz, gdy aplikacja jest otwarta; druga strona ponawia.'),
-    () => { $('tab-invites').click(); $('btn-new-invite').click() })
-  way('way-have', 'way quiet', tr('Mam czyjeś zaproszenie'),
-    tr('Wklej link albo sam kod, który ktoś Ci podał.'),
-    () => { $('tab-invites').click(); $('btn-have-invite').click() })
-
-  host.append(intro, ways)
-}
 
 /**
  * -----------------------------------------------------------------------------
@@ -3025,7 +2986,7 @@ $('pw-save').addEventListener('click', async () => {
 $('btn-settings').addEventListener('click', openDrawer)
 $('chip-profile').addEventListener('click', openDrawer)
 $('btn-close-drawer').addEventListener('click', closeDrawer)
-$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); pendingInvite = null; closeImport(); closeScan(); closeIgnored(); closePaste() })
+$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); closeWelcome(); pendingInvite = null; closeImport(); closeScan(); closeIgnored(); closePaste() })
 $('btn-logout').addEventListener('click', () => location.reload())
 // The same act, from the header rather than from inside Settings — but asked
 // first, because this one sits beside a button people press often. Logging out
@@ -4270,6 +4231,30 @@ $('btn-new-invite')?.addEventListener('click', async () => {
  * There is deliberately no shortcut past that comparison - it is the only thing
  * standing between a link and a man in the middle.
  */
+/**
+ * The first screen: shown on every sign-in with an empty contact book.
+ *
+ * Not only on a first run, and not suppressed for somebody holding groups —
+ * a person returning to a profile they have not used still has nobody to write
+ * to, and having groups is no evidence of having contacts.
+ *
+ * Sign-in is the ONLY trigger (the user's call, 2026-09-22). Removing the last
+ * contact deliberately shows nothing: a window that reappears on an ordinary
+ * delete punishes tidying up. It returns at the next sign-in.
+ *
+ * Each row hands off to the surface that already owns the job — the invites tab
+ * mints and lists, the paste window reads. This points; it does not perform.
+ */
+const closeWelcome = () => { $('scrim').classList.remove('open'); $('welcome-modal').classList.remove('open') }
+$('welcome-close')?.addEventListener('click', closeWelcome)
+$('welcome-share')?.addEventListener('click', () => { closeWelcome(); void openShare() })
+$('welcome-invite')?.addEventListener('click', () => {
+  closeWelcome(); $('tab-invites').click(); $('btn-new-invite').click()
+})
+$('welcome-have')?.addEventListener('click', () => {
+  closeWelcome(); $('tab-invites').click(); $('btn-have-invite').click()
+})
+
 const closePaste = () => { $('scrim').classList.remove('open'); $('paste-modal').classList.remove('open') }
 $('btn-have-invite')?.addEventListener('click', () => {
   ;($('paste-input') as HTMLTextAreaElement).value = ''

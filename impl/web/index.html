@@ -857,7 +857,7 @@
      and will not find one, because there is no directory to search. So the card
      names the three doors there ARE, and each row describes a SITUATION rather
      than a mechanism -- "for somebody you know", not "asymmetric key exchange". */
-  .ways{display:flex;flex-direction:column;gap:8px}
+  .ways{display:flex;flex-direction:column;gap:8px;margin-top:14px}
   .way{display:block;width:100%;text-align:left;background:var(--bg);border:1px solid var(--border);
        border-radius:10px;padding:11px 13px;cursor:pointer;color:var(--text)}
   .way:hover{border-color:var(--accent);background:var(--accent-soft)}
@@ -868,13 +868,9 @@
   /* A quieter third row: it answers "somebody handed me a link", which is a
      different question from the two above it. */
   .way.quiet{background:none;border-style:dashed}
-  /* In the pane, not in a window over it: the question is asked by the empty
-     list, so the answer is drawn in the list. Nothing to scroll around either -
-     `.pane` already overflows, on every screen height. */
-  .ways-intro{padding:14px 12px 2px}
-  .ways-intro h3{margin:0 0 6px;font-size:14px;color:var(--text)}
-  .ways-intro p{margin:0;font-size:12px;line-height:1.5;color:var(--muted)}
-  .ways{margin:10px 6px 12px}
+  /* A tall card on a short screen (a phone on its side) must scroll INSIDE
+     itself rather than growing off both ends of the viewport. */
+  #welcome-modal{max-height:calc(var(--app-h,100dvh) - 28px);overflow-y:auto}
   .xfer-track{height:6px;border-radius:3px;background:var(--accent-soft);overflow:hidden;margin:10px 0 6px}
   .xfer-fill{height:100%;width:0%;background:var(--accent);border-radius:3px;transition:width .2s ease}
   .xfer-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px;font-size:12px;color:var(--muted)}
@@ -1620,6 +1616,30 @@
     <div class="modal-actions"><button class="btn-send" id="paste-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="paste-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
+  <!-- The first thing somebody sees after making an identity, and the moment
+       the product is most often lost: they are looking for a "find a user" box
+       and there is no directory to search. So the card says why, and then names
+       the three doors that exist. Each row describes a SITUATION -- "for
+       somebody you know" -- because "which key-exchange model do you prefer" is
+       a quiz nobody passes on their first run. -->
+  <div class="modal" id="welcome-modal">
+    <h2 data-i18n="Jesteś w środku. Teraz potrzebujesz drugiej osoby.">Jesteś w środku. Teraz potrzebujesz drugiej osoby.</h2>
+    <div class="msub" data-i18n="Nie ma tu listy użytkowników, której można by poszukać — kontakt powstaje dopiero wtedy, gdy obie strony mają swoje klucze publiczne. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie widzi.">Nie ma tu listy użytkowników, której można by poszukać — kontakt powstaje dopiero wtedy, gdy obie strony mają swoje klucze publiczne. Od tego momentu treść jest szyfrowana end-to-end i żaden serwer po drodze jej nie widzi.</div>
+    <div class="ways">
+      <button type="button" class="way lead" id="welcome-share">
+        <span class="w-hd"><span data-i18n="Wyślij swój profil">Wyślij swój profil</span></span>
+        <small data-i18n="Dla kogoś, kogo znasz. Wymieniacie się kluczami i każde z Was sprawdza odcisk drugiego. Nikt się do Ciebie nie odezwie, dopóki sam nie weźmiesz jego klucza.">Dla kogoś, kogo znasz. Wymieniacie się kluczami i każde z Was sprawdza odcisk drugiego. Nikt się do Ciebie nie odezwie, dopóki sam nie weźmiesz jego klucza.</small>
+      </button>
+      <button type="button" class="way" id="welcome-invite">
+        <span class="w-hd"><span data-i18n="Opublikuj zaproszenie">Opublikuj zaproszenie</span></span>
+        <small data-i18n="Jeden link, który możesz gdziekolwiek powiesić. Kto go ma, może zapukać — zobaczysz odcisk i notatkę, i zdecydujesz. Pukanie odbierzesz, gdy aplikacja jest otwarta; druga strona ponawia.">Jeden link, który możesz gdziekolwiek powiesić. Kto go ma, może zapukać — zobaczysz odcisk i notatkę, i zdecydujesz. Pukanie odbierzesz, gdy aplikacja jest otwarta; druga strona ponawia.</small>
+      </button>
+      <button type="button" class="way quiet" id="welcome-have">
+        <span class="w-hd"><span data-i18n="Mam czyjeś zaproszenie">Mam czyjeś zaproszenie</span></span>
+        <small data-i18n="Wklej link albo sam kod, który ktoś Ci podał.">Wklej link albo sam kod, który ktoś Ci podał.</small>
+      </button>
+    </div>
+    <div class="modal-actions"><button class="btn-ghost" id="welcome-close" style="flex:1" data-i18n="Później">Później</button></div>
   <div class="modal" id="import-modal">
     <h2 data-i18n="Zaproszenie">Zaproszenie</h2>
     <div class="msub" data-i18n="Ktoś przysłał Ci swój profil. Sprawdź odcisk, zanim dodasz.">Ktoś przysłał Ci swój profil. Sprawdź odcisk, zanim dodasz.</div>
