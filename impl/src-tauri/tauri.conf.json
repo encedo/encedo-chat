@@ -49,6 +49,7 @@
       "icons/icon.png",
       "icons/icon.ico"
     ],
+    "iOS": { "minimumSystemVersion": "26.0" },
     "createUpdaterArtifacts": true
   },
   "plugins": {
