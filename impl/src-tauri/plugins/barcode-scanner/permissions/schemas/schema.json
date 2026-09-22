@@ -355,6 +355,18 @@
           "markdownDescription": "Denies the scan command without any pre-configured scope."
         },
         {
+          "description": "Enables the set_zoom command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-zoom",
+          "markdownDescription": "Enables the set_zoom command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_zoom command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-zoom",
+          "markdownDescription": "Denies the set_zoom command without any pre-configured scope."
+        },
+        {
           "description": "Enables the vibrate command without any pre-configured scope.",
           "type": "string",
           "const": "allow-vibrate",
@@ -367,10 +379,22 @@
           "markdownDescription": "Denies the vibrate command without any pre-configured scope."
         },
         {
-          "description": "This permission set configures which\nbarcode scanning features are by default exposed.\n\n#### Granted Permissions\n\nIt allows all barcode related features.\n\n\n#### This default permission set includes:\n\n- `allow-cancel`\n- `allow-check-permissions`\n- `allow-open-app-settings`\n- `allow-request-permissions`\n- `allow-scan`\n- `allow-vibrate`",
+          "description": "Enables the zoom_range command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-zoom-range",
+          "markdownDescription": "Enables the zoom_range command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the zoom_range command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-zoom-range",
+          "markdownDescription": "Denies the zoom_range command without any pre-configured scope."
+        },
+        {
+          "description": "This permission set configures which\nbarcode scanning features are by default exposed.\n\n#### Granted Permissions\n\nIt allows all barcode related features.\n\n\n#### This default permission set includes:\n\n- `allow-cancel`\n- `allow-check-permissions`\n- `allow-open-app-settings`\n- `allow-request-permissions`\n- `allow-scan`\n- `allow-vibrate`\n- `allow-set-zoom`\n- `allow-zoom-range`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "This permission set configures which\nbarcode scanning features are by default exposed.\n\n#### Granted Permissions\n\nIt allows all barcode related features.\n\n\n#### This default permission set includes:\n\n- `allow-cancel`\n- `allow-check-permissions`\n- `allow-open-app-settings`\n- `allow-request-permissions`\n- `allow-scan`\n- `allow-vibrate`"
+          "markdownDescription": "This permission set configures which\nbarcode scanning features are by default exposed.\n\n#### Granted Permissions\n\nIt allows all barcode related features.\n\n\n#### This default permission set includes:\n\n- `allow-cancel`\n- `allow-check-permissions`\n- `allow-open-app-settings`\n- `allow-request-permissions`\n- `allow-scan`\n- `allow-vibrate`\n- `allow-set-zoom`\n- `allow-zoom-range`"
         }
       ]
     }

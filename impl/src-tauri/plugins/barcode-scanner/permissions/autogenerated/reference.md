@@ -15,6 +15,8 @@ It allows all barcode related features.
 - `allow-request-permissions`
 - `allow-scan`
 - `allow-vibrate`
+- `allow-set-zoom`
+- `allow-zoom-range`
 
 ## Permission Table
 
@@ -158,6 +160,32 @@ Denies the scan command without any pre-configured scope.
 <tr>
 <td>
 
+`barcode-scanner:allow-set-zoom`
+
+</td>
+<td>
+
+Enables the set_zoom command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`barcode-scanner:deny-set-zoom`
+
+</td>
+<td>
+
+Denies the set_zoom command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `barcode-scanner:allow-vibrate`
 
 </td>
@@ -177,6 +205,32 @@ Enables the vibrate command without any pre-configured scope.
 <td>
 
 Denies the vibrate command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`barcode-scanner:allow-zoom-range`
+
+</td>
+<td>
+
+Enables the zoom_range command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`barcode-scanner:deny-zoom-range`
+
+</td>
+<td>
+
+Denies the zoom_range command without any pre-configured scope.
 
 </td>
 </tr>
