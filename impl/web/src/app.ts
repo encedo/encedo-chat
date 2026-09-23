@@ -19,6 +19,7 @@ import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSessi
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import { exportProfile, openBundle, applyBundle, conflictsWith, localKV, FILE_EXT } from '../../lib/migrate.ts'
 import { decodeInvite, inviteLink, type Invite } from '../../lib/invite.ts'
+import { pickFirst, orderFrom } from '../../lib/nodepick.ts'
 import jsQR from './vendor/jsqr.cjs'
 import { checkBook, signBook, pack, type Verdict } from '../../lib/bookmac.ts'
 import type { GkBackend } from '../../lib/group.ts'
@@ -93,9 +94,9 @@ import published from '../../../infra/nodes.json'
 // list that must agree is a bug with a delay on it; importing the file removes
 // the second copy. `enabled` is the client's own idea and is not in the file.
 
-interface NodeEntry { name: string; addr: string; enabled: boolean }
-const DEFAULT_NODES: NodeEntry[] = (published.nodes as Array<{ name: string; addr: string }>)
-  .map((n) => ({ name: n.name, addr: n.addr, enabled: true }))
+interface NodeEntry { name: string; addr: string; enabled: boolean; w?: number }
+const DEFAULT_NODES: NodeEntry[] = (published.nodes as Array<{ name: string; addr: string; w?: number }>)
+  .map((n) => ({ name: n.name, addr: n.addr, enabled: true, ...(typeof n.w === 'number' ? { w: n.w } : {}) }))
 /** The floor under every dial: the first published node. */
 const RELAY = DEFAULT_NODES[0].addr
 function loadNodes(): NodeEntry[] {
@@ -103,8 +104,28 @@ function loadNodes(): NodeEntry[] {
   return DEFAULT_NODES.map((n) => ({ ...n }))
 }
 function saveNodes(list: NodeEntry[]) { try { localStorage.setItem('ec-nodes', JSON.stringify(list)) } catch {} }
-/** The relay to dial this session — the first enabled node, or the first published one as a floor. */
-function chosenRelay(): string { return loadNodes().find((n) => n.enabled)?.addr || RELAY }
+/**
+ * The node drawn for THIS session, remembered.
+ *
+ * Drawn once and kept, because `chosenRelays()` is asked six times over a
+ * session — when the room opens, when the relay set is refreshed, for the ICE
+ * servers — and a fresh draw on each call would quietly change which node is
+ * "first" underneath a session that had already been established on another.
+ * Re-drawn only if the node it picked is no longer enabled, which is somebody
+ * turning it off in Settings.
+ */
+let drawnRelay: string | null = null
+function drawFirst(on: NodeEntry[]): NodeEntry[] {
+  if (drawnRelay && on.some((n) => n.addr === drawnRelay)) {
+    return orderFrom(on, on.findIndex((n) => n.addr === drawnRelay))
+  }
+  const ordered = orderFrom(on, pickFirst(on, Math.random()))
+  drawnRelay = ordered[0]?.addr ?? null
+  return ordered
+}
+
+/** The relay to dial this session — the drawn node, or the first published one as a floor. */
+function chosenRelay(): string { return chosenRelays()[0] || RELAY }
 /**
  * All enabled nodes in list order — the failover candidates (3b). The first is
  * the preferred relay; if it is down the session falls through to the next.
@@ -119,8 +140,11 @@ function chosenRelay(): string { return loadNodes().find((n) => n.enabled)?.addr
  * fallback it should be. Nothing here reads a name — change the file, not this.
  */
 function chosenRelays(): string[] {
-  const on = loadNodes().filter((n) => n.enabled).map((n) => n.addr)
-  return on.length ? on : [RELAY]
+  const on = loadNodes().filter((n) => n.enabled)
+  if (!on.length) return [RELAY]
+  // With no weights in the published file — which is the case today —
+  // `pickFirst` returns 0 and this is the published order, unchanged.
+  return drawFirst(on).map((n) => n.addr)
 }
 /**
  * Transport. libp2p is the default; `?mqtt=1` switches to the broker (fall-back
