@@ -1044,7 +1044,7 @@ async function softLogin() {
       const plain = await unseal(pass, blob)
       id = await browserSoftwareIdentity(name, () => plain, () => {})
     }
-    closeSoftModal()
+    endModals() // signed in: the app is behind this, not another window
     activeSoftProfile = name
     // The handle lives INSIDE the sealed blob, and the blob's own storage key is
     // the name - so a rename is unseal, rewrite, re-seal, move, and only then is
@@ -1856,7 +1856,7 @@ function promptName(title: string, sub: string, current: string, label = 'Nazwa'
     $('members-pop').hidden = true; closeEmojiPop()
     pushModal('rename-modal')
     const done = (v: string | null) => {
-      dropModal('rename-modal')
+      if (v) endModals(); else dropModal('rename-modal') // saved, or withdrawn
       input.type = 'text'
       $('rename-save').removeEventListener('click', onSave)
       $('rename-cancel').removeEventListener('click', onCancel)
@@ -2105,7 +2105,17 @@ function endModals() {
  */
 function dropModal(id: string) {
   const i = modalStack.lastIndexOf(id)
-  if (i < 0) return
+  if (i < 0) {
+    // On screen but not in the stack: something put it there outside this
+    // mechanism. Close it anyway and leave the stack alone — a window that
+    // refuses to close because the bookkeeping disagrees is a worse failure
+    // than the bookkeeping being wrong, and it is the one the person is stuck
+    // looking at.
+    MODAL_EXIT[id]?.()
+    $(id).classList.remove('open')
+    if (!modalStack.length) $('scrim').classList.remove('open')
+    return
+  }
   modalStack.splice(i, 1)
   MODAL_EXIT[id]?.()
   $(id).classList.remove('open')
@@ -3164,7 +3174,7 @@ $('pw-save').addEventListener('click', async () => {
     // failure anywhere in here leaves the profile openable with the old one.
     const next = await reseal(oldPw, a, blob)
     localStorage.setItem(softKey(activeSoftProfile), JSON.stringify(next))
-    closePasswd(); toast(tr('Hasło zmienione.'))
+    endModals(); toast(tr('Hasło zmienione.')) // changed; Settings is outside the stack and stays
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('pw-msg', tr('Złe obecne hasło.'), 'err')
     else setMsg('pw-msg', tr('Błąd: ') + (e?.message ?? e), 'err')
@@ -4238,8 +4248,13 @@ function promptInvite(current?: PubInvite): Promise<{ label: string; expires?: n
     pushModal('invite-modal')
 
     const onTtl = () => { $('invite-when-box').hidden = ttl.value !== 'custom' }
+    // The value says which of the two exits this is, and it is the only place
+    // that knows: `done` is shared by Save and Cancel. Creating an invite is a
+    // finished errand — coming back to the card that offered it (reported from
+    // onboarding: "dałem utwórz i wróciło na modal onboardingu") is the same
+    // absurdity as returning to "Dodaj peera" after adding somebody.
     const done = (v: { label: string; expires?: number } | null) => {
-      dropModal('invite-modal')
+      if (v) endModals(); else dropModal('invite-modal')
       $('invite-save').removeEventListener('click', onSave)
       $('invite-cancel').removeEventListener('click', onCancel)
       ttl.removeEventListener('change', onTtl)
@@ -5696,11 +5711,11 @@ $('mig-go')?.addEventListener('click', async () => {
   try {
     if (migMode === 'export') {
       if (!(await runExport(password))) return
-      closeMigrate()
+      endModals() // the profile moved; nothing to step back into
       toast(tr('Zapisano plik z profilem — pamiętaj, że to przeniesienie, a nie kopia'))
     } else {
       const name = await runImport(password)
-      closeMigrate()
+      endModals() // the profile moved; nothing to step back into
       // Straight into the login form with the name filled in: the password that
       // opens this profile has just been typed, and asking someone to go and
       // find the profile they have only now moved in is a strange end to a
@@ -8487,7 +8502,7 @@ $('group-create').addEventListener('click', async () => {
     const gu: GroupUI = { gid, name, epoch: 0, members: roster.map((m) => ({ pub: m.pub })), log: [], unseen: 0, room: null }
     groupsUI.set(gid, gu)
     gu.room = await client.openGroup(gid, groupHandlers(gid))
-    closeGroupModal()
+    endModals() // the group exists; the window that made it has nothing left to offer
     await activateGroup(gid)
     void distributeGroup(gid, name) // send the invite (keys) to each member over 1:1
     void persistGroups() // the new group must survive a reload immediately

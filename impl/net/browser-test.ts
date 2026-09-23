@@ -2745,6 +2745,13 @@ async function main() {
       document.getElementById('invite-label').value = 'dla informatorów';
       document.getElementById('invite-save').click();
       return new Promise((res) => setTimeout(() => {
+        // Creating an invite FINISHES the errand, so no window may survive it.
+        // It did: the window that offered the invite came back, because the
+        // save and the cancel shared one exit and both stepped back (reported
+        // from onboarding, 2026-09-23 -- "dałem utwórz i wróciło na modal
+        // onboardingu"). Read first, before the clipboard work below can open
+        // anything of its own.
+        window.__stillOpen = [...document.querySelectorAll('.modal.open')].map((m) => m.id);
         window.__copied = null;
         // Headless does not always expose a clipboard, and the app's own copy
         // path swallows that — so the stand-in is installed rather than assumed.
@@ -2754,6 +2761,7 @@ async function main() {
         const row = document.querySelector('#pane-invites .inv-row');
         if (row) row.querySelector('.inv-acts button').click();
         setTimeout(() => res({
+          stillOpen: window.__stillOpen,
           link: window.__copied,
           shown: document.querySelectorAll('#pane-invites .inv-row').length,
           label: (document.querySelector('#pane-invites .inv-label') || {}).textContent,
@@ -2763,6 +2771,9 @@ async function main() {
         }), 300);
       }, 700));
     `)
+    if (inv.stillOpen?.length)
+      throw new Error(`creating an invite left ${JSON.stringify(inv.stillOpen)} on screen`
+        + ' — a finished errand closes the windows it came through, it does not step back into them')
     if (inv.shown !== 1) throw new Error(`the invite was not created: ${JSON.stringify(inv)}`)
     if (inv.label !== 'dla informatorów') throw new Error(`the typed name did not survive: ${inv.label}`)
     if (/^do /.test(inv.when)) throw new Error(`an invite expired without anybody asking for it: ${inv.when}`)
@@ -3046,20 +3057,46 @@ async function main() {
     // Each door, one at a time, back to the card in between. What is asserted is
     // the DESTINATION: onboarding points at the surface that owns the job, and a
     // button that quietly stopped pointing anywhere would still look fine.
-    const door = async (id: string, opens: string) => {
+    //
+    // Each door is opened AND backed out of through the app's own controls. It
+    // used to put the card back by setting classes by hand, which tested the
+    // button and nothing else — and stepping back is now half the promise: this
+    // card is the only orientation a new profile has, so withdrawing from what
+    // it opened has to return here rather than empty the screen.
+    const door = async (id: string, opens: string, cancel: string) => {
       await B.eval(`document.getElementById(${JSON.stringify(id)}).click(); return 1`)
       await B.waitFor(`${id} opens ${opens}`, `
         return document.getElementById(${JSON.stringify(opens)}).classList.contains('open')`, 10_000)
-      await B.eval(`
-        document.getElementById(${JSON.stringify(opens)}).classList.remove('open');
-        document.getElementById('scrim').classList.remove('open');
-        document.getElementById('welcome-modal').classList.add('open');
-        return 1;
-      `)
+      await B.eval(`document.getElementById(${JSON.stringify(cancel)}).click(); return 1`)
+      await B.waitFor(`backing out of ${opens} returns to the card`, `
+        return document.getElementById('welcome-modal').classList.contains('open')
+          && !document.getElementById(${JSON.stringify(opens)}).classList.contains('open')`, 10_000)
     }
-    await door('welcome-share', 'share-modal')
-    await door('welcome-invite', 'invite-modal')
-    await door('welcome-have', 'paste-modal')
+    await door('welcome-share', 'share-modal', 'share-close')
+    await door('welcome-invite', 'invite-modal', 'invite-cancel')
+    await door('welcome-have', 'paste-modal', 'paste-cancel')
+    step('each way in comes back to the card when you withdraw from it')
+
+    // And FINISHING one closes everything, including the card that offered it.
+    // Reported from onboarding: creating an invite came back to the card,
+    // because save and cancel shared one exit. Only reproducible from HERE —
+    // started from the invites tab the window is alone in the stack, and
+    // stepping back and finishing look identical.
+    await B.eval(`document.getElementById('welcome-invite').click(); return 1`)
+    await B.waitFor('the card opens the invite window again',
+      `return document.getElementById('invite-modal').classList.contains('open')`, 10_000)
+    await B.eval(`
+      document.getElementById('invite-label').value = 'z onboardingu';
+      document.getElementById('invite-save').click(); return 1`)
+    await sleep(700)
+    const afterCreate = await B.eval<string[]>(`
+      return [...document.querySelectorAll('.modal.open')].map((m) => m.id)`)
+    if (afterCreate.length)
+      throw new Error(`creating an invite from the first-run card left ${JSON.stringify(afterCreate)} on screen`
+        + ' — finishing an errand closes the windows it came through, it does not step back into them')
+    step('finishing one closes the card too, instead of stepping back into it')
+
+    await B.eval(`document.getElementById('welcome-modal').classList.add('open'); return 1`) // the dismissal check below needs it
     await B.eval(`document.getElementById('welcome-close').click(); return 1`)
     const gone = await B.eval<boolean>(`
       return !document.getElementById('welcome-modal').classList.contains('open')`)
