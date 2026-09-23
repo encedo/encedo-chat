@@ -2654,6 +2654,30 @@ async function openScan() {
   clr('scan-msg')
   $('scrim').classList.add('open'); $('scan-modal').classList.add('open')
   if (nativeScanAvailable()) { await runNativeScan(); return }
+
+  // The READER is built before the camera is asked for, and the order is the
+  // whole point. On every WebKit `BarcodeDetector` does not exist -- and on
+  // iOS that means EVERY browser, Chrome and Firefox included, because they
+  // are all WKWebView underneath. Asking for a camera we are about to refuse
+  // spent the user a permission grant for nothing: reported from iOS Chrome,
+  // 2026-09-23, where the prompt appeared, was granted, and was answered with
+  // "this browser cannot read a QR code". Android is a real Chromium and has
+  // the reader, which is why the same flow looks fine there.
+  //
+  // `scanSupported()` cannot prevent this: it deliberately judges SHAPE (a
+  // coarse pointer and a narrow screen), because Chrome for macOS claims the
+  // `qr_code` format and then does not deliver it, so no capability answer can
+  // be trusted. Constructing the reader is the only honest test, and it costs
+  // nothing to do it first.
+  let detector: any
+  try {
+    detector = new (globalThis as any).BarcodeDetector({ formats: ['qr_code'] })
+  } catch (e: any) {
+    ecLog('qr reader missing: ' + (e?.message ?? e))
+    setMsg('scan-msg', tr('Ta przeglądarka nie odczyta kodu QR — wklej link zamiast skanować.'), 'err')
+    return
+  }
+
   const video = $('scan-video') as HTMLVideoElement
   try {
     // The rear camera on a phone; whatever exists on a laptop. The resolution
@@ -2671,18 +2695,6 @@ async function openScan() {
     return
   }
   setupScanZoom(scanStream)
-  // A phone browser is not a promise of a reader: Safari and Firefox for
-  // Android have none, and `new undefined(...)` throws. The camera is already
-  // running by this point, so it goes out before anything is said.
-  let detector: any
-  try {
-    detector = new (globalThis as any).BarcodeDetector({ formats: ['qr_code'] })
-  } catch (e: any) {
-    ecLog('qr reader missing: ' + (e?.message ?? e))
-    stopScanCamera()
-    setMsg('scan-msg', tr('Ta przeglądarka nie odczyta kodu QR — wklej link zamiast skanować.'), 'err')
-    return
-  }
   // A frame that cannot be READ resolves to an empty list; `detect` THROWING is
   // a different thing, and treating the two alike is what left a live camera
   // pointed at a code it would never resolve, saying nothing, for ever. A few
