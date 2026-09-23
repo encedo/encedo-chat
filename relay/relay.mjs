@@ -49,6 +49,7 @@ import { createHash } from 'crypto'
 import { createDump } from './dump.mjs'
 import { startStats } from './stats.mjs'
 import { siblingSet, shouldJoin } from './topics.mjs'
+import { LOAD_TOPIC, ANNOUNCE_MS, saturation, encodeLoad } from './load.mjs'
 import { redisSink } from './redis.mjs'
 import { appendFile } from 'fs'
 
@@ -77,6 +78,10 @@ const PEERS = getPeers()
 const SIBLINGS = siblingSet(get('--siblings', '').split(',').filter(Boolean), PEERS)
 // OFF by default: the code goes out inert and is turned on one node at a time.
 const LOCAL_TOPICS = process.argv.includes('--local-topics-only')
+// Say how full this node is, on the mesh, for clients choosing where to dial
+// (load.mjs explains why it is not a file over HTTP). OFF by default, like
+// everything else that changes behaviour.
+const ANNOUNCE_LOAD = process.argv.includes('--announce-load')
 // Optional IPv6 listen port for inter-relay peering over a provider's private
 // network (where public IPv4 between VMs is blocked but IPv6 routes). Kept on a
 // SEPARATE port from PORT so the IPv4 nginx path (0.0.0.0:PORT) is untouched and
@@ -301,6 +306,33 @@ console.log(`\n[ok] Relay uruchomiony na porcie ${PORT}`)
 // at all, and after a deploy it is the one line that proves which build is up.
 console.log(`Tematy: limit ${MAX_TOPICS} równoczesnych, eviction po ${IDLE_TTL / 1000}s ciszy (sweep ${SWEEP_MS / 1000}s)`)
 console.log(`Połączenia: limit ${MAX_CONNS}`)
+
+// ---- how full this node is, on the mesh ------------------------------------
+// Subscribed ALWAYS, announced only when asked. Listening costs one topic and
+// is what lets the announcement cross the mesh at all: a relay that is not in
+// this topic's mesh would not forward it, and the other nodes' readings would
+// stop at their own clients. Subscribed DIRECTLY rather than through the
+// subscription-change handler, so `--local-topics-only` does not apply to it —
+// this one is the relay's own business, not a client's.
+relay.services.pubsub.subscribe(LOAD_TOPIC)
+if (ANNOUNCE_LOAD) {
+  const say = () => {
+    try {
+      const sat = saturation({
+        conns: relay.getConnections().length, maxConns: MAX_CONNS,
+        topics: relay.services.pubsub.getTopics().length, maxTopics: MAX_TOPICS,
+      })
+      // Fire and forget, like the statistics sink: a relay must never fall over
+      // for the sake of telling anybody how busy it is.
+      void relay.services.pubsub.publish(LOAD_TOPIC, encodeLoad(statsNode, sat)).catch(() => {})
+    } catch {}
+  }
+  setInterval(say, ANNOUNCE_MS).unref?.()
+  setTimeout(say, 5_000).unref?.() // one early reading, once the node has settled
+  console.log(`Obciążenie: ogłaszam co ${ANNOUNCE_MS / 1000}s jako "${statsNode}" (temat ${LOAD_TOPIC.slice(0, 12)}...)`)
+} else {
+  console.log('Obciążenie: nasłuchuję, nie ogłaszam (--announce-load je włącza)')
+}
 // Loud on purpose: this line's ABSENCE from the journal is what proves a node
 // ran without the dump. Nothing is printed when DUMP is unset.
 // Said out loud because it decides what this node carries, and the difference
