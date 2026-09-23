@@ -3557,11 +3557,30 @@ function restoreDraft() {
  * Fine pointers only — the same guard the add window uses. On a phone, focusing
  * pops the software keyboard over the conversation you just asked to see, which
  * is the opposite of helping.
+ *
+ * CALL IT AFTER THE PANE IS ON SCREEN. `focus()` on an element inside a
+ * `display:none` ancestor does nothing and reports nothing, so calling this
+ * while `#chat-view` is still hidden fails SILENTLY. That shipped: the first
+ * room opened after sign-in had no cursor in the composer, and only the first,
+ * because by the second click the pane was already revealed by the first.
+ * Reported from a browser, 2026-09-23.
+ *
+ * The visibility test is `offsetParent`, not `hidden`: the composer never
+ * carries `hidden` itself — its ANCESTOR does, and `element.hidden` says
+ * nothing about ancestors. Same trap as reading `classList` to decide whether
+ * the user can see something.
  */
 function focusComposer() {
-  if (!matchMedia('(pointer:fine)').matches) return
   const inp = $('msg-input') as HTMLTextAreaElement | null
-  if (!inp || inp.hidden) return
+  if (!inp) return
+  // The ORDERING check comes first and it says so out loud, because this is
+  // the failure that shipped and it leaves no other trace: a caller that runs
+  // before the pane is revealed gets nothing, silently. Said here, the harness
+  // can assert that nobody calls this too early — on a machine with no pointer
+  // at all, where the focus itself would never be taken and the fault would be
+  // invisible. With the calls in the right order this line never appears.
+  if (inp.hidden || !inp.offsetParent) { ecLog('focusComposer: composer is not on screen'); return }
+  if (!matchMedia('(pointer:fine)').matches) return
   inp.focus()
   // After a restored draft the caret belongs at the END of what was written.
   try { inp.selectionStart = inp.selectionEnd = inp.value.length } catch {}
@@ -7055,12 +7074,12 @@ async function activateRoom(pub: string) {
   if (!sameTarget) stashDraft() // belongs to the room being LEFT, so before the switch
   activePub = pub; activeGid = null // a 1:1 takes the screen — no group is active
   if (!sameTarget) { clearComposer(); restoreDraft() }
-  focusComposer()
   $('members-cluster').hidden = true; $('members-pop').hidden = true // group-only UI
   closeEmojiPop() // the transcript is about to be replayed — its anchor is going away
   room.unseen = 0
   $('chat-empty').hidden = true; $('chat-view').hidden = false
   showChatPane(true)
+  focusComposer() // AFTER the pane is on screen — see the note on focusComposer
   $('peer-avatar').textContent = initials(room.contact.name)
   $('peer-name').textContent = room.contact.name
   // The peer is identified the same way we identify ourselves: 8-byte
@@ -8063,10 +8082,10 @@ async function activateGroup(gid: string) {
   if (!sameTarget) stashDraft() // belongs to the room being LEFT, so before the switch
   activeGid = gid; activePub = null // a group takes over — no 1:1 is "active"
   if (!sameTarget) { clearComposer(); restoreDraft() }
-  focusComposer()
   gu.unseen = 0; gu.called = false
   $('chat-empty').hidden = true; $('chat-view').hidden = false
   showChatPane(true)
+  focusComposer() // AFTER the pane is on screen — as in activateRoom
   $('peer-avatar').textContent = tr('👥')
   $('peer-name').textContent = groupDisplay(gu); $('peer-name').title = ''
   $('peer-dot').className = 'dot ok'; $('peer-status').textContent = tr('{n} członków', { n: gu.members.length })

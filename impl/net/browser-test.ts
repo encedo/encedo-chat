@@ -834,6 +834,27 @@ async function main() {
     await Promise.all([login(A, 'sim-a'), login(B, 'sim-b')])
 
     await Promise.all([openContact(A, 'sim-b'), openContact(B, 'sim-a')])
+
+    // The FIRST room after sign-in, and only the first: `#chat-view` starts
+    // hidden, and `focus()` on an element inside a `display:none` ancestor does
+    // nothing and reports nothing, so calling focusComposer before the reveal
+    // failed SILENTLY — every later click worked because the pane was already
+    // open (reported from a browser, 2026-09-23).
+    //
+    // The ORDER is asserted, not the focus. Headless Chromium reports
+    // `(pointer: none)`, so the focus would never be taken here whatever the
+    // code did, and an assertion on `activeElement` passes for the wrong
+    // reason — it did, on the first attempt at this test. `focusComposer` says
+    // out loud when it is called before its element is on screen, and that
+    // line is what must never appear.
+    scenario('the composer is never asked to take focus before it is on screen')
+    const earlyFocus = A.console.filter((l) => l.includes('focusComposer: composer is not on screen'))
+    if (earlyFocus.length)
+      throw new Error(`focusComposer ran ${earlyFocus.length}x while #chat-view was still hidden`
+        + ' — the call belongs after the pane is revealed, or the cursor is silently dropped'
+        + ' on the first room of every session')
+    step('the reveal comes first, so the cursor has somewhere to go')
+
     const [ba, bb] = await Promise.all([A.waitFor<string>('EH-2 on A', BADGE_GREEN, 90_000), B.waitFor<string>('EH-2 on B', BADGE_GREEN, 90_000)])
     step(`EH-2 established in both: "${ba.trim()}" / "${bb.trim()}"`)
 
