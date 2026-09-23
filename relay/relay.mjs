@@ -10,6 +10,16 @@
  *                  [--stats 15] [--stats-json <path>] [--quiet-msgs]
  *                  [--stats-redis redis://127.0.0.1:6379] [--stats-node bs1]
  *                  [--stats-ttl-days 30]
+ *                  [--siblings <peerid,...>] [--local-topics-only]
+ *   --siblings     — peer ids of the OTHER relays. Needed because behind nginx
+ *                    every client looks like 127.0.0.1 and bs1 dials nobody, so
+ *                    a sibling cannot be told from a client by address or by
+ *                    direction. Ids from --peers are added automatically.
+ *   --local-topics-only
+ *                  — carry a topic only while one of OUR OWN clients wants it,
+ *                    instead of every topic any relay mentions. Without it each
+ *                    node carries the whole network and the network can only be
+ *                    as big as its smallest node (topics.mjs). OFF by default.
  *   --stats <min>  — one summary line per window instead of guessing from a
  *                    trace: live topics (+added -evicted, REFUSED), messages,
  *                    bytes, distinct publishers, connections, CPU, RSS, heap
@@ -38,6 +48,7 @@ import { multiaddr } from '@multiformats/multiaddr'
 import { createHash } from 'crypto'
 import { createDump } from './dump.mjs'
 import { startStats } from './stats.mjs'
+import { siblingSet, shouldJoin } from './topics.mjs'
 import { redisSink } from './redis.mjs'
 import { appendFile } from 'fs'
 
@@ -59,6 +70,13 @@ const PASS  = get('--pass', 'default-relay-pass')
 const PORT  = parseInt(get('--port', '9001'))
 const HOST  = get('--host', null)   // e.g. onchato.com — used to print the production WSS multiaddr
 const PEERS = getPeers()
+// Which peers are the OTHER RELAYS, and whether their subscriptions count.
+// See topics.mjs for why this is configured rather than guessed — behind nginx
+// every client looks like 127.0.0.1, and bs1 dials nobody, so neither address
+// nor direction can tell a sibling from a client.
+const SIBLINGS = siblingSet(get('--siblings', '').split(',').filter(Boolean), PEERS)
+// OFF by default: the code goes out inert and is turned on one node at a time.
+const LOCAL_TOPICS = process.argv.includes('--local-topics-only')
 // Optional IPv6 listen port for inter-relay peering over a provider's private
 // network (where public IPv4 between VMs is blocked but IPv6 routes). Kept on a
 // SEPARATE port from PORT so the IPv4 nginx path (0.0.0.0:PORT) is untouched and
@@ -208,6 +226,9 @@ const stats = STATS_MIN > 0
 
 relay.services.pubsub.addEventListener('subscription-change', (evt) => {
   for (const { topic, subscribe } of evt.detail.subscriptions) {
+    // A sibling relay mentioning a topic is not a reason to carry it; one of
+    // our own clients asking for it is. Off by default (see LOCAL_TOPICS).
+    if (subscribe && !shouldJoin(evt.detail.peerId, { siblings: SIBLINGS, localOnly: LOCAL_TOPICS })) continue
     if (subscribe && !relay.services.pubsub.getTopics().includes(topic)) {
       if (relay.services.pubsub.getTopics().length >= MAX_TOPICS) {
         // The client gets no error for this — it just never sees anyone in the
@@ -282,6 +303,12 @@ console.log(`Tematy: limit ${MAX_TOPICS} równoczesnych, eviction po ${IDLE_TTL 
 console.log(`Połączenia: limit ${MAX_CONNS}`)
 // Loud on purpose: this line's ABSENCE from the journal is what proves a node
 // ran without the dump. Nothing is printed when DUMP is unset.
+// Said out loud because it decides what this node carries, and the difference
+// is invisible from outside until the message counts diverge.
+console.log(LOCAL_TOPICS
+  ? `Tematy: TYLKO od wlasnych klientow (--local-topics-only), ${SIBLINGS.size} przekaznikow rozpoznanych`
+  : `Tematy: od kazdego peera (tryb dotychczasowy), ${SIBLINGS.size} przekaznikow rozpoznanych`)
+
 if (stats) {
   console.log(`Statystyki: co ${STATS_MIN} min jedna linia [stats ${STATS_MIN}m]`
     + `${STATS_JSON ? ` + JSONL -> ${STATS_JSON}` : ''}`
