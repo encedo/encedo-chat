@@ -1669,6 +1669,39 @@ async function main() {
         && document.getElementById('scan-video').srcObject === null`)
     if (!cameraOff) throw new Error('the viewfinder stayed open (and the camera with it) after a successful scan')
     step('a known key reads as verification, and the camera is released')
+
+    // The OTHER half of scanning, and the one that shipped broken: a key we do
+    // NOT hold opens the import window — and the add window it was started from
+    // used to stay open underneath it. Two windows then shared the screen, the
+    // import fields in the middle with "Dodaj peera" above and that window's own
+    // Save/Cancel below (reported with screenshots from Android and iOS,
+    // 2026-09-23). The paste path already asserted this; the scan path did not,
+    // and that is exactly where it broke.
+    //
+    // The stranger is B's own invite with one character of the key changed:
+    // same encoding, same length, a key nobody holds.
+    await A.eval(`
+      const frag = ${JSON.stringify(bLink)}.split('#')[1].slice(2);
+      const j = JSON.parse(atob(frag.split('-').join('+').split('_').join('/')));
+      j.p = j.p.slice(0, 8) + (j.p[8] === 'A' ? 'B' : 'A') + j.p.slice(9);
+      j.n = 'nieznajomy';
+      const link = 'https://onchato.com/chat#i=' +
+        btoa(JSON.stringify(j)).split('+').join('-').split('/').join('_').split('=').join('');
+      window.BarcodeDetector = class { constructor() {} async detect() { return [{ rawValue: link }] } };
+      window.BarcodeDetector.getSupportedFormats = async () => ['qr_code'];
+      document.getElementById('btn-add-peer').click();
+      document.getElementById('btn-scan').click();
+      return 1`)
+    await A.waitFor('scanning a key we do not hold opens the import window',
+      `return document.getElementById('import-modal').classList.contains('open')`, 15_000)
+    const stacked = await A.eval<string[]>(`
+      return [...document.querySelectorAll('.modal.open')].map((m) => m.id)`)
+    if (stacked.length !== 1 || stacked[0] !== 'import-modal')
+      throw new Error(`scanning a stranger left ${stacked.length} windows open (${stacked.join(', ')})`
+        + ' — the window the scan was started from must close, or they share the screen')
+    await A.eval(`document.getElementById('import-cancel').click(); return 1`)
+    step('a stranger opens the import window, and it is the only window on screen')
+
     await A.resize(1200, 800) // back to a desktop for everything after this
 
     // A knock is the answer to the one problem a synchronous messenger cannot

@@ -2389,6 +2389,14 @@ function inviteFromPaste(text: string): Invite | null {
  */
 async function showInvite(inv: Invite, nameOverride?: string) {
   pendingInvite = inv
+  // The add window is the usual way in here — somebody pressed "scan" or pasted
+  // a link inside it — and it was left OPEN underneath. Two windows then shared
+  // the screen: the invite's fields in the middle with "Dodaj peera" above it
+  // and that window's own Save/Cancel poking out below (reported with
+  // screenshots from Android and iOS, 2026-09-23). Closed here rather than at
+  // each call site, because every path that reaches an invite comes through
+  // some window that has finished its job.
+  closeModal()
   $('scrim').classList.add('open'); $('import-modal').classList.add('open')
   clr('import-msg')
   ;($('import-name') as HTMLInputElement).value = nameOverride || inv.name
