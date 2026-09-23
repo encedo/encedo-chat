@@ -219,13 +219,23 @@ export async function probeCapabilities(opts: { hostRtc?: boolean } = {}): Promi
   // which since 2026-09-19 is a phone and nothing else -- because Chrome for
   // macOS claims `qr_code` and then does not deliver it, so the claim below
   // cannot be trusted to gate a camera.
-  const hasDetector = typeof (globalThis as any).BarcodeDetector === 'function'
-  const canDecode = await qrDecodeAvailable((globalThis as any).BarcodeDetector)
-  add('BarcodeDetector', false, canDecode && canCapture,
-    'Ta platforma nie umie czytać kodów QR — kod można pokazać, ale nie zeskanować; zostaje wklejenie linku.'
-    + (!hasDetector ? ' Brak czytnika kodów (BarcodeDetector).'
-      : !canDecode ? ' Czytnik kodów jest, ale nie obsługuje formatu QR na tej platformie.'
-      : noCapture))
+  //
+  // WHAT THIS LINE NOW MEASURES, because it changed on 2026-09-23 and the old
+  // answer was actively wrong in the packaged app and in Safari alike.
+  //
+  // The app no longer asks the platform to READ a code: it carries its own
+  // decoder (`web/src/vendor/jsqr.cjs`), because WebKit has no
+  // `BarcodeDetector` and on iOS every browser is WebKit — so this line used
+  // to report "cannot scan" on an iPhone that could scan perfectly well
+  // through the native plugin, and on desktop Safari where the camera was the
+  // only thing missing.
+  //
+  // So the question left is the CAMERA. The reader is a given; the lens is
+  // not. WHICH reader ran is not shown here — it goes to the diary through
+  // `ecLog('qr reader: ...')`, which is where somebody debugging a misbehaving
+  // scan will be looking anyway, and this line has one job.
+  add('Skaner QR', false, canCapture,
+    'Nie da się zeskanować kodu QR — kod można pokazać, zostaje wklejenie linku.' + noCapture)
 
   const missing = caps.filter((c) => c.required && !c.ok)
   const degraded = caps.filter((c) => !c.required && !c.ok)

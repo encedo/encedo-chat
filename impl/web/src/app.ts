@@ -19,6 +19,7 @@ import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSessi
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import { exportProfile, openBundle, applyBundle, conflictsWith, localKV, FILE_EXT } from '../../lib/migrate.ts'
 import { decodeInvite, inviteLink, type Invite } from '../../lib/invite.ts'
+import jsQR from './vendor/jsqr.cjs'
 import { checkBook, signBook, pack, type Verdict } from '../../lib/bookmac.ts'
 import type { GkBackend } from '../../lib/group.ts'
 // `t` is taken: this file uses it for text, topics, timers and DOM nodes, and a
@@ -2649,6 +2650,73 @@ let scanTimer: any = null
 /** The native scanner is running: `closeScan` has a camera to stop. */
 let scanNative = false
 
+/**
+ * One video frame in, the code's text or null out — with whichever reader this
+ * browser actually has.
+ *
+ * `BarcodeDetector` is a Chromium API. WebKit never shipped it, and on iOS
+ * EVERY browser is WebKit by Apple's rule — so scanning worked on Android and
+ * was impossible on an iPhone in Chrome, Safari and Firefox alike. Reported
+ * 2026-09-23. Showing a code was never affected (`lib/qr.ts` is our own
+ * encoder); only reading one was.
+ *
+ * So there are two readers and the platform picks. Where the native one exists
+ * it stays: it is decoded outside JavaScript and it is faster. Where it does
+ * not, the vendored jsQR decodes the frame here — same input, same answer, and
+ * the loop around it does not know the difference.
+ *
+ * The frame is SCALED DOWN first, and that is not an optimisation to skip. A
+ * 1920x1080 frame is two million pixels through a pure-JavaScript binariser
+ * every 250 ms; on a phone that is a visibly stuttering viewfinder. A QR code
+ * held up to a camera survives 640px with room to spare, because a code needs
+ * its modules resolved, not its pixels.
+ *
+ * `willReadFrequently` is asked for because that is exactly what this does —
+ * without it a browser may keep the canvas on the GPU, where every
+ * `getImageData` costs a readback.
+ */
+type QrReader = (v: HTMLVideoElement) => Promise<string | null>
+
+/** Longest side a frame is scaled to before our own decoder reads it. */
+const QR_DECODE_PX = 640
+
+function makeQrReader(): QrReader {
+  const Ctor = (globalThis as any).BarcodeDetector
+  if (typeof Ctor === 'function') {
+    try {
+      const native = new Ctor({ formats: ['qr_code'] })
+      ecLog('qr reader: BarcodeDetector')
+      return async (v) => {
+        const codes = await native.detect(v)
+        const raw = codes?.[0]?.rawValue
+        return raw ? String(raw) : null
+      }
+    } catch {
+      // It exists and refuses the format. Chrome for macOS advertises `qr_code`
+      // and does not deliver it, so this is a real case, not a defensive one —
+      // and ours works there too.
+    }
+  }
+  ecLog('qr reader: jsQR (this browser has no BarcodeDetector)')
+  let cv: HTMLCanvasElement | null = null
+  return async (v) => {
+    const w = v.videoWidth, h = v.videoHeight
+    if (!w || !h) return null // the first frames arrive before the video has size
+    const k = Math.min(1, QR_DECODE_PX / Math.max(w, h))
+    const dw = Math.max(1, Math.round(w * k)), dh = Math.max(1, Math.round(h * k))
+    if (!cv) cv = document.createElement('canvas')
+    if (cv.width !== dw || cv.height !== dh) { cv.width = dw; cv.height = dh }
+    const ctx = cv.getContext('2d', { willReadFrequently: true })
+    if (!ctx) return null
+    ctx.drawImage(v, 0, 0, dw, dh)
+    const img = ctx.getImageData(0, 0, dw, dh)
+    // `dontInvert`: a QR code is dark-on-light. Trying the inverse doubles the
+    // work of every frame to find codes nobody prints.
+    const found = (jsQR as any)(img.data, dw, dh, { inversionAttempts: 'dontInvert' })
+    return found?.data ?? null
+  }
+}
+
 async function openScan() {
   if (!scanSupported()) return
   clr('scan-msg')
@@ -2669,14 +2737,7 @@ async function openScan() {
   // `qr_code` format and then does not deliver it, so no capability answer can
   // be trusted. Constructing the reader is the only honest test, and it costs
   // nothing to do it first.
-  let detector: any
-  try {
-    detector = new (globalThis as any).BarcodeDetector({ formats: ['qr_code'] })
-  } catch (e: any) {
-    ecLog('qr reader missing: ' + (e?.message ?? e))
-    setMsg('scan-msg', tr('Ta przeglądarka nie odczyta kodu QR — wklej link zamiast skanować.'), 'err')
-    return
-  }
+  const read = makeQrReader()
 
   const video = $('scan-video') as HTMLVideoElement
   try {
@@ -2695,27 +2756,39 @@ async function openScan() {
     return
   }
   setupScanZoom(scanStream)
-  // A frame that cannot be READ resolves to an empty list; `detect` THROWING is
-  // a different thing, and treating the two alike is what left a live camera
+  // A frame with no code in it resolves to null; the read THROWING is a
+  // different thing, and treating the two alike is what left a live camera
   // pointed at a code it would never resolve, saying nothing, for ever. A few
   // throws in a row are allowed because the first frames can arrive before the
   // video is ready; past that it is the platform, not the picture.
+  //
+  // EACH PASS SCHEDULES THE NEXT — a fixed interval would not do here, and the
+  // numbers say why. Our own decoder is quick when there IS a code (a few ms:
+  // it finds the finder patterns and stops) and slow when there is NOT, which
+  // is the normal state of a viewfinder: measured at ~130 ms for a 640px frame
+  // on a laptop, and a phone is several times that. On a 250 ms interval those
+  // passes would start overlapping and the preview would stutter while the
+  // queue grew. Chained, a slow decode only means a slower scan, never a
+  // backlog.
   let misfires = 0
-  scanTimer = setInterval(async () => {
+  const pass = async () => {
     try {
-      const codes = await detector.detect(video)
+      const raw = await read(video)
       misfires = 0
-      const raw = codes?.[0]?.rawValue
-      if (raw) handleScanned(String(raw))
+      if (raw) { handleScanned(raw); return } // handled: it reopens or closes
     } catch (e: any) {
-      if (++misfires < 4) return // the video is probably not ready yet
-      ecLog('qr scan unavailable: ' + (e?.message ?? e))
-      // The camera goes out, the window stays: somebody is looking at it and
-      // deserves to be told, rather than have it vanish.
-      stopScanCamera()
-      setMsg('scan-msg', tr('Ta przeglądarka nie odczyta kodu QR — wklej link zamiast skanować.'), 'err')
+      if (++misfires >= 4) {
+        ecLog('qr scan unavailable: ' + (e?.message ?? e))
+        // The camera goes out, the window stays: somebody is looking at it and
+        // deserves to be told, rather than have it vanish.
+        stopScanCamera()
+        setMsg('scan-msg', tr('Ta przeglądarka nie odczyta kodu QR — wklej link zamiast skanować.'), 'err')
+        return
+      }
     }
-  }, 250)
+    if (scanStream) scanTimer = setTimeout(pass, 120) // the camera is still on
+  }
+  scanTimer = setTimeout(pass, 120)
 }
 
 /**
@@ -2850,7 +2923,7 @@ function setupScanZoom(stream: MediaStream) {
  */
 function stopScanCamera() {
   closeScanNative()
-  clearInterval(scanTimer); scanTimer = null
+  clearTimeout(scanTimer); scanTimer = null // a chained pass, not an interval
   ;($('scan-zoom-row') as HTMLElement).hidden = true // the next camera may have no zoom
   for (const t of scanStream?.getTracks() ?? []) t.stop() // the camera light goes out
   scanStream = null
