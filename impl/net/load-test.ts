@@ -40,7 +40,7 @@ console.log(`podlaczony do JEDNEGO wezla, slucham ${WAIT / 1000}s na temacie ${L
 await new Promise((r) => setTimeout(r, WAIT))
 
 const seen = freshest(heard)
-const list = [...seen.values()].map((r) => `${r.node}=${(r.sat * 100).toFixed(0)}%`).join('  ')
+const list = [...seen.values()].map((r) => `${r.node}=${r.pct}%`).join('  ')
 console.log(`uslyszane: ${list || '(nic)'}`)
 console.log(seen.size >= 2
   ? `PRZESZLO — ${seen.size} wezly przez jedno polaczenie`

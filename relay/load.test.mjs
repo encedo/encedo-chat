@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { LOAD_TOPIC, saturation, encodeLoad, decodeLoad, freshest, STALE_MS, ANNOUNCE_MS } from './load.mjs'
+import { LOAD_TOPIC, loadPercent, encodeLoad, decodeLoad, freshest, STALE_MS, ANNOUNCE_MS } from './load.mjs'
 
 test('the topic is shaped like every other topic, so it does not stand out', () => {
   // Room topics are 52 base32 characters out of HKDF. One readable name among
@@ -16,35 +16,40 @@ test('the WORSE of the two limits is what gets published', () => {
   // Connections run out first in the ordinary case; topics run out later and
   // refuse SILENTLY. Publishing either alone would send people to a node that
   // has room by one measure and none by the other.
-  assert.equal(saturation({ conns: 520, maxConns: 520, topics: 1, maxTopics: 250 }), 1)
-  assert.equal(saturation({ conns: 1, maxConns: 520, topics: 250, maxTopics: 250 }), 1)
-  assert.equal(saturation({ conns: 52, maxConns: 520, topics: 0, maxTopics: 250 }), 0.1)
+  assert.equal(loadPercent({ conns: 520, maxConns: 520, topics: 1, maxTopics: 250 }), 100)
+  assert.equal(loadPercent({ conns: 1, maxConns: 520, topics: 250, maxTopics: 250 }), 100)
+  assert.equal(loadPercent({ conns: 52, maxConns: 520, topics: 0, maxTopics: 250 }), 10)
 })
 
-test('saturation is coarse, and rounds towards full', () => {
-  // 0.91 answers "nearly full", not "nine tenths, go ahead".
-  assert.equal(saturation({ conns: 91, maxConns: 100 }), 1)
-  assert.equal(saturation({ conns: 11, maxConns: 100 }), 0.2)
-  assert.equal(saturation({ conns: 0, maxConns: 520 }), 0)
-  // Never past 1, whatever a miscounted gauge says.
-  assert.equal(saturation({ conns: 9999, maxConns: 520 }), 1)
+test('a percent, 0 to 100, rounded towards full', () => {
+  // 100 and not 99: "no point coming here" has to be sayable, and it is the one
+  // reading a client must not mistake for "nearly".
+  assert.equal(loadPercent({ conns: 100, maxConns: 100 }), 100)
+  // Rounded UP, so 90.1% reports 91 rather than "90, go ahead"...
+  assert.equal(loadPercent({ conns: 901, maxConns: 1000 }), 91)
+  // ...and a node with anybody on it never reports empty.
+  assert.equal(loadPercent({ conns: 1, maxConns: 520 }), 1)
+  assert.equal(loadPercent({ conns: 0, maxConns: 520 }), 0)
+  // Never past 100, whatever a miscounted gauge says.
+  assert.equal(loadPercent({ conns: 9999, maxConns: 520 }), 100)
 })
 
 test('an announcement survives the wire', () => {
   const at = 1_700_000_000_000
-  const r = decodeLoad(encodeLoad('bs3', 0.3, at))
-  assert.deepEqual(r, { node: 'bs3', sat: 0.3, at })
+  const r = decodeLoad(encodeLoad('bs3', 30, at))
+  assert.deepEqual(r, { node: 'bs3', pct: 30, at })
 })
 
 test('rubbish off the network is refused, not guessed at', () => {
   const enc = (o) => new TextEncoder().encode(JSON.stringify(o))
   assert.equal(decodeLoad(new TextEncoder().encode('not json')), null)
-  assert.equal(decodeLoad(enc({ v: 2, n: 'bs3', s: 0.1, at: 1 })), null, 'a future version')
-  assert.equal(decodeLoad(enc({ v: 1, n: '', s: 0.1, at: 1 })), null, 'no name')
-  assert.equal(decodeLoad(enc({ v: 1, n: 'bs3', s: -1, at: 1 })), null, 'negative load')
-  assert.equal(decodeLoad(enc({ v: 1, n: 'bs3', s: 2, at: 1 })), null, 'over full')
-  assert.equal(decodeLoad(enc({ v: 1, n: 'bs3', s: Infinity, at: 1 })), null)
-  assert.equal(decodeLoad(enc({ v: 1, n: 'bs3', s: 0.1 })), null, 'no timestamp')
+  assert.equal(decodeLoad(enc({ v: 2, n: 'bs3', pct: 10, at: 1 })), null, 'a future version')
+  assert.equal(decodeLoad(enc({ v: 1, n: '', pct: 10, at: 1 })), null, 'no name')
+  assert.equal(decodeLoad(enc({ v: 1, n: 'bs3', pct: -1, at: 1 })), null, 'negative load')
+  assert.equal(decodeLoad(enc({ v: 1, n: 'bs3', pct: 101, at: 1 })), null, 'over full')
+  assert.equal(decodeLoad(enc({ v: 1, n: 'bs3', pct: 12.5, at: 1 })), null, 'not a whole percent')
+  assert.equal(decodeLoad(enc({ v: 1, n: 'bs3', pct: Infinity, at: 1 })), null)
+  assert.equal(decodeLoad(enc({ v: 1, n: 'bs3', pct: 10 })), null, 'no timestamp')
 })
 
 test('a node that went quiet stops counting', () => {
@@ -52,8 +57,8 @@ test('a node that went quiet stops counting', () => {
   // every listener, and "empty, come in" makes the dead node the most
   // attractive one on the network.
   const now = 1_700_000_000_000
-  const live = { node: 'bs3', sat: 0.2, at: now - 1000 }
-  const dead = { node: 'bs1', sat: 0, at: now - STALE_MS - 1 }
+  const live = { node: 'bs3', pct: 20, at: now - 1000 }
+  const dead = { node: 'bs1', pct: 0, at: now - STALE_MS - 1 }
   const seen = freshest([live, dead], now)
   assert.ok(seen.has('bs3'))
   assert.ok(!seen.has('bs1'), 'a stale "empty" was still believed')
@@ -62,15 +67,15 @@ test('a node that went quiet stops counting', () => {
 test('the newest reading per node wins', () => {
   const now = 1_700_000_000_000
   const seen = freshest([
-    { node: 'bs3', sat: 0.9, at: now - 20_000 },
-    { node: 'bs3', sat: 0.2, at: now - 1_000 },
+    { node: 'bs3', pct: 90, at: now - 20_000 },
+    { node: 'bs3', pct: 20, at: now - 1_000 },
   ], now)
-  assert.equal(seen.get('bs3').sat, 0.2)
+  assert.equal(seen.get('bs3').pct, 20)
 })
 
 test('a reading from the future is not evidence', () => {
   // A node with a wrong clock would otherwise win every comparison for ever.
   const now = 1_700_000_000_000
-  const seen = freshest([{ node: 'bs1', sat: 0, at: now + ANNOUNCE_MS * 5 }], now)
+  const seen = freshest([{ node: 'bs1', pct: 0, at: now + ANNOUNCE_MS * 5 }], now)
   assert.ok(!seen.has('bs1'))
 })

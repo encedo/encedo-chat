@@ -33,9 +33,11 @@
  *
  * ## What is published, and what deliberately is not
  *
- * A saturation ROUNDED to a tenth, not `47/250`. An exact live-room count is a
- * population figure for the whole network, readable by anyone over time; a
- * client choosing a relay needs to know "about a fifth full", not the number.
+ * A PERCENT, not `47/250`. An exact live-room count is a population figure for
+ * the whole network, readable by anyone over time; a client choosing a relay
+ * needs to know how full, not how many. One percent of 520 connections is about
+ * five of them, so the number is a good deal less sharp than the counters
+ * behind it — which is the intent, not a rounding accident.
  *
  * Two saturations are measured and the WORSE is published, because two limits
  * can bind and they bind differently: connections (520) run out first in the
@@ -80,14 +82,19 @@ export const ANNOUNCE_MS = 30_000
 export const STALE_MS = 3 * ANNOUNCE_MS
 
 /**
- * The worse of the two saturations, rounded to a tenth.
+ * The worse of the two saturations, as a whole percent.
  *
- * Rounded UP: at 0.91 the honest answer for somebody deciding whether to come
- * here is "nearly full", not "nine tenths, go ahead".
+ * 0..100 rather than 0..99: "completely full" has to be distinguishable from
+ * "nearly full", and that is the one case where a client must know there is no
+ * point coming here at all.
+ *
+ * Rounded UP, always: at 90.1% the honest answer for somebody deciding whether
+ * to join is "91", not "90, go ahead". The same reason 0.4% reports as 1 rather
+ * than 0 — a node with anybody on it is not empty.
  */
-export function saturation({ conns = 0, maxConns = 1, topics = 0, maxTopics = 1 }) {
+export function loadPercent({ conns = 0, maxConns = 1, topics = 0, maxTopics = 1 }) {
   const worst = Math.max(conns / Math.max(maxConns, 1), topics / Math.max(maxTopics, 1))
-  return Math.min(1, Math.ceil(Math.max(worst, 0) * 10) / 10)
+  return Math.max(0, Math.min(100, Math.ceil(Math.max(worst, 0) * 100)))
 }
 
 /**
@@ -98,8 +105,8 @@ export function saturation({ conns = 0, maxConns = 1, topics = 0, maxTopics = 1 
  * attractive one on the network. Nothing here can tell a stale reading from a
  * calm one except its age.
  */
-export function encodeLoad(node, sat, atMs = Date.now()) {
-  return new TextEncoder().encode(JSON.stringify({ v: 1, n: String(node).slice(0, 40), s: sat, at: atMs }))
+export function encodeLoad(node, pct, atMs = Date.now()) {
+  return new TextEncoder().encode(JSON.stringify({ v: 1, n: String(node).slice(0, 40), pct, at: atMs }))
 }
 
 /** Parse an announcement, or null. Everything here arrived from the network. */
@@ -108,9 +115,12 @@ export function decodeLoad(bytes) {
   try { d = JSON.parse(new TextDecoder().decode(bytes)) } catch { return null }
   if (d?.v !== 1) return null
   if (typeof d.n !== 'string' || !d.n || d.n.length > 40) return null
-  if (typeof d.s !== 'number' || !Number.isFinite(d.s) || d.s < 0 || d.s > 1) return null
+  // A whole percent, in range. `Number.isInteger` also refuses NaN and
+  // Infinity, and a fractional value would mean a sender that is not speaking
+  // this version however much it claims v:1.
+  if (!Number.isInteger(d.pct) || d.pct < 0 || d.pct > 100) return null
   if (typeof d.at !== 'number' || !Number.isFinite(d.at)) return null
-  return { node: d.n, sat: d.s, at: d.at }
+  return { node: d.n, pct: d.pct, at: d.at }
 }
 
 /**

@@ -39,6 +39,46 @@
  * fairest one.
  */
 
+/**
+ * NEXT, AND NOT YET BUILT: load, and the hysteresis it needs.
+ *
+ * Relays already announce how full they are (`relay/load.mjs`) — a whole
+ * percent, on the mesh, every 30 s. What is missing is this side reading it,
+ * and the intended shape is `effective = w * (1 - pct/100)`: load CORRECTS the
+ * weight, it does not replace it. A weight says things a measurement cannot,
+ * such as bs1 being the web host and therefore wanted as a spare however empty
+ * it looks.
+ *
+ * HYSTERESIS IS PART OF THE FEATURE, not a refinement of it, and it is easier
+ * to see why before the code exists than after somebody reports it.
+ *
+ * Without it the mechanism fights itself. Every client sees the same numbers at
+ * the same moment, so the emptiest node is the obvious answer for ALL of them
+ * at once; they move together, it stops being the emptiest, and the next round
+ * sends the same crowd somewhere else. The load figure makes clients
+ * synchronised rather than independent, which is the one thing a load balancer
+ * must not do — and each move costs a reconnect, a re-subscribe and a gap in
+ * presence for everybody in the room.
+ *
+ * So switching needs all four, and the numbers want measuring rather than
+ * guessing:
+ *
+ *   - a MARGIN: move only if the other node is better by enough to be worth a
+ *     reconnect, not by one percent of noise;
+ *   - a DWELL: that margin has to hold across several announcements, so a
+ *     momentary spike moves nobody;
+ *   - a COOLDOWN: at most one move per client per long interval, whatever the
+ *     numbers say afterwards;
+ *   - and a DIE ROLL: even when all three agree, move only with some
+ *     probability, so the crowd disperses instead of marching.
+ *
+ * The first three are ordinary. The fourth is the one that actually breaks the
+ * synchronisation, because the first three still fire for everybody at the same
+ * instant — they only delay the stampede.
+ *
+ * A move must also never interrupt a live conversation: a relay that is merely
+ * busy is still working, and the reason to leave it is that it is FULL.
+ */
 export interface WeightedNode { addr: string; w?: number }
 
 /**

@@ -49,7 +49,7 @@ import { createHash } from 'crypto'
 import { createDump } from './dump.mjs'
 import { startStats } from './stats.mjs'
 import { siblingSet, shouldJoin } from './topics.mjs'
-import { LOAD_TOPIC, ANNOUNCE_MS, saturation, encodeLoad } from './load.mjs'
+import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad } from './load.mjs'
 import { redisSink } from './redis.mjs'
 import { appendFile } from 'fs'
 
@@ -318,13 +318,13 @@ relay.services.pubsub.subscribe(LOAD_TOPIC)
 if (ANNOUNCE_LOAD) {
   const say = () => {
     try {
-      const sat = saturation({
+      const pct = loadPercent({
         conns: relay.getConnections().length, maxConns: MAX_CONNS,
         topics: relay.services.pubsub.getTopics().length, maxTopics: MAX_TOPICS,
       })
       // Fire and forget, like the statistics sink: a relay must never fall over
       // for the sake of telling anybody how busy it is.
-      void relay.services.pubsub.publish(LOAD_TOPIC, encodeLoad(statsNode, sat)).catch(() => {})
+      void relay.services.pubsub.publish(LOAD_TOPIC, encodeLoad(statsNode, pct)).catch(() => {})
     } catch {}
   }
   setInterval(say, ANNOUNCE_MS).unref?.()
