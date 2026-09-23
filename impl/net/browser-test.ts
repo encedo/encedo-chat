@@ -1699,8 +1699,22 @@ async function main() {
     if (stacked.length !== 1 || stacked[0] !== 'import-modal')
       throw new Error(`scanning a stranger left ${stacked.length} windows open (${stacked.join(', ')})`
         + ' — the window the scan was started from must close, or they share the screen')
+    // ...and backing out of it RETURNS to the window it was started from. This
+    // is the other half of the window stack: closing used to end the errand, so
+    // cancelling here dropped you on an empty screen with the add window gone —
+    // the same dead end the welcome card had, where each of its three ways
+    // closed the only orientation a new profile has.
     await A.eval(`document.getElementById('import-cancel').click(); return 1`)
-    step('a stranger opens the import window, and it is the only window on screen')
+    const afterCancel = await A.eval<string[]>(`
+      return [...document.querySelectorAll('.modal.open')].map((m) => m.id)`)
+    if (afterCancel.length !== 1 || afterCancel[0] !== 'add-modal')
+      throw new Error(`cancelling the invite left ${JSON.stringify(afterCancel)}`
+        + ' — it must come back to the window the scan was started from, not to an empty screen')
+    await A.eval(`document.getElementById('add-cancel').click(); return 1`)
+    const afterAll = await A.eval<string[]>(`
+      return [...document.querySelectorAll('.modal.open')].map((m) => m.id)`)
+    if (afterAll.length) throw new Error(`the screen kept ${JSON.stringify(afterAll)} after the last window was cancelled`)
+    step('a stranger opens the import window alone, and cancelling walks back through the stack')
 
     await A.resize(1200, 800) // back to a desktop for everything after this
 

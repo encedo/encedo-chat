@@ -211,6 +211,15 @@ const wantsDirect = () => !WEBRTC_OFF && transportMode() !== 'relay'
 /** Content may ONLY go direct — the node carries no message bytes at all. */
 const directOnly = () => wantsDirect() && transportMode() === 'direct'
 const $ = (id: string) => document.getElementById(id) as HTMLElement
+
+// The window stack lives in two halves on purpose. These two are DECLARED here,
+// at the top, because windows register their tidying (`MODAL_EXIT[...] = ...`)
+// next to their own code, and those lines run while the module is loading — a
+// `const` further down would still be in its temporal dead zone and the whole
+// app would fail to start. The functions that use them are hoisted, so they
+// stay with the rest of the window code further down.
+const modalStack: string[] = []
+const MODAL_EXIT: Record<string, () => void> = {}
 const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
 
@@ -648,7 +657,7 @@ function showIdentityPicker(ids: Array<{ kid: string; handle: string }>, onPick:
   const cancel = $('identity-cancel')
   cancel.hidden = false
   const close = () => {
-    $('scrim').classList.remove('open'); $('identity-modal').classList.remove('open')
+    dropModal('identity-modal')
     cancel.removeEventListener('click', onCancel)
     $('scrim').removeEventListener('click', onCancel)
     document.removeEventListener('keydown', onKey)
@@ -664,7 +673,7 @@ function showIdentityPicker(ids: Array<{ kid: string; handle: string }>, onPick:
   cancel.addEventListener('click', onCancel)
   $('scrim').addEventListener('click', onCancel)
   document.addEventListener('keydown', onKey)
-  $('scrim').classList.add('open'); $('identity-modal').classList.add('open')
+  pushModal('identity-modal')
 }
 
 $('go').addEventListener('click', async () => {
@@ -871,7 +880,7 @@ $('hem-back')?.addEventListener('click', () => renderLoginProfiles())
 let softIntendsNew = false
 
 function openSoftModal(name?: string, creating = false) {
-  $('scrim').classList.add('open'); $('soft-modal').classList.add('open')
+  pushModal('soft-modal')
   clr('soft-msg'); softCreating = ''
   softIntendsNew = creating
   // WARNING: A NEW profile starts EMPTY. Prefilling the last name here was the sign-in
@@ -956,7 +965,8 @@ function weakRefusal(pw: string): string {
   return tr('Za słabe hasło — miernik musi być pełny. Najprościej dopisać drugie słowo albo wydłużyć do 12+ znaków. Profilu nie da się odzyskać, więc to hasło jest całą jego ochroną.')
 }
 
-const closeSoftModal = () => { softIntendsNew = false; $('scrim').classList.remove('open'); $('soft-modal').classList.remove('open') }
+const closeSoftModal = () => { softIntendsNew = false; dropModal('soft-modal') }
+MODAL_EXIT['soft-modal'] = () => { softIntendsNew = false }
 // WARNING: An arrow, not a reference. `openSoftModal` grew a `name` parameter when the
 // login card learned to open a NAMED profile, and a listener passed by reference
 // hands it the PointerEvent — which landed in the name field as
@@ -998,10 +1008,8 @@ async function softLogin() {
         tr('Nie ma profilu „{name}"', { name }),
         tr('Utworzyć na tym urządzeniu nową tożsamość o tej nazwie? Jeśli chciałeś wejść na istniejącą, sprawdź pisownię — to osobne tożsamości, nie jedna.'),
         tr('Utwórz'))
-      // ask() drops the scrim when it closes, but the profile window is still
-      // up behind it — without this it floats with no backdrop and the
-      // click-outside-to-close it relies on stops working.
-      $('scrim').classList.add('open')
+      // (The scrim used to be put back by hand here: `ask()` took it down
+      // while this window was still up. The window stack restores both.)
       if (ok) { softMode(true); $('soft-pass2').focus() }
       return
     }
@@ -1434,7 +1442,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   // nothing: a window that reappears on an ordinary delete is a window that
   // punishes tidying up. It comes back the next time you log in (user's call).
   else if (!contactsCache.length) {
-    $('scrim').classList.add('open'); $('welcome-modal').classList.add('open')
+    pushModal('welcome-modal')
   }
 }
 
@@ -1807,10 +1815,10 @@ function ask(title: string, body: string, yes = 'Tak', rememberLabel?: string, h
     // unchanged, so a caller that already translated its label is unaffected.
     if (noLabel) no.textContent = tr(noLabel)
     $('members-pop').hidden = true; closeEmojiPop() // nothing may stay clickable behind a modal
-    $('scrim').classList.add('open'); $('ask-modal').classList.add('open')
+    pushModal('ask-modal')
     const done = (v: boolean) => {
       const remember = !!(rememberLabel && cb?.checked)
-      $('scrim').classList.remove('open'); $('ask-modal').classList.remove('open')
+      dropModal('ask-modal')
       $('ask-yes').removeEventListener('click', onYes)
       document.getElementById('ask-open')?.removeEventListener('click', onYes)
       $('ask-no').removeEventListener('click', onNo)
@@ -1846,9 +1854,9 @@ function promptName(title: string, sub: string, current: string, label = 'Nazwa'
     input.type = secret ? 'password' : 'text'
     input.value = current
     $('members-pop').hidden = true; closeEmojiPop()
-    $('scrim').classList.add('open'); $('rename-modal').classList.add('open')
+    pushModal('rename-modal')
     const done = (v: string | null) => {
-      $('scrim').classList.remove('open'); $('rename-modal').classList.remove('open')
+      dropModal('rename-modal')
       input.type = 'text'
       $('rename-save').removeEventListener('click', onSave)
       $('rename-cancel').removeEventListener('click', onCancel)
@@ -1982,9 +1990,8 @@ async function claimContact(name: string, pub: string): Promise<boolean> {
     tr('Masz już kontakt „{name}"', { name }),
     tr('Ta nazwa jest już zajęta przez kogoś o innym kluczu. Zastąpienie usunie tamten kontakt — jeśli to dwie różne osoby, wróć i nadaj inną nazwę.'),
     tr('Zastąp'))
-  // ask() takes the scrim down with it and the window that asked is still open
-  // behind it — the same repair as in the profile window.
-  $('scrim').classList.add('open')
+  // (Same repair as above, and gone for the same reason: the stack puts the
+  // asking window and its backdrop back when `ask()` closes.)
   if (!ok) return false
   await session.book.remove(sameName)
   return true
@@ -2025,12 +2032,94 @@ function attachByteBudget(input: HTMLInputElement | HTMLTextAreaElement, max: nu
   paint()
 }
 
+// ---- one window at a time, and a way back ----------------------------------
+/**
+ * The windows on screen, outermost first.
+ *
+ * Before this each window closed itself and whatever it opened simply appeared,
+ * which produced two failures with one cause. Two windows could share the
+ * screen -- scanning a QR left "Dodaj peera" behind the import window, its own
+ * Save and Cancel poking out below (reported with screenshots, 2026-09-23). And
+ * a window opened FROM another had no way back: the welcome card offers three
+ * ways in, each one closed it, and cancelling what it opened left an empty
+ * screen in the first minute of a new profile.
+ *
+ * So the windows form a stack, and there are two ways to leave one. The
+ * difference is not technical, it is what happened:
+ *
+ *   `backModal()` -- you withdrew. Cancel, Escape, a click on the backdrop.
+ *                    This window goes, the one it came from returns.
+ *   `endModals()` -- the errand is finished. The contact was added, the file
+ *                    was sent. Everything goes, because coming back to "Dodaj
+ *                    peera" after adding somebody would be absurd.
+ *
+ * Every close has to pick one, and the pick is a judgement about the flow, not
+ * a mechanical substitution -- which is why they are named for the answer
+ * rather than for the mechanism.
+ */
+
+/**
+ * What a window has to put away on its way out, whoever closes it.
+ *
+ * Leaving used to be the window's own function, so the tidying lived there —
+ * and a generic "go back" would have walked past it, leaving the camera on
+ * after a backdrop click. Registered against the window instead, so it happens
+ * for every exit: its own button, Escape, the backdrop, or a flow that moved
+ * on. Each entry must be safe to run twice, because the window's own close
+ * still does its part.
+ */
+
+/** Open a window. Whatever was on screen becomes the one to return to. */
+function pushModal(id: string) {
+  const top = modalStack[modalStack.length - 1]
+  if (top === id) return // already here: an open() that also repaints
+  if (top) $(top).classList.remove('open')
+  modalStack.push(id)
+  $('scrim').classList.add('open')
+  $(id).classList.add('open')
+}
+
+/** You withdrew from this window: it goes, the one behind it comes back. */
+function backModal() {
+  const id = modalStack.pop()
+  if (id) { MODAL_EXIT[id]?.(); $(id).classList.remove('open') }
+  const prev = modalStack[modalStack.length - 1]
+  if (prev) $(prev).classList.add('open')
+  else $('scrim').classList.remove('open')
+}
+
+/** The errand is over. Nothing to come back to. */
+function endModals() {
+  for (const id of modalStack) { MODAL_EXIT[id]?.(); $(id).classList.remove('open') }
+  modalStack.length = 0
+  $('scrim').classList.remove('open')
+}
+
+/**
+ * Leave THIS window whether or not it is the one on top.
+ *
+ * A window can be closed by something other than its own button -- a scan that
+ * succeeded, a transfer that ended -- and by then the stack may have moved on.
+ * Removing it by name keeps the stack honest instead of popping whatever
+ * happens to be last.
+ */
+function dropModal(id: string) {
+  const i = modalStack.lastIndexOf(id)
+  if (i < 0) return
+  modalStack.splice(i, 1)
+  MODAL_EXIT[id]?.()
+  $(id).classList.remove('open')
+  const top = modalStack[modalStack.length - 1]
+  if (top) $(top).classList.add('open')
+  else $('scrim').classList.remove('open')
+}
+
 const paintScanButton = () => { $('btn-scan').hidden = !scanSupported() }
 // Focus only where a keyboard is already on the desk: on a phone, focusing
 // the field pops the software keyboard OVER the modal before the person can
 // reach the scan button — and scan is the primary door there.
-const openModal = () => { $('scrim').classList.add('open'); $('add-modal').classList.add('open'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; paintStoreOptions('add-store'); paintScanButton(); if (matchMedia('(pointer:fine)').matches) $('add-pub').focus() }
-const closeModal = () => { $('scrim').classList.remove('open'); $('add-modal').classList.remove('open') }
+const openModal = () => { pushModal('add-modal'); clr('add-msg'); ;($('add-name') as HTMLInputElement).value = ''; ($('add-pub') as HTMLInputElement).value = ''; paintStoreOptions('add-store'); paintScanButton(); if (matchMedia('(pointer:fine)').matches) $('add-pub').focus() }
+const closeModal = () => dropModal('add-modal')
 $('add-cancel').addEventListener('click', closeModal)
 
 /**
@@ -2062,12 +2151,14 @@ $('add-save').addEventListener('click', async () => {
   // the only thing between a link and a man in the middle. A name typed here
   // wins over the one in the link: someone who typed it meant it.
   const inv = pub ? inviteFromPaste(pub) : null
-  if (inv) { closeModal(); await showInvite(inv, name); return }
+  // Not closed: the window stays in the stack, so Cancel on the invite comes
+  // back here instead of to an empty screen.
+  if (inv) { await showInvite(inv, name); return }
   if (!name || !pub) { setMsg('add-msg', tr('Podaj nazwę i klucz.'), 'err'); return }
   try { if (Uint8Array.from(atob(pub), (c) => c.charCodeAt(0)).length !== 32) { setMsg('add-msg', tr('Klucz nie wygląda na 32-bajtowy X25519 (base64).'), 'err'); return } }
   catch { setMsg('add-msg', tr('Klucz nie jest poprawnym base64.'), 'err'); return }
   const store = storeChoice('add-store')
-  if (store === 'none') { closeModal(); void openRoomFor({ name, pub, source: 'local' }, true); return } // ephemeral — nothing saved (HEM nor localStorage)
+  if (store === 'none') { endModals(); void openRoomFor({ name, pub, source: 'local' }, true); return } // ephemeral — nothing saved (HEM nor localStorage)
   const persistent = store !== 'local'
   const btn = $('add-save') as HTMLButtonElement; btn.disabled = true; btn.textContent = tr('Zapisuję…')
   try {
@@ -2075,7 +2166,7 @@ $('add-save').addEventListener('click', async () => {
     await session.book.add(name, pub, persistent)
     markAdded(pub)
     await refreshContacts()
-    closeModal()
+    endModals() // added: there is nothing to come back to
     // Same question as the link path. Typing a key by hand is exactly the case
     // where the other side has nothing of yours yet.
     if ((await ask(tr('Dodano {name}', { name }),
@@ -2303,7 +2394,7 @@ const inAppShell = !/^https?:$/.test(location.protocol) || location.hostname ===
 
 const openShare = async (returnMode = false) => {
   if (!session) return
-  $('scrim').classList.add('open'); $('share-modal').classList.add('open')
+  pushModal('share-modal')
   $('share-title').textContent = returnMode ? tr('Odeślij swój profil') : tr('Udostępnij swój profil')
   // The return trip is not optional politeness — until the other side holds our
   // key too, neither of us can compute the pair topic, so nothing can be sent.
@@ -2335,7 +2426,7 @@ const openShare = async (returnMode = false) => {
     ecLog('QR not drawn: ' + (e?.message ?? e), 'debug')
   }
 }
-const closeShare = () => { $('scrim').classList.remove('open'); $('share-modal').classList.remove('open') }
+const closeShare = () => dropModal('share-modal')
 // Zaznaczenie linku po kliknięciu było atrybutem `onclick` w markupie; CSP nie
 // przepuszcza atrybutów zdarzeń, a jeden taki atrybut wymusiłby `unsafe-inline`
 // w `script-src`, co unieważnia całą politykę.
@@ -2348,7 +2439,9 @@ $('share-copy').addEventListener('click', async () => {
   catch { el.select(); toast(tr('Zaznaczono — skopiuj ręcznie')) } // no clipboard permission, or plain http
 })
 
-const closeImport = () => { $('scrim').classList.remove('open'); $('import-modal').classList.remove('open') }
+const closeImport = () => dropModal('import-modal')
+// A half-read invite must not survive the window that was reading it.
+MODAL_EXIT['import-modal'] = () => { pendingInvite = null }
 $('import-cancel').addEventListener('click', () => { pendingInvite = null; closeImport() })
 
 /**
@@ -2395,9 +2488,8 @@ async function showInvite(inv: Invite, nameOverride?: string) {
   // and that window's own Save/Cancel poking out below (reported with
   // screenshots from Android and iOS, 2026-09-23). Closed here rather than at
   // each call site, because every path that reaches an invite comes through
-  // some window that has finished its job.
-  closeModal()
-  $('scrim').classList.add('open'); $('import-modal').classList.add('open')
+  // some window it came from, and that window is where Cancel belongs.
+  pushModal('import-modal')
   clr('import-msg')
   ;($('import-name') as HTMLInputElement).value = nameOverride || inv.name
   paintStoreOptions('import-store')
@@ -2438,7 +2530,7 @@ $('import-add').addEventListener('click', async () => {
     // topic, which this client could always derive (DISCOVERY-PROPOSAL.md §2.2).
     if (inv.inbox && store !== 'none') startKnocking(inv.pub, inv.inbox, name, val('import-note'))
     pendingInvite = null
-    closeImport()
+    endModals() // imported: the windows it came through are finished too
     // Nothing was written, so the conversation is all there is: open it, or the
     // import ends with no trace of having happened.
     if (store === 'none') void openRoomFor({ name, pub: inv.pub, source: 'local' }, true)
@@ -2728,7 +2820,7 @@ function makeQrReader(): QrReader {
 async function openScan() {
   if (!scanSupported()) return
   clr('scan-msg')
-  $('scrim').classList.add('open'); $('scan-modal').classList.add('open')
+  pushModal('scan-modal')
   if (nativeScanAvailable()) { await runNativeScan(); return }
 
   // The READER is built before the camera is asked for, and the order is the
@@ -2940,8 +3032,11 @@ function stopScanCamera() {
 
 function closeScan() {
   stopScanCamera()
-  $('scrim').classList.remove('open'); $('scan-modal').classList.remove('open')
+  dropModal('scan-modal')
 }
+// However it is dismissed — its own button, Escape, the backdrop, or a flow
+// that moved on — the camera goes out with it.
+MODAL_EXIT['scan-modal'] = () => stopScanCamera()
 
 function handleScanned(text: string) {
   const inv = inviteFromPaste(text)
@@ -2954,7 +3049,7 @@ function handleScanned(text: string) {
     // Verification: the key on screen is the key we hold. Said as a fact about
     // the KEY, not about the person — the name is ours, the key is what matched.
     toast(tr('✓ Ten sam klucz, który masz zapisany jako „{name}”', { name: known.name }))
-    closeModal()
+    endModals() // the question was answered; nothing is half-done behind it
     return
   }
   const sameName = contactsCache.find((c) => c.name === inv.name)
@@ -3041,13 +3136,13 @@ async function removeProfile(name: string) {
 }
 
 const openPasswd = () => {
-  $('scrim').classList.add('open'); $('passwd-modal').classList.add('open'); clr('pw-msg')
+  pushModal('passwd-modal'); clr('pw-msg')
   for (const f of ['pw-old', 'pw-new', 'pw-new2']) ($(f) as HTMLInputElement).value = ''
   paintMeter($('pwm-new'), '', true) // empty hides — no stale bar from last time
   ;($('pw-who') as HTMLInputElement).value = activeSoftProfile
   $('pw-old').focus()
 }
-const closePasswd = () => { $('scrim').classList.remove('open'); $('passwd-modal').classList.remove('open') }
+const closePasswd = () => dropModal('passwd-modal')
 $('btn-passwd').addEventListener('click', openPasswd)
 $('pw-cancel').addEventListener('click', closePasswd)
 $('pw-save').addEventListener('click', async () => {
@@ -3079,7 +3174,14 @@ $('pw-save').addEventListener('click', async () => {
 $('btn-settings').addEventListener('click', openDrawer)
 $('chip-profile').addEventListener('click', openDrawer)
 $('btn-close-drawer').addEventListener('click', closeDrawer)
-$('scrim').addEventListener('click', () => { closeModal(); closeDrawer(); closeSoftModal(); closePasswd(); closeShare(); closeWelcome(); pendingInvite = null; closeImport(); closeScan(); closeIgnored(); closePaste() })
+$('scrim').addEventListener('click', () => {
+  // A click on the backdrop is a withdrawal, the same as Cancel — so it steps
+  // BACK one window rather than sweeping the screen. Each window puts its own
+  // things away through MODAL_EXIT, which is what keeps the camera from
+  // staying on when the scanner is dismissed this way.
+  if (modalStack.length) { backModal(); return }
+  closeDrawer()
+})
 $('btn-logout').addEventListener('click', () => location.reload())
 // The same act, from the header rather than from inside Settings — but asked
 // first, because this one sits beside a button people press often. Logging out
@@ -3164,11 +3266,11 @@ type XferUi = {
 let xfer: XferUi | null = null
 let xferTimer: any = null
 
-function xferOpen() { $('scrim').classList.add('open'); $('xfer-modal').classList.add('open') }
+function xferOpen() { pushModal('xfer-modal') }
 function xferClose() {
   clearInterval(xferTimer); xferTimer = null
   xfer = null
-  $('xfer-modal').classList.remove('open'); $('scrim').classList.remove('open')
+  dropModal('xfer-modal')
   setFill(0)
 }
 const setFill = (pct: number) => { ($('xfer-fill') as HTMLElement).style.width = `${Math.max(0, Math.min(100, pct))}%` }
@@ -3473,8 +3575,8 @@ const recTime = (ms: number) => {
  *  back. The window has two faces and one clock. */
 function paintRecWindow(state: 'recording' | 'ready' | 'off') {
   const modal = $('rec-modal')
-  if (state === 'off') { modal.classList.remove('open'); $('scrim').classList.remove('open'); return }
-  modal.classList.add('open'); $('scrim').classList.add('open')
+  if (state === 'off') { dropModal('rec-modal'); return }
+  pushModal('rec-modal')
   const done = state === 'ready'
   $('rec-dot').classList.toggle('done', done)
   $('rec-title').textContent = tr(done ? 'Nagranie gotowe' : 'Nagrywam…')
@@ -4133,11 +4235,11 @@ function promptInvite(current?: PubInvite): Promise<{ label: string; expires?: n
     ttl.value = current?.expires ? 'custom' : '0'
     when.value = current?.expires ? localInputValue(current.expires) : ''
     $('invite-when-box').hidden = ttl.value !== 'custom'
-    $('scrim').classList.add('open'); $('invite-modal').classList.add('open')
+    pushModal('invite-modal')
 
     const onTtl = () => { $('invite-when-box').hidden = ttl.value !== 'custom' }
     const done = (v: { label: string; expires?: number } | null) => {
-      $('scrim').classList.remove('open'); $('invite-modal').classList.remove('open')
+      dropModal('invite-modal')
       $('invite-save').removeEventListener('click', onSave)
       $('invite-cancel').removeEventListener('click', onCancel)
       ttl.removeEventListener('change', onTtl)
@@ -4231,9 +4333,9 @@ function renderIgnored() {
 $('btn-ignored')?.addEventListener('click', async () => {
   await loadIgnored()
   renderIgnored()
-  $('scrim').classList.add('open'); $('ignored-modal').classList.add('open')
+  pushModal('ignored-modal')
 })
-const closeIgnored = () => { $('scrim').classList.remove('open'); $('ignored-modal').classList.remove('open') }
+const closeIgnored = () => dropModal('ignored-modal')
 $('ignored-close')?.addEventListener('click', closeIgnored)
 
 function paintInviteBadge() {
@@ -4357,21 +4459,25 @@ $('btn-new-invite')?.addEventListener('click', async () => {
  * Each row hands off to the surface that already owns the job — the invites tab
  * mints and lists, the paste window reads. This points; it does not perform.
  */
-const closeWelcome = () => { $('scrim').classList.remove('open'); $('welcome-modal').classList.remove('open') }
+const closeWelcome = () => dropModal('welcome-modal')
 $('welcome-close')?.addEventListener('click', closeWelcome)
-$('welcome-share')?.addEventListener('click', () => { closeWelcome(); void openShare() })
+// The three ways do NOT close this card: it stays underneath as the place to
+// come back to. It is the first minute of a new profile, and the old behaviour
+// closed the only orientation there was, so backing out of what you picked
+// left an empty screen with nothing to pick again (the user's report).
+$('welcome-share')?.addEventListener('click', () => { void openShare() })
 $('welcome-invite')?.addEventListener('click', () => {
-  closeWelcome(); $('tab-invites').click(); $('btn-new-invite').click()
+  $('tab-invites').click(); $('btn-new-invite').click()
 })
 $('welcome-have')?.addEventListener('click', () => {
-  closeWelcome(); $('tab-invites').click(); $('btn-have-invite').click()
+  $('tab-invites').click(); $('btn-have-invite').click()
 })
 
-const closePaste = () => { $('scrim').classList.remove('open'); $('paste-modal').classList.remove('open') }
+const closePaste = () => dropModal('paste-modal')
 $('btn-have-invite')?.addEventListener('click', () => {
   ;($('paste-input') as HTMLTextAreaElement).value = ''
   clr('paste-msg')
-  $('scrim').classList.add('open'); $('paste-modal').classList.add('open')
+  pushModal('paste-modal')
   // Same rule as the add window: a phone pops its keyboard over the modal.
   if (matchMedia('(pointer:fine)').matches) $('paste-input').focus()
 })
@@ -4384,7 +4490,8 @@ $('paste-go')?.addEventListener('click', async () => {
   // fixed rather than retyped. The window it would open has no way to say this:
   // by then there is nothing to show a fingerprint for.
   if (!inv) { setMsg('paste-msg', tr('To nie wygląda na zaproszenie — sprawdź, czy skopiowałeś całość.'), 'err'); return }
-  closePaste()
+  // Left open behind: Cancel on the invite returns here, with the text still in
+  // the field, instead of ending the errand.
   await showInvite(inv)
 })
 
@@ -5543,10 +5650,10 @@ function openMigrate(mode: 'export' | 'import') {
   $('mig-file-wrap').hidden = mode === 'export'
   $('mig-title').textContent = tr(mode === 'export' ? 'Przenieś profil' : 'Wczytaj przeniesiony profil')
   $('mig-note').textContent = tr(mode === 'export' ? MIG_NOTE_EXPORT : MIG_NOTE_IMPORT)
-  $('scrim').classList.add('open'); $('mig-modal').classList.add('open')
+  pushModal('mig-modal')
   $(mode === 'export' ? 'mig-pass' : 'mig-file').focus()
 }
-function closeMigrate() { $('mig-modal').classList.remove('open'); $('scrim').classList.remove('open') }
+function closeMigrate() { dropModal('mig-modal') }
 $('mig-cancel')?.addEventListener('click', closeMigrate)
 $('go-migrate')?.addEventListener('click', () => openMigrate('import'))
 $('btn-export')?.addEventListener('click', () => openMigrate('export'))
@@ -8361,9 +8468,9 @@ function openGroupModal() {
     list.appendChild(row)
   }
   ;($('group-name') as HTMLInputElement).value = ''; clr('group-msg')
-  $('scrim').classList.add('open'); $('group-modal').classList.add('open'); $('group-name').focus()
+  pushModal('group-modal'); $('group-name').focus()
 }
-const closeGroupModal = () => { $('scrim').classList.remove('open'); $('group-modal').classList.remove('open') }
+const closeGroupModal = () => dropModal('group-modal')
 $('group-cancel').addEventListener('click', closeGroupModal)
 $('group-create').addEventListener('click', async () => {
   if (!client || !session) return
