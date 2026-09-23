@@ -50,6 +50,7 @@ import { createDump } from './dump.mjs'
 import { startStats } from './stats.mjs'
 import { siblingSet, shouldJoin } from './topics.mjs'
 import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad } from './load.mjs'
+import { makeQuota, DEFAULT_PER_PEER } from './quota.mjs'
 import { redisSink } from './redis.mjs'
 import { appendFile } from 'fs'
 
@@ -82,6 +83,11 @@ const LOCAL_TOPICS = process.argv.includes('--local-topics-only')
 // (load.mjs explains why it is not a file over HTTP). OFF by default, like
 // everything else that changes behaviour.
 const ANNOUNCE_LOAD = process.argv.includes('--announce-load')
+// How many topics ONE peer may make this node carry. Without it the only limit
+// was global, so a single socket could claim all of --max-topics and every real
+// room after that was refused SILENTLY (quota.mjs).
+const PER_PEER = parseInt(get('--max-topics-per-peer', String(DEFAULT_PER_PEER)))
+const quota = makeQuota(PER_PEER)
 // Optional IPv6 listen port for inter-relay peering over a provider's private
 // network (where public IPv4 between VMs is blocked but IPv6 routes). Kept on a
 // SEPARATE port from PORT so the IPv4 nginx path (0.0.0.0:PORT) is untouched and
@@ -234,6 +240,22 @@ relay.services.pubsub.addEventListener('subscription-change', (evt) => {
     // A sibling relay mentioning a topic is not a reason to carry it; one of
     // our own clients asking for it is. Off by default (see LOCAL_TOPICS).
     if (subscribe && !shouldJoin(evt.detail.peerId, { siblings: SIBLINGS, localOnly: LOCAL_TOPICS })) continue
+
+    const asker = evt.detail.peerId.toString()
+    if (!subscribe) quota.release(asker, topic)
+    // Siblings are exempt: their subscriptions are the network's, which no
+    // per-peer number could sensibly bound — and with --local-topics-only they
+    // never reach this line anyway.
+    if (subscribe && !SIBLINGS.has(asker) && !quota.claim(asker, topic)) {
+      // Counted as a refusal, so it reaches the same alarm as the global cap.
+      // Loud, because from the client's side this is indistinguishable from the
+      // room simply being empty.
+      stats?.counters.topic('refuse')
+      console.log(`[!topic] PEER ${asker.slice(0, 12)}... at its limit of ${PER_PEER} — REFUSING "${topic.slice(0, 16)}..."`)
+      dump?.event('topic.refuse', { topic, peer: asker, perPeerLimit: PER_PEER })
+      continue
+    }
+
     if (subscribe && !relay.services.pubsub.getTopics().includes(topic)) {
       if (relay.services.pubsub.getTopics().length >= MAX_TOPICS) {
         // The client gets no error for this — it just never sees anyone in the
@@ -278,6 +300,9 @@ setInterval(() => {
 }, SWEEP_MS)
 
 relay.addEventListener('peer:connect', (evt) => { stats?.counters.conn(1); console.log('[+]', evt.detail.toString().slice(0, 16) + '...') })
+// A peer that leaves takes its topic claims with it, or a reconnecting client
+// would stay locked out by its own previous session.
+relay.addEventListener('peer:disconnect', (evt) => { quota.forget(evt.detail.toString()) })
 relay.addEventListener('peer:disconnect', (evt) => { stats?.counters.conn(-1); console.log('[-]', evt.detail.toString().slice(0, 16) + '...') })
 // connections, subscriptions, every frame, reservations, start/stop -> JSONL
 dump?.attach(relay, { flags: args })
