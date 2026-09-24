@@ -12,6 +12,7 @@
  * t:'rtc' routes to onSignal, everything else to the UI callbacks.
  */
 
+import { origin } from './origin.ts'
 import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
 import { alignedTimer } from './radiophase.ts'
 import type { Session } from './session.ts'
@@ -940,16 +941,20 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
 
   const handler = async (evt) => {
     if (evt.detail.topic !== topic) return
-    const from = evt.detail.from.toString()
-    if (eh2 && isHandshakeFrame(evt.detail.data)) {
-      dbg(`<- msg${evt.detail.data[0]} from ${short(from)} (${evt.detail.data.length} B)`)
-      await onHandshakeFrame(evt.detail.data, from)
+    // The sender comes from the frame when it carries one (lib/origin.ts),
+    // from the transport otherwise; everything below keys on it either way.
+    const o = origin(evt)
+    if (!o) return
+    const { from, data } = o
+    if (eh2 && isHandshakeFrame(data)) {
+      dbg(`<- msg${data[0]} from ${short(from)} (${data.length} B)`)
+      await onHandshakeFrame(data, from)
       return
     }
-    if (await processSealed(evt.detail.data, from)) return
+    if (await processSealed(data, from)) return
     // not sealed -> authenticated Announce (presence/discovery, §5.5)
-    const res = await verifyAnnounce(evt.detail.data, keys.macKey)
-    if (!res.ok) { noteUndecodable(from, evt.detail.data.length); return }
+    const res = await verifyAnnounce(data, keys.macKey)
+    if (!res.ok) { noteUndecodable(from, data.length); return }
     if (res.peer === self) return
     if (seenNonces.has(res.nonce!)) return
     seenNonces.add(res.nonce!)

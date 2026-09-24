@@ -27,6 +27,7 @@
  * keepalives go to all of them, sends go to the current day's.
  */
 
+import { origin } from './origin.ts'
 import type { GroupSession } from './group.ts'
 import { envMsg, envReaction, envFile, encodeEnvelope, decodeEnvelope, type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta } from './envelope.ts'
 import type { QuoteRef } from './quote.ts'
@@ -136,7 +137,11 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
 
   const handler = async (evt: any) => {
     if (stopped || !live.has(evt.detail.topic)) return
-    const data: Uint8Array = evt.detail.data
+    // Sender identity here comes from the sender-key MAC, not from `from`, but
+    // the frame may still arrive in an origin envelope (lib/origin.ts).
+    const o = origin(evt)
+    if (!o) return
+    const data: Uint8Array = o.data
     if (data.length === 1 && data[0] === T_GKEEPALIVE) return // a member's mesh keepalive — ignore
     const opened = await session.receive(data)
     // null = our own echo, an unknown sender, a forged/tampered MAC, a replay, or

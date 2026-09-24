@@ -13,6 +13,7 @@ import { GroupManager, softwareGk, type GroupId, type Member } from '../lib/grou
 import { joinGroup, type GroupRoom } from '../lib/grouproom.ts'
 import { makeQuote } from '../lib/quote.ts'
 import { pubHint } from '../lib/mentions.ts'
+import { wrap } from '../lib/origin.ts'
 
 const P = { networkId: 'groom', dateUTC: '2026-08-01' }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -22,8 +23,13 @@ async function softId(): Promise<GroupId> {
   return { pub: b64(k.pub), ecdh: async (peerPubB64: string) => k.dh(unb64(peerPubB64)) }
 }
 
-/** In-memory GossipSub: publish reaches every other node subscribed to the topic. */
-function hub() {
+/**
+ * In-memory GossipSub: publish reaches every other node subscribed to the topic.
+ * `viaRelay` makes it a relay pushing for its clients instead: every frame is
+ * wrapped with the publisher's id (lib/origin.ts) and the transport names the
+ * relay as the sender of all of them.
+ */
+function hub(viaRelay = false) {
   const nodes = new Map<string, (topic: string, data: Uint8Array, from: string) => void>()
   return {
     node(id: string) {
@@ -35,7 +41,10 @@ function hub() {
           addEventListener: (_e: string, h: (evt: any) => void) => listeners.push(h),
           removeEventListener: (_e: string, h: (evt: any) => void) => { const i = listeners.indexOf(h); if (i >= 0) listeners.splice(i, 1) },
           subscribe: () => {}, unsubscribe: () => {},
-          publish: async (topic: string, data: Uint8Array) => { for (const [peer, deliver] of nodes) if (peer !== id) deliver(topic, data, id) },
+          publish: async (topic: string, data: Uint8Array) => {
+            const onWire = viaRelay ? wrap(id, data) : data
+            for (const [peer, deliver] of nodes) if (peer !== id) deliver(topic, onWire, viaRelay ? 'relay' : id)
+          },
         } },
       }
     },
@@ -45,8 +54,8 @@ function hub() {
 interface Peer { id: GroupId; mgr: GroupManager; node: any; recv: { from: string; body: string; re?: any }[]; react: { from: string; to: string; emoji: string }[]; room?: GroupRoom }
 
 /** n members, cross-distributed sender keys, each joined to the group room. */
-async function makeGroup(n: number): Promise<{ gid: string; topic: string; peers: Peer[] }> {
-  const net = hub()
+async function makeGroup(n: number, viaRelay = false): Promise<{ gid: string; topic: string; peers: Peer[] }> {
+  const net = hub(viaRelay)
   const peers: Peer[] = []
   for (let i = 0; i < n; i++) {
     const id = await softId()
@@ -76,6 +85,18 @@ test('3 members: a text broadcast reaches the others, not the sender', async () 
   assert.deepEqual(peers[2].recv, [{ from: peers[0].id.pub, body: 'czesc grupo', re: undefined }])
   assert.equal(peers[0].recv.length, 0, 'the sender does not receive its own broadcast')
   assert.ok(id.length > 0)
+})
+
+test('3 members behind a relay that pushes for them: wrapped frames, same delivery', async () => {
+  // The group never keyed on the transport sender (the sender-key MAC names the
+  // member), but every frame -- content AND the 1-byte keepalive -- now has to
+  // be unwrapped before it is read.
+  const { peers } = await makeGroup(3, true)
+  await peers[0].room!.sendText('przez przekaznik')
+  await sleep(30)
+  assert.deepEqual(peers[1].recv, [{ from: peers[0].id.pub, body: 'przez przekaznik', re: undefined }])
+  assert.deepEqual(peers[2].recv, [{ from: peers[0].id.pub, body: 'przez przekaznik', re: undefined }])
+  assert.equal(peers[0].recv.length, 0)
 })
 
 test('a reply arrives quoting what it answers', async () => {

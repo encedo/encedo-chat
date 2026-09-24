@@ -29,6 +29,7 @@
  * duplicate either way — and either way both of us stop.
  */
 
+import { origin } from './origin.ts'
 import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
 import { activeDatesForOffset } from './presence.ts'
 
@@ -75,9 +76,11 @@ export function watchSelfSession(
 
   const handler = async (evt: any) => {
     if (done || evt.detail.topic !== topic) return
-    const from = evt.detail.from?.toString?.()
+    const o = origin(evt)
+    if (!o) return
+    const { from, data } = o
     if (from === self) return
-    const res = await verifyAnnounce(evt.detail.data, macKey)
+    const res = await verifyAnnounce(data, macKey)
     if (!res.ok || !res.peer || res.peer === self) return
     if (seenNonces.has(res.nonce!)) return
     seenNonces.add(res.nonce!)

@@ -26,6 +26,7 @@
  * the Announce (a spec-queue item); for now §9.1 resolves duplicates in seconds.
  */
 
+import { origin } from './origin.ts'
 import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
 import { alignedTimer } from './radiophase.ts'
 import { isHandshakeFrame } from '../eh2/establish.ts'
@@ -68,9 +69,10 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
 
   const handler = async (evt: any) => {
     if (stopped || evt.detail.topic !== topic) return
-    const from = evt.detail.from?.toString?.()
+    const o = origin(evt)
+    if (!o) return
+    const { from, data } = o
     if (from === self) return
-    const data: Uint8Array = evt.detail.data
     // A handshake frame is the contact opening a conversation — the light watch
     // steps aside and lets the full room take over (core handles the upgrade).
     if (isHandshakeFrame(data)) { opts.onIncomingHandshake(data, from); return }
