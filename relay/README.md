@@ -68,8 +68,7 @@ table at its bottom) — copying it as it is gives a unit that will not start.
 The fill-in recipe is `DEPLOY.md` step 4; the gist:
 
 ```bash
-sed -e "s|<NODE>|bs1|g" -e "s|<V6>|...|" -e "s|<PEERS>|...|" -e "s|<SIBLINGS>|...|" \
-    -e "s|<MAX_TOPICS>|2000|" onchato-relay.service | sudo tee /etc/systemd/system/onchato-relay.service
+../infra/bs-setup.sh --dry-run --host bsN.onchato.com   # shows the filled unit; without --dry-run it installs
 sudo systemctl daemon-reload
 sudo systemctl enable --now onchato-relay
 sudo journalctl -u onchato-relay -f      # confirm the PeerId on startup (bs1: 12D3KooWP6Sp…)

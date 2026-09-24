@@ -153,9 +153,9 @@ V6=$(ip -6 addr show scope global | awk '/inet6/{print $2}' | cut -d/ -f1 | head
 PEERS="/ip6/2a03:ec41:0:9::cf/tcp/9002/ws/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp /ip6/2a01:7e0:0:164::16c/tcp/9002/ws/p2p/12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y /ip6/2a03:b0c0:2:f0:0:1:ed56:d001/tcp/9002/ws/p2p/12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5"
 SIBLINGS="12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp,12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y,12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5"
 NODE=${HOST%%.*}; MAXT=1000                      # 2000 on a 2 GB machine
-sed -e "s|<NODE>|$NODE|g" -e "s|<V6>|$V6|" -e "s|<PEERS>|$PEERS|" \
-    -e "s|<SIBLINGS>|$SIBLINGS|" -e "s|<MAX_TOPICS>|$MAXT|" onchato-relay.service \
-  | sudo tee /etc/systemd/system/onchato-relay.service >/dev/null
+# (or simply: infra/bs-setup.sh, which does all of steps 1-6 and 8 from the same template)
+sed -E "/^(ExecStart|Description)=/{s|<NODE>|$NODE|g; s|<V6>|$V6|; s|<PEERS>|$PEERS|; s|<SIBLINGS>|$SIBLINGS|; s|<MAX_TOPICS>|$MAXT|}" \
+    onchato-relay.service | sudo tee /etc/systemd/system/onchato-relay.service >/dev/null
 grep -cE '^(ExecStart|Description)=.*<' /etc/systemd/system/onchato-relay.service   # must print 0: nothing left unfilled
 sudo systemctl daemon-reload
 sudo systemctl enable --now onchato-relay
