@@ -45,6 +45,7 @@ import {
   diagFileAvailable, diagPath, diagAppend,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
+import { invQrView } from './invqr.ts'
 import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
 import { iceServersFor } from '../../lib/ice.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
@@ -487,7 +488,7 @@ const diag = newDiag()
 const SHOW_KEYS = __EC_ALLOW_KEYS__ && new URLSearchParams(location.search).has('keys')
 const HEM_TRACE = new URLSearchParams(location.search).has('debug') || SHOW_KEYS
 // `?debug=2` adds the wire dump (lib/protolog.ts `wire`): every frame at the
-// node edge and on the direct channel, with its first 32 bytes -- evidence that
+// node edge and on the direct channel, with its first 64 bytes -- evidence that
 // what the node carries is ciphertext. Nothing secret; `?keys=1` stays separate.
 // getAll, not get: `?debug=1&debug=2` (a link that already carried debug=1) means the higher.
 const WIRE_TRACE = Math.max(0, ...new URLSearchParams(location.search).getAll('debug').map(Number).filter((n) => !isNaN(n))) >= 2
@@ -4640,17 +4641,31 @@ function paintInviteQrKnocks(showCodeAgain = false) {
   const box = $('invqr-knocks')
   box.innerHTML = ''
   const mine = pendingKnocks.filter((k) => k.inviteId === invQrShown)
-  const last = invQrAccepted[invQrAccepted.length - 1]
-  const success = !!last && !mine.length && !showCodeAgain
-  $('invqr-qr').hidden = success
-  $('invqr-done').hidden = !success
-  $('invqr-sub').textContent = success
-    ? tr('„{name}" jest już w Twoich kontaktach.', { name: last.name })
+  // Several people can scan one code: the rules are in web/src/invqr.ts.
+  const v = invQrView(mine.length, invQrAccepted, showCodeAgain)
+  $('invqr-qr').hidden = !v.showCode
+  $('invqr-done').hidden = !v.success
+  const names = v.accepted.map((a) => `„${a.name}"`).join(', ')
+  $('invqr-sub').textContent = v.success
+    ? (v.accepted.length === 1
+      ? tr('„{name}" jest już w Twoich kontaktach.', { name: v.accepted[0].name })
+      : tr('{names} są już w Twoich kontaktach.', { names }))
     : tr('Pokaż ten kod osobie, którą zapraszasz. Zeskanuje go aparatem albo w aplikacji — jej prośba pojawi się tutaj, a Ty przyjmiesz ją jednym dotknięciem.')
-  if (success) {
-    $('invqr-who').textContent = tr('Połączono z „{name}"', { name: last.name })
-    $('invqr-fp').textContent = tr('odcisk: ') + '…'
-    void fingerprint(last.pub).then((f) => { if (invQrAccepted[invQrAccepted.length - 1] === last) $('invqr-fp').textContent = tr('odcisk: ') + f })
+  if (v.success) {
+    $('invqr-who').textContent = v.accepted.length === 1
+      ? tr('Połączono z „{name}"', { name: v.accepted[0].name })
+      : tr('Połączono: {names}', { names })
+    // One fingerprint line per person accepted here, filled as they are computed.
+    const fpBox = $('invqr-fp'); fpBox.innerHTML = ''
+    for (const a of v.accepted) {
+      const line = document.createElement('div')
+      line.textContent = (v.accepted.length > 1 ? `${a.name} — ` : '') + tr('odcisk: ') + '…'
+      fpBox.appendChild(line)
+      void fingerprint(a.pub).then((f) => { line.textContent = (v.accepted.length > 1 ? `${a.name} — ` : '') + tr('odcisk: ') + f })
+    }
+    $('invqr-open').textContent = v.accepted.length === 1
+      ? tr('Otwórz rozmowę')
+      : tr('Otwórz rozmowę z „{name}"', { name: v.openTarget!.name })
     return
   }
   for (const a of invQrAccepted) {
@@ -4679,7 +4694,7 @@ function paintInviteQrKnocks(showCodeAgain = false) {
 }
 $('invqr-close').addEventListener('click', () => backModal())
 $('invqr-open').addEventListener('click', () => {
-  const last = invQrAccepted[invQrAccepted.length - 1]
+  const last = invQrView(0, invQrAccepted, false).openTarget
   const c = last && contactsCache.find((x) => x.pub === last.pub)
   endModals()
   if (c) void openRoomFor(c, true)

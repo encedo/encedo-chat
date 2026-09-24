@@ -48,6 +48,9 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '🤝 Securing…': '🤝 Zabezpieczam…',
   },
   en: {
+    '{names} są już w Twoich kontaktach.': '{names} are now in your contacts.',
+    'Połączono: {names}': 'Connected: {names}',
+    'Otwórz rozmowę z „{name}"': 'Open the conversation with “{name}”',
     'Bezpośrednio (WebRTC) — ta wiadomość nie przeszła przez węzeł': 'Direct (WebRTC) — this message did not go through the node',
     'Otwórz rozmowę': 'Open the conversation',
     'Pokaż kod dla kolejnej osoby': 'Show the code for the next person',
