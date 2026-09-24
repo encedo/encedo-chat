@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { T, PROTOCOL, encodePick, encodeDrop, encodeRefused, encodeDeliver, encodePush, encodeAck, decodeFrame, makePicks } from './pick.mjs'
+import { T, PROTOCOL, encodePick, encodeDrop, encodeRefused, encodePicked, encodeDeliver, encodePush, encodeAck, decodeFrame, makePicks } from './pick.mjs'
 
 const TOPIC = 'topic-a'
 const OTHER = 'topic-b'
@@ -15,6 +15,8 @@ test('control frames round-trip', () => {
   assert.deepEqual(decodeFrame(encodePick(TOPIC)), { type: T.PICK, topic: TOPIC })
   assert.deepEqual(decodeFrame(encodeDrop(TOPIC)), { type: T.DROP, topic: TOPIC })
   assert.deepEqual(decodeFrame(encodeRefused(TOPIC)), { type: T.REFUSED, topic: TOPIC })
+  assert.deepEqual(decodeFrame(encodePicked(TOPIC)), { type: T.PICKED, topic: TOPIC })
+  assert.notEqual(T.PICKED, T.REFUSED, 'yes and no are different bytes')
 })
 
 test('a delivery keeps the original sender, the topic and the bytes', () => {

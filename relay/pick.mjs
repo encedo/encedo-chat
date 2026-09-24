@@ -52,6 +52,12 @@
  *   relay  -> client  0x11 DELIVER u8 fromLen, from, u8 topicLen, topic, data
  *                     0x12 REFUSED topic
  *                     0x13 ACK     u8 topicLen, topic, u16be recipients
+ *                     0x14 PICKED  topic
+ *
+ * PICKED is the positive answer to PICK. A GossipSub client learns that the
+ * relay joined its topic from the relay's subscription announcement and gates
+ * its first Announce on it (`getSubscribers(topic)` non-empty); a light client
+ * has no such announcement, so the relay says it outright.
  *
  * Topics are 52 base32 characters and peer ids are ~52, so a one-byte length
  * is enough and anything longer is refused as malformed rather than parsed.
@@ -59,7 +65,7 @@
 
 export const PROTOCOL = '/onchato/pick/1'
 
-export const T = Object.freeze({ PICK: 0x01, DROP: 0x02, PUSH: 0x03, DELIVER: 0x11, REFUSED: 0x12, ACK: 0x13 })
+export const T = Object.freeze({ PICK: 0x01, DROP: 0x02, PUSH: 0x03, DELIVER: 0x11, REFUSED: 0x12, ACK: 0x13, PICKED: 0x14 })
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
@@ -75,6 +81,7 @@ function nameBytes(s) {
 export function encodePick(topic) { const t = nameBytes(topic); return concat([T.PICK], t) }
 export function encodeDrop(topic) { const t = nameBytes(topic); return concat([T.DROP], t) }
 export function encodeRefused(topic) { const t = nameBytes(topic); return concat([T.REFUSED], t) }
+export function encodePicked(topic) { const t = nameBytes(topic); return concat([T.PICKED], t) }
 
 export function encodeDeliver(from, topic, data) {
   const f = nameBytes(from), t = nameBytes(topic)
@@ -108,7 +115,7 @@ function concat(...parts) {
 export function decodeFrame(bytes) {
   if (!(bytes instanceof Uint8Array) || bytes.length < 2) return null
   const type = bytes[0]
-  if (type === T.PICK || type === T.DROP || type === T.REFUSED) {
+  if (type === T.PICK || type === T.DROP || type === T.REFUSED || type === T.PICKED) {
     if (bytes.length - 1 > MAX_NAME) return null
     return { type, topic: dec.decode(bytes.subarray(1)) }
   }

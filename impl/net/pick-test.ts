@@ -67,6 +67,7 @@ for (let i = 0; i < 40; i++) {
 
 const d = got.find((f) => f.type === T.DELIVER)
 const delivered = !!d && new TextDecoder().decode(d.data) === token
+const pickedYes = got.some((f) => f.type === T.PICKED && f.topic === topic)
 const fromRight = !!d && d.from === talker.peerId.toString()
 
 // --- the send side: PUSH -------------------------------------------------
@@ -106,11 +107,13 @@ for (let i = 0; i < 20; i++) {
   await sleep(250)
 }
 const refused = got.some((f) => f.type === T.REFUSED && f.topic === second)
+const pickedNo = !got.some((f) => f.type === T.PICKED && f.topic === second)
 // On production the per-peer cap is 40, so a second pick is rightly accepted;
 // the refusal path is proven against a local relay started with cap 1.
 const expectRefused = process.env.EXPECT_REFUSED !== '0'
 const refusalOk = expectRefused ? refused : !refused
 
+console.log(`PICK -> PICKED         : ${pickedYes ? 'TAK' : 'NIE'}`)
 console.log(`dostarczono przez pick : ${delivered ? 'TAK' : 'NIE'}`)
 console.log(`from = nadawca         : ${fromRight ? 'TAK' : 'NIE'}${d ? '' : ' (brak ramki)'}`)
 console.log(`drugi pick REFUSED     : ${refused ? 'TAK' : 'NIE'}${expectRefused ? '' : ' (oczekiwane NIE: limit 40)'}`)
@@ -119,7 +122,10 @@ console.log(`PUSH -> gossipsub peer : ${talkerSaw ? 'TAK (bajty i koperta nietkn
 console.log(`PUSH -> drugi picker   : ${watcherSaw ? 'TAK (DELIVER, from z koperty = pusher)' : 'NIE'}`)
 console.log(`PUSH nie wraca do pushera: ${pusherEcho ? 'NIE (echo!)' : 'TAK'}`)
 const pushOk = !!ack && ack.recipients >= 2 && talkerSaw && watcherSaw && !pusherEcho
-const ok = delivered && fromRight && refusalOk && pushOk
+// A refused pick must not ALSO be answered PICKED (whatever the cap under test, a
+// PICKED for the first topic is required).
+const pickedOk = pickedYes && (!refused || pickedNo)
+const ok = delivered && fromRight && refusalOk && pushOk && pickedOk
 console.log(ok ? 'PRZESZLO' : 'NIE PRZESZLO')
 
 out.end(); wout.end()

@@ -55,7 +55,7 @@ import { leafAnnouncements } from './leaf.mjs'
 import { pipe } from 'it-pipe'
 import * as lp from 'it-length-prefixed'
 import { pushable } from 'it-pushable'
-import { PROTOCOL as PICK_PROTOCOL, T as PICK_T, decodeFrame as decodePickFrame, encodeDeliver, encodeRefused, encodeAck, makePicks } from './pick.mjs'
+import { PROTOCOL as PICK_PROTOCOL, T as PICK_T, decodeFrame as decodePickFrame, encodeDeliver, encodeRefused, encodePicked, encodeAck, makePicks } from './pick.mjs'
 import { redisSink } from './redis.mjs'
 import { appendFile } from 'fs'
 
@@ -306,6 +306,9 @@ if (PICK) {
         }
         lastSeen.set(f.topic, Date.now())
         picks.add(peer, f.topic, send)
+        // Said outright: a light client has no subscription announcement to
+        // learn from that the relay is now in its topic.
+        send(encodePicked(f.topic))
       }
     }).catch(() => {}).finally(bye)
   })
