@@ -636,6 +636,13 @@
   .prof-row .p-del:hover{color:var(--err,#c0392b)}
   @media (pointer:coarse){.prof-row .p-del{padding:9px 10px}}
   .btn-send{background:var(--accent);color:var(--accent-ink);border:none;padding:0 22px;border-radius:8px;font-weight:600}
+  /* The composer's send button is a SQUARE the height of a one-line field. It
+     had only horizontal padding, so on desktop it was as tall as its 18px icon
+     -- a flat pill beside a 42px field; a phone only got a square because the
+     touch rule adds min-height. Scoped to the composer: .btn-send also dresses
+     the wide primary buttons in dialogs, which must stay as they are. */
+  .composer .btn-send{box-sizing:border-box;width:42px;height:42px;padding:0;flex-shrink:0;
+    display:inline-flex;align-items:center;justify-content:center}
   /* Show-the-password eye, attached to every password input at startup
      (app.ts wraps them — the markup stays plain <input type="password">). */
   .pw-wrap{position:relative;display:block}
@@ -1159,6 +1166,7 @@
     .icon-btn{min-height:42px;min-width:42px;width:42px;height:42px}
     .contact{min-height:52px}
     .composer input,.composer textarea,.composer button{min-height:44px}
+    .composer .btn-send{width:44px;height:44px}  /* the touch floor is 44: keep it square at 44 */
     /* 16px keeps iOS from zooming the page when a field takes focus. */
     input,select,textarea{font-size:16px}
   }
