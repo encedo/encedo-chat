@@ -52,6 +52,10 @@ import { siblingSet, shouldJoin } from './topics.mjs'
 import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad } from './load.mjs'
 import { makeQuota, DEFAULT_PER_PEER } from './quota.mjs'
 import { leafAnnouncements } from './leaf.mjs'
+import { pipe } from 'it-pipe'
+import * as lp from 'it-length-prefixed'
+import { pushable } from 'it-pushable'
+import { PROTOCOL as PICK_PROTOCOL, T as PICK_T, decodeFrame as decodePickFrame, encodeDeliver, encodeRefused, makePicks } from './pick.mjs'
 import { redisSink } from './redis.mjs'
 import { appendFile } from 'fs'
 
@@ -93,6 +97,10 @@ const quota = makeQuota(PER_PEER)
 // Without it every connection is sent the node's whole topic list (leaf.mjs).
 // OFF by default; deployed inert, then turned on one node at a time.
 const LEAF_ANNOUNCE = process.argv.includes('--leaf-announce')
+// `/onchato/pick/1`: a client names a topic and is handed what arrives on it,
+// without being a GossipSub peer for it (pick.mjs). OFF by default.
+const PICK = process.argv.includes('--pick')
+const picks = makePicks()
 // Optional IPv6 listen port for inter-relay peering over a provider's private
 // network (where public IPv4 between VMs is blocked but IPv6 routes). Kept on a
 // SEPARATE port from PORT so the IPv4 nginx path (0.0.0.0:PORT) is untouched and
@@ -240,6 +248,45 @@ const stats = STATS_MIN > 0
     })
   : null
 
+if (PICK) {
+  await relay.handle(PICK_PROTOCOL, ({ stream, connection }) => {
+    const peer = connection.remotePeer.toString()
+    const out = pushable()
+    const send = (bytes) => { try { out.push(bytes) } catch {} }
+    // Everything this stream ever picked goes with it when it closes.
+    const bye = () => {
+      for (const t of picks.forget(peer)) quota.release(peer, t)
+      try { out.end() } catch {}
+    }
+    void pipe(out, (src) => lp.encode(src), stream.sink).catch(() => {}).finally(bye)
+    void pipe(stream.source, (src) => lp.decode(src), async (src) => {
+      for await (const chunk of src) {
+        const f = decodePickFrame(chunk.subarray())
+        if (!f) continue
+        if (f.type === PICK_T.DROP) { picks.drop(peer, f.topic); quota.release(peer, f.topic); continue }
+        if (f.type !== PICK_T.PICK) continue
+        // Same policy as a GossipSub subscription: per-peer quota, then the
+        // global cap -- but the answer is SAID, which a subscription never gets.
+        const already = relay.services.pubsub.getTopics().includes(f.topic)
+        if (!quota.claim(peer, f.topic) || (!already && relay.services.pubsub.getTopics().length >= MAX_TOPICS)) {
+          quota.release(peer, f.topic)
+          stats?.counters.topic('refuse')
+          console.log(`[!topic] PICK by ${peer.slice(0, 12)}... REFUSED "${f.topic.slice(0, 16)}..."`)
+          send(encodeRefused(f.topic))
+          continue
+        }
+        if (!already) {
+          relay.services.pubsub.subscribe(f.topic)
+          stats?.counters.topic('add')
+          console.log(`[+topic] "${f.topic}" (pick)`)
+        }
+        lastSeen.set(f.topic, Date.now())
+        picks.add(peer, f.topic, send)
+      }
+    }).catch(() => {}).finally(bye)
+  })
+}
+
 if (LEAF_ANNOUNCE) {
   // Throws if the pinned library no longer has the shape this relies on:
   // better a relay that will not start than one that runs unpatched and looks
@@ -287,7 +334,16 @@ relay.services.pubsub.addEventListener('subscription-change', (evt) => {
 })
 
 relay.services.pubsub.addEventListener('message', (evt) => {
-  lastSeen.set(evt.detail.topic, Date.now()) // heartbeat announces count -> live rooms stay
+  lastSeen.set(evt.detail.topic, Date.now())
+  if (PICK) {
+    // GossipSub already de-duplicated this by message id; each pick-holder gets
+    // it once. The publisher is passed on -- sessions are keyed by it.
+    const sinks = picks.sinksFor(evt.detail.topic, evt.detail.from.toString())
+    if (sinks.length) {
+      const frame = encodeDeliver(evt.detail.from.toString(), evt.detail.topic, evt.detail.data)
+      for (const sink of sinks) sink(frame)
+    }
+  } // heartbeat announces count -> live rooms stay
   // Metadata only. The payload is ciphertext (and with EH-2 it is binary, so
   // decoding it printed garbage anyway) — logging it just parked user metadata
   // in journald for no operational benefit.
@@ -374,6 +430,9 @@ if (ANNOUNCE_LOAD) {
 // ran without the dump. Nothing is printed when DUMP is unset.
 // Said out loud because it decides what this node carries, and the difference
 // is invisible from outside until the message counts diverge.
+console.log(PICK
+  ? `Pick: wlaczony (${PICK_PROTOCOL}) — klient moze wskazac temat zamiast subskrybowac`
+  : 'Pick: wylaczony (--pick wlacza)')
 console.log(LEAF_ANNOUNCE
   ? 'Ogłoszenia: klientom TYLKO ich tematy, przekaźnikom wszystko (--leaf-announce)'
   : 'Ogłoszenia: wszystkim wszystko (tryb dotychczasowy; --leaf-announce zmienia)')
