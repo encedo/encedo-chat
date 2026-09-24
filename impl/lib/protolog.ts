@@ -15,8 +15,8 @@
  *
  *   `wire`   — every frame that crosses the client's edge, both ways: which
  *              plane (the node or the direct channel), which topic, the sender
- *              named inside the frame, its type and size, and the first 32
- *              bytes in hex. `?debug=2`. It exists as EVIDENCE: that what the
+ *              named inside the frame, its type and size, and the first 64
+ *              bytes in hex (WIRE_HEAD). `?debug=2`. It exists as EVIDENCE: that what the
  *              node carries is ciphertext and headers, never a sentence. It
  *              prints nothing that is secret -- the bytes are what the node
  *              itself already sees.
@@ -61,6 +61,8 @@ export function enableProtoLog(opts: { events?: boolean; keys?: boolean; wire?: 
 export const protoLogOn = () => showEvents
 export const protoKeysOn = () => showKeys
 export const protoWireOn = () => showWire
+/** How much of each frame the wire dump shows: enough to see a header AND ciphertext (the user's call: 64 at least). */
+export const WIRE_HEAD = 64
 
 /** What a frame is, from its first byte (after the origin envelope, S13). */
 export function frameKind(b: Uint8Array): string {
@@ -84,9 +86,9 @@ export function frameKind(b: Uint8Array): string {
  */
 export function wlog(dir: '->' | '<-', via: 'node' | 'direct', topic: string, from: string, frame: Uint8Array): void {
   if (!showWire) return
-  const head = hex(frame.slice(0, 32))
+  const head = hex(frame.slice(0, WIRE_HEAD))
   const who = from ? ` from=${from.slice(0, 16)}...` : ''
-  sink(`[wire] ${dir} ${via.padEnd(6)} topic=${topic.slice(0, 12)}...${who} ${frame.length} B ${frameKind(frame)} | ${head}${frame.length > 32 ? '...' : ''}`)
+  sink(`[wire] ${dir} ${via.padEnd(6)} topic=${topic.slice(0, 12)}...${who} ${frame.length} B ${frameKind(frame)} | ${head}${frame.length > WIRE_HEAD ? '...' : ''}`)
 }
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')

@@ -1,12 +1,12 @@
 /**
  * The `wire` level of the protocol log (`?debug=2`): one line per frame at the
  * client's edge -- plane, topic, the sender the frame names, its kind and size,
- * and the first 32 bytes in hex. Evidence, not a secret: it must stay silent
+ * and the first 64 bytes in hex. Evidence, not a secret: it must stay silent
  * unless asked for, and it must never print more than the head of a frame.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { enableProtoLog, wlog, frameKind } from '../lib/protolog.ts'
+import { enableProtoLog, wlog, frameKind, WIRE_HEAD } from '../lib/protolog.ts'
 
 test('silent unless the wire level is on', () => {
   const lines: string[] = []
@@ -18,16 +18,17 @@ test('silent unless the wire level is on', () => {
 test('one line per frame: plane, topic, sender, kind, size, and only the head of the bytes', () => {
   const lines: string[] = []
   enableProtoLog({ events: true, wire: true, sink: (l) => lines.push(l) })
-  const frame = new Uint8Array(100).fill(0xab); frame[0] = 0x10
+  const frame = new Uint8Array(150).fill(0xab); frame[0] = 0x10
   wlog('<-', 'direct', 'abcdefghijklmnop', '12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp', frame)
   assert.equal(lines.length, 1)
   const l = lines[0]
   assert.match(l, /^\[wire\] <- direct/)
   assert.match(l, /topic=abcdefghijkl\.\.\./)
   assert.match(l, /from=12D3KooWP6SpQxgc\.\.\./)
-  assert.match(l, /100 B ratchet content/)
+  assert.match(l, /150 B ratchet content/)
   const hexPart = l.split('| ')[1]
-  assert.equal(hexPart, '10' + 'ab'.repeat(31) + '...', 'exactly 32 bytes, then an ellipsis')
+  assert.equal(WIRE_HEAD, 64, 'the user asked for at least 64 bytes')
+  assert.equal(hexPart, '10' + 'ab'.repeat(WIRE_HEAD - 1) + '...', 'exactly WIRE_HEAD bytes, then an ellipsis')
   enableProtoLog({ events: false, wire: false })
 })
 
@@ -38,4 +39,12 @@ test('frame kinds by first byte', () => {
   assert.equal(frameKind(Uint8Array.from([0x21])), 'group keepalive')
   assert.equal(frameKind(new TextEncoder().encode('{"v":1}')), 'announce (JSON, MAC-ed)')
   assert.equal(frameKind(new Uint8Array(348).fill(0x55)), 'knock (inbox)')
+})
+
+test('a frame no longer than the head is printed whole, without an ellipsis', () => {
+  const lines: string[] = []
+  enableProtoLog({ events: true, wire: true, sink: (l) => lines.push(l) })
+  wlog('->', 'node', 'abcdefghijklmnop', '', Uint8Array.from([0x21]))
+  assert.match(lines[0], /\| 21$/)
+  enableProtoLog({ events: false, wire: false })
 })
