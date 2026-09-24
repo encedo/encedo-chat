@@ -251,6 +251,9 @@ const $ = (id: string) => document.getElementById(id) as HTMLElement
 // stay with the rest of the window code further down.
 const modalStack: string[] = []
 const MODAL_EXIT: Record<string, () => void> = {}
+/** The published invite whose QR is on screen (its knocks are painted under it), and who was accepted there. */
+let invQrShown: string | null = null
+let invQrAccepted: string[] = []
 const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
 
@@ -4422,7 +4425,8 @@ async function startInboxWatches() {
         pendingKnocks.unshift({ ik, name: k.name, note: k.note, at: nowMs(), inviteId: inv.id })
         paintInviteBadge()
         if (!$('pane-invites').hidden) renderInvites()
-        toast(tr('Ktoś puka do zaproszenia „{label}"', { label: inv.label }))
+        if (invQrShown === inv.id) paintInviteQrKnocks()
+        else toast(tr('Ktoś puka do zaproszenia „{label}"', { label: inv.label }))
       })(),
       onLog: ecLog,
     }))
@@ -4559,8 +4563,66 @@ async function acceptKnock(k: PendingKnock) {
   await refreshContacts()
   pendingKnocks = pendingKnocks.filter((p) => p !== k)
   paintInviteBadge(); renderInvites()
+  if (invQrShown === k.inviteId) { invQrAccepted.push(name); paintInviteQrKnocks() }
   toast(tr('Dodano kontakt „{name}"', { name }))
 }
+
+// ---- a published invite as a QR, with its knocks underneath -------------------
+// The pairing people actually want across a table: show the code, the other
+// phone scans it (the camera app or ours -- the code is the plain invite link),
+// taps Dodaj, and the knock lands HERE, under the code, with its fingerprint and
+// one button. Not an auto-accept: the invite is public and lives until you
+// withdraw it, so anybody who ever photographed this code can knock with it.
+MODAL_EXIT['invqr-modal'] = () => { invQrShown = null; invQrAccepted = [] }
+
+function openInviteQr(inv: PubInvite) {
+  invQrShown = inv.id
+  invQrAccepted = []
+  $('invqr-title').textContent = inv.label
+  try {
+    $('invqr-qr').innerHTML = qrSvg(inviteUrlFor(inv), { size: 300 })
+    $('invqr-qr').hidden = false
+  } catch (e: any) {
+    // Too long for the encoder (a very long non-ASCII name): the link still
+    // works, so say where it is rather than showing an empty box.
+    $('invqr-qr').hidden = true
+    ecLog('invite QR not drawn: ' + (e?.message ?? e), 'debug')
+    toast(tr('Ten link jest za długi na kod QR — użyj „Kopiuj link".'), 4000)
+    return
+  }
+  paintInviteQrKnocks()
+  pushModal('invqr-modal')
+}
+
+function paintInviteQrKnocks() {
+  const box = $('invqr-knocks')
+  box.innerHTML = ''
+  for (const name of invQrAccepted) {
+    const d = document.createElement('div'); d.className = 'invqr-done'
+    d.textContent = tr('Połączono z „{name}"', { name })
+    box.appendChild(d)
+  }
+  const mine = pendingKnocks.filter((k) => k.inviteId === invQrShown)
+  if (!mine.length && !invQrAccepted.length) {
+    const w = document.createElement('div'); w.className = 'invqr-wait'
+    w.textContent = tr('Czekam na zeskanowanie…')
+    box.appendChild(w)
+  }
+  for (const k of mine) {
+    const row = document.createElement('div'); row.className = 'knock-row'
+    const nm = document.createElement('div'); nm.className = 'k-name'; nm.textContent = k.name || tr('Bez nazwy')
+    const fp = document.createElement('div'); fp.className = 'k-fp'; fp.textContent = tr('odcisk: ') + '…'
+    void fingerprint(k.ik).then((f) => { fp.textContent = tr('odcisk: ') + f })
+    row.append(nm, fp)
+    if (k.note) { const n = document.createElement('div'); n.className = 'k-note'; n.textContent = k.note; row.appendChild(n) }
+    const acts = document.createElement('div'); acts.className = 'inv-acts'
+    const yes = document.createElement('button'); yes.textContent = tr('Przyjmij')
+    yes.addEventListener('click', () => void acceptKnock(k))
+    acts.appendChild(yes); row.appendChild(acts)
+    box.appendChild(row)
+  }
+}
+$('invqr-close').addEventListener('click', () => backModal())
 
 function renderInvites() {
   const pane = $('pane-invites')
@@ -4652,7 +4714,10 @@ function renderInvites() {
       pendingKnocks = pendingKnocks.filter((p) => p.inviteId !== inv.id)
       saveInvites(); paintInviteBadge(); renderInvites()
     })
-    acts.append(copy, kill)
+    const qr = document.createElement('button'); qr.className = 'inv-qr'; qr.textContent = tr('Pokaż QR')
+    qr.disabled = dead
+    qr.addEventListener('click', () => openInviteQr(inv))
+    acts.append(copy, qr, kill)
     row.append(top, acts)
     pane.appendChild(row)
   }

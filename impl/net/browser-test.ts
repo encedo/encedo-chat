@@ -2797,6 +2797,24 @@ async function main() {
       throw new Error(`the invite carries no usable inbox secret: ${JSON.stringify(payload.s)}`)
     step('A published an invite, and its link carries 32 bytes of inbox secret')
 
+    // The QR of that invite, opened BEFORE the knock: across a table this window
+    // is what is on screen when the other phone scans, so the knock must land
+    // in it -- and be accepted from it, with one tap next to the fingerprint.
+    const qrOpen = await A.eval<any>(`
+      const btn = document.querySelector('#pane-invites .inv-row .inv-qr');
+      if (!btn) return { btn: false };
+      btn.click();
+      const m = document.getElementById('invqr-modal');
+      return { btn: true, open: m.classList.contains('open'),
+               rects: document.querySelectorAll('#invqr-qr svg rect, #invqr-qr svg path').length,
+               title: document.getElementById('invqr-title').textContent,
+               waiting: (document.getElementById('invqr-knocks').textContent || '') };
+    `)
+    if (!qrOpen.btn) throw new Error('the invite row offers no "Pokaż QR"')
+    if (!qrOpen.open || !qrOpen.rects) throw new Error(`the invite QR did not open with a code in it: ${JSON.stringify(qrOpen)}`)
+    if (qrOpen.title !== 'dla informatorów') throw new Error(`the QR window names another invite: ${qrOpen.title}`)
+    step('A shows the invite as a QR, waiting for a scan')
+
     await B.eval(`location.hash = ${JSON.stringify(frag)}; return 1`)
     await B.waitFor('B is shown the published invite', `
       return document.getElementById('import-modal').classList.contains('open');
@@ -2854,14 +2872,38 @@ async function main() {
     if (req.contacts !== 0) throw new Error('a knock added a contact by itself')
     step(`A sees a request with a fingerprint, and no contact was created: ${req.fp}`)
 
+    // Accepted from the QR window, which is still on screen: the knock landed
+    // under the code, with its fingerprint, and one tap there is the whole thing.
+    await A.waitFor('the knock also landed under the QR, with its fingerprint', `
+      const row = document.querySelector('#invqr-knocks .knock-row');
+      return document.getElementById('invqr-modal').classList.contains('open') && !!row
+        && (row.textContent || '').includes('sim-c')
+        && /[0-9A-F]{2}:[0-9A-F]{2}/.test((row.querySelector('.k-fp') || {}).textContent || '');
+    `, 15_000)
+    if (process.env.SHOT) { // the invite QR with a knock under it, desktop and phone
+      const dir = process.env.SHOT_DIR ?? '/tmp'
+      await A.screenshot(`${dir}/invite-qr-desktop.png`)
+      await A.resize(390, 780, true)
+      await sleep(400)
+      await A.screenshot(`${dir}/invite-qr-phone.png`)
+      await A.resize(1280, 800, false)
+      await sleep(400)
+      step(`screenshots -> ${dir}/invite-qr-{desktop,phone}.png`)
+    }
     await A.eval(`
-      document.querySelector('#pane-invites .knock-row .inv-acts button').click(); return 1;
+      document.querySelector('#invqr-knocks .knock-row .inv-acts button').click(); return 1;
     `)
     await A.waitFor('accepting makes the contact', `
       return [...document.querySelectorAll('#pane-contacts .contact')]
         .some((c) => (c.textContent || '').includes('sim-c'));
     `, 20_000)
-    step('accepting the request is what creates the contact')
+    const qrAfter = await A.eval<any>(`
+      return { done: (document.querySelector('#invqr-knocks .invqr-done') || {}).textContent || '',
+               left: document.querySelectorAll('#invqr-knocks .knock-row').length };
+    `)
+    if (!qrAfter.done.includes('sim-c') || qrAfter.left) throw new Error(`the QR window did not say who joined: ${JSON.stringify(qrAfter)}`)
+    await A.eval(`document.getElementById('invqr-close').click(); return 1`)
+    step('accepting under the QR creates the contact, and the window says who joined')
 
     // And the wait ends by itself, with no reply channel: A now holds B's key,
     // so A can reach the pair topic, and an Announce there is the whole answer.

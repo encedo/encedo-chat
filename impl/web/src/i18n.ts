@@ -48,6 +48,11 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '🤝 Securing…': '🤝 Zabezpieczam…',
   },
   en: {
+    'Pokaż ten kod osobie, którą zapraszasz. Zeskanuje go aparatem albo w aplikacji — jej prośba pojawi się tutaj, a Ty przyjmiesz ją jednym dotknięciem.': 'Show this code to the person you are inviting. They scan it with the camera or in the app — their request appears here, and you accept it with one tap.',
+    'Pokaż QR': 'Show QR',
+    'Czekam na zeskanowanie…': 'Waiting for a scan…',
+    'Połączono z „{name}"': 'Connected with “{name}”',
+    'Ten link jest za długi na kod QR — użyj „Kopiuj link".': 'This link is too long for a QR code — use “Copy link”.',
     'Węzeł odmówił tematu — jest pełny. Wybierz inny węzeł w Ustawieniach → Sieć.': 'The node refused the topic — it is full. Pick another node in Settings → Network.',
     ' a klucz grupy zostanie skasowany z HEM — grupy nie da się już przywrócić.': ' and the group key will be erased from the HEM — the group cannot be restored.',
     ' Ich dotychczasowa kopia rozmowy pozostanie u nich; nie da się jej usunąć zdalnie.': ' Their existing copy of the conversation stays with them; it cannot be deleted remotely.',

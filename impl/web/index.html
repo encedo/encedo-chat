@@ -883,6 +883,11 @@
   #btn-knock:disabled{opacity:.45}
   .qr-box{display:grid;place-items:center;background:#fff;border-radius:10px;padding:12px;margin:10px 0}
   .qr-box svg{display:block;max-width:100%;height:auto}
+  /* Read from a phone held at arm's length across a table: as big as the window allows. */
+  .qr-box.qr-big svg{width:300px}
+  #invqr-knocks .knock-row{margin-top:10px}
+  #invqr-knocks .invqr-done{margin-top:10px;font-size:13px;color:var(--ok,#2e7d32)}
+  #invqr-knocks .invqr-wait{margin-top:10px;font-size:13px;color:var(--muted)}
   /* `contain`, not `cover`: the detector reads the WHOLE frame, so a cropped
      preview shows less than is being scanned - the picture should be the truth
      about what the camera sees. */
@@ -1569,6 +1574,19 @@
     <div class="fp-box"><span class="fp-lbl" data-i18n="Twój odcisk">Twój odcisk</span><span class="fp-val" id="share-fp">—</span></div>
     <div class="hint" data-i18n="Podaj ten odcisk osobno — głosem albo osobiście. Odbiorca porówna go z tym, co zobaczy po kliknięciu linku; to jedyne, co wykrywa podmianę klucza po drodze.">Podaj ten odcisk osobno — głosem albo osobiście. Odbiorca porówna go z tym, co zobaczy po kliknięciu linku; to jedyne, co wykrywa podmianę klucza po drodze.</div>
     <div class="modal-actions"><button class="btn-send" id="share-copy" style="flex:1;border-radius:8px" data-i18n="Kopiuj link">Kopiuj link</button><button class="btn-ghost" id="share-close" data-i18n="Zamknij">Zamknij</button></div>
+  </div>
+
+  <!-- A published invite as a QR, and the place its knocks land while it is on
+       screen: the person across the table scans, taps Dodaj, and the request
+       shows up right here under the code. Accepting stays ONE deliberate tap
+       with the fingerprint beside it -- the invite is public and lives
+       forever, so anybody who ever saw this code can knock with it. -->
+  <div class="modal" id="invqr-modal">
+    <h2 id="invqr-title" data-i18n="Zaproszenie">Zaproszenie</h2>
+    <div class="msub" data-i18n="Pokaż ten kod osobie, którą zapraszasz. Zeskanuje go aparatem albo w aplikacji — jej prośba pojawi się tutaj, a Ty przyjmiesz ją jednym dotknięciem.">Pokaż ten kod osobie, którą zapraszasz. Zeskanuje go aparatem albo w aplikacji — jej prośba pojawi się tutaj, a Ty przyjmiesz ją jednym dotknięciem.</div>
+    <div class="qr-box qr-big" id="invqr-qr"></div>
+    <div id="invqr-knocks"></div>
+    <div class="modal-actions"><button class="btn-ghost" id="invqr-close" style="flex:1" data-i18n="Zamknij">Zamknij</button></div>
   </div>
 
   <!-- One window for minting and for editing, because both decisions are the
