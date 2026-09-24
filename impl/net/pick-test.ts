@@ -12,7 +12,8 @@
  * a second PICK must come back REFUSED rather than vanish. That answer is the
  * point of the protocol: a GossipSub subscription past the cap gets no signal.
  *
- *   node net/pick-test.ts <relay multiaddr>        # expects per-peer cap 1
+ *   node net/pick-test.ts <relay multiaddr>                  # expects per-peer cap 1
+ *   EXPECT_REFUSED=0 node net/pick-test.ts <relay multiaddr>  # production: cap is 40, so no refusal
  */
 import { multiaddr } from '@multiformats/multiaddr'
 import { pipe } from 'it-pipe'
@@ -68,12 +69,17 @@ for (let i = 0; i < 20; i++) {
   await sleep(250)
 }
 const refused = got.some((f) => f.type === T.REFUSED && f.topic === second)
+// On production the per-peer cap is 40, so a second pick is rightly accepted;
+// the refusal path is proven against a local relay started with cap 1.
+const expectRefused = process.env.EXPECT_REFUSED !== '0'
+const refusalOk = expectRefused ? refused : !refused
 
 console.log(`dostarczono przez pick : ${delivered ? 'TAK' : 'NIE'}`)
 console.log(`from = nadawca         : ${fromRight ? 'TAK' : 'NIE'}${d ? '' : ' (brak ramki)'}`)
-console.log(`drugi pick REFUSED     : ${refused ? 'TAK' : 'NIE'}`)
-console.log(delivered && fromRight && refused ? 'PRZESZLO' : 'NIE PRZESZLO')
+console.log(`drugi pick REFUSED     : ${refused ? 'TAK' : 'NIE'}${expectRefused ? '' : ' (oczekiwane NIE: limit 40)'}`)
+const ok = delivered && fromRight && refusalOk
+console.log(ok ? 'PRZESZLO' : 'NIE PRZESZLO')
 
 out.end()
 await talker.stop(); await picker.stop()
-process.exit(delivered && fromRight && refused ? 0 : 1)
+process.exit(ok ? 0 : 1)
