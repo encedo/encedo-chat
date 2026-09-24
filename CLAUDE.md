@@ -487,7 +487,9 @@ session (`startSession({transport:'mqtt', broker})`, web `?mqtt=1`, CLI
 scenarios), `FAILOVER=1`, `RELAY_NODE=<full multiaddr>` (⚠️ a bare hostname
 lands in the node list as an invalid address and looks like a dead relay),
 `RELAY_A`/`RELAY_B` (split the two browsers across nodes), `IPFS_RPC`,
-`APP_URL`, `HEADFUL`, `SHOT`/`SHOT_DIR`.
+`APP_URL`, `HEADFUL`, `SHOT`/`SHOT_DIR`, and the transport: both browsers run
+the app's default (the light pick/push client since 0.6.24); `GOSSIP_B=1` puts B
+on the full GossipSub peer (`?light=0`, the mixed case), `GOSSIP=1` both.
 
 The browser harness is the only thing that covers the **WebRTC data plane** —
 Node has no `RTCPeerConnection`. It speaks two protocols because the browsers do

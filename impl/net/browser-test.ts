@@ -45,10 +45,14 @@ import { hemKid } from '../lib/descr.ts'
 const DIST = join(import.meta.dirname, '..', 'web', 'dist')
 const LOCAL_PORT = 9333
 const APP_URL = process.env.APP_URL ?? `http://127.0.0.1:${LOCAL_PORT}/?eh2=1&debug=1&lang=pl`
-// LIGHT=1 puts browser B on the light transport (net/light.ts: no GossipSub,
-// pick/push over one stream) while A keeps GossipSub -- the mixed case every
-// scenario then exercises without knowing it.
-const B_URL = process.env.LIGHT && process.env.LIGHT !== '0' ? `${APP_URL}${APP_URL.includes('?') ? '&' : '?'}light=1` : APP_URL
+// Both browsers run the app's default transport, which is the light one
+// (net/light.ts) since 0.6.24. GOSSIP_B=1 puts browser B on the full GossipSub
+// peer (`?light=0`) -- the mixed case, which is what a user on an older build
+// talking to a new one looks like; GOSSIP=1 puts both there (the old path).
+const withParam = (url: string, p: string) => `${url}${url.includes('?') ? '&' : '?'}${p}`
+const ALL_GOSSIP = !!process.env.GOSSIP && process.env.GOSSIP !== '0'
+const A_URL = ALL_GOSSIP ? withParam(APP_URL, 'light=0') : APP_URL
+const B_URL = ALL_GOSSIP || (process.env.GOSSIP_B && process.env.GOSSIP_B !== '0') ? withParam(APP_URL, 'light=0') : APP_URL
 const SERVE_LOCAL = !process.env.APP_URL
 
 const MIME: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.map': 'application/json' }
@@ -768,7 +772,7 @@ async function main() {
   try {
     scenario('setup — two browsers, two identities, one room')
     step(`launching ${PAIR[0]} + ${PAIR[1] ?? PAIR[0]} on ${APP_URL}`)
-    await Promise.all([A.start(APP_URL), B.start(B_URL)])
+    await Promise.all([A.start(A_URL), B.start(B_URL)])
 
     if (process.env.SHOT_LOGIN) { // capture the login node list (collapsed -> expanded)
       await A.resize(460, 760)
@@ -778,14 +782,14 @@ async function main() {
         {name:'bs2.onchato.com', addr:'/dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y', enabled:true},
         {name:'vm-prywatna', addr:'/dns4/vm.local/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWXyZ789...', enabled:false}
       ])); return 1`)
-      await A.reload(APP_URL)
+      await A.reload(A_URL)
       await A.waitFor('login form', `return !!document.getElementById('go-soft')`)
       await A.eval(`document.getElementById('nodes-toggle').click(); return 1`)
       await sleep(350)
       await A.screenshot(`${process.env.SHOT_DIR ?? '/tmp'}/login-nodes.png`)
       step(`screenshot -> ${process.env.SHOT_DIR ?? '/tmp'}/login-nodes.png`)
       await A.eval(`localStorage.removeItem('ec-nodes'); return 1`) // don't leak demo nodes into the run
-      await A.reload(APP_URL)
+      await A.reload(A_URL)
     }
 
     for (const [b, handle] of [[A, 'sim-a'], [B, 'sim-b']] as const) {
@@ -834,7 +838,7 @@ async function main() {
     // never negotiating anything. The relay path is what everything else covers,
     // and `FAILOVER=1` / `?webrtc=0` still exercise it deliberately.
     for (const b of [A, B]) await b.eval(`localStorage.setItem('ec-transport', 'auto'); return 1`)
-    await Promise.all([A.reload(APP_URL), B.reload(B_URL)])
+    await Promise.all([A.reload(A_URL), B.reload(B_URL)])
     await Promise.all([login(A, 'sim-a'), login(B, 'sim-b')])
 
     await Promise.all([openContact(A, 'sim-b'), openContact(B, 'sim-a')])
@@ -1925,7 +1929,7 @@ async function main() {
     // A page reload means a NEW ephemeral PeerId and a fresh room, while the
     // peer still holds a ratchet for the old one. The reloading side must be
     // able to re-handshake, and the other side must accept it.
-    await A.reload(APP_URL)
+    await A.reload(A_URL)
     await login(A, 'sim-a')
     await openContact(A, 'sim-b')
     await A.waitFor('EH-2 after reload (A)', BADGE_GREEN, 90_000)
@@ -2449,7 +2453,7 @@ async function main() {
     // from the cache AND keep the chains, so A can still broadcast to B.
     const groupsBefore = await A.eval<number>(`return document.querySelectorAll('#pane-groups .contact').length`)
     if (groupsBefore === 0) throw new Error('precondition: A has no group to persist')
-    await A.reload(APP_URL)
+    await A.reload(A_URL)
     await login(A, 'sim-a')
     await A.waitFor('A restored the group from cache', `return !!document.querySelector('#pane-groups .contact')`, 20_000)
     step('the group reappeared from cache after reload')
@@ -2509,7 +2513,7 @@ async function main() {
     if (pinShape.readable) throw new Error('the pin blob is readable JSON — not encrypted at rest')
     step('the pin store on disk is encrypted and keyed by the identity')
 
-    await A.reload(APP_URL)
+    await A.reload(A_URL)
     await login(A, 'sim-a')
     await A.waitFor('A restored the group after the pin reload',
       `return !!document.querySelector('#pane-groups .contact')`, 20_000)

@@ -153,10 +153,13 @@ function chosenRelays(): string[] {
  */
 const MQTT_PARAM = new URLSearchParams(location.search).get('mqtt')
 const USE_MQTT = MQTT_PARAM !== null && MQTT_PARAM !== '0'
-// `?light=1`: the light transport (net/light.ts) -- same relays, no GossipSub in
-// the client, pick/push over one stream. R&D switch for stage 2 measurements.
+// The light transport (net/light.ts) is the DEFAULT since 0.6.24 (the user's
+// call, 2026-09-24): same relays, no GossipSub in the client, pick/push over one
+// stream -- no mesh upkeep, no per-frame signatures, a refused topic said out
+// loud. `?light=0` brings back the full GossipSub peer, for comparison and as
+// the escape hatch if a node without `--pick` is ever in the list.
 const LIGHT_PARAM = new URLSearchParams(location.search).get('light')
-const USE_LIGHT = !USE_MQTT && LIGHT_PARAM !== null && LIGHT_PARAM !== '0'
+const USE_LIGHT = !USE_MQTT && LIGHT_PARAM !== '0'
 // The broker lives on the SAME host as the relay (bs1.onchato.com), not on the
 // site the app is served from — deriving it from `location.hostname` pointed it
 // at onchato.com, where there is no broker. Take the host straight from RELAY so
