@@ -1,21 +1,42 @@
 # systemd — onchato libp2p relay (encedo-chat/relay)
-# Install:  sudo cp onchato-relay.service /etc/systemd/system/
-#           sudo systemctl daemon-reload && sudo systemctl enable --now onchato-relay
-# Logs:     sudo journalctl -u onchato-relay -f
 #
-# WARNING: Keep --pass bs1.onchato.com — it seeds the relay PeerId that every client
-#    has hardcoded. WorkingDirectory below is the onchato host layout —
-#    adjust it if your encedo-chat checkout lives elsewhere.
+# ONE template for every node. The flags below are what bs1, bs2 and bs3 run
+# (checked 2026-09-24); a node rebuilt from an older copy of this file came up
+# without the mesh, sharding, pick or stats and looked perfectly healthy.
+# Fill the <...> fields from the table at the bottom, then:
+#
+#   sudo cp onchato-relay.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now onchato-relay
+#   sudo journalctl -u onchato-relay -n 25 --no-pager
+#
+# WARNING: --pass IS the PeerId. Never change it once the node's address is
+#    published -- every client that cached it would fail. bs1's PeerId is also
+#    compiled into every shipped build.
+# WARNING: in a /dns4/.../http-path/%2Frelay multiaddr, systemd needs %%2F.
+#    The /ip6/... mesh addresses below have no % and need nothing.
+#
+# The mesh is ALL-TO-ALL over IPv6 port 9002 (bs1's provider blocks IPv4
+# between its VMs): every node listens on 9002 (--v6-port/--v6-host), dials
+# the other nodes (--peers), and ufw allows 9002 only from their IPv6s:
+#   sudo ufw allow from <OTHER_V6> to any port 9002 proto tcp comment '<other> relay mesh over IPv6'
+# --siblings is the other nodes' PeerIds: a relay is told everything, a client
+# only its own topics (--leaf-announce), and only a client's topic makes this
+# node carry it (--local-topics-only).
+#
+# --max-topics from measurement (2026-09-24, ~28 kB rss per topic): 2000 on a
+# 2 GB node, 1000 on a 1 GB node. relay-health.sh reads it from ExecStart.
+# --stats-redis needs the local Redis (relay/DEPLOY.md, step 4c).
 
 [Unit]
-Description=onchato libp2p relay (encedo-chat)
-After=network.target
+Description=onchato libp2p relay <NODE> (encedo-chat)
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=www-data
 WorkingDirectory=/opt/github/encedo-chat/relay
-ExecStart=/usr/bin/node relay.mjs --port 9001 --pass bs1.onchato.com --host bs1.onchato.com
+ExecStart=/usr/bin/node relay.mjs --port 9001 --pass <NODE>.onchato.com --host <NODE>.onchato.com --peers <PEERS> --v6-port 9002 --v6-host <V6> --siblings <SIBLINGS> --local-topics-only --leaf-announce --pick --announce-load --max-topics <MAX_TOPICS> --stats 15 --quiet-msgs --stats-redis redis://127.0.0.1:6379 --stats-node <NODE> --stats-ttl-days 30
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
@@ -23,3 +44,15 @@ LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
+
+# ---------------------------------------------------------------------------
+# The nodes today. <PEERS> for a node = the "mesh address" of every OTHER row,
+# space-separated; <SIBLINGS> = their PeerIds, comma-separated.
+#
+# node  PeerId                                                  <V6> (mesh address = /ip6/<V6>/tcp/9002/ws/p2p/<PeerId>)   RAM   <MAX_TOPICS>
+# bs1   12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp     2a03:ec41:0:9::cf                                            2 GB  2000
+# bs2   12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y     2a01:7e0:0:164::16c                                          1 GB  1000
+# bs3   12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5     2a03:b0c0:2:f0:0:1:ed56:d001                                 1 GB  1000
+#
+# bs1 runs LimitNOFILE=524288: it also hosts the web, the IPFS store and the
+# feedback sink. The relay alone does not need more than 65536.

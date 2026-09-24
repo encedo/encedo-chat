@@ -62,13 +62,17 @@ sudo journalctl -u onchato-relay -f    # PeerId 12D3KooWP6Sp… + the topic budg
 
 First-time systemd install:
 
+`onchato-relay.service` is a TEMPLATE with `<NODE>`, `<V6>`, `<PEERS>`,
+`<SIBLINGS>` and `<MAX_TOPICS>` to fill (the existing nodes' values are in a
+table at its bottom) — copying it as it is gives a unit that will not start.
+The fill-in recipe is `DEPLOY.md` step 4; the gist:
+
 ```bash
-# the unit ships with WorkingDirectory=/opt/github/encedo-chat/relay — change it
-# if your clone lives elsewhere, then:
-sudo cp onchato-relay.service /etc/systemd/system/
+sed -e "s|<NODE>|bs1|g" -e "s|<V6>|...|" -e "s|<PEERS>|...|" -e "s|<SIBLINGS>|...|" \
+    -e "s|<MAX_TOPICS>|2000|" onchato-relay.service | sudo tee /etc/systemd/system/onchato-relay.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now onchato-relay
-sudo journalctl -u onchato-relay -f      # confirm PeerId 12D3KooWP6Sp… on startup
+sudo journalctl -u onchato-relay -f      # confirm the PeerId on startup (bs1: 12D3KooWP6Sp…)
 ```
 
 Node 18+ (plain ESM). Runs as `www-data` by default — the clone dir must be readable

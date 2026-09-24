@@ -83,10 +83,15 @@ it is reached only by nginx over loopback, and loopback is not filtered by
 ufw — so **9001 stays closed** and clients notice nothing. 3478/udp is the one
 exception to "everything goes through nginx": nginx speaks TCP and STUN is UDP,
 so that service faces the world directly (§4b). Do not open it: an
-open 9001 is a plain-WS door around every limit nginx enforces. (bs1 has one
-extra listener, IPv6 port 9002, for exactly one reason: its provider blocks
-IPv4 between its VMs, so bs2 meshes with it over IPv6. ufw restricts that port
-to bs2's address. A node outside that provider needs nothing of the kind.)
+open 9001 is a plain-WS door around every limit nginx enforces. The one
+further port is the **mesh: IPv6 9002, open only to the other nodes'
+addresses** (bs1's provider blocks IPv4 between its VMs, so since 2026-09-24
+every node meshes with every other over IPv6):
+
+```bash
+# one line per EXISTING node, with its IPv6 from the table in onchato-relay.service
+sudo ufw allow from 2a03:ec41:0:9::cf to any port 9002 proto tcp comment 'bs1 relay mesh over IPv6'
+```
 
 ## 2. Node.js 22 LTS
 
@@ -134,53 +139,43 @@ build the clients ship with.
 
 ## 4. The service
 
-The unit file in the repo is bs1's. Yours differs in three places — the pass,
-the name it prints, and `--peers`, the other nodes it dials to join the mesh
-(one address per node, the addresses of the nodes that exist today):
+`relay/onchato-relay.service` is the template every node runs, with the full
+set of flags and a table of the existing nodes at the bottom. **Copy it and fill
+the `<...>` fields; do not hand-write a shorter `ExecStart`** — a relay started
+without `--siblings`, `--local-topics-only`, `--leaf-announce`, `--pick` and the
+stats flags comes up, answers, and quietly behaves like a different network
+node (carries everybody's topics, tells every client every topic, refuses light
+clients, writes no statistics). For a new node:
 
 ```bash
-sudo tee /etc/systemd/system/onchato-relay.service >/dev/null <<EOF
-# onchato libp2p relay — $HOST (encedo-chat/relay). Generated per relay/DEPLOY.md.
-# --pass IS the PeerId: never change it once the address is published.
-[Unit]
-Description=onchato libp2p relay $HOST (encedo-chat)
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/opt/github/encedo-chat/relay
-ExecStart=/usr/bin/node relay.mjs --port 9001 --pass $HOST --host $HOST \\
-  --peers /dns4/bs1.onchato.com/tcp/443/wss/http-path/%%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp \\
-          /dns4/bs2.onchato.com/tcp/443/wss/http-path/%%2Frelay/p2p/12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y \\
-          /dns4/bs3.onchato.com/tcp/443/wss/http-path/%%2Frelay/p2p/12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5
-Restart=always
-RestartSec=5
-Environment=NODE_ENV=production
-LimitNOFILE=65536
-
-[Install]
-WantedBy=multi-user.target
-EOF
+cd /opt/github/encedo-chat/relay
+V6=$(ip -6 addr show scope global | awk '/inet6/{print $2}' | cut -d/ -f1 | head -1)
+PEERS="/ip6/2a03:ec41:0:9::cf/tcp/9002/ws/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp /ip6/2a01:7e0:0:164::16c/tcp/9002/ws/p2p/12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y /ip6/2a03:b0c0:2:f0:0:1:ed56:d001/tcp/9002/ws/p2p/12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5"
+SIBLINGS="12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp,12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y,12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5"
+NODE=${HOST%%.*}; MAXT=1000                      # 2000 on a 2 GB machine
+sed -e "s|<NODE>|$NODE|g" -e "s|<V6>|$V6|" -e "s|<PEERS>|$PEERS|" \
+    -e "s|<SIBLINGS>|$SIBLINGS|" -e "s|<MAX_TOPICS>|$MAXT|" onchato-relay.service \
+  | sudo tee /etc/systemd/system/onchato-relay.service >/dev/null
+grep -cE '^(ExecStart|Description)=.*<' /etc/systemd/system/onchato-relay.service   # must print 0: nothing left unfilled
 sudo systemctl daemon-reload
 sudo systemctl enable --now onchato-relay
 sudo journalctl -u onchato-relay -n 25 --no-pager
 ```
 
-`%%2Frelay` is not a typo: systemd expands `%` in `ExecStart`, so the
-multiaddr's `%2F` has to be written `%%2F` there. Everywhere else (a shell,
+The mesh addresses are `/ip6/...:9002`, not the public `/dns4/.../wss` ones.
+If you ever put a `/dns4/.../http-path/%2Frelay` multiaddr into `ExecStart`,
+write it `%%2Frelay`: systemd expands `%`. Everywhere else (a shell,
 `nodes.json`, a browser) it is `%2F`.
 
 **Read the log before going on.** Six lines matter:
 
 ```
 Pass: "bs4.onchato.com" -> PeerId: 12D3KooWNanm...CGKo   <- MUST equal the PeerId from step 0
-  [ok] /dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay...   <- mesh to bs1 is up
-  [ok] /dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay...   <- mesh to bs2 is up
-  [ok] /dns4/bs3.onchato.com/tcp/443/wss/http-path/%2Frelay...   <- mesh to bs3 is up
+  [ok] /ip6/2a03:ec41:0:9::cf/tcp/9002/ws/p2p/12D3KooWP6Sp...     <- mesh to bs1 is up
+  [ok] /ip6/2a01:7e0:0:164::16c/tcp/9002/ws/p2p/12D3KooWJJJt...   <- mesh to bs2 is up
+  [ok] /ip6/2a03:b0c0:2:f0:0:1:ed56:d001/tcp/9002/ws/p2p/...      <- mesh to bs3 is up
 [ok] Relay uruchomiony na porcie 9001
-Tematy: limit 250 równoczesnych, eviction po 120s ciszy (sweep 30s)
+Tematy: limit 1000 równoczesnych, eviction po 120s ciszy (sweep 30s)
 ```
 
 A different PeerId means the pass is wrong; fix the unit now, because an
@@ -229,6 +224,22 @@ STUN servers; they ask the nodes they dial, on the default port, because running
 STUN is part of being a node (`impl/lib/ice.ts`). A node that reaches the
 published list without this service answers a client's Binding Request with
 nothing, and the client waits out the ICE timeout before falling back.
+
+## 4c. Redis for the statistics
+
+`--stats-redis` writes one hash per 15-minute window (`st:<node>:<window>`,
+30-day TTL) to a Redis on the same machine. Without it the relay still runs,
+prints the `[stats]` line and says it cannot reach Redis — nothing else.
+
+```bash
+sudo apt-get install -y redis-server
+sudo sed -i -E 's/^#? *maxmemory .*/maxmemory 64mb/; s/^#? *maxmemory-policy .*/maxmemory-policy volatile-ttl/' /etc/redis/redis.conf
+grep -E '^(bind|protected-mode|maxmemory)' /etc/redis/redis.conf   # bind 127.0.0.1 -::1, protected-mode yes, 64mb, volatile-ttl
+sudo systemctl restart redis-server && redis-cli ping               # PONG
+```
+
+Loopback only, no password, no port in ufw: the relay is its only client, and
+`volatile-ttl` evicts the oldest windows first if the 64 MB ever fills.
 
 ## 5. The certificate
 
@@ -310,14 +321,24 @@ RELAY_B=/dns4/$HOST/tcp/443/wss/http-path/%2Frelay/p2p/<PeerId> \
 npm run browser-test > browser-test.log 2>&1; tail -3 browser-test.log
 ```
 
-## 8. The mesh — why only the new node dials
+## 8. The mesh — all-to-all, so the existing nodes change too
 
-Step 4 already meshed the node: `--peers` makes it dial bs1, bs2 and bs3 at
-start and re-dial any of them it is not connected to, every 10 s. The link is
-bidirectional, so **the existing nodes need no change and no restart** — a
-pair split across bs1 and the new node meets through that link. When the new
-node restarts, it re-dials; when bs1 restarts, the new node notices within 10 s
-and re-dials. On the existing nodes you can see it arrive (this is how bs3's
+Step 4 already meshed the new node: `--peers` makes it dial every other node at
+start and re-dial any of them it is not connected to, every 10 s. Since
+2026-09-24 the mesh is **all-to-all** — every node also dials the new one — so
+that after an outage the link comes back from whichever end wakes first, not
+only from the node that happened to be listed as the dialler. On **each
+existing node**: add the new node's mesh address to `--peers` and its PeerId to
+`--siblings`, allow its IPv6 on 9002, restart:
+
+```bash
+sudo ufw allow from <NEW_V6> to any port 9002 proto tcp comment '<new> relay mesh over IPv6'
+sudo sed -i 's|--peers |--peers /ip6/<NEW_V6>/tcp/9002/ws/p2p/<NEW_PEERID> |; s|--siblings |--siblings <NEW_PEERID>,|' /etc/systemd/system/onchato-relay.service
+sudo systemctl daemon-reload && sudo systemctl restart onchato-relay
+```
+
+Then add the row to the table at the bottom of `relay/onchato-relay.service`
+in the repo, so the next rebuild knows about it. On the existing nodes you can see it arrive (this is how bs3's
 arrival was confirmed on 2026-09-03 — a `[+]` on bs1 and on bs2, no `[-]`):
 
 ```bash
