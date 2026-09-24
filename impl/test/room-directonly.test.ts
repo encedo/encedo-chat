@@ -64,16 +64,16 @@ const until = async (cond: () => boolean, ms = 8000) => {
 }
 
 /** Two rooms that have actually handshaked. `directOnly` applies to A. */
-async function meet(directOnly: boolean) {
+async function meet(directOnly: boolean, extra: { onSentViaA?: (id: string, via: string) => void; onViaB?: (via: string) => void } = {}) {
   const net = hub()
   const ss = new Uint8Array(32).fill(0x5e)
   const macKey = await announceMacKey(ss, P)
   const [ikA, ikB] = [await generateX25519(), await generateX25519()]
   const heard: string[] = []
   const A = joinChat(net.node('peer-a'), TOPIC, { macKey, eh2: { ik: ikA, peerIkPub: ikB.pub, attemptTimeoutMs: 400 } },
-    { firstAnnounceMs: 5, contentDirectOnly: directOnly })
+    { firstAnnounceMs: 5, contentDirectOnly: directOnly, onSentVia: extra.onSentViaA })
   const B = joinChat(net.node('peer-b'), TOPIC, { macKey, eh2: { ik: ikB, peerIkPub: ikA.pub, attemptTimeoutMs: 400 } },
-    { firstAnnounceMs: 5, onMessage: (_f, m) => heard.push(m.body) })
+    { firstAnnounceMs: 5, onMessage: (_f, m, meta) => { heard.push(m.body); extra.onViaB?.(meta.via) } })
   await until(() => A.secured().length === 1 && B.secured().length === 1)
   const contentFromA = () => net.sent.get('peer-a')!.filter((b) => b[0] === CONTENT).length
   return { A, B, heard, contentFromA, stop: () => { A.stop(); B.stop() } }
@@ -126,4 +126,41 @@ test('direct-only: losing the channel holds content instead of restoring the rel
   assert.equal(contentFromA(), 0, 'a dead channel quietly restored the relay')
   assert.deepEqual(heard, [])
   stop()
+})
+
+// ---- which plane a message took: the route mark on the bubble (UI only) ----
+test('a message through the node is reported as relay on both sides', async (t) => {
+  const sent: string[] = [], got: string[] = []
+  const { A, heard, stop } = await meet(false, { onSentViaA: (_id, v) => sent.push(v), onViaB: (v) => got.push(v) })
+  t.after(stop)
+  A.sendText('przez wezel')
+  await until(() => heard.includes('przez wezel'))
+  assert.deepEqual(sent, ['relay'])
+  assert.deepEqual(got, ['relay'])
+})
+
+test('a message over the direct channel is reported as direct on both sides', async (t) => {
+  const sent: string[] = [], got: string[] = []
+  const { A, B, heard, contentFromA, stop } = await meet(false, { onSentViaA: (_id, v) => sent.push(v), onViaB: (v) => got.push(v) })
+  t.after(stop)
+  // The channel: A's content goes straight into B's injectContent -- the path
+  // the WebRTC plane uses.
+  A.setContentSend((sealed) => B.injectContent(sealed, 'peer-a'))
+  const before = contentFromA()
+  A.sendText('bezposrednio')
+  await until(() => heard.includes('bezposrednio'))
+  assert.equal(contentFromA(), before, 'the node carried it after all')
+  assert.deepEqual(sent, ['direct'], 'the sender did not report the direct plane')
+  assert.deepEqual(got, ['direct'], 'the receiver did not report the direct plane')
+})
+
+test('only messages and files are reported: typing and acks are not', async (t) => {
+  const ids: string[] = []
+  const { A, heard, stop } = await meet(false, { onSentViaA: (id) => ids.push(id) })
+  t.after(stop)
+  A.sendTyping('start')
+  const id = A.sendText('jedna')
+  await until(() => heard.includes('jedna'))
+  await new Promise((r) => setTimeout(r, 100))
+  assert.deepEqual(ids, [id])
 })

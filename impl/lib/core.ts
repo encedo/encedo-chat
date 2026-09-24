@@ -20,6 +20,8 @@ import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { createMqttPeer } from '../net/mqtt-node.ts'
 import { createLightPeer } from '../net/light.ts'
+import { protoWireOn, wlog } from './protolog.ts'
+import { origin, unwrap } from './origin.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
 import type { webrtcLink } from '../net/webrtc.ts'
 import { createXferSession, type XferSession, type XferEv, type FileLike, type OfferResult } from './xfer-session.ts'
@@ -825,6 +827,23 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     }
   }
   const self = node.peerId.toString()
+  // `?debug=2`: every frame at the node edge, both ways (lib/protolog.ts
+  // `wire`). Tapped HERE, on the session's one pubsub surface, so it sees the
+  // same thing whichever transport is under it -- GossipSub or pick/push -- and
+  // every topic: pair, self, group, inbox.
+  if (protoWireOn()) {
+    const ps = node.services.pubsub
+    ps.addEventListener('message', (evt: any) => {
+      const o = origin(evt)
+      wlog('<-', 'node', evt.detail.topic, o?.from ?? '', o?.data ?? evt.detail.data)
+    })
+    const publish = ps.publish.bind(ps)
+    ps.publish = (topic: string, data: Uint8Array) => {
+      const u = unwrap(data)
+      wlog('->', 'node', topic, u?.from ?? '', u?.frame ?? data)
+      return publish(topic, data)
+    }
+  }
   log(`session up over ${viaMqtt ? 'MQTT' : opts.transport === 'light' ? 'libp2p light (pick/push)' : 'libp2p'} in ${Date.now() - dialT0} ms as ${self.slice(0, 12)}...`)
 
   /** Every room open on this transport — refreshed, flushed and stopped together. */
@@ -1197,6 +1216,7 @@ async function openRoom(
     onEdit: opts.onEdit,
     onKnock: opts.onKnock,
     onFile: opts.onFile,
+    onSentVia: opts.onSentVia,
     onSignal: (from, env) => plane?.onSignal(from, env),
     // Group Sender-Key Distribution rides this 1:1 ratchet (it authenticates
     // the invite); without forwarding it the invite reaches the room, decodes,

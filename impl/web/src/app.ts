@@ -317,6 +317,12 @@ type MsgEv = Extract<Ev, { t: 'msg' }>
 
 interface Room {
   contact: Contact
+  /**
+   * Ids of messages/files that travelled the DIRECT plane (WebRTC): ours as they
+   * were last sent, theirs as they arrived. Drawn as the header's green badge in
+   * the bubble's meta line; the node, the default plane, gets no mark.
+   */
+  direct?: Set<string>
   conv: Conversation | null
   log: Ev[]
   unseen: number
@@ -348,6 +354,29 @@ const activeRoom = (): Room | null => (activePub ? rooms.get(activePub) ?? null 
  *  `.chat-open`). Without this the unread counter fired once, then messages for
  *  the still-active room rendered into the hidden pane instead of lighting the dot. */
 const isViewing = (room: Room): boolean => room === activeRoom() && $('app').classList.contains('chat-open')
+
+/** The route mark on a bubble: the header's own green badge, small, only when the message went direct. */
+function paintRoute(id: string | undefined) {
+  if (!id) return
+  const row = $('messages').querySelector(`.mrow[data-mid="${id}"]`) as HTMLElement | null
+  const meta = row?.querySelector('.b-meta') as HTMLElement | null
+  if (!meta) return
+  const on = !!activeRoom()?.direct?.has(id)
+  const had = meta.querySelector('.b-route')
+  if (on && !had) {
+    const m = document.createElement('span'); m.className = 'b-route'; m.textContent = '🟢'
+    m.title = tr('Bezpośrednio (WebRTC) — ta wiadomość nie przeszła przez węzeł')
+    // At the END of the line, never next to the time: the time is the line's
+    // text node, which `stampTime` rewrites and readers parse.
+    meta.appendChild(m)
+  } else if (!on && had) had.remove()
+}
+function noteVia(room: Room, id: string | undefined, via: 'direct' | 'relay') {
+  if (!id) return
+  if (!room.direct) room.direct = new Set()
+  if (via === 'direct') room.direct.add(id); else room.direct.delete(id)
+  if (room === activeRoom()) paintRoute(id)
+}
 const LOG_CAP = 1000
 
 function paintStatus() {
@@ -457,8 +486,13 @@ const diag = newDiag()
 
 const SHOW_KEYS = __EC_ALLOW_KEYS__ && new URLSearchParams(location.search).has('keys')
 const HEM_TRACE = new URLSearchParams(location.search).has('debug') || SHOW_KEYS
+// `?debug=2` adds the wire dump (lib/protolog.ts `wire`): every frame at the
+// node edge and on the direct channel, with its first 32 bytes -- evidence that
+// what the node carries is ciphertext. Nothing secret; `?keys=1` stays separate.
+// getAll, not get: `?debug=1&debug=2` (a link that already carried debug=1) means the higher.
+const WIRE_TRACE = Math.max(0, ...new URLSearchParams(location.search).getAll('debug').map(Number).filter((n) => !isNaN(n))) >= 2
 if (HEM_TRACE) {
-  enableProtoLog({ events: true, keys: SHOW_KEYS, sink: (line) => console.log(`%c${line}`, 'color:#2a8c6a') })
+  enableProtoLog({ events: true, keys: SHOW_KEYS, wire: WIRE_TRACE, sink: (line) => console.log(`%c${line}`, 'color:#2a8c6a') })
 }
 
 /**
@@ -5040,6 +5074,7 @@ function appendMsg(ev: MsgEv) {
   }
   if (outOfOrder) insertByTime(box, row, Number(row.dataset.ts))
   else box.appendChild(row)
+  paintRoute(id)
   if (stick) { box.scrollTop = box.scrollHeight; unread = 0 }
   else if (kind === 'peer') unread++
   refreshJump()
@@ -6450,6 +6485,7 @@ function wireBubbleId(row: HTMLElement, id: string) {
   // (`settled`) and no delivery event will ever name its id, so it stays out.
   const st = row.querySelector('.b-state') as HTMLElement | null
   if (st && !st.dataset.settled) stateEls.set(id, st)
+  paintRoute(id)
 }
 
 
@@ -7518,6 +7554,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
       onWebrtcState: (s) => noteTransport(room, s),
       onXfer: (e) => onXferEvent(room, e),
       onSecurity: (peer, state) => noteSecurity(room, peer, state),
+      onSentVia: (id, via) => noteVia(room, id, via),
       onLog: ecLog,
       onDelivered: (id, ms) => { if (!noteEditDelivery(room, id, 'ok')) record(room, { t: 'delivery', id, state: 'ok', ms }) },
       onUndelivered: (id) => { if (!noteEditDelivery(room, id, 'lost')) record(room, { t: 'delivery', id, state: 'lost' }) },
@@ -7536,6 +7573,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
         // `au` is the CONTACT's identity key, not `from`: in a 1:1 `from` is the
         // transport PeerId (`room.ts`), and a quote hint taken from it would
         // name nobody. In a group the same callback's `from` IS the identity key.
+        noteVia(room, msg.id, meta.via)
         record(room, { t: 'msg', kind: 'peer', text: msg.body, ts: msg.ts, id: msg.id, ooo: meta.outOfOrder, re: msg.re, au: contact.pub })
       },
       onTyping: (_from, state) => { peerTyping = state === 'start'; if (room === activeRoom()) setTyping(peerTyping, contact.name) },
@@ -7553,7 +7591,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
         ev!.text = e.body; ev!.edited = nowMs()
         if (isViewing(room)) repaintMsg(ev!)
       },
-      onFile: (_from, f) => record(room, { t: 'file', kind: 'peer', ts: nowMs(), file: f, au: contact.pub }),
+      onFile: (_from, f, meta) => { noteVia(room, f.id, meta?.via ?? 'relay'); record(room, { t: 'file', kind: 'peer', ts: nowMs(), file: f, au: contact.pub }) },
       onForeign: () => {
         // The user is the only one who can fix this, so say it in the transcript
         // rather than in a console nobody has open. Two windows on one identity

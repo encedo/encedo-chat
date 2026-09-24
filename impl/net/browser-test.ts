@@ -52,7 +52,11 @@ const APP_URL = process.env.APP_URL ?? `http://127.0.0.1:${LOCAL_PORT}/?eh2=1&de
 const withParam = (url: string, p: string) => `${url}${url.includes('?') ? '&' : '?'}${p}`
 const ALL_GOSSIP = !!process.env.GOSSIP && process.env.GOSSIP !== '0'
 const A_URL = ALL_GOSSIP ? withParam(APP_URL, 'light=0') : APP_URL
-const B_URL = ALL_GOSSIP || (process.env.GOSSIP_B && process.env.GOSSIP_B !== '0') ? withParam(APP_URL, 'light=0') : APP_URL
+const B_BASE = ALL_GOSSIP || (process.env.GOSSIP_B && process.env.GOSSIP_B !== '0') ? withParam(APP_URL, 'light=0') : APP_URL
+// B always runs the wire dump (`?debug=2`): the route scenario reads it back as
+// the evidence that what crossed each plane was ciphertext. A later `debug=2`
+// in the query wins over the harness's `debug=1`.
+const B_URL = withParam(B_BASE, 'debug=2')
 const SERVE_LOCAL = !process.env.APP_URL
 
 const MIME: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.map': 'application/json' }
@@ -1781,6 +1785,35 @@ async function main() {
     step(direct ? 'transport upgraded to WebRTC Direct' : 'WARNING: still on relay — WebRTC did not come up')
     await roundTrip(A, B, 'after-upgrade')
     step('messages still flow after the transport decision')
+    if (direct) {
+      // The route mark: a message that went over the DataChannel carries the
+      // header's green badge in its meta line, on the sender's bubble (the
+      // plane it left on) and on the receiver's (the plane it came in on).
+      const tok = `A-route-${Date.now().toString(36)}`
+      await send(A, tok)
+      await B.waitFor('the direct message reached B', seen(tok), 25_000)
+      const marked = (who: string) => `
+        const row = [...document.querySelectorAll('#messages .mrow.${who}')].find((r) => (r.textContent || '').includes(${JSON.stringify(tok)}));
+        return !!row && !!row.querySelector('.b-meta .b-route');`
+      await B.waitFor('B marks the message it received directly', marked('in'), 10_000)
+      await A.waitFor('A marks the message it sent directly', marked('out'), 10_000)
+      step('a message over the direct channel carries the green route mark on both sides')
+      // The wire dump for that same message on B: it came in on the direct
+      // plane as ratchet content, and the logged head is bytes, not the text.
+      const wire = B.console.filter((l) => l.includes('[wire]'))
+      const inDirect = wire.filter((l) => l.includes('<- direct') && l.includes('ratchet content'))
+      const inNode = wire.filter((l) => l.includes('<- node'))
+      if (!inDirect.length) throw new Error(`?debug=2 logged no direct ratchet frame on B: ${wire.slice(-5).join(' | ')}`)
+      if (!inNode.length) throw new Error('?debug=2 logged nothing from the node on B')
+      if (wire.some((l) => l.includes(tok))) throw new Error('the wire dump printed a message in the clear')
+      step(`?debug=2 on B: ${inDirect.length} direct ratchet frame(s), ${inNode.length} node frame(s), no plaintext`)
+      if (process.env.SHOT) {
+        const dir = process.env.SHOT_DIR ?? '/tmp'
+        await B.resize(390, 780, true); await sleep(400)
+        await B.screenshot(`${dir}/route-mark-phone.png`)
+        await B.resize(1280, 800, false); await sleep(300)
+      }
+    }
 
     // The direct plane is the ONLY place a transfer exists (§13.1), so this is
     // the only harness that can see one at all — Node has no RTCPeerConnection

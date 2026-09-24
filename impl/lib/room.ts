@@ -13,6 +13,7 @@
  */
 
 import { origin, wrap } from './origin.ts'
+import { wlog } from './protolog.ts'
 import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
 import { alignedTimer } from './radiophase.ts'
 import type { Session } from './session.ts'
@@ -70,6 +71,8 @@ export interface RoomKeys { macKey: CryptoKey; eh2: Eh2Options }
  * verdict: the ratchet is untouched and one Announce takes it back to `active`.
  */
 export type PresenceEvent = 'join' | 'active' | 'away' | 'quiet' | 'leave'
+/** The plane a content frame travelled: the WebRTC DataChannel, or the node. */
+export type ContentVia = 'direct' | 'relay'
 export interface ChatOpts {
   /**
    * Content may ONLY leave over the direct channel — never through the node.
@@ -88,7 +91,8 @@ export interface ChatOpts {
    * the gap it left was filled after the fact. Front-ends that can place it
    * (the web transcript) should; the terminal just says so.
    */
-  onMessage?: (from: string, m: MsgEnv, meta: { outOfOrder: boolean }) => void
+  /** `via`: the plane this copy arrived on -- 'direct' = the WebRTC DataChannel, 'relay' = the node. */
+  onMessage?: (from: string, m: MsgEnv, meta: { outOfOrder: boolean; via: ContentVia }) => void
   onTyping?: (from: string, state: TypingState) => void
   onPresence?: (from: string, ev: PresenceEvent) => void
   onReaction?: (from: string, r: ReactionEnv) => void
@@ -96,7 +100,13 @@ export interface ChatOpts {
   onEdit?: (from: string, e: EditEnv) => void
   /** The peer is asking for attention, right now. Never queued, never re-sent. */
   onKnock?: (from: string) => void
-  onFile?: (from: string, f: FileEnv) => void
+  onFile?: (from: string, f: FileEnv, meta?: { via: ContentVia }) => void
+  /**
+   * Which plane a `msg`/`file` of OURS just left on, each time it is sent (a
+   * re-send can take the other one). Local knowledge for the UI, nothing on the
+   * wire: the same ratchet ciphertext rides either plane.
+   */
+  onSentVia?: (id: string, via: ContentVia) => void
   onSignal?: (from: string, env: RtcEnv) => void // WebRTC signaling (control plane)
   /** A group Sender-Key Distribution arrived over this 1:1 ratchet (§8) — the
    *  session routes it to the group manager. */
@@ -382,7 +392,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     return true
   }
 
-  const dispatch = (from: string, env: any) => {
+  const dispatch = (from: string, env: any, via: ContentVia = 'relay') => {
     switch (env.t) {
       case 'msg':
         touch(from)
@@ -390,7 +400,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
         if (firstSeq(from, env.seq)) {
           const late = outOfOrder(from, env.seq)
           if (late) log(`message ${env.id} from ${short(from)} arrived out of order (seq ${env.seq} after ${topSeq.get(from)})`)
-          onMessage(from, env as MsgEnv, { outOfOrder: late })
+          onMessage(from, env as MsgEnv, { outOfOrder: late, via })
         }
         break
       case 'reaction': touch(from); if (firstSeq(from, env.seq)) onReaction(from, env as ReactionEnv); break
@@ -408,7 +418,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       case 'file':
         touch(from)
         void confirm(env.id)
-        if (firstSeq(from, env.seq)) onFile(from, env as FileEnv)
+        if (firstSeq(from, env.seq)) onFile(from, env as FileEnv, { via })
         break
       case 'typing': touch(from); onTyping(from, env.state as TypingState); break
       case 'presence': {
@@ -914,7 +924,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   }
 
   // decrypt + decode + dispatch a sealed frame (from GossipSub OR the DataChannel)
-  const processSealed = async (data: Uint8Array, from: string): Promise<boolean> => {
+  const processSealed = async (data: Uint8Array, from: string, via: ContentVia = 'relay'): Promise<boolean> => {
     const s = sessionFor(from)
     if (!s) return false
     // A throw here (the ratchet raises one when a header claims a jump past the
@@ -934,7 +944,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     if (from !== self) {
       const env = decodeEnvelope(pt)
       dbg(`<- content ${data.length} B from ${short(from)} -> ${env ? (env as any).t : 'undecodable'}`)
-      if (env) dispatch(from, env)
+      if (env) dispatch(from, env, via)
     }
     return true
   }
@@ -1126,7 +1136,17 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       return
     }
     for (const s of sessions.values()) {
-      try { const sealed = await s.encrypt(bytes); dbg(`-> content ${sealed.length} B via ${contentSend === gossipContent ? 'relay' : contentSend === holdContent ? 'held (direct-only)' : 'WebRTC'}`); contentSend(sealed) }
+      try {
+        const sealed = await s.encrypt(bytes)
+        const via: ContentVia | 'held' = contentSend === gossipContent ? 'relay' : contentSend === holdContent ? 'held' : 'direct'
+        dbg(`-> content ${sealed.length} B via ${via === 'direct' ? 'WebRTC' : via === 'held' ? 'held (direct-only)' : 'relay'}`)
+        if (via === 'direct') wlog('->', 'direct', topic, self, sealed)
+        contentSend(sealed)
+        if (via !== 'held' && opts.onSentVia) {
+          const env: any = decodeEnvelope(bytes)
+          if (env && (env.t === 'msg' || env.t === 'file') && env.id) opts.onSentVia(env.id, via)
+        }
+      }
       catch (e: any) { log(`send failed: ${e?.message ?? e}`) }
     }
   }
@@ -1191,7 +1211,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     sendSignal: (to: string, sig: any) => emitGossip(encodeEnvelope(envRtc(seq++, to, sig))),
     // data-plane hooks used by the browser WebRTC upgrader
     setContentSend: (fn: ((sealed: Uint8Array) => void) | null) => { contentSend = fn ?? relayFallback },
-    injectContent: (sealed: Uint8Array, from: string) => { void processSealed(sealed, from) },
+    injectContent: (sealed: Uint8Array, from: string) => { wlog('<-', 'direct', topic, from, sealed); void processSealed(sealed, from, 'direct') },
     who: () => [...lastSeen.keys()],
     /** Announce now — e.g. when a tab becomes visible after being throttled. */
     refresh: () => { void announce() },

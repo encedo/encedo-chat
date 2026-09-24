@@ -13,6 +13,14 @@
  *   `events` — stages, transitions, counters, sizes. Says WHAT happened.
  *   `keys`   — the actual secret bytes. Says what it happened WITH.
  *
+ *   `wire`   — every frame that crosses the client's edge, both ways: which
+ *              plane (the node or the direct channel), which topic, the sender
+ *              named inside the frame, its type and size, and the first 32
+ *              bytes in hex. `?debug=2`. It exists as EVIDENCE: that what the
+ *              node carries is ciphertext and headers, never a sentence. It
+ *              prints nothing that is secret -- the bytes are what the node
+ *              itself already sees.
+ *
  * They are separate because a debug console ends up pasted into a bug report.
  * Everything under `events` is safe to hand to somebody; everything under `keys`
  * is the conversation itself, and a transcript plus a root key is the whole of
@@ -38,18 +46,48 @@
 
 let showEvents = false
 let showKeys = false
+let showWire = false
 let sink: (line: string) => void = (line) => console.log(line)
 
 /** Turn narration on. `keys` additionally prints secret material — see above. */
-export function enableProtoLog(opts: { events?: boolean; keys?: boolean; sink?: (line: string) => void } = {}): void {
+export function enableProtoLog(opts: { events?: boolean; keys?: boolean; wire?: boolean; sink?: (line: string) => void } = {}): void {
   showEvents = opts.events ?? true
   showKeys = opts.keys ?? false
+  showWire = opts.wire ?? false
   if (opts.sink) sink = opts.sink
   if (showKeys) sink('[proto] KEY MATERIAL WILL BE PRINTED — debug builds only, never a shipped one')
 }
 
 export const protoLogOn = () => showEvents
 export const protoKeysOn = () => showKeys
+export const protoWireOn = () => showWire
+
+/** What a frame is, from its first byte (after the origin envelope, S13). */
+export function frameKind(b: Uint8Array): string {
+  if (!b.length) return 'empty'
+  switch (b[0]) {
+    case 0x01: return b.length === 348 ? 'knock?' : 'EH-2 msg1'
+    case 0x02: return 'EH-2 msg2'
+    case 0x03: return 'EH-2 msg3'
+    case 0x10: return 'ratchet content'
+    case 0x20: return 'group message'
+    case 0x21: return b.length === 1 ? 'group keepalive' : '0x21?'
+    case 0x7b: return 'announce (JSON, MAC-ed)'
+    default: return b.length === 348 ? 'knock (inbox)' : `0x${b[0].toString(16).padStart(2, '0')}`
+  }
+}
+
+/**
+ * One frame at the client's edge. `dir` is '->' (sent) or '<-' (received),
+ * `via` the plane, `from` the sender as the frame names it (the origin
+ * envelope) or the transport's word when the frame carries none.
+ */
+export function wlog(dir: '->' | '<-', via: 'node' | 'direct', topic: string, from: string, frame: Uint8Array): void {
+  if (!showWire) return
+  const head = hex(frame.slice(0, 32))
+  const who = from ? ` from=${from.slice(0, 16)}...` : ''
+  sink(`[wire] ${dir} ${via.padEnd(6)} topic=${topic.slice(0, 12)}...${who} ${frame.length} B ${frameKind(frame)} | ${head}${frame.length > 32 ? '...' : ''}`)
+}
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
 
