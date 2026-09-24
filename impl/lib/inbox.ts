@@ -305,14 +305,26 @@ export async function sendKnock(
   // nobody without failing (`allowPublishToZeroTopicPeers`), which costs the
   // Source the whole 90 s until the next attempt. So wait, briefly, the way the
   // room waits for the relay to join a topic before announcing.
+  //
+  // Waiting is not enough since the relay announces to a client only the topics
+  // that client HOLDS (relay/leaf.mjs, 2026-09-24): a peer that only wants to
+  // publish is told nothing, and its publish goes to nobody -- the browser
+  // harness caught exactly this once the flag was on. So the knocker subscribes
+  // for the duration of the knock. It costs one transient topic on the peer's
+  // quota and tells the relay nothing the publish would not: the frame itself
+  // names the topic. Unsubscribed right after, whatever happened.
   const deadline = now() + (opts.waitMs ?? 8_000)
-  while (now() < deadline) {
-    try { if (node.services.pubsub.getSubscribers(topic).length > 0) break } catch { break }
-    await new Promise((r) => setTimeout(r, 250))
+  try { node.services.pubsub.subscribe(topic) } catch {}
+  try {
+    while (now() < deadline) {
+      try { if (node.services.pubsub.getSubscribers(topic).length > 0) break } catch { break }
+      await new Promise((r) => setTimeout(r, 250))
+    }
+    const res: any = await node.services.pubsub.publish(topic, await sealKnock(inbox, journalistPub, body))
+    // Absence is not evidence (test doubles report nothing); zero is.
+    const reach = res?.recipients?.length
+    return typeof reach === 'number' ? reach : null
+  } finally {
+    try { node.services.pubsub.unsubscribe(topic) } catch {}
   }
-
-  const res: any = await node.services.pubsub.publish(topic, await sealKnock(inbox, journalistPub, body))
-  // Absence is not evidence (test doubles report nothing); zero is.
-  const reach = res?.recipients?.length
-  return typeof reach === 'number' ? reach : null
 }

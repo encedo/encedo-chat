@@ -267,17 +267,39 @@ test('a knock sent by the Source is the knock the Journalist opens', async () =>
   w.stop()
 })
 
-test('sending a knock does not subscribe the Source to the topic', async () => {
-  // Subscribing would put the Source in the subscriber set for no gain.
+test('sending a knock subscribes the Source for the knock only, and lets go after', async () => {
+  // Until 2026-09-24 this asserted the opposite ("subscribing puts the Source
+  // in the subscriber set for no gain"). The gain appeared with relay/leaf.mjs:
+  // a relay announces to a client only the topics that client holds, so a
+  // publish-only peer is never told anybody carries the topic and, with
+  // floodPublish, its knock reaches nobody. The browser harness caught it.
   const inbox = secret(9)
   const j = await generateX25519(), src = await generateX25519()
-  const subs: string[] = []
+  const calls: string[] = []
+  let held = new Set<string>()
   const node = { services: { pubsub: {
-    publish: async () => {},
-    subscribe: (t: string) => subs.push(t),
+    publish: async (t: string) => { calls.push(`publish:${held.has(t) ? 'while-subscribed' : 'UNSUBSCRIBED'}`) },
+    subscribe: (t: string) => { calls.push('subscribe'); held.add(t) },
+    unsubscribe: (t: string) => { calls.push('unsubscribe'); held.delete(t) },
+    getSubscribers: () => [{ toString: () => 'relay' }],
   } } }
   await sendKnock(node, inbox, j.pub, P, { ik: src.pub, name: 'x' })
-  assert.deepEqual(subs, [])
+  assert.deepEqual(calls, ['subscribe', 'publish:while-subscribed', 'unsubscribe'])
+  assert.equal(held.size, 0, 'nothing is left subscribed after the knock')
+})
+
+test('a knock lets go of the topic even when publishing throws', async () => {
+  const inbox = secret(9)
+  const j = await generateX25519(), src = await generateX25519()
+  const held = new Set<string>()
+  const node = { services: { pubsub: {
+    publish: async () => { throw new Error('relay gone') },
+    subscribe: (t: string) => held.add(t),
+    unsubscribe: (t: string) => held.delete(t),
+    getSubscribers: () => [],
+  } } }
+  await assert.rejects(sendKnock(node, inbox, j.pub, P, { ik: src.pub, name: 'x' }, { waitMs: 0 }), /relay gone/)
+  assert.equal(held.size, 0)
 })
 
 // ---- the decoy is the keepalive, so its WORST gap is what matters ----------
