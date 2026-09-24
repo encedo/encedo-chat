@@ -51,6 +51,7 @@ import { startStats } from './stats.mjs'
 import { siblingSet, shouldJoin } from './topics.mjs'
 import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad } from './load.mjs'
 import { makeQuota, DEFAULT_PER_PEER } from './quota.mjs'
+import { leafAnnouncements } from './leaf.mjs'
 import { redisSink } from './redis.mjs'
 import { appendFile } from 'fs'
 
@@ -88,6 +89,10 @@ const ANNOUNCE_LOAD = process.argv.includes('--announce-load')
 // room after that was refused SILENTLY (quota.mjs).
 const PER_PEER = parseInt(get('--max-topics-per-peer', String(DEFAULT_PER_PEER)))
 const quota = makeQuota(PER_PEER)
+// Tell a client only about the topics it holds; tell a sibling relay everything.
+// Without it every connection is sent the node's whole topic list (leaf.mjs).
+// OFF by default; deployed inert, then turned on one node at a time.
+const LEAF_ANNOUNCE = process.argv.includes('--leaf-announce')
 // Optional IPv6 listen port for inter-relay peering over a provider's private
 // network (where public IPv4 between VMs is blocked but IPv6 routes). Kept on a
 // SEPARATE port from PORT so the IPv4 nginx path (0.0.0.0:PORT) is untouched and
@@ -235,6 +240,13 @@ const stats = STATS_MIN > 0
     })
   : null
 
+if (LEAF_ANNOUNCE) {
+  // Throws if the pinned library no longer has the shape this relies on:
+  // better a relay that will not start than one that runs unpatched and looks
+  // fine. Installed before the first connection can arrive.
+  leafAnnouncements(relay.services.pubsub, { siblings: SIBLINGS, log: (m) => { if (!QUIET_MSGS) console.log('[leaf]', m) } })
+}
+
 relay.services.pubsub.addEventListener('subscription-change', (evt) => {
   for (const { topic, subscribe } of evt.detail.subscriptions) {
     // A sibling relay mentioning a topic is not a reason to carry it; one of
@@ -362,6 +374,9 @@ if (ANNOUNCE_LOAD) {
 // ran without the dump. Nothing is printed when DUMP is unset.
 // Said out loud because it decides what this node carries, and the difference
 // is invisible from outside until the message counts diverge.
+console.log(LEAF_ANNOUNCE
+  ? 'Ogłoszenia: klientom TYLKO ich tematy, przekaźnikom wszystko (--leaf-announce)'
+  : 'Ogłoszenia: wszystkim wszystko (tryb dotychczasowy; --leaf-announce zmienia)')
 console.log(LOCAL_TOPICS
   ? `Tematy: TYLKO od wlasnych klientow (--local-topics-only), ${SIBLINGS.size} przekaznikow rozpoznanych`
   : `Tematy: od kazdego peera (tryb dotychczasowy), ${SIBLINGS.size} przekaznikow rozpoznanych`)
