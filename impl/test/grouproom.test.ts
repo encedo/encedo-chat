@@ -13,7 +13,6 @@ import { GroupManager, softwareGk, type GroupId, type Member } from '../lib/grou
 import { joinGroup, type GroupRoom } from '../lib/grouproom.ts'
 import { makeQuote } from '../lib/quote.ts'
 import { pubHint } from '../lib/mentions.ts'
-import { wrap } from '../lib/origin.ts'
 
 const P = { networkId: 'groom', dateUTC: '2026-08-01' }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -25,9 +24,9 @@ async function softId(): Promise<GroupId> {
 
 /**
  * In-memory GossipSub: publish reaches every other node subscribed to the topic.
- * `viaRelay` makes it a relay pushing for its clients instead: every frame is
- * wrapped with the publisher's id (lib/origin.ts) and the transport names the
- * relay as the sender of all of them.
+ * `viaRelay` makes it a relay pushing for its clients instead: the frame (which
+ * the client already wrapped in an origin envelope, lib/origin.ts) is passed on
+ * as it is, and the transport names the relay as the sender of all of them.
  */
 function hub(viaRelay = false) {
   const nodes = new Map<string, (topic: string, data: Uint8Array, from: string) => void>()
@@ -42,8 +41,7 @@ function hub(viaRelay = false) {
           removeEventListener: (_e: string, h: (evt: any) => void) => { const i = listeners.indexOf(h); if (i >= 0) listeners.splice(i, 1) },
           subscribe: () => {}, unsubscribe: () => {},
           publish: async (topic: string, data: Uint8Array) => {
-            const onWire = viaRelay ? wrap(id, data) : data
-            for (const [peer, deliver] of nodes) if (peer !== id) deliver(topic, onWire, viaRelay ? 'relay' : id)
+            for (const [peer, deliver] of nodes) if (peer !== id) deliver(topic, data, viaRelay ? 'relay' : id)
           },
         } },
       }

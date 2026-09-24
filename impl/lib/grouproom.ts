@@ -27,7 +27,7 @@
  * keepalives go to all of them, sends go to the current day's.
  */
 
-import { origin } from './origin.ts'
+import { origin, wrap } from './origin.ts'
 import type { GroupSession } from './group.ts'
 import { envMsg, envReaction, envFile, encodeEnvelope, decodeEnvelope, type MsgEnv, type ReactionEnv, type FileEnv, type FileMeta } from './envelope.ts'
 import type { QuoteRef } from './quote.ts'
@@ -88,7 +88,10 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
   // unref so timers never keep a Node process alive (tests, CLI) — a no-op in
   // the browser, where setTimeout returns a number, so the heartbeat still runs.
   const unref = (t: any) => { try { t?.unref?.() } catch {} return t }
-  const keepaliveOn = (t: string) => { try { node.services.pubsub.publish(t, KEEPALIVE).catch(() => {}) } catch {} }
+  // The group authenticates members by the sender-key MAC, but the frame on
+  // the wire still names its publisher like every other (lib/origin.ts).
+  const me: string = node.peerId.toString()
+  const keepaliveOn = (t: string) => { try { node.services.pubsub.publish(t, wrap(me, KEEPALIVE)).catch(() => {}) } catch {} }
 
   // ---- the live day-topics (rotation) ---------------------------------------
   // `byDate` is the truth (date -> topic); `live` is the handler's fast lookup.
@@ -193,7 +196,7 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
   const broadcast = async (bytes: Uint8Array) => {
     const frame = await session.send(bytes)
     try {
-      const r = await node.services.pubsub.publish(primary, frame)
+      const r = await node.services.pubsub.publish(primary, wrap(me, frame))
       log(`published ${frame.length} B -> ${primary.slice(0, 8)}... (recipients: ${r?.recipients?.length ?? '?'})`)
     } catch (e: any) {
       log(`publish FAILED on ${primary.slice(0, 8)}...: ${e?.message ?? e}`)

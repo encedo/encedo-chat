@@ -12,7 +12,7 @@
  * t:'rtc' routes to onSignal, everything else to the UI callbacks.
  */
 
-import { origin } from './origin.ts'
+import { origin, wrap } from './origin.ts'
 import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
 import { alignedTimer } from './radiophase.ts'
 import type { Session } from './session.ts'
@@ -968,7 +968,9 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   node.services.pubsub.subscribe(topic)
   log(`joined topic ${topic.slice(0, 12)}... as ${short(self)} (${eh2 ? 'EH-2' : 'interim key'})`)
 
-  const gossip = (bytes: Uint8Array) => { node.services.pubsub.publish(topic, bytes).catch(() => {}) }
+  // Every frame on the topic carries its sender (lib/origin.ts): the receiver
+  // keys on it, and the transport's word about who published stops mattering.
+  const gossip = (bytes: Uint8Array) => { node.services.pubsub.publish(topic, wrap(self, bytes)).catch(() => {}) }
 
   /**
    * Consecutive heartbeats that reached nobody.
@@ -983,7 +985,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
   let unheard = 0
   const announce = async () => {
     try {
-      const bytes = await buildAnnounce(self, keys.macKey)
+      const bytes = wrap(self, await buildAnnounce(self, keys.macKey))
       const res: any = await node.services.pubsub.publish(topic, bytes).catch(() => null)
       // Test doubles do not report recipients; absence is not evidence.
       const reach = res?.recipients?.length

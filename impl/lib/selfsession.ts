@@ -29,7 +29,7 @@
  * duplicate either way — and either way both of us stop.
  */
 
-import { origin } from './origin.ts'
+import { origin, wrap } from './origin.ts'
 import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
 import { activeDatesForOffset } from './presence.ts'
 
@@ -68,7 +68,7 @@ export function watchSelfSession(
     // settled window hears the newcomer and goes silent immediately, so the
     // newcomer — still in its own opening window — may never hear anything and
     // carries on alone. The farewell is the proof that it was here.
-    try { await node.services.pubsub.publish(topic, await buildAnnounce(self, macKey)) } catch {}
+    try { await node.services.pubsub.publish(topic, wrap(self, await buildAnnounce(self, macKey))) } catch {}
     done = true
     stop()
     opts.onTakenOver(byPeer)
@@ -102,7 +102,7 @@ export function watchSelfSession(
 
   const announce = async () => {
     if (done) return
-    try { await node.services.pubsub.publish(topic, await buildAnnounce(self, macKey)) } catch {}
+    try { await node.services.pubsub.publish(topic, wrap(self, await buildAnnounce(self, macKey))) } catch {}
   }
   void announce()
 

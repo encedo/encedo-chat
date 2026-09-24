@@ -26,7 +26,7 @@
  * the Announce (a spec-queue item); for now §9.1 resolves duplicates in seconds.
  */
 
-import { origin } from './origin.ts'
+import { origin, wrap } from './origin.ts'
 import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
 import { alignedTimer } from './radiophase.ts'
 import { isHandshakeFrame } from '../eh2/establish.ts'
@@ -64,7 +64,7 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
 
   const announce = async () => {
     if (stopped) return
-    try { await node.services.pubsub.publish(topic, await buildAnnounce(self, macKey)) } catch {}
+    try { await node.services.pubsub.publish(topic, wrap(self, await buildAnnounce(self, macKey))) } catch {}
   }
 
   const handler = async (evt: any) => {

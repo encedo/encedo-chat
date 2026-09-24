@@ -13,18 +13,24 @@ import { watchPresence } from '../lib/presence.ts'
 import { announceMacKey } from '../lib/rendezvous.ts'
 import { buildAnnounce } from '../lib/announce.ts'
 import { generateX25519 } from '../lib/x25519.ts'
-import { wrap } from '../lib/origin.ts'
+import { wrap, unwrap, isTagged } from '../lib/origin.ts'
+import { watchSelfSession } from '../lib/selfsession.ts'
+import { sendKnock } from '../lib/inbox.ts'
+import { GroupManager, softwareGk, type GroupId } from '../lib/group.ts'
+import { joinGroup } from '../lib/grouproom.ts'
+import { b64, unb64 } from '../lib/wc.ts'
 
 const TOPIC = 'pair-topic'
 const P = { networkId: 'test', dateUTC: '2026-09-24' }
 const RELAY = 'relay-peer'
 
 /**
- * In-memory pubsub that behaves like a relay pushing for its clients: every
- * published frame is wrapped with the PUBLISHER's id, and delivered with the
- * relay as the transport sender. A peer for which `raw` is true is an old
- * client on the same topic: it publishes bare frames through its own
- * GossipSub, so the transport names it truthfully.
+ * In-memory pubsub that behaves like a relay pushing for its clients: the
+ * client's frame (already wrapped by the client, phase B) is passed on as it
+ * is, and the transport names the RELAY as the sender of all of them. A peer
+ * for which `raw` is true is an old client on the same topic: its envelope is
+ * stripped so bare frames go out, and the transport names it truthfully, as
+ * its own GossipSub would.
  */
 function relayHub(raw?: (id: string) => boolean) {
   const nodes = new Map<string, (topic: string, data: Uint8Array, from: string) => void>()
@@ -45,7 +51,7 @@ function relayHub(raw?: (id: string) => boolean) {
             subscribe: () => {}, unsubscribe: () => {},
             publish: async (topic: string, data: Uint8Array) => {
               const old = raw?.(id) ?? false
-              const onWire = old ? data : wrap(id, data)
+              const onWire = old ? (unwrap(data)?.frame ?? data) : data
               for (const [peer, deliver] of nodes) if (peer !== id) deliver(topic, onWire, old ? id : RELAY)
             },
           },
@@ -147,4 +153,66 @@ test('the presence watch lights up from a wrapped Announce relayed by somebody e
   net.inject('other-topic', wrap('me2', await buildAnnounce('me2', macKey)))
   await new Promise((r) => setTimeout(r, 150))
   assert.equal(flips, 0, 'a wrapped echo of our own announce is not a contact')
+})
+
+/** A pubsub that only records what was handed to it. */
+function spy() {
+  const published: Array<{ topic: string; data: Uint8Array }> = []
+  const listeners: Array<(evt: any) => void> = []
+  const node = (id: string) => ({
+    peerId: { toString: () => id },
+    services: { pubsub: {
+      addEventListener: (_e: string, h: (evt: any) => void) => listeners.push(h),
+      removeEventListener: (_e: string, h: (evt: any) => void) => { const i = listeners.indexOf(h); if (i >= 0) listeners.splice(i, 1) },
+      subscribe: () => {}, unsubscribe: () => {},
+      publish: async (topic: string, data: Uint8Array) => { published.push({ topic, data }); return { recipients: [] } },
+    } },
+  })
+  return { published, node }
+}
+
+test('everything the client publishes on a pair, self or group topic names its sender; a knock does not', async (t) => {
+  const { published, node } = spy()
+  const macKey = await announceMacKey(new Uint8Array(32).fill(0x11), P)
+  const ik = await generateX25519()
+  const other = await generateX25519()
+
+  // 1:1 room: announce + a handshake opener go out on join.
+  const room = joinChat(node('me'), 'pair', { macKey, eh2: { ik, peerIkPub: other.pub, attemptTimeoutMs: 300 } }, { firstAnnounceMs: 1 })
+  t.after(() => room.stop())
+  // presence watch and self-topic watch: one announce each.
+  const pw = watchPresence(node('me'), 'pair2', macKey, 'me', { heartbeatMs: 10_000, onOnline() {}, onOffline() {}, onIncomingHandshake() {} })
+  t.after(() => pw.stop())
+  const sw = watchSelfSession(node('me'), 'self', macKey, 'me', { heartbeatMs: 10_000, onTakenOver() {} })
+  t.after(() => sw.stop())
+  // group: a message and the keepalive.
+  const gid: GroupId = { pub: b64(ik.pub), ecdh: async (p: string) => ik.dh(unb64(p)) }
+  const mgr = new GroupManager(gid, P)
+  const { gk, pub: gkPub } = await softwareGk()
+  const g = await mgr.createGroup(gkPub, [{ pub: gid.pub }, { pub: b64(other.pub) }], gk)
+  const gr = await joinGroup(node('me'), mgr.session(g)!, {})
+  t.after(() => gr.stop())
+  await gr.sendText('do grupy')
+  await until(() => published.length >= 5, 2000)
+
+  for (const { topic, data } of published) {
+    assert.ok(isTagged(data), `frame on ${topic} is not wrapped: first byte 0x${data[0].toString(16)}`)
+    assert.equal(unwrap(data)!.from, 'me', `frame on ${topic} names somebody else`)
+  }
+  const topics = new Set(published.map((p) => p.topic))
+  assert.ok(topics.has('pair') && topics.has('pair2') && topics.has('self') && topics.has(gr.topic),
+    `expected all four kinds of topic, saw ${[...topics].join(', ')}`)
+
+  // The knock: no envelope, ever. Its first bytes are a random ephemeral key
+  // and its sender is nobody's business (§5.8).
+  const before = published.length
+  await sendKnock(node('me'), new Uint8Array(32).fill(0x77), other.pub, P, { ik: ik.pub, name: 'x' }, { waitMs: 0 })
+  // Heartbeats keep going out meanwhile, so pick the knock out by its shape:
+  // it is the ONLY untagged frame, everything else is still an envelope.
+  const since = published.slice(before)
+  const bare = since.filter((p) => !isTagged(p.data))
+  assert.equal(bare.length, 1, `exactly one bare frame since the knock, saw ${bare.length} of ${since.length}`)
+  const knock = bare[0].data
+  assert.equal(unwrap(knock), null, 'a knock is never an origin envelope')
+  assert.equal(knock.length, 348, 'and it keeps its fixed size')
 })

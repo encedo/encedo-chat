@@ -5,6 +5,7 @@
  */
 
 import { buildAnnounce, verifyAnnounce, nonceCache } from './announce.ts'
+import { origin, wrap } from './origin.ts'
 
 export interface JoinOpts {
   onPeer?: (peerId: string) => void
@@ -26,7 +27,9 @@ export function joinRoom(node, topic: string, macKey: CryptoKey, opts: JoinOpts 
 
   const handler = async (evt) => {
     if (evt.detail.topic !== topic) return
-    const res = await verifyAnnounce(evt.detail.data, macKey)
+    const o = origin(evt)
+    if (!o) return
+    const res = await verifyAnnounce(o.data, macKey)
     if (!res.ok || res.peer === self) return
     if (seenNonces.has(res.nonce!)) return
     seenNonces.add(res.nonce!)
@@ -38,7 +41,7 @@ export function joinRoom(node, topic: string, macKey: CryptoKey, opts: JoinOpts 
   node.services.pubsub.subscribe(topic)
 
   const announce = async () => {
-    try { await node.services.pubsub.publish(topic, await buildAnnounce(self, macKey)) } catch {}
+    try { await node.services.pubsub.publish(topic, wrap(self, await buildAnnounce(self, macKey))) } catch {}
   }
   const t0 = setTimeout(announce, initialDelayMs)
   const hb = setInterval(announce, heartbeatMs)

@@ -13,6 +13,7 @@ import assert from 'node:assert/strict'
 import { joinChat } from '../lib/room.ts'
 import { announceMacKey } from '../lib/rendezvous.ts'
 import { generateX25519 } from '../lib/x25519.ts'
+import { unwrap } from '../lib/origin.ts'
 
 const TOPIC = 'direct-only-topic'
 const P = { networkId: 'test', dateUTC: '2026-09-13' }
@@ -41,7 +42,9 @@ function hub() {
             subscribe: () => {}, unsubscribe: () => {},
             getSubscribers: () => [...nodes.keys()].filter((k) => k !== id).map((k) => ({ toString: () => k })),
             publish: async (topic: string, data: Uint8Array) => {
-              sent.get(id)!.push(data)
+              // What the node carried, minus the origin envelope: the promise
+              // under test is about the frame type, and that is inside.
+              sent.get(id)!.push(unwrap(data)?.frame ?? data)
               for (const [peer, deliver] of nodes) if (peer !== id) deliver(topic, data, id)
               return { recipients: [1] }
             },

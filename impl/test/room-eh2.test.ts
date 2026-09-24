@@ -13,6 +13,7 @@ import { joinChat } from '../lib/room.ts'
 import { announceMacKey } from '../lib/rendezvous.ts'
 import { buildAnnounce } from '../lib/announce.ts'
 import { generateX25519 } from '../lib/x25519.ts'
+import { unwrap } from '../lib/origin.ts'
 
 const TOPIC = 'test-topic'
 const P = { networkId: 'test', dateUTC: '2026-07-29' }
@@ -50,9 +51,12 @@ function hub(
             subscribe: () => {},
             unsubscribe: () => {},
             publish: async (topic: string, data: Uint8Array) => {
-              if (drop?.(data, id)) return
-              const times = duplicate?.(data) ? 2 : 1
-              const held = delayMs?.(data, id) ?? 0
+              // The predicates look at the frame TYPE (first byte), which sits
+              // inside the origin envelope the client now puts on every frame.
+              const inner = unwrap(data)?.frame ?? data
+              if (drop?.(inner, id)) return
+              const times = duplicate?.(inner) ? 2 : 1
+              const held = delayMs?.(inner, id) ?? 0
               const fanOut = () => {
                 for (let n = 0; n < times; n++) {
                   for (const [peer, deliver] of nodes) if (peer !== id) deliver(topic, data, id)
