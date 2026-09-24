@@ -2897,13 +2897,27 @@ async function main() {
       return [...document.querySelectorAll('#pane-contacts .contact')]
         .some((c) => (c.textContent || '').includes('sim-c'));
     `, 20_000)
-    const qrAfter = await A.eval<any>(`
-      return { done: (document.querySelector('#invqr-knocks .invqr-done') || {}).textContent || '',
-               left: document.querySelectorAll('#invqr-knocks .knock-row').length };
-    `)
-    if (!qrAfter.done.includes('sim-c') || qrAfter.left) throw new Error(`the QR window did not say who joined: ${JSON.stringify(qrAfter)}`)
-    await A.eval(`document.getElementById('invqr-close').click(); return 1`)
-    step('accepting under the QR creates the contact, and the window says who joined')
+    // After the accept, with nobody else waiting, the code gives way to "connected
+    // with X" -- a code left on screen after a pairing read as "not done yet"
+    // (the user's first live test). Then "Otwórz rozmowę" goes straight there.
+    await A.waitFor('the code gives way to "connected with sim-c"', `
+      return document.getElementById('invqr-qr').hidden
+        && !document.getElementById('invqr-done').hidden
+        && (document.getElementById('invqr-who').textContent || '').includes('sim-c')
+        && /[0-9A-F]{2}:[0-9A-F]{2}/.test(document.getElementById('invqr-fp').textContent || '');
+    `, 10_000)
+    if (process.env.SHOT) {
+      const dir = process.env.SHOT_DIR ?? '/tmp'
+      await A.resize(390, 780, true); await sleep(400)
+      await A.screenshot(`${dir}/invite-qr-success-phone.png`)
+      await A.resize(1280, 800, false); await sleep(400)
+    }
+    await A.eval(`document.getElementById('invqr-open').click(); return 1`)
+    await A.waitFor('"Otwórz rozmowę" closes the window and opens the conversation with sim-c', `
+      return !document.querySelector('.modal.open')
+        && (document.getElementById('peer-name').textContent || '') === 'sim-c';
+    `, 15_000)
+    step('accepting under the QR creates the contact; the code gives way to "connected", and one tap opens the conversation')
 
     // And the wait ends by itself, with no reply channel: A now holds B's key,
     // so A can reach the pair topic, and an Announce there is the whole answer.

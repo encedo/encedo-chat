@@ -253,7 +253,7 @@ const modalStack: string[] = []
 const MODAL_EXIT: Record<string, () => void> = {}
 /** The published invite whose QR is on screen (its knocks are painted under it), and who was accepted there. */
 let invQrShown: string | null = null
-let invQrAccepted: string[] = []
+let invQrAccepted: { name: string; pub: string }[] = []
 const val = (id: string) => ($(id) as HTMLInputElement).value.trim()
 const dec = new TextDecoder()
 
@@ -4563,7 +4563,7 @@ async function acceptKnock(k: PendingKnock) {
   await refreshContacts()
   pendingKnocks = pendingKnocks.filter((p) => p !== k)
   paintInviteBadge(); renderInvites()
-  if (invQrShown === k.inviteId) { invQrAccepted.push(name); paintInviteQrKnocks() }
+  if (invQrShown === k.inviteId) { invQrAccepted.push({ name, pub: k.ik }); paintInviteQrKnocks() }
   toast(tr('Dodano kontakt „{name}"', { name }))
 }
 
@@ -4594,16 +4594,37 @@ function openInviteQr(inv: PubInvite) {
   pushModal('invqr-modal')
 }
 
-function paintInviteQrKnocks() {
+/**
+ * Three states, one window. Waiting: the code, and "waiting for a scan".
+ * Somebody knocked: the code stays and their request sits under it -- a second
+ * person may be about to scan. Accepted and nobody else waiting: the code is
+ * REPLACED by "connected with X" and three ways on (the user's call after the
+ * first live test: a code left on screen after a successful pairing read as
+ * "not done yet"). "Pokaz kod dla kolejnej osoby" brings the code back.
+ */
+function paintInviteQrKnocks(showCodeAgain = false) {
   const box = $('invqr-knocks')
   box.innerHTML = ''
-  for (const name of invQrAccepted) {
+  const mine = pendingKnocks.filter((k) => k.inviteId === invQrShown)
+  const last = invQrAccepted[invQrAccepted.length - 1]
+  const success = !!last && !mine.length && !showCodeAgain
+  $('invqr-qr').hidden = success
+  $('invqr-done').hidden = !success
+  $('invqr-sub').textContent = success
+    ? tr('„{name}" jest już w Twoich kontaktach.', { name: last.name })
+    : tr('Pokaż ten kod osobie, którą zapraszasz. Zeskanuje go aparatem albo w aplikacji — jej prośba pojawi się tutaj, a Ty przyjmiesz ją jednym dotknięciem.')
+  if (success) {
+    $('invqr-who').textContent = tr('Połączono z „{name}"', { name: last.name })
+    $('invqr-fp').textContent = tr('odcisk: ') + '…'
+    void fingerprint(last.pub).then((f) => { if (invQrAccepted[invQrAccepted.length - 1] === last) $('invqr-fp').textContent = tr('odcisk: ') + f })
+    return
+  }
+  for (const a of invQrAccepted) {
     const d = document.createElement('div'); d.className = 'invqr-done'
-    d.textContent = tr('Połączono z „{name}"', { name })
+    d.textContent = tr('Połączono z „{name}"', { name: a.name })
     box.appendChild(d)
   }
-  const mine = pendingKnocks.filter((k) => k.inviteId === invQrShown)
-  if (!mine.length && !invQrAccepted.length) {
+  if (!mine.length) {
     const w = document.createElement('div'); w.className = 'invqr-wait'
     w.textContent = tr('Czekam na zeskanowanie…')
     box.appendChild(w)
@@ -4623,6 +4644,13 @@ function paintInviteQrKnocks() {
   }
 }
 $('invqr-close').addEventListener('click', () => backModal())
+$('invqr-open').addEventListener('click', () => {
+  const last = invQrAccepted[invQrAccepted.length - 1]
+  const c = last && contactsCache.find((x) => x.pub === last.pub)
+  endModals()
+  if (c) void openRoomFor(c, true)
+})
+$('invqr-again').addEventListener('click', () => paintInviteQrKnocks(true))
 
 function renderInvites() {
   const pane = $('pane-invites')

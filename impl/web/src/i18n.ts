@@ -48,6 +48,9 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '🤝 Securing…': '🤝 Zabezpieczam…',
   },
   en: {
+    'Otwórz rozmowę': 'Open the conversation',
+    'Pokaż kod dla kolejnej osoby': 'Show the code for the next person',
+    '„{name}" jest już w Twoich kontaktach.': '“{name}” is now in your contacts.',
     'Pokaż ten kod osobie, którą zapraszasz. Zeskanuje go aparatem albo w aplikacji — jej prośba pojawi się tutaj, a Ty przyjmiesz ją jednym dotknięciem.': 'Show this code to the person you are inviting. They scan it with the camera or in the app — their request appears here, and you accept it with one tap.',
     'Pokaż QR': 'Show QR',
     'Czekam na zeskanowanie…': 'Waiting for a scan…',

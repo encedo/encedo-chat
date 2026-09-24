@@ -886,6 +886,12 @@
   /* Read from a phone held at arm's length across a table: as big as the window allows. */
   .qr-box.qr-big svg{width:300px}
   #invqr-knocks .knock-row{margin-top:10px}
+  .invqr-ok{display:grid;justify-items:center;gap:8px;padding:22px 12px 14px;border-radius:10px;margin:10px 0;text-align:center;background:color-mix(in srgb,var(--good,#2e7d32) 8%,transparent)}
+  .invqr-ok[hidden]{display:none}
+  .invqr-ok .ok-tick{font-size:44px;line-height:1;color:var(--good,#2e7d32)}
+  .invqr-ok .ok-who{font-size:18px;font-weight:600}
+  .invqr-ok .ok-fp{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:6px}
+  .invqr-ok button{width:100%;border-radius:8px;padding:10px}
   #invqr-knocks .invqr-done{margin-top:10px;font-size:13px;color:var(--ok,#2e7d32)}
   #invqr-knocks .invqr-wait{margin-top:10px;font-size:13px;color:var(--muted)}
   /* `contain`, not `cover`: the detector reads the WHOLE frame, so a cropped
@@ -1583,8 +1589,15 @@
        forever, so anybody who ever saw this code can knock with it. -->
   <div class="modal" id="invqr-modal">
     <h2 id="invqr-title" data-i18n="Zaproszenie">Zaproszenie</h2>
-    <div class="msub" data-i18n="Pokaż ten kod osobie, którą zapraszasz. Zeskanuje go aparatem albo w aplikacji — jej prośba pojawi się tutaj, a Ty przyjmiesz ją jednym dotknięciem.">Pokaż ten kod osobie, którą zapraszasz. Zeskanuje go aparatem albo w aplikacji — jej prośba pojawi się tutaj, a Ty przyjmiesz ją jednym dotknięciem.</div>
+    <div class="msub" id="invqr-sub">Pokaż ten kod osobie, którą zapraszasz. Zeskanuje go aparatem albo w aplikacji — jej prośba pojawi się tutaj, a Ty przyjmiesz ją jednym dotknięciem.</div>
     <div class="qr-box qr-big" id="invqr-qr"></div>
+    <div class="invqr-ok" id="invqr-done" hidden>
+      <div class="ok-tick" aria-hidden="true">✓</div>
+      <div class="ok-who" id="invqr-who"></div>
+      <div class="ok-fp" id="invqr-fp"></div>
+      <button class="btn-send" id="invqr-open" data-i18n="Otwórz rozmowę">Otwórz rozmowę</button>
+      <button class="btn-ghost" id="invqr-again" data-i18n="Pokaż kod dla kolejnej osoby">Pokaż kod dla kolejnej osoby</button>
+    </div>
     <div id="invqr-knocks"></div>
     <div class="modal-actions"><button class="btn-ghost" id="invqr-close" style="flex:1" data-i18n="Zamknij">Zamknij</button></div>
   </div>
