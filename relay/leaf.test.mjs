@@ -13,7 +13,9 @@ function fakePubsub() {
     sent,
     topics: new Map(),          // topic -> Set(peer)
     subscriptions: new Set(),   // ours
-    sendSubscriptions(toPeer, topics, subscribe) { sent.push({ to: String(toPeer), topics: [...topics], subscribe }) },
+    // `to` is recorded AS GIVEN: the real sendRpc looks the stream up by the
+    // peer's string, so an object here is a send that silently goes nowhere.
+    sendSubscriptions(toPeer, topics, subscribe) { sent.push({ to: toPeer, topics: [...topics], subscribe }) },
     handleReceivedSubscription(from, topic, subscribe) {
       let s = this.topics.get(topic); if (!s) { s = new Set(); this.topics.set(topic, s) }
       if (subscribe) s.add(String(from)); else s.delete(String(from))
@@ -68,6 +70,20 @@ test('a second client joining a room the relay already carries is told so', () =
   p.subscriptions.add('T')                                  // relay already in T (client-a's doing)
   p.handleReceivedSubscription('client-b', 'T', true)
   assert.deepEqual(p.sent, [{ to: 'client-b', topics: ['T'], subscribe: true }])
+})
+
+test('the answer to a second joiner is addressed by STRING, whatever object the library hands over', () => {
+  // The library calls handleReceivedSubscription with a PeerId object and
+  // sendRpc with a string key. Answering with the object is a silent no-op:
+  // the room looks like it formed and the client publishes to nobody.
+  const p = fakePubsub()
+  leafAnnouncements(p, { siblings: new Set([BS1]) })
+  p.subscriptions.add('T')
+  const peerIdLike = { toString: () => 'client-b' }
+  p.handleReceivedSubscription(peerIdLike, 'T', true)
+  assert.equal(p.sent.length, 1, 'the second joiner was told')
+  assert.equal(typeof p.sent[0].to, 'string', `addressed by ${typeof p.sent[0].to}, the stream lookup needs a string`)
+  assert.equal(p.sent[0].to, 'client-b')
 })
 
 test('a client announcing a topic we do NOT hold gets no answer yet', () => {

@@ -90,10 +90,17 @@ export function leafAnnouncements(pubsub, { siblings, log = () => {} }) {
 
   pubsub.handleReceivedSubscription = (from, topic, subscribe) => {
     recv(from, topic, subscribe)
+    // `from` is a PeerId OBJECT here (the library's own call site hands over
+    // the connection's peer), while `sendRpc` finds the stream by the peer's
+    // STRING (`streamsOutbound.get(id)`). Pass the object and the lookup
+    // misses, the library logs at debug level and sends nothing -- which is
+    // what happened in production on 2026-09-24: a client joining a room the
+    // relay already carried was never told, and with floodPublish it then
+    // published to nobody. Always the string.
     const peer = from.toString()
     // They hold T now, and so do we: say so, to them alone. For a sibling the
     // normal broadcast already covers it.
-    if (subscribe && !siblings.has(peer) && pubsub.subscriptions.has(topic)) send(from, [topic], true)
+    if (subscribe && !siblings.has(peer) && pubsub.subscriptions.has(topic)) send(peer, [topic], true)
   }
 
   return { restore() { pubsub.sendSubscriptions = origSend; pubsub.handleReceivedSubscription = origRecv } }
