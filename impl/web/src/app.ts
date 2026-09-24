@@ -153,6 +153,10 @@ function chosenRelays(): string[] {
  */
 const MQTT_PARAM = new URLSearchParams(location.search).get('mqtt')
 const USE_MQTT = MQTT_PARAM !== null && MQTT_PARAM !== '0'
+// `?light=1`: the light transport (net/light.ts) -- same relays, no GossipSub in
+// the client, pick/push over one stream. R&D switch for stage 2 measurements.
+const LIGHT_PARAM = new URLSearchParams(location.search).get('light')
+const USE_LIGHT = !USE_MQTT && LIGHT_PARAM !== null && LIGHT_PARAM !== '0'
 // The broker lives on the SAME host as the relay (bs1.onchato.com), not on the
 // site the app is served from — deriving it from `location.hostname` pointed it
 // at onchato.com, where there is no broker. Take the host straight from RELAY so
@@ -1374,8 +1378,11 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     relay: chosenRelay(),
     relays: chosenRelays(),   // 3b: fall through the enabled node list if one is down
     gkBackend,                // §8 bucket A: a HEM identity mints GK in the HSM
-    transport: USE_MQTT ? 'mqtt' : 'libp2p',
+    transport: USE_MQTT ? 'mqtt' : USE_LIGHT ? 'light' : 'libp2p',
     broker: BROKER,
+    // Light only: the relay said no to a topic. Until now a full node looked
+    // exactly like an empty room; this is the first time the client is told.
+    onRefused: (topic) => { ecLog(`relay refused topic ${topic.slice(0, 12)}...`); toast(t('Węzeł odmówił tematu — jest pełny. Wybierz inny węzeł w Ustawieniach → Sieć.'), 4000) },
     forcedRotationSec: FORCED_ROTATION_SEC,
     onGroupSkd: (from, skd) => { void onGroupInvite(from, skd) }, // a group invite arrived over a 1:1
     onGroupSkdReq: (from, req) => { void answerSkdReq(from, req) }, // …and a member asking for one back
@@ -5019,7 +5026,7 @@ startDiag()
 // bar), so this costs the packaged app nothing.
 if (DEBUG) (globalThis as any).__diag = diag
 
-ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : 'libp2p'}`
+ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : USE_LIGHT ? 'libp2p light (pick/push)' : 'libp2p'}`
   + ` rotation=${FORCED_ROTATION_SEC == null ? 'per-pair offset' : `forced ${String(Math.floor(FORCED_ROTATION_SEC / 3600)).padStart(2, '0')}:${String(Math.floor((FORCED_ROTATION_SEC % 3600) / 60)).padStart(2, '0')} UTC`};`
   + ' add ?debug=1 for the full trace, ?mqtt=1 for the broker transport, ?rot=<hour> to force the rollover time')
 // Printed because the app-shell test is a guess about somebody else's software:

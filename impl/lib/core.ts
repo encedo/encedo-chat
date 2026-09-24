@@ -19,6 +19,7 @@ import type { QuoteRef } from './quote.ts'
 import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { createMqttPeer } from '../net/mqtt-node.ts'
+import { createLightPeer } from '../net/light.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
 import type { webrtcLink } from '../net/webrtc.ts'
 import { createXferSession, type XferSession, type XferEv, type FileLike, type OfferResult } from './xfer-session.ts'
@@ -466,7 +467,7 @@ export interface OpenOpts extends ChatOpts {
   /** See `SessionOpts.relays` — ordered relay candidates for failover (libp2p). */
   relays?: string[]
   /** See `SessionOpts` — the fall-back transport, chosen per session. */
-  transport?: 'libp2p' | 'mqtt'
+  transport?: 'libp2p' | 'mqtt' | 'light'
   broker?: string
   params?: RoomParams
   webrtc?: boolean // enable the WebRTC direct data plane (browser only)
@@ -517,7 +518,7 @@ export type LinkState = 'online' | 'reconnecting' | 'offline'
 
 /** A read-only snapshot of the transport, for the Network tab. */
 export interface NetStatus {
-  transport: 'libp2p' | 'mqtt'
+  transport: 'libp2p' | 'mqtt' | 'light'
   relay: string      // relay multiaddr (libp2p) or broker url (mqtt)
   self: string       // our ephemeral PeerId
   link: LinkState
@@ -699,7 +700,12 @@ export interface SessionOpts {
    * engine, same crypto, a broker instead of a GossipSub mesh — see the MQTT
    * section in README.md for what that costs and what it buys.
    */
-  transport?: 'libp2p' | 'mqtt'
+  transport?: 'libp2p' | 'mqtt' | 'light'
+  /**
+   * The relay refused a topic (light transport only -- the first refusal in the
+   * system that is said rather than silent). GossipSub never reports this.
+   */
+  onRefused?: (topic: string) => void
   /** Broker URL for `transport: 'mqtt'` (`wss://host/mqtt`, or `mqtt://host:1883` in Node). */
   broker?: string
   params?: RoomParams
@@ -782,9 +788,13 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   let candidates = (opts.relays?.length ? opts.relays : [opts.relay]).filter(Boolean)
   if (!viaMqtt && candidates.length === 0) throw new Error('startSession: no relay to dial')
   let activeRelay = candidates[0]
+  // 'light' dials the same relays and fails over the same way; only the
+  // pubsub surface is pick/push instead of GossipSub (net/light.ts).
   const node: any = viaMqtt
     ? await createMqttPeer({ url: opts.broker!, onLog: opts.onLog })
-    : await createPeer()
+    : opts.transport === 'light'
+      ? await createLightPeer({ onLog: opts.onLog, onRefused: opts.onRefused })
+      : await createPeer()
   /**
    * Dial, or re-dial. MQTT reconnects its one broker; libp2p sweeps the relay
    * candidates (first that connects wins) and remembers which one, so a dead or
@@ -815,7 +825,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     }
   }
   const self = node.peerId.toString()
-  log(`session up over ${viaMqtt ? 'MQTT' : 'libp2p'} in ${Date.now() - dialT0} ms as ${self.slice(0, 12)}...`)
+  log(`session up over ${viaMqtt ? 'MQTT' : opts.transport === 'light' ? 'libp2p light (pick/push)' : 'libp2p'} in ${Date.now() - dialT0} ms as ${self.slice(0, 12)}...`)
 
   /** Every room open on this transport — refreshed, flushed and stopped together. */
   interface OpenRoom { refresh(): void; flushPending(): void; stop(): void; sendPresence(s: any): void }
@@ -1096,7 +1106,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       try { topics = [...(node.services?.pubsub?.getTopics?.() ?? [])] } catch {}
       let peers = 0
       try { peers = node.getConnections().length } catch {}
-      return { transport: viaMqtt ? 'mqtt' : 'libp2p', relay: viaMqtt ? (opts.broker ?? '') : activeRelay, self, link, connected: connected(), peers, topics }
+      return { transport: viaMqtt ? 'mqtt' : opts.transport === 'light' ? 'light' : 'libp2p', relay: viaMqtt ? (opts.broker ?? '') : activeRelay, self, link, connected: connected(), peers, topics }
     },
     async knock(inboxSecret, toPub, body) {
       return sendKnock(node, inboxSecret, unb64(toPub), params, {

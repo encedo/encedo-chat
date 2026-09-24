@@ -45,6 +45,10 @@ import { hemKid } from '../lib/descr.ts'
 const DIST = join(import.meta.dirname, '..', 'web', 'dist')
 const LOCAL_PORT = 9333
 const APP_URL = process.env.APP_URL ?? `http://127.0.0.1:${LOCAL_PORT}/?eh2=1&debug=1&lang=pl`
+// LIGHT=1 puts browser B on the light transport (net/light.ts: no GossipSub,
+// pick/push over one stream) while A keeps GossipSub -- the mixed case every
+// scenario then exercises without knowing it.
+const B_URL = process.env.LIGHT && process.env.LIGHT !== '0' ? `${APP_URL}${APP_URL.includes('?') ? '&' : '?'}light=1` : APP_URL
 const SERVE_LOCAL = !process.env.APP_URL
 
 const MIME: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.map': 'application/json' }
@@ -764,7 +768,7 @@ async function main() {
   try {
     scenario('setup — two browsers, two identities, one room')
     step(`launching ${PAIR[0]} + ${PAIR[1] ?? PAIR[0]} on ${APP_URL}`)
-    await Promise.all([A.start(APP_URL), B.start(APP_URL)])
+    await Promise.all([A.start(APP_URL), B.start(B_URL)])
 
     if (process.env.SHOT_LOGIN) { // capture the login node list (collapsed -> expanded)
       await A.resize(460, 760)
@@ -830,7 +834,7 @@ async function main() {
     // never negotiating anything. The relay path is what everything else covers,
     // and `FAILOVER=1` / `?webrtc=0` still exercise it deliberately.
     for (const b of [A, B]) await b.eval(`localStorage.setItem('ec-transport', 'auto'); return 1`)
-    await Promise.all([A.reload(APP_URL), B.reload(APP_URL)])
+    await Promise.all([A.reload(APP_URL), B.reload(B_URL)])
     await Promise.all([login(A, 'sim-a'), login(B, 'sim-b')])
 
     await Promise.all([openContact(A, 'sim-b'), openContact(B, 'sim-a')])
@@ -2714,7 +2718,7 @@ async function main() {
     // assertion would pass against an app that added the contact on the knock.
     scenario('a published invite is answered by a knock, and a knock is a request')
     await B.reload('about:blank')
-    await B.reload(APP_URL)
+    await B.reload(B_URL)
     await B.waitFor('B back at the login form', `return !!document.getElementById('go-soft')`, 20_000)
     await softProfile(B, 'sim-c')
     await B.waitFor('B signed in as a stranger to A', `
@@ -3133,7 +3137,7 @@ async function main() {
     // card" is what invites somebody to add a seen-once flag, and that flag is
     // exactly wrong: a person returning to a profile they have not used still
     // has nobody to write to. Re-entered here rather than argued about.
-    await B.reload(APP_URL)
+    await B.reload(B_URL)
     await B.waitFor('B back at the login form', `return !!document.getElementById('go-soft')`, 20_000)
     await softProfile(B, 'stara-nazwa')
     await B.waitFor('the card on a REPEAT sign-in', `

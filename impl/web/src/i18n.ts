@@ -48,6 +48,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '🤝 Securing…': '🤝 Zabezpieczam…',
   },
   en: {
+    'Węzeł odmówił tematu — jest pełny. Wybierz inny węzeł w Ustawieniach → Sieć.': 'The node refused the topic — it is full. Pick another node in Settings → Network.',
     ' a klucz grupy zostanie skasowany z HEM — grupy nie da się już przywrócić.': ' and the group key will be erased from the HEM — the group cannot be restored.',
     ' Ich dotychczasowa kopia rozmowy pozostanie u nich; nie da się jej usunąć zdalnie.': ' Their existing copy of the conversation stays with them; it cannot be deleted remotely.',
     ' Obie sesje zostały zamknięte — jedna tożsamość, jedna aktywna sesja.': ' Both sessions were closed — one identity, one active session.',
