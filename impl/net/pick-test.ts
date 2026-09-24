@@ -12,6 +12,12 @@
  * a second PICK must come back REFUSED rather than vanish. That answer is the
  * point of the protocol: a GossipSub subscription past the cap gets no signal.
  *
+ * Then the send side (phase C): the picker PUSHes an origin-wrapped frame on
+ * the topic. The GossipSub talker must receive those bytes untouched (the
+ * transport says the relay sent them; the envelope says who did), a second
+ * picker must get them as a DELIVER, and the pusher must get an ACK whose
+ * reach counts both.
+ *
  *   node net/pick-test.ts <relay multiaddr>                  # expects per-peer cap 1
  *   EXPECT_REFUSED=0 node net/pick-test.ts <relay multiaddr>  # production: cap is 40, so no refusal
  */
@@ -21,7 +27,8 @@ import * as lp from 'it-length-prefixed'
 import { pushable } from 'it-pushable'
 import { randomBytes } from 'node:crypto'
 import { createPeer } from './peer.ts'
-import { PROTOCOL, T, encodePick, decodeFrame } from '../../relay/pick.mjs'
+import { PROTOCOL, T, encodePick, encodePush, decodeFrame } from '../../relay/pick.mjs'
+import { wrap, unwrap } from '../lib/origin.ts'
 
 const addr = process.argv[2]
 if (!addr) { console.error('usage: node net/pick-test.ts <relay multiaddr>'); process.exit(2) }
@@ -62,6 +69,36 @@ const d = got.find((f) => f.type === T.DELIVER)
 const delivered = !!d && new TextDecoder().decode(d.data) === token
 const fromRight = !!d && d.from === talker.peerId.toString()
 
+// --- the send side: PUSH -------------------------------------------------
+// A second picker on the same topic, so the relay has a local holder to
+// deliver to besides the GossipSub talker.
+const watcher = await createPeer()
+await watcher.dial(multiaddr(addr))
+const wstream = await watcher.dialProtocol(multiaddr(addr), PROTOCOL)
+const wout = pushable<Uint8Array>()
+void pipe(wout, (s) => lp.encode(s), wstream.sink)
+const wgot: any[] = []
+void pipe(wstream.source, (s) => lp.decode(s), async (src) => {
+  for await (const chunk of src) { const f = decodeFrame(chunk.subarray()); if (f) wgot.push(f) }
+})
+wout.push(encodePick(topic))
+const talkerGot: Uint8Array[] = []
+talker.services.pubsub.addEventListener('message', (e: any) => { if (e.detail.topic === topic) talkerGot.push(e.detail.data) })
+await sleep(2000)
+
+const pushToken = 'push-hello-' + randomBytes(4).toString('hex')
+const pushed = wrap(picker.peerId.toString(), new TextEncoder().encode(pushToken))
+out.push(encodePush(topic, pushed))
+for (let i = 0; i < 40; i++) {
+  if (got.some((f) => f.type === T.ACK) && talkerGot.length && wgot.some((f) => f.type === T.DELIVER)) break
+  await sleep(250)
+}
+const ack = got.find((f) => f.type === T.ACK && f.topic === topic)
+const talkerSaw = talkerGot.some((d) => unwrap(d)?.from === picker.peerId.toString() && new TextDecoder().decode(unwrap(d)!.frame) === pushToken)
+const wd = wgot.find((f) => f.type === T.DELIVER)
+const watcherSaw = !!wd && unwrap(wd.data)?.from === picker.peerId.toString() && new TextDecoder().decode(unwrap(wd.data)!.frame) === pushToken
+const pusherEcho = got.some((f) => f.type === T.DELIVER && f.topic === topic && unwrap(f.data)?.from === picker.peerId.toString())
+
 // Second pick past the cap -> must be REFUSED, not silent.
 out.push(encodePick(second))
 for (let i = 0; i < 20; i++) {
@@ -77,9 +114,14 @@ const refusalOk = expectRefused ? refused : !refused
 console.log(`dostarczono przez pick : ${delivered ? 'TAK' : 'NIE'}`)
 console.log(`from = nadawca         : ${fromRight ? 'TAK' : 'NIE'}${d ? '' : ' (brak ramki)'}`)
 console.log(`drugi pick REFUSED     : ${refused ? 'TAK' : 'NIE'}${expectRefused ? '' : ' (oczekiwane NIE: limit 40)'}`)
-const ok = delivered && fromRight && refusalOk
+console.log(`PUSH -> ACK            : ${ack ? `TAK (reach ${ack.recipients})` : 'NIE'}`)
+console.log(`PUSH -> gossipsub peer : ${talkerSaw ? 'TAK (bajty i koperta nietkniete)' : 'NIE'}`)
+console.log(`PUSH -> drugi picker   : ${watcherSaw ? 'TAK (DELIVER, from z koperty = pusher)' : 'NIE'}`)
+console.log(`PUSH nie wraca do pushera: ${pusherEcho ? 'NIE (echo!)' : 'TAK'}`)
+const pushOk = !!ack && ack.recipients >= 2 && talkerSaw && watcherSaw && !pusherEcho
+const ok = delivered && fromRight && refusalOk && pushOk
 console.log(ok ? 'PRZESZLO' : 'NIE PRZESZLO')
 
-out.end()
-await talker.stop(); await picker.stop()
+out.end(); wout.end()
+await talker.stop(); await picker.stop(); await watcher.stop()
 process.exit(ok ? 0 : 1)

@@ -55,7 +55,7 @@ import { leafAnnouncements } from './leaf.mjs'
 import { pipe } from 'it-pipe'
 import * as lp from 'it-length-prefixed'
 import { pushable } from 'it-pushable'
-import { PROTOCOL as PICK_PROTOCOL, T as PICK_T, decodeFrame as decodePickFrame, encodeDeliver, encodeRefused, makePicks } from './pick.mjs'
+import { PROTOCOL as PICK_PROTOCOL, T as PICK_T, decodeFrame as decodePickFrame, encodeDeliver, encodeRefused, encodeAck, makePicks } from './pick.mjs'
 import { redisSink } from './redis.mjs'
 import { appendFile } from 'fs'
 
@@ -264,6 +264,30 @@ if (PICK) {
         const f = decodePickFrame(chunk.subarray())
         if (!f) continue
         if (f.type === PICK_T.DROP) { picks.drop(peer, f.topic); quota.release(peer, f.topic); continue }
+        if (f.type === PICK_T.PUSH) {
+          // Publish on the client's behalf, bytes untouched (the sender is
+          // inside the origin envelope, never read here), then hand the same
+          // bytes to this node's own pick-holders of the topic -- our own
+          // publish does not come back to us as a `message` event. The ACK
+          // carries the reach, which is what a client's isolation detector
+          // reads off `publish()` when it has its own GossipSub.
+          let reach = 0
+          try {
+            const r = await relay.services.pubsub.publish(f.topic, f.data)
+            reach += r?.recipients?.length ?? 0
+          } catch (e) {
+            if (!QUIET_MSGS) console.log(`[push] publish on "${f.topic.slice(0, 16)}..." failed: ${e?.message ?? e}`)
+          }
+          const frame = encodeDeliver(peer, f.topic, f.data)
+          for (const sink of picks.sinksFor(f.topic, peer)) { sink(frame); reach++ }
+          lastSeen.set(f.topic, Date.now())
+          // Our own publish never comes back as a `message` event, so count it
+          // here or a light client's traffic vanishes from the stats line.
+          stats?.counters.msg(peer, f.data.length)
+          stats?.counters.push()
+          send(encodeAck(f.topic, reach))
+          continue
+        }
         if (f.type !== PICK_T.PICK) continue
         // Same policy as a GossipSub subscription: per-peer quota, then the
         // global cap -- but the answer is SAID, which a subscription never gets.

@@ -58,6 +58,7 @@ export function newCounters(now = () => Date.now(), cpuUsage = () => process.cpu
   let msgs = 0, bytes = 0, maxBytes = 0
   let added = 0, evicted = 0, refused = 0
   let up = 0, down = 0
+  let pushes = 0
   let lagMax = 0
   let pubs = new Set()
 
@@ -74,6 +75,8 @@ export function newCounters(now = () => Date.now(), cpuUsage = () => process.cpu
       else if (what === 'refuse') refused++
     },
     conn(delta) { if (delta > 0) up++; else down++ },
+    /** A frame published on a client's behalf over /onchato/pick (PUSH). */
+    push() { pushes++ },
     lag(ms) { if (ms > lagMax) lagMax = ms },
 
     /**
@@ -101,6 +104,7 @@ export function newCounters(now = () => Date.now(), cpuUsage = () => process.cpu
         bytes,
         max_bytes: maxBytes,
         publishers: pubs.size,
+        pushes,
         conns: gauges.conns ?? null,
         conns_up: up,
         conns_down: down,
@@ -112,7 +116,7 @@ export function newCounters(now = () => Date.now(), cpuUsage = () => process.cpu
       }
       since = at
       cpu0 = c
-      msgs = bytes = maxBytes = added = evicted = refused = up = down = lagMax = 0
+      msgs = bytes = maxBytes = added = evicted = refused = up = down = pushes = lagMax = 0
       // Dropped whole, not cleared entry by entry: the ids were never wanted,
       // only how many there were.
       pubs = new Set()
@@ -125,7 +129,7 @@ export function newCounters(now = () => Date.now(), cpuUsage = () => process.cpu
 export function formatLine(s, windowMin) {
   return `[stats ${windowMin}m] topics=${s.topics} (+${s.topics_added} -${s.topics_evicted}`
     + `${s.topics_refused ? ` REFUSED=${s.topics_refused}` : ''}) msgs=${s.msgs} bytes=${human(s.bytes)}`
-    + ` max=${human(s.max_bytes)} pubs=${s.publishers} conns=${s.conns} (+${s.conns_up} -${s.conns_down})`
+    + ` max=${human(s.max_bytes)} pubs=${s.publishers}${s.pushes ? ` push=${s.pushes}` : ''} conns=${s.conns} (+${s.conns_up} -${s.conns_down})`
     + ` cpu=${s.cpu_pct}% rss=${human(s.rss)} heap=${human(s.heap)} lag=${s.lag_ms}ms up=${upFor(s.uptime_s)}`
 }
 

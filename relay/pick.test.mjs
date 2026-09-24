@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { T, PROTOCOL, encodePick, encodeDrop, encodeRefused, encodeDeliver, decodeFrame, makePicks } from './pick.mjs'
+import { T, PROTOCOL, encodePick, encodeDrop, encodeRefused, encodeDeliver, encodePush, encodeAck, decodeFrame, makePicks } from './pick.mjs'
 
 const TOPIC = 'topic-a'
 const OTHER = 'topic-b'
@@ -33,6 +33,19 @@ test('an empty payload is still a delivery', () => {
   assert.equal(f.data.length, 0)
 })
 
+test('a push carries the topic and the bytes untouched; an ack carries the count', () => {
+  const data = Uint8Array.from([0xe1, 3, 65, 66, 67, 0x10, 9])   // an origin envelope: opaque here
+  const f = decodeFrame(encodePush(TOPIC, data))
+  assert.equal(f.type, T.PUSH)
+  assert.equal(f.topic, TOPIC)
+  assert.deepEqual([...f.data], [...data], 'the relay must never touch the payload')
+  const a = decodeFrame(encodeAck(TOPIC, 3))
+  assert.deepEqual(a, { type: T.ACK, topic: TOPIC, recipients: 3 })
+  assert.equal(decodeFrame(encodeAck(TOPIC, 0)).recipients, 0, 'zero is an answer, not an absence')
+  assert.equal(decodeFrame(encodeAck(TOPIC, 70000)).recipients, 0xffff, 'clamped to two bytes')
+  assert.equal(decodeFrame(encodePush(TOPIC, new Uint8Array(0))).data.length, 0, 'an empty push is still a push')
+})
+
 test('rubbish is refused, not guessed at', () => {
   assert.equal(decodeFrame(new Uint8Array(0)), null)
   assert.equal(decodeFrame(Uint8Array.from([0x01])), null, 'a type with no topic')
@@ -40,6 +53,8 @@ test('rubbish is refused, not guessed at', () => {
   // A delivery whose declared lengths overrun the frame.
   assert.equal(decodeFrame(Uint8Array.from([T.DELIVER, 200, 1, 2])), null)
   assert.equal(decodeFrame(Uint8Array.from([T.DELIVER, 1, 65, 200, 1])), null)
+  assert.equal(decodeFrame(Uint8Array.from([T.PUSH, 200, 65])), null, 'a push whose topic overruns the frame')
+  assert.equal(decodeFrame(Uint8Array.from([T.ACK, 1, 65, 0])), null, 'an ack short of its two count bytes')
   // A name that does not fit one byte of length is not encodable at all.
   assert.throws(() => encodePick('x'.repeat(256)), /does not fit/)
   assert.throws(() => encodePick(''), /does not fit/)

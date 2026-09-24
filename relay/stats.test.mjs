@@ -20,6 +20,16 @@ function rig(startMs = 1_757_000_000_000) {
   }
 }
 
+test('a push is counted, shown only when there was one, and reset with the window', () => {
+  const c = newCounters(() => 1000, () => ({ user: 0, system: 0 }))
+  assert.equal(formatLine(c.roll({ topics: 0, conns: 0 }), 15).includes('push='), false, 'no pushes, no field')
+  c.push(); c.push()
+  const snap = c.roll({ topics: 0, conns: 0 })
+  assert.equal(snap.pushes, 2)
+  assert.match(formatLine(snap, 15), / push=2 /)
+  assert.equal(c.roll({}).pushes, 0, 'reset with the window')
+})
+
 test('a window counts what happened in it, and only that', () => {
   const r = rig()
   r.counters.msg('12D3a', 176)

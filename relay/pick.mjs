@@ -10,18 +10,23 @@
  * DELIVER frames. No mesh, no heartbeats, no subscription announcements on the
  * client's side.
  *
- * ## Why only the receive side
+ * ## The send side: PUSH (stage 2, phase C)
  *
- * The send side (Waku's LightPush) is NOT here, and the reason is in the
- * client, not the relay. `lib/room.ts` keys the EH-2 session and the ratchet
- * by the GossipSub publisher id (`evt.detail.from`). A relay publishing on a
- * client's behalf would sign as itself, so every message would arrive as
- * `from = relay` and every session would collapse into one. Carrying the
- * origin inside the payload would change the wire format for every existing
- * client. Either answer is a change to the client's identity model, which is
- * stage 2's business and the user's decision. For now a light client still
- * PUBLISHES through GossipSub (signed by itself, `from` correct for everybody)
- * and RECEIVES through pick.
+ * Until phase B the send side (Waku's LightPush) could not exist: `lib/room.ts`
+ * keyed the EH-2 session by the GossipSub publisher id, and a relay publishing
+ * on a client's behalf signs as itself -- every message would have arrived as
+ * `from = relay`. Since 0.6.22 every frame carries its sender inside (the
+ * origin envelope, impl/lib/origin.ts, PROTOCOL.md S13), so who publishes the
+ * GossipSub message no longer matters to any receiver. A PUSH is therefore:
+ * publish these bytes UNCHANGED on this topic (the relay never opens the
+ * envelope) and hand them to the local pick-holders of that topic except the
+ * pusher. The answer is an ACK carrying how many peers the publish reached --
+ * the number the room's isolation detector reads off `publish()` today, so a
+ * light client keeps that detector.
+ *
+ * A push needs no prior pick: a knock on an inbox topic is a publish by a peer
+ * that never listens there. Nor does the relay subscribe because of a push --
+ * it publishes into its fanout (the siblings, and its own subscribers).
  *
  * ## What the relay knows -- exactly as much as before
  *
@@ -43,8 +48,10 @@
  *
  *   client -> relay   0x01 PICK    topic
  *                     0x02 DROP    topic
+ *                     0x03 PUSH    u8 topicLen, topic, data
  *   relay  -> client  0x11 DELIVER u8 fromLen, from, u8 topicLen, topic, data
  *                     0x12 REFUSED topic
+ *                     0x13 ACK     u8 topicLen, topic, u16be recipients
  *
  * Topics are 52 base32 characters and peer ids are ~52, so a one-byte length
  * is enough and anything longer is refused as malformed rather than parsed.
@@ -52,7 +59,7 @@
 
 export const PROTOCOL = '/onchato/pick/1'
 
-export const T = Object.freeze({ PICK: 0x01, DROP: 0x02, DELIVER: 0x11, REFUSED: 0x12 })
+export const T = Object.freeze({ PICK: 0x01, DROP: 0x02, PUSH: 0x03, DELIVER: 0x11, REFUSED: 0x12, ACK: 0x13 })
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
@@ -72,6 +79,18 @@ export function encodeRefused(topic) { const t = nameBytes(topic); return concat
 export function encodeDeliver(from, topic, data) {
   const f = nameBytes(from), t = nameBytes(topic)
   return concat([T.DELIVER, f.length], f, [t.length], t, data)
+}
+
+export function encodePush(topic, data) {
+  const t = nameBytes(topic)
+  return concat([T.PUSH, t.length], t, data)
+}
+
+/** How many peers a push reached; clamped to what two bytes hold. */
+export function encodeAck(topic, recipients) {
+  const t = nameBytes(topic)
+  const n = Math.max(0, Math.min(0xffff, recipients | 0))
+  return concat([T.ACK, t.length], t, [n >> 8, n & 0xff])
 }
 
 function concat(...parts) {
@@ -100,6 +119,18 @@ export function decodeFrame(bytes) {
     const tl = bytes[o++]; if (!tl || o + tl > bytes.length) return null
     const topic = dec.decode(bytes.subarray(o, o + tl)); o += tl
     return { type, from, topic, data: bytes.subarray(o) }
+  }
+  if (type === T.PUSH) {
+    let o = 1
+    const tl = bytes[o++]; if (!tl || o + tl > bytes.length) return null
+    const topic = dec.decode(bytes.subarray(o, o + tl)); o += tl
+    return { type, topic, data: bytes.subarray(o) }
+  }
+  if (type === T.ACK) {
+    let o = 1
+    const tl = bytes[o++]; if (!tl || o + tl + 2 > bytes.length) return null
+    const topic = dec.decode(bytes.subarray(o, o + tl)); o += tl
+    return { type, topic, recipients: (bytes[o] << 8) | bytes[o + 1] }
   }
   return null
 }
