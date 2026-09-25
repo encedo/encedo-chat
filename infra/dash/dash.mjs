@@ -4,6 +4,7 @@
  *
  *   node infra/dash/dash.mjs            # then open http://localhost:8088
  *   node infra/dash/dash.mjs --port 8090 --every 5
+ *   node infra/dash/dash.mjs --ipfs-host root@ipfs.encedo.com   # also the store's disk
  *
  * Every few seconds it asks each node for its live numbers over SSH
  * (`ssh bsN curl 127.0.0.1:9003/metrics`) -- the relay serves them on
@@ -34,6 +35,10 @@ const EVERY_S = Number(opt('--every', 5))
 const METRICS_PORT = Number(opt('--metrics-port', 9003))
 const KEEP = Math.ceil((30 * 60) / EVERY_S)          // 30 minutes of live samples
 const HISTORY_EVERY_MS = 5 * 60_000
+const SIDE_EVERY_MS = 30_000                          // nginx errors, feedback, IPFS disk
+const FEEDBACK_NODE = opt('--feedback-node', 'bs1')   // where infra/feedback appends its JSONL
+const IPFS_HOST = opt('--ipfs-host', null)            // an SSH target; no panel data without it
+const IPFS_PATH = opt('--ipfs-path', '/')
 const WINDOW_MS = 15 * 60_000
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -59,7 +64,9 @@ function ssh(host, command, timeoutMs = 8000) {
 }
 
 /** Per node: live samples, the last reading, the last error, the 24 h windows. */
-const state = Object.fromEntries(NODES.map((n) => [n, { samples: [], last: null, error: null, history: [] }]))
+const state = Object.fromEntries(NODES.map((n) => [n, { samples: [], last: null, error: null, history: [], nginx: null }]))
+/** Not per node: the feedback sink and the file store. */
+const extra = { feedback: null, ipfs: IPFS_HOST ? null : { configured: false } }
 
 async function pollOne(node) {
   const s = state[node]
@@ -101,16 +108,52 @@ async function historyOne(node) {
   } catch { /* keep the previous history; the live card says whether the node answers */ }
 }
 
+/**
+ * nginx's own verdicts over the last 5 minutes, per node: a client turned away
+ * by the per-IP connection limit, by the handshake rate, or because nginx ran
+ * out of worker connections. None of these reach the relay's numbers -- the
+ * client never got that far -- which is why they are read from nginx's log.
+ */
+async function nginxOne(node) {
+  if (LOCAL) return
+  const cmd = `C=$(date -d '-5 min' '+%Y/%m/%d %H:%M:%S'); sudo -n tail -n 20000 /var/log/nginx/error.log 2>/dev/null`
+    + ` | awk -v c="$C" 'substr($0,1,19) >= c' | awk '/limiting connections/{l++} /limiting requests/{r++} /worker_connections are not enough/{w++} END{print l+0, r+0, w+0}'`
+  try {
+    const [conn, rate, slots] = (await ssh(`${node}.onchato.com`, cmd)).trim().split(/\s+/).map(Number)
+    state[node].nginx = { at: Date.now(), conn, rate, slots }
+  } catch (e) { state[node].nginx = { at: Date.now(), error: String(e?.message ?? e) } }
+}
+
+async function feedbackOne() {
+  if (LOCAL || !NODES.includes(FEEDBACK_NODE)) return
+  const today = new Date().toISOString().slice(0, 10)
+  const cmd = `F=/var/lib/onchato/feedback.jsonl; sudo -n wc -l < $F; sudo -n grep -c '"ts":"${today}' $F || true`
+  try {
+    const [total, todayN] = (await ssh(`${FEEDBACK_NODE}.onchato.com`, cmd)).trim().split(/\s+/).map(Number)
+    extra.feedback = { at: Date.now(), total, today: todayN }
+  } catch (e) { extra.feedback = { at: Date.now(), error: String(e?.message ?? e) } }
+}
+
+async function ipfsOne() {
+  if (!IPFS_HOST) return
+  try {
+    const out = (await ssh(IPFS_HOST, `df -P ${IPFS_PATH} | tail -1`)).trim().split(/\s+/)
+    extra.ipfs = { configured: true, at: Date.now(), pct: Number(String(out[4]).replace('%', '')), used: Number(out[2]) * 1024, size: Number(out[1]) * 1024 }
+  } catch (e) { extra.ipfs = { configured: true, at: Date.now(), error: String(e?.message ?? e) } }
+}
+
 const tick = () => Promise.all(NODES.map(pollOne))
+const side = () => Promise.all([...NODES.map(nginxOne), feedbackOne(), ipfsOne()])
 const history = () => Promise.all(NODES.map(historyOne))
 setInterval(tick, EVERY_S * 1000); void tick()
 setInterval(history, HISTORY_EVERY_MS); void history()
+setInterval(side, SIDE_EVERY_MS); void side()
 
 const PAGE = readFileSync(join(here, 'index.html'), 'utf8')
 createServer((req, res) => {
   if (req.url === '/data') {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-    res.end(JSON.stringify({ now: Date.now(), every: EVERY_S, nodes: NODES, state }))
+    res.end(JSON.stringify({ now: Date.now(), every: EVERY_S, nodes: NODES, state, extra }))
     return
   }
   if (req.url === '/' || req.url === '/index.html') {

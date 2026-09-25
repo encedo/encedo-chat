@@ -46,16 +46,33 @@
   .err{font-family:var(--mono);font-size:12px;color:var(--bad);margin-top:6px;word-break:break-word}
   .stale .pct,.stale dd{opacity:.45}
   footer{max-width:1280px;margin:14px auto 0;color:var(--muted);font-size:12px}
+  .alerts{max-width:1280px;margin:0 auto 12px;display:flex;flex-direction:column;gap:6px}
+  .alert{display:flex;gap:10px;align-items:baseline;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);font-size:13.5px}
+  .alert b{font-family:var(--mono);font-size:12px;letter-spacing:.04em;padding:1px 7px;border-radius:4px;color:#fff}
+  .alert.red b{background:var(--bad)} .alert.amber b{background:var(--warn)}
+  .alert.ok{color:var(--muted)} .alert.ok b{background:var(--ok)}
+  .alert .since{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+  .totals{max-width:1280px;margin:0 auto 14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+  .tile{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+  .tile dt{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  .tile dd{margin:2px 0 0;font-family:var(--mono);font-size:20px;font-variant-numeric:tabular-nums}
+  .tile dd small{font-size:12px;color:var(--muted)}
+  .nginx{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin:2px 0 8px}
+  .nginx .hot{color:var(--bad)}
+  #notify{margin-left:8px;font:12px var(--sans);padding:4px 10px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);cursor:pointer}
+  #notify:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 </style>
 </head>
 <body>
 <header>
   <h1>Węzły onchato</h1>
-  <span class="sub" id="upd">—</span>
+  <span class="sub" id="upd">—</span><button id="notify" type="button">Włącz powiadomienia</button>
   <span class="legend"><span><i style="background:var(--ok)"></i>&lt; 75%</span><span><i style="background:var(--warn)"></i>75–90%</span><span><i style="background:var(--bad)"></i>≥ 90%</span><span><i style="background:var(--off)"></i>brak odczytu</span></span>
 </header>
+<section class="alerts" id="alerts" aria-live="polite"></section>
+<section class="totals" id="totals"></section>
 <main class="grid" id="grid"></main>
-<footer>Obciążenie = to samo, co węzeł ogłasza: max(połączenia / limit, tematy / limit). Wykres: ostatnie 30 min (co kilka sekund). Pasek: ostatnie 24 h z Redisa, okna 15 min (połączenia).</footer>
+<footer>Obciążenie = to samo, co węzeł ogłasza: max(połączenia / limit, tematy / limit). Progi alarmów jak w LAUNCH-PLAN.md §4: obciążenie 75/90%, lag 150 ms przez 5 min / 400 ms przez 2 min, CPU 70% / 85%, każda odmowa, mesh &lt; 2, nginx odprawiający klientów. Wykresy: 30 min; pasek: 24 h z Redisa.</footer>
 <script>
 const fmtB = (b) => b == null ? '—' : b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(0) + ' MB'
 const fmtR = (r) => r == null ? '—' : r < 10 ? r.toFixed(1) : Math.round(r).toString()
@@ -110,6 +127,7 @@ function card(node, s, now, every) {
       <div><dt>Push/s</dt><dd>${fmtR(L?.pushes)}</dd></div>
       <div><dt>Odmowy/s</dt><dd style="color:${L?.refused ? 'var(--bad)' : 'inherit'}">${fmtR(L?.refused)}</dd></div>
     </dl>
+    ${nginxLine(s.nginx)}
     <div class="clbl"><span>obciążenie, 30 min</span><span>75 · 90</span></div>
     <div class="chart" style="color:${st}">${spark(series('pct'), { max: 100, marks: [{ v: 75, c: 'var(--warn)' }, { v: 90, c: 'var(--bad)' }] })}</div>
     <div class="clbl"><span>wiadomości/s, 30 min</span><span></span></div>
@@ -120,16 +138,100 @@ function card(node, s, now, every) {
   </section>`
 }
 
+function nginxLine(n) {
+  if (!n) return '<div class="nginx">nginx: czekam na pierwszy odczyt…</div>'
+  if (n.error) return `<div class="nginx">nginx: ${n.error}</div>`
+  const v = (x) => x > 0 ? `<span class="hot">${x}</span>` : '0'
+  return `<div class="nginx">nginx, 5 min: limit IP ${v(n.conn)} · tempo ${v(n.rate)} · brak slotów ${v(n.slots)}</div>`
+}
+
+/** True when every sample in the last `ms` is past `thr` (and the window is covered). */
+function sustained(samples, key, thr, ms, now) {
+  const w = samples.filter((p) => now - p.t <= ms)
+  if (!w.length || now - w[0].t < ms * 0.8) return false
+  return w.every((p) => (p[key] ?? 0) > thr)
+}
+
+/** The thresholds of LAUNCH-PLAN.md section 4, one list for the whole page. */
+function alertsFor(d) {
+  const out = []
+  for (const n of d.nodes) {
+    const s = d.state[n], L = s.last
+    if (!L || d.now - L.t > d.every * 3000) { out.push({ id: `${n}:down`, lvl: 'red', text: `${n}: brak odczytu ${L ? ago(d.now - L.t) : ''}${s.error ? ' — ' + s.error.msg : ''}` }); continue }
+    if (L.pct >= 90) out.push({ id: `${n}:pct90`, lvl: 'red', text: `${n}: obciążenie ${L.pct}% (≥ 90)` })
+    else if (L.pct >= 75) out.push({ id: `${n}:pct75`, lvl: 'amber', text: `${n}: obciążenie ${L.pct}% (≥ 75)` })
+    if (sustained(s.samples, 'lag', 400, 120_000, d.now)) out.push({ id: `${n}:lag400`, lvl: 'red', text: `${n}: lag pętli > 400 ms od 2 min (teraz ${L.lag} ms)` })
+    else if (sustained(s.samples, 'lag', 150, 300_000, d.now)) out.push({ id: `${n}:lag150`, lvl: 'amber', text: `${n}: lag pętli > 150 ms od 5 min (teraz ${L.lag} ms)` })
+    if (sustained(s.samples, 'cpu', 85, 120_000, d.now)) out.push({ id: `${n}:cpu85`, lvl: 'red', text: `${n}: CPU > 85% od 2 min (teraz ${L.cpu}%)` })
+    else if (sustained(s.samples, 'cpu', 70, 300_000, d.now)) out.push({ id: `${n}:cpu70`, lvl: 'amber', text: `${n}: CPU > 70% od 5 min (teraz ${L.cpu}%)` })
+    if ((L.refused ?? 0) > 0) out.push({ id: `${n}:refused`, lvl: 'red', text: `${n}: odmowy tematów/pick — ktoś właśnie nie dostał pokoju` })
+    if (L.mesh < 2) out.push({ id: `${n}:mesh`, lvl: 'red', text: `${n}: mesh ${L.mesh}/2 — pokoje między węzłami mogą nie działać` })
+    const g = s.nginx
+    if (g && !g.error) {
+      const hits = (g.conn || 0) + (g.rate || 0) + (g.slots || 0)
+      if (g.slots > 0 || hits >= 10) out.push({ id: `${n}:nginx`, lvl: 'red', text: `${n}: nginx odprawia klientów (5 min: limit IP ${g.conn}, tempo ${g.rate}, brak slotów ${g.slots})` })
+      else if (hits > 0) out.push({ id: `${n}:nginx`, lvl: 'amber', text: `${n}: nginx odprawił ${hits} poł. w 5 min (limit IP ${g.conn}, tempo ${g.rate})` })
+    }
+  }
+  const ip = d.extra?.ipfs
+  if (ip?.configured && !ip.error && ip.pct >= 85) out.push({ id: 'ipfs:85', lvl: 'red', text: `sklep IPFS: dysk ${ip.pct}%` })
+  else if (ip?.configured && !ip.error && ip.pct >= 70) out.push({ id: 'ipfs:70', lvl: 'amber', text: `sklep IPFS: dysk ${ip.pct}%` })
+  return out.sort((a, b) => (a.lvl === b.lvl ? 0 : a.lvl === 'red' ? -1 : 1))
+}
+
+const firstSeen = new Map()   // alert id -> when it first appeared (for "od …")
+let notified = new Set()
+function paintAlerts(list, now) {
+  for (const a of list) if (!firstSeen.has(a.id)) firstSeen.set(a.id, now)
+  for (const id of [...firstSeen.keys()]) if (!list.some((a) => a.id === id)) firstSeen.delete(id)
+  const el = document.getElementById('alerts')
+  el.innerHTML = list.length
+    ? list.map((a) => `<div class="alert ${a.lvl}"><b>${a.lvl === 'red' ? 'ALARM' : 'UWAGA'}</b><span>${a.text}</span><span class="since">od ${ago(now - firstSeen.get(a.id))}</span></div>`).join('')
+    : '<div class="alert ok"><b>OK</b><span>Brak alarmów — wszystkie progi w normie.</span></div>'
+  // A browser notification once per NEW red alert, if the operator allowed it.
+  if ('Notification' in window && Notification.permission === 'granted') {
+    for (const a of list) if (a.lvl === 'red' && !notified.has(a.id)) new Notification('onchato: ' + a.text)
+  }
+  notified = new Set(list.filter((a) => a.lvl === 'red').map((a) => a.id))
+  document.title = list.some((a) => a.lvl === 'red') ? '● ALARM — onchato' : 'onchato — węzły'
+}
+
+function paintTotals(d) {
+  const live = d.nodes.map((n) => d.state[n].last).filter((L) => L && d.now - L.t <= d.every * 3000)
+  const sum = (k) => live.reduce((a, L) => a + (L[k] ?? 0), 0)
+  const busiest = d.nodes.map((n) => [n, d.state[n].last]).filter(([, L]) => L).sort((a, b) => b[1].pct - a[1].pct)[0]
+  const fb = d.extra?.feedback, ip = d.extra?.ipfs
+  const tile = (k, v) => `<div class="tile"><dt>${k}</dt><dd>${v}</dd></div>`
+  document.getElementById('totals').innerHTML = [
+    tile('Węzły', `${live.length}<small> / ${d.nodes.length}</small>`),
+    tile('Klienci w sieci', `${sum('clients')}<small> / ${sum('maxConns')}</small>`),
+    tile('Wiadomości/s', fmtR(sum('msgs'))),
+    tile('Najbardziej obciążony', busiest ? `${busiest[0]} <small>${busiest[1].pct}%</small>` : '—'),
+    tile('Zgłoszenia 💬', fb ? (fb.error ? '<small>brak dostępu</small>' : `${fb.today}<small> dziś · ${fb.total} razem</small>`) : '<small>…</small>'),
+    tile('Sklep IPFS', !ip || ip.configured === false ? '<small>nie skonfigurowano</small>' : ip.error ? '<small>brak dostępu</small>' : `${ip.pct}%<small> dysku</small>`),
+  ].join('')
+}
+
 async function refresh() {
   try {
     const r = await fetch('/data', { cache: 'no-store' })
     const d = await r.json()
+    paintAlerts(alertsFor(d), d.now)
+    paintTotals(d)
     document.getElementById('grid').innerHTML = d.nodes.map((n) => card(n, d.state[n], d.now, d.every)).join('')
     document.getElementById('upd').textContent = `odświeżone ${new Date(d.now).toLocaleTimeString()} · co ${d.every} s przez SSH`
   } catch (e) {
     document.getElementById('upd').textContent = 'dashboard nie odpowiada — czy dash.mjs działa?'
   }
 }
+const nb = document.getElementById('notify')
+const paintNotify = () => {
+  if (!('Notification' in window)) { nb.hidden = true; return }
+  nb.textContent = Notification.permission === 'granted' ? 'Powiadomienia włączone' : 'Włącz powiadomienia'
+  nb.disabled = Notification.permission === 'granted'
+}
+nb.addEventListener('click', async () => { try { await Notification.requestPermission() } catch {} paintNotify() })
+paintNotify()
 refresh(); setInterval(refresh, 2000)
 </script>
 </body>
