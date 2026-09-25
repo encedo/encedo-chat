@@ -2028,6 +2028,16 @@ async function main() {
     scenario('switching to another contact and back')
     await openContact(A, 'ghost')          // a peer that will never answer
     await sleep(2_000)
+    // An unconfirmed message says what it is waiting for: here the other side,
+    // who is not there -- not an endless "wysylam..." (reported from a phone).
+    const toGhost = `do-ducha-${Date.now().toString(36)}`
+    await send(A, toGhost)
+    await A.waitFor('a message to an absent contact says it waits for them', `
+      const row = [...document.querySelectorAll('#messages .mrow.out')].find((r) => (r.textContent || '').includes(${JSON.stringify(toGhost)}));
+      const st = row && row.querySelector('.b-state');
+      return !!st && /czeka na rozmówcę/.test(st.textContent || '') && !/wysyłam/.test(st.textContent || '');
+    `, 10_000)
+    step('a message to an absent contact says "czeka na rozmówcę", not "wysyłam"')
     await openContact(A, 'sim-b')          // ...and back to the real conversation
     await A.waitFor('EH-2 after switching back', BADGE_GREEN, 90_000)
     await roundTrip(A, B, 'after-switch')

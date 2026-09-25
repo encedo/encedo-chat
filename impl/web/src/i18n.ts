@@ -48,6 +48,10 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '🤝 Securing…': '🤝 Zabezpieczam…',
   },
   en: {
+    ' · czekam na sieć…': ' · waiting for the network…',
+    'Brak połączenia z przekaźnikiem — wyślę, gdy wróci': 'No connection to the relay — it will go out when it is back',
+    ' · czeka na rozmówcę…': ' · waiting for the other person…',
+    'Rozmówcy teraz nie ma — wiadomość dojdzie, gdy wróci (i otworzy tę rozmowę)': 'The other person is not here now — it will arrive when they come back (and open this conversation)',
     '{names} są już w Twoich kontaktach.': '{names} are now in your contacts.',
     'Połączono: {names}': 'Connected: {names}',
     'Otwórz rozmowę z „{name}"': 'Open the conversation with “{name}”',

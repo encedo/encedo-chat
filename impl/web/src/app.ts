@@ -382,8 +382,34 @@ function noteVia(room: Room, id: string | undefined, via: 'direct' | 'relay') {
 }
 const LOG_CAP = 1000
 
+/**
+ * What an unconfirmed message of ours is actually waiting for -- said, instead
+ * of an endless "wysylam...". Reported from a phone on a motorway: during a
+ * minute without network, and after it, bubbles sat on "wysylam..." with no
+ * hint whether the problem was our network or the other side. The delivery
+ * machinery already tells the two apart (it pauses the retries while the peer
+ * is absent); the label now does too. Painted over every bubble still marked
+ * `data-pending`, whenever the link or the peer's presence changes.
+ */
+function pendingLabel(): { text: string; title: string } {
+  if (linkState !== 'online') return { text: tr(' · czekam na sieć…'), title: tr('Brak połączenia z przekaźnikiem — wyślę, gdy wróci') }
+  const lp = activeRoom()?.lastPresence
+  // Never seen yet (null) counts as absent too: sending into an empty room is
+  // exactly the case the retries stop for.
+  if (!lp || lp === 'leave' || lp === 'quiet') return { text: tr(' · czeka na rozmówcę…'), title: tr('Rozmówcy teraz nie ma — wiadomość dojdzie, gdy wróci (i otworzy tę rozmowę)') }
+  return { text: tr(' · wysyłam…'), title: tr('Czekam na potwierdzenie od klienta rozmówcy') }
+}
+function paintPending() {
+  const l = pendingLabel()
+  for (const el of stateEls.values()) {
+    if (!el.dataset.pending) continue
+    if (el.textContent !== l.text) { el.textContent = l.text; el.title = l.title }
+  }
+}
+
 function paintStatus() {
   const dot = $('peer-dot'), txt = $('peer-status')
+  paintPending() // the same two facts decide what an unconfirmed bubble says
   paintKnockButton() // whether anyone is there to hear it changes with this label
   if (linkState !== 'online') {
     dot.className = 'dot bad'
@@ -4962,6 +4988,7 @@ const stateEls = new Map<string, HTMLElement>()
 function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
   const el = stateEls.get(id)
   if (!el) return
+  delete el.dataset.pending // settled one way or the other: no longer "waiting for"
   if (state === 'ok') {
     el.textContent = tr(' · ✓ ') + tr('dostarczone')
     el.title = tr('Klient rozmówcy potwierdził odbiór{when} — to nie jest „przeczytane”', { when: ms !== undefined ? tr(' po {ms} ms', { ms }) : '' })
@@ -4986,6 +5013,7 @@ function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
       if (!activeRoom()?.conv?.resend(id)) return
       el.textContent = tr(' · wysyłam ponownie…')
       el.title = tr('Czekam na potwierdzenie od klienta rozmówcy')
+      el.dataset.pending = '1'
     })
     el.appendChild(again)
   }
@@ -5080,7 +5108,8 @@ function appendMsg(ev: MsgEv) {
       // so it is "sent", never the 1:1 "sending...->delivered" that would hang here.
       st.textContent = tr(' · wysłano'); st.title = tr('Wysłane do grupy (broadcast — bez potwierdzeń doręczenia)')
     } else {
-      st.textContent = tr(' · wysyłam…'); st.title = tr('Czekam na potwierdzenie od klienta rozmówcy')
+      const l = pendingLabel()
+      st.textContent = l.text; st.title = l.title; st.dataset.pending = '1'
       stateEls.set(id, st) // only 1:1 gets delivery updates
     }
     m.appendChild(st)
@@ -6455,8 +6484,8 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
       st.title = tr('Druga strona potwierdziła cały plik — inaczej transfer by się nie zakończył')
       st.dataset.settled = '1'
     } else {
-      st.textContent = tr(' · wysyłam…')
-      st.title = tr('Czekam na potwierdzenie od klienta rozmówcy')
+      const l = pendingLabel()
+      st.textContent = l.text; st.title = l.title; st.dataset.pending = '1'
     }
     meta.appendChild(st)
   }
