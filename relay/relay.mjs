@@ -57,7 +57,7 @@ import * as lp from 'it-length-prefixed'
 import { pushable } from 'it-pushable'
 import { PROTOCOL as PICK_PROTOCOL, T as PICK_T, decodeFrame as decodePickFrame, encodeDeliver, encodeRefused, encodePicked, encodeAck, makePicks } from './pick.mjs'
 import { redisSink } from './redis.mjs'
-import { makeMetrics, metricsHandler, SAMPLE_MS } from './metrics.mjs'
+import { makeMetrics, metricsHandler, SAMPLE_MS, readCommit } from './metrics.mjs'
 import { createServer as createHttpServer } from 'http'
 import { appendFile } from 'fs'
 
@@ -466,8 +466,7 @@ if (ANNOUNCE_LOAD) {
 if (metrics) {
   // The build this process runs, once: a dashboard showing three nodes should
   // say when one of them is behind.
-  let commit = null
-  try { commit = (await import('child_process')).execSync('git rev-parse --short HEAD', { cwd: new URL('.', import.meta.url).pathname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() } catch {}
+  const commit = readCommit(new URL('..', import.meta.url).pathname.replace(/\/$/, ''))
   let due = Date.now() + 1_000
   setInterval(() => { const late = Date.now() - due; due = Date.now() + 1_000; if (late > 0) metrics.lag(late) }, 1_000).unref?.()
   setInterval(() => metrics.sample(), SAMPLE_MS).unref?.()

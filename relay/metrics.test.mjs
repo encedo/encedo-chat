@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { makeMetrics, metricsHandler } from './metrics.mjs'
+import { makeMetrics, metricsHandler, readCommit } from './metrics.mjs'
 
 const clock = () => { let t = 1_000_000; return { now: () => t, add: (ms) => { t += ms } } }
 
@@ -64,4 +64,14 @@ test('a reading that throws is a 500 with the reason, not a crash', () => {
   const r = call(h, 'GET', '/metrics')
   assert.equal(r.code, 500)
   assert.match(r.body, /boom/)
+})
+
+test('the commit is read from .git: a branch ref, a packed ref, a detached HEAD, or nothing', () => {
+  const sha = 'fac40ed' + '0'.repeat(33)
+  const fs = (files) => ({ readFile: (p) => { const k = p.replace('/repo/.git/', ''); if (!(k in files)) throw new Error('ENOENT'); return files[k] } })
+  assert.equal(readCommit('/repo', fs({ HEAD: 'ref: refs/heads/main\n', 'refs/heads/main': sha + '\n' })), 'fac40ed')
+  assert.equal(readCommit('/repo', fs({ HEAD: 'ref: refs/heads/main\n', 'packed-refs': `# pack\n${sha} refs/heads/main\n` })), 'fac40ed')
+  assert.equal(readCommit('/repo', fs({ HEAD: sha + '\n' })), 'fac40ed')
+  assert.equal(readCommit('/repo', fs({})), null)
+  assert.equal(readCommit('/repo', fs({ HEAD: 'ref: refs/heads/main\n', 'refs/heads/main': 'garbage' })), null)
 })

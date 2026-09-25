@@ -20,6 +20,8 @@
  * (how many people, when they talk), and the dashboard reaches them over SSH.
  */
 
+import { readFileSync } from 'fs'
+
 export const SAMPLE_MS = 5_000
 
 export function makeMetrics({ now = () => Date.now(), cpuUsage = () => process.cpuUsage(), memoryUsage = () => process.memoryUsage() } = {}) {
@@ -79,4 +81,25 @@ export function metricsHandler(read) {
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
     res.end(body)
   }
+}
+
+/**
+ * The commit this checkout is on, read from .git directly. `git rev-parse`
+ * refuses to run as the service user in a clone another user owns ("dubious
+ * ownership"), which is exactly the production layout -- so no git binary.
+ * `null` when it cannot be told; never throws.
+ */
+export function readCommit(repoDir, { readFile = (p) => readFileSync(p, 'utf8') } = {}) {
+  try {
+    const head = readFile(`${repoDir}/.git/HEAD`).trim()
+    if (!head.startsWith('ref: ')) return head.slice(0, 7)
+    const ref = head.slice(5)
+    let sha = null
+    try { sha = readFile(`${repoDir}/.git/${ref}`).trim() } catch {
+      const packed = readFile(`${repoDir}/.git/packed-refs`)
+      const line = packed.split('\n').find((l) => l.endsWith(' ' + ref))
+      sha = line ? line.split(' ')[0] : null
+    }
+    return sha && /^[0-9a-f]{40}$/.test(sha) ? sha.slice(0, 7) : null
+  } catch { return null }
 }
