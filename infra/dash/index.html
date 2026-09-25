@@ -78,7 +78,9 @@ function spark(points, { max, h = 64, w = 320, stroke = 'currentColor', marks = 
 /** 24 h of 15-minute windows as bars (connections). */
 function hist(rows, maxConns) {
   const w = 320, h = 34, n = rows.length || 1, bw = w / n
-  const top = Math.max(maxConns ? maxConns * 0.25 : 10, ...rows.map((r) => r.conns ?? 0))
+  // Scaled to what the day actually held (labelled beside it), not to the
+  // limit: at a few dozen connections a limit-scaled bar is a flat line.
+  const top = Math.max(4, ...rows.map((r) => r.conns ?? 0)) * 1.1
   const bars = rows.map((r, i) => r.conns == null ? '' :
     `<rect x="${(i * bw + 0.5).toFixed(1)}" y="${(h - (r.conns / top) * (h - 2)).toFixed(1)}" width="${Math.max(1, bw - 1).toFixed(1)}" height="${((r.conns / top) * (h - 2)).toFixed(1)}" fill="var(--accent)" opacity=".7"><title>${new Date(r.t).toLocaleString()} — ${r.conns} poł., ${r.topics ?? '—'} tematów, CPU ${r.cpu ?? '—'}%</title></rect>`).join('')
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="24 godziny połączeń">${bars}</svg>`
@@ -91,10 +93,10 @@ function card(node, s, now, every) {
   const pct = stale ? null : L.pct
   const st = color(pct)
   const series = (k) => s.samples.map((p) => ({ t: p.t, v: p[k] }))
-  const commit = L?.commit ? `@${L.commit}` : ''
+  const peak = Math.max(0, ...s.history.map((r) => r.conns ?? 0))
   return `<section class="card ${stale ? 'stale' : ''}" style="--state:${st}">
     <div class="top"><span class="name">${node}</span>
-      <span class="meta">${commit}${L ? ` · up ${ago(L.uptime * 1000)}` : ''}<br>${L ? `odczyt ${ago(age)} temu` : 'brak odczytu'}</span></div>
+      <span class="meta">${[L?.commit ? '@' + L.commit : '', L ? 'up ' + ago(L.uptime * 1000) : ''].filter(Boolean).join(' · ')}<br>${L ? `odczyt ${ago(age)} temu` : 'brak odczytu'}</span></div>
     <div class="big"><span class="pct">${pct == null ? '—' : pct + '%'}</span><span class="pctlbl">obciążenie</span></div>
     <div class="bar"><b style="width:${pct ?? 0}%"></b><span class="tick" style="left:75%"></span><span class="tick" style="left:90%"></span></div>
     <dl>
@@ -112,7 +114,7 @@ function card(node, s, now, every) {
     <div class="chart" style="color:${st}">${spark(series('pct'), { max: 100, marks: [{ v: 75, c: 'var(--warn)' }, { v: 90, c: 'var(--bad)' }] })}</div>
     <div class="clbl"><span>wiadomości/s, 30 min</span><span></span></div>
     <div class="chart s" style="color:var(--accent)">${spark(series('msgs'), { h: 48 })}</div>
-    <div class="clbl"><span>połączenia, 24 h</span><span>okna 15 min</span></div>
+    <div class="clbl"><span>połączenia, 24 h (okna 15 min)</span><span>maks ${peak}</span></div>
     <div class="chart h">${hist(s.history, L?.maxConns)}</div>
     ${s.error ? `<div class="err">${s.error.msg} (${ago(now - s.error.at)} temu)</div>` : ''}
   </section>`
