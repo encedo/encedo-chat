@@ -243,8 +243,13 @@ avoid — so the dialog states that rather than opening silently. It carries a
 outlive the session in which it was dismissed, and nothing else here survives a
 reload either. The host is also in the arrow's tooltip, before any click.
 
-**Always a new tab.** Not a preference: navigating away from a live session
-tears down the transport and every ratchet with it. `rel="noopener noreferrer"`
+**Always a new tab — except an invite to this app.** Not a preference:
+navigating away from a live session tears down the transport and every ratchet
+with it. The one exception (2026-09-25): a link to this app's own address (the
+canonical one or the page we are on) carrying `#i=` opens the add-contact
+window in place (`ownInvite` in `web/src/app.ts`). A new tab cost a
+conversation on an iPhone — Safari drops background tabs, and a second tab that
+signs in trips the one-identity-one-session rule and closes both. `rel="noopener noreferrer"`
 plus `referrerpolicy="no-referrer"` stop the destination reaching back into the
 window or learning where the visitor came from.
 
