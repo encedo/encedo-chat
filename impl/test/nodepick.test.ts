@@ -79,3 +79,65 @@ test('one node, or none, is not a special case for the caller', () => {
   assert.equal(pickFirst([], 0.9), 0)
   assert.deepEqual(orderFrom([], 0), [])
 })
+
+// ---- load-aware choice ------------------------------------------------------
+import { loginChoice, rebalanceChoice, nodeKey, MOVE_GAP, HOT, COOL, HOT_FOR_MS, REBALANCE_P, LOAD_STALE_MS } from '../lib/nodepick.ts'
+
+const NOW = 10_000_000
+const L = (node: string, pct: number, age = 5_000) => [node, { node, pct, at: NOW - age }] as [string, any]
+const loads = (...e: [string, any][]) => new Map(e)
+const W = new Map<string, number>()
+
+test('nodeKey names a relay the way it announces itself', () => {
+  assert.equal(nodeKey('/dns4/bs3.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWLc'), 'bs3')
+  assert.equal(nodeKey('/ip4/127.0.0.1/tcp/9001/ws/p2p/12D3'), '127')
+})
+
+test('login: a node lighter by the gap wins the second choice', () => {
+  assert.equal(loginChoice('bs3', ['bs3', 'bs2'], loads(L('bs3', 70), L('bs2', 70 - MOVE_GAP)), W, 0.5, NOW), 'bs2')
+})
+
+test('login: not lighter enough, or heavier, and we stay', () => {
+  assert.equal(loginChoice('bs3', ['bs3', 'bs2'], loads(L('bs3', 70), L('bs2', 70 - MOVE_GAP + 1)), W, 0.5, NOW), null)
+  assert.equal(loginChoice('bs3', ['bs3', 'bs2'], loads(L('bs3', 10), L('bs2', 60)), W, 0.5, NOW), null)
+})
+
+test('login: no fresh reading on either side means no move', () => {
+  assert.equal(loginChoice('bs3', ['bs3', 'bs2'], loads(L('bs3', 90), L('bs2', 0, LOAD_STALE_MS + 1)), W, 0.5, NOW), null, 'a stale 0 % is not an invitation')
+  assert.equal(loginChoice('bs3', ['bs3', 'bs2'], loads(L('bs2', 0)), W, 0.5, NOW), null, 'our own node unknown')
+  assert.equal(loginChoice('bs3', ['bs3'], loads(L('bs3', 99)), W, 0.5, NOW), null, 'nowhere else to go')
+})
+
+test('login: the second choice is drawn by weight, not always the lightest', () => {
+  // bs1 is empty but weight 0 (failover only): it is never the second choice.
+  const ls = loads(L('bs3', 90), L('bs2', 50), L('bs1', 0))
+  const w = new Map([['bs1', 0], ['bs2', 1]])
+  for (let i = 0; i < 100; i++) assert.equal(loginChoice('bs3', ['bs3', 'bs2', 'bs1'], ls, w, i / 100, NOW), 'bs2')
+  // Unweighted, both others get drawn -- two choices, not "the least loaded".
+  const seen = new Set()
+  for (let i = 0; i < 100; i++) seen.add(loginChoice('bs3', ['bs3', 'bs2', 'bs1'], ls, W, i / 100, NOW))
+  assert.deepEqual([...seen].sort(), ['bs1', 'bs2'])
+})
+
+test('rebalance: hot long enough, a cool node, and the dice say yes -- move there', () => {
+  const ls = loads(L('bs3', HOT), L('bs2', COOL - 1), L('bs1', 20))
+  assert.equal(rebalanceChoice('bs3', ['bs3', 'bs2', 'bs1'], ls, NOW - HOT_FOR_MS, 0, NOW), 'bs1', 'the coolest')
+})
+
+test('rebalance: every condition is needed', () => {
+  const ls = loads(L('bs3', HOT), L('bs2', 20))
+  const c = ['bs3', 'bs2']
+  assert.equal(rebalanceChoice('bs3', c, loads(L('bs3', HOT - 1), L('bs2', 20)), NOW - HOT_FOR_MS, 0, NOW), null, 'not hot')
+  assert.equal(rebalanceChoice('bs3', c, ls, NOW - HOT_FOR_MS + 1, 0, NOW), null, 'not hot for long enough')
+  assert.equal(rebalanceChoice('bs3', c, ls, null, 0, NOW), null, 'no hot streak recorded')
+  assert.equal(rebalanceChoice('bs3', c, ls, NOW - HOT_FOR_MS, REBALANCE_P, NOW), null, 'the dice said no')
+  assert.equal(rebalanceChoice('bs3', c, loads(L('bs3', HOT), L('bs2', COOL)), NOW - HOT_FOR_MS, 0, NOW), null, 'nobody cool')
+  assert.equal(rebalanceChoice('bs3', c, loads(L('bs3', HOT), L('bs2', 0, LOAD_STALE_MS + 1)), NOW - HOT_FOR_MS, 0, NOW), null, 'the cool one is stale')
+})
+
+test('rebalance: over many checks only about REBALANCE_P of a hot room moves', () => {
+  const ls = loads(L('bs3', 95), L('bs2', 10))
+  let moved = 0
+  for (let i = 0; i < 1000; i++) if (rebalanceChoice('bs3', ['bs3', 'bs2'], ls, NOW - HOT_FOR_MS, i / 1000, NOW)) moved++
+  assert.ok(Math.abs(moved - 1000 * REBALANCE_P) <= 1, `moved ${moved}`)
+})

@@ -21,6 +21,8 @@ import { createPeer, dial } from '../net/peer.ts'
 import { createMqttPeer } from '../net/mqtt-node.ts'
 import { createLightPeer } from '../net/light.ts'
 import { protoWireOn, wlog } from './protolog.ts'
+import { loginChoice, rebalanceChoice, nodeKey, HOT, LOAD_STALE_MS, type LoadReading } from './nodepick.ts'
+import { LOAD_TOPIC, decodeLoad } from '../../relay/load.mjs'
 import { origin, unwrap } from './origin.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
 import type { webrtcLink } from '../net/webrtc.ts'
@@ -738,6 +740,16 @@ export interface SessionOpts {
    */
   onRelay?: (addr: string) => void
   /**
+   * Choose the node by load (libp2p/light only): read every node's announced
+   * load from the node we reached, move once at login if a second random
+   * choice is lighter by MOVE_GAP, and later only under hysteresis (lib/nodepick.ts).
+   */
+  loadBalance?: boolean
+  /** Capacity weights by node key ('bs1'), for the second choice. Missing = 1. */
+  nodeWeights?: Record<string, number>
+  /** How a relay address maps to the name it announces under. Default: `nodeKey`. */
+  nodeKeyOf?: (addr: string) => string
+  /**
    * Another window of THIS identity appeared, so both stand down (§9.1). By the
    * time this fires the transport is gone and every room is stopped; the UI
    * should clear what it shows. Omit it and the self-topic watch is not started.
@@ -905,6 +917,54 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   node.addEventListener?.('connection:close', () => {
     if (!closed && !connected()) { log('lost the relay connection'); void reconnect() }
   })
+
+  // ---- load-aware node choice (lib/nodepick.ts) -----------------------------
+  // The node we reached replays every node's latest load the moment we ask
+  // for LOAD_TOPIC (relay/load.mjs makeLoadCache), so the login decision is
+  // taken within a second, before rooms have much to lose; after that only a
+  // sustained overload moves anybody, and only a fraction at a time.
+  let lbTimer: any = null
+  if (!viaMqtt && opts.loadBalance) {
+    const keyOf = opts.nodeKeyOf ?? nodeKey
+    const loads = new Map<string, LoadReading>()
+    const weights = new Map(Object.entries(opts.nodeWeights ?? {}))
+    let hotSince: number | null = null
+    let lastMove = 0
+    const keys = () => candidates.map(keyOf)
+    const summary = () => [...loads.values()].sort((a, b) => a.node.localeCompare(b.node)).map((r) => `${r.node} ${r.pct}%`).join(', ') || 'no readings'
+    node.services.pubsub.addEventListener('message', (evt: any) => {
+      if (evt.detail?.topic !== LOAD_TOPIC) return
+      const r = decodeLoad(evt.detail.data)
+      if (r) loads.set(r.node, r)
+    })
+    node.services.pubsub.subscribe(LOAD_TOPIC)
+    const moveTo = async (key: string, why: string) => {
+      const addr = candidates.find((a) => keyOf(a) === key)
+      if (!addr || addr === activeRelay || closed) return
+      lastMove = Date.now()
+      log(`load: moving ${keyOf(activeRelay)} -> ${key} (${why})`)
+      candidates = [addr, ...candidates.filter((a) => a !== addr)]
+      await reconnect(true)
+    }
+    void (async () => {
+      const t0 = Date.now()
+      while (!closed && !loads.has(keyOf(activeRelay)) && Date.now() - t0 < 3_000) await new Promise((r) => setTimeout(r, 100))
+      if (closed) return
+      const cur = keyOf(activeRelay)
+      const to = loginChoice(cur, keys(), loads, weights, Math.random(), Date.now())
+      log(`load at login: ${summary()} -> ${to ? `moving to ${to}` : `staying on ${cur}`}`)
+      if (to) await moveTo(to, `lighter by at least the gap at login`)
+    })()
+    lbTimer = setInterval(() => {
+      if (closed || redialing) return
+      const now = Date.now(), cur = keyOf(activeRelay), mine = loads.get(cur)
+      if (mine && now - mine.at <= LOAD_STALE_MS && mine.pct >= HOT) { if (hotSince === null) hotSince = now } else hotSince = null
+      if (now - lastMove < 10 * 60_000) return // one move per ten minutes, whatever happens
+      const to = rebalanceChoice(cur, keys(), loads, hotSince, Math.random(), now)
+      if (to) void moveTo(to, `${cur} at ${mine?.pct}% for ${Math.round((now - (hotSince ?? now)) / 1000)} s; ${summary()}`)
+    }, 20_000)
+    lbTimer.unref?.()
+  }
   // Belt and braces: events can be missed (a frozen tab wakes with a socket that
   // is dead but never fired a close), so look for ourselves as well.
   const linkWatch = setInterval(() => {
@@ -1000,6 +1060,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     if (closed) return
     closed = true
     log(`session closing: ${why}`)
+    if (lbTimer) clearInterval(lbTimer)
     for (const w of [...inboxes]) { try { w.stop() } catch {} }
     inboxes.clear()
     for (const w of presence.values()) { try { w.watch.stop() } catch {} }

@@ -48,7 +48,7 @@ Positioning: dual-use secure messenger (private, commercial, military / critical
 
 - Browser (web entry channel) and installed app (desktop/Android — the channel with the resilience guarantees).
 - Client libp2p **PeerId is ephemeral**: freshly generated on every app start / page reload (key never persisted). An established room keeps its PeerId and its topic across the daily rotation (`PROTOCOL.md` §5.4) — the rotation bounds *discovery* correlation.
-- Node selection: the client compiles in the node list (`infra/nodes.json`), dials it in order and fails over down it; the user can reorder or override locally, and the list can be refreshed by its compiled-in IPFS CID. No GeoDNS.
+- Node selection: the client compiles in the node list (`infra/nodes.json`); among the nodes the user has left enabled it **draws** the first (by capacity weight, uniform when the list carries none), then reads every node's announced load from that node and, if a second random choice is lighter by 20 points, moves once at login ("power of two choices"); later it moves only when its node has stayed ≥ 85 % for a minute and another is < 60 %, and then only a fifth of the time per check (hysteresis, `lib/nodepick.ts`). The rest of the list is the failover chain. The list can be refreshed by its compiled-in IPFS CID. No GeoDNS.
 
 ## Identity model
 

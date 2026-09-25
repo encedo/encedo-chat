@@ -19,7 +19,7 @@ import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSessi
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import { exportProfile, openBundle, applyBundle, conflictsWith, localKV, FILE_EXT } from '../../lib/migrate.ts'
 import { decodeInvite, inviteLink, type Invite } from '../../lib/invite.ts'
-import { pickFirst, orderFrom } from '../../lib/nodepick.ts'
+import { pickFirst, orderFrom, nodeKey } from '../../lib/nodepick.ts'
 import jsQR from './vendor/jsqr.cjs'
 import { checkBook, signBook, pack, type Verdict } from '../../lib/bookmac.ts'
 import type { GkBackend } from '../../lib/group.ts'
@@ -160,6 +160,9 @@ const USE_MQTT = MQTT_PARAM !== null && MQTT_PARAM !== '0'
 // the escape hatch if a node without `--pick` is ever in the list.
 const LIGHT_PARAM = new URLSearchParams(location.search).get('light')
 const USE_LIGHT = !USE_MQTT && LIGHT_PARAM !== '0'
+// Load-aware node choice (lib/nodepick.ts, wired in core): on by default,
+// `?lb=0` turns it off -- e.g. to stay on a node picked by hand for a test.
+const USE_LB = !USE_MQTT && new URLSearchParams(location.search).get('lb') !== '0'
 // The broker lives on the SAME host as the relay (bs1.onchato.com), not on the
 // site the app is served from — deriving it from `location.hostname` pointed it
 // at onchato.com, where there is no broker. Take the host straight from RELAY so
@@ -1420,6 +1423,9 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     gkBackend,                // §8 bucket A: a HEM identity mints GK in the HSM
     transport: USE_MQTT ? 'mqtt' : USE_LIGHT ? 'light' : 'libp2p',
     broker: BROKER,
+    loadBalance: USE_LB,
+    // Capacity weights from the published list, by the name a node announces.
+    nodeWeights: Object.fromEntries(loadNodes().filter((n) => typeof n.w === 'number').map((n) => [nodeKey(n.addr), n.w as number])),
     // Light only: the relay said no to a topic. Until now a full node looked
     // exactly like an empty room; this is the first time the client is told.
     onRefused: (topic) => { ecLog(`relay refused topic ${topic.slice(0, 12)}...`); toast(t('Węzeł odmówił tematu — jest pełny. Wybierz inny węzeł w Ustawieniach → Sieć.'), 4000) },

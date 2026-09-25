@@ -129,3 +129,84 @@ export function orderFrom<T extends WeightedNode>(nodes: T[], first: number): T[
   out.unshift(picked)
   return out
 }
+
+// ---------------------------------------------------------------------------
+// Load-aware choice: "power of two choices" at login, hysteresis afterwards.
+// ---------------------------------------------------------------------------
+//
+// Every relay announces how full it is (relay/load.mjs, a percent every 30 s)
+// and replays the latest reading of every node to a client that asks. So a
+// client can dial the drawn node, read the whole picture in its first second,
+// and then decide once whether to stay. The rules, and why:
+//
+// - LOGIN, power of two choices: compare the node we are on with ONE other
+//   drawn at random (weighted like the first draw), and move only if the other
+//   is lighter by MOVE_GAP points. Picking "the least loaded" instead sends
+//   every client that reads the same 30-second-old numbers to the same node
+//   (a herd); two random choices keep the herd apart and still pull the peak
+//   down sharply compared with a plain draw.
+// - DURING THE SESSION, hysteresis: move only when our node has been HOT for
+//   HOT_FOR_MS, some other node is below COOL, and then only with probability
+//   REBALANCE_P per check -- a full room must drain gradually, not jump at once.
+// - A reading older than LOAD_STALE_MS is no reading at all; a node without one
+//   is never chosen on the strength of an imagined 0 %.
+//
+// Pure, so every rule below has a test; lib/core.ts wires it to the transport.
+
+export interface LoadReading { node: string; pct: number; at: number }
+export const MOVE_GAP = 20
+export const HOT = 85
+export const COOL = 60
+export const HOT_FOR_MS = 60_000
+export const REBALANCE_P = 0.2
+export const LOAD_STALE_MS = 90_000
+
+/** 'bs3' out of a relay multiaddr (`/dns4/bs3.onchato.com/...`) -- the name nodes announce under. */
+export function nodeKey(addr: string): string {
+  const host = addr.match(/\/dns[46]?\/([^/]+)/)?.[1] ?? addr.match(/\/ip[46]\/([^/]+)/)?.[1] ?? addr
+  return host.split('.')[0]
+}
+
+const fresh = (r: LoadReading | undefined, now: number): r is LoadReading =>
+  !!r && now - r.at <= LOAD_STALE_MS && r.at <= now + 30_000
+
+/**
+ * At login: stay (null) or move to the returned node key. `candidates` are the
+ * enabled nodes' keys, `weights` their capacity weights (missing = 1).
+ */
+export function loginChoice(current: string, candidates: string[], loads: Map<string, LoadReading>,
+  weights: Map<string, number>, roll: number, now: number): string | null {
+  const others = candidates.filter((k) => k !== current)
+  if (!others.length) return null
+  const mine = loads.get(current)
+  if (!fresh(mine, now)) return null
+  // The second choice, drawn like the first so capacity still counts.
+  const ws = others.map((k) => Math.max(0, weights.get(k) ?? 1))
+  const total = ws.reduce((a, b) => a + b, 0)
+  const r = (Number.isFinite(roll) ? Math.min(Math.max(roll, 0), 0.999999) : 0) * (total || others.length)
+  let acc = 0, other = others[0]
+  for (let i = 0; i < others.length; i++) { acc += total ? ws[i] : 1; if (r < acc) { other = others[i]; break } }
+  const theirs = loads.get(other)
+  if (!fresh(theirs, now)) return null
+  return mine.pct - theirs.pct >= MOVE_GAP ? other : null
+}
+
+/**
+ * During the session: move (the returned key) or stay (null). `hotSince` is
+ * when our node was first seen at or above HOT in the current streak, or null.
+ */
+export function rebalanceChoice(current: string, candidates: string[], loads: Map<string, LoadReading>,
+  hotSince: number | null, roll: number, now: number): string | null {
+  const mine = loads.get(current)
+  if (!fresh(mine, now) || mine.pct < HOT) return null
+  if (hotSince === null || now - hotSince < HOT_FOR_MS) return null
+  if (!(roll < REBALANCE_P)) return null
+  let best: LoadReading | null = null, bestKey: string | null = null
+  for (const k of candidates) {
+    if (k === current) continue
+    const r = loads.get(k)
+    if (!fresh(r, now) || r.pct >= COOL) continue
+    if (!best || r.pct < best.pct) { best = r; bestKey = k }
+  }
+  return bestKey
+}
