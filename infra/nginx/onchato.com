@@ -368,8 +368,8 @@ server {
         proxy_set_header   X-Real-IP  $remote_addr;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
-        limit_conn relay_conn 20;                    # per realne IP
-        limit_req  zone=relay_req burst=30 nodelay;
+        limit_conn relay_conn 50;                    # per realne IP
+        limit_req  zone=relay_req burst=50 nodelay;
     }
 
 location /mqtt {
