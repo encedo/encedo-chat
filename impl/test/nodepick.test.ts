@@ -4,14 +4,17 @@ import { pickFirst, orderFrom } from '../lib/nodepick.ts'
 
 const N = (addr: string, w?: number) => (w === undefined ? { addr } : { addr, w })
 
-test('with no weights the first node wins, whatever the roll', () => {
-  // The published list carries no weights today, so this is the assertion that
-  // the mechanism shipped INERT: the behaviour must be the old one bit for bit,
-  // not merely similar.
-  const list = [N('bs3'), N('bs2'), N('bs1')]
-  for (const roll of [0, 0.01, 0.5, 0.75, 0.999999]) {
-    assert.equal(pickFirst(list, roll), 0, `roll ${roll} moved the choice`)
-  }
+test('with no weights the draw is uniform: every node gets its share', () => {
+  // The published list carries no weights. Until 2026-09-25 the first node won
+  // every roll, and a demo room landed on one node; now the roll spreads them.
+  const list = [N('a'), N('b'), N('c')]
+  const hits = [0, 0, 0]
+  const ROLLS = 3000
+  for (let i = 0; i < ROLLS; i++) hits[pickFirst(list, i / ROLLS)]++
+  for (const h of hits) assert.ok(Math.abs(h - ROLLS / 3) < ROLLS * 0.02, `uneven split ${hits}`)
+  assert.equal(pickFirst(list, 0), 0)
+  assert.equal(pickFirst(list, 0.34), 1)
+  assert.equal(pickFirst(list, 0.99), 2)
 })
 
 test('a weight splits the choice where the weight says', () => {
@@ -42,9 +45,14 @@ test('weight 0 is never dialled first, but stays in the list', () => {
   assert.equal(orderFrom(list, 0).length, 3, 'and it is still there to fall through to')
 })
 
-test('every weight zero falls back to the order, never to nothing', () => {
+test('every weight zero is treated as no weights at all: uniform, never nothing', () => {
   const list = [N('a', 0), N('b', 0)]
-  assert.equal(pickFirst(list, 0.5), 0)
+  assert.equal(pickFirst(list, 0.2), 0)
+  assert.equal(pickFirst(list, 0.7), 1)
+})
+
+test('a NaN roll with no weights still names a node', () => {
+  assert.equal(pickFirst([N('a'), N('b')], NaN), 0)
 })
 
 test('a roll outside [0,1) cannot walk off the end', () => {

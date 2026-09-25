@@ -96,9 +96,14 @@ export function pickFirst(nodes: WeightedNode[], roll: number): number {
   if (nodes.length <= 1) return 0
   const weights = nodes.map((n) => (typeof n.w === 'number' && n.w > 0 ? n.w : 0))
   const total = weights.reduce((a, b) => a + b, 0)
-  // Nobody carries a weight (today), or every weight is zero: the order decides,
-  // exactly as before. Never leave the caller without a node to dial.
-  if (total <= 0) return 0
+  // Nobody carries a weight (the published list today), or every weight is
+  // zero: a UNIFORM draw. Until 2026-09-25 the order decided here, which sent
+  // every client to the first node of the list -- a room of people at a demo
+  // all on one 1-vCPU node while two others idled. The user's call: spread
+  // them, and accept that the list's order no longer means "preferred" (it
+  // still decides the failover chain after the drawn node, see orderFrom).
+  const r = Number.isFinite(roll) ? Math.min(Math.max(roll, 0), 0.999999) : 0
+  if (total <= 0) return Math.floor(r * nodes.length)
   // A weight of 0 next to non-zero weights means "failover only" — a node that
   // should stay reachable without being aimed at. bs1 is that node: it is the
   // web host as well, so it is wanted as a spare however empty it looks.
