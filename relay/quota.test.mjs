@@ -70,6 +70,7 @@ test('a peer id is compared as text, whatever libp2p hands over', () => {
 test('the default is generous against the measured usage', () => {
   // Four topics per client measured on production; forty leaves a heavy user
   // with ten times their share and still takes the lever from one socket.
-  assert.ok(DEFAULT_PER_PEER >= 4 * 5)
+  assert.ok(DEFAULT_PER_PEER >= 2 * 70, 'a 70-contact address book must survive a rotation window')
+  assert.ok(DEFAULT_PER_PEER * 10 <= 1600, 'still a small share of a node, so one socket cannot fill it')
   assert.ok(DEFAULT_PER_PEER < 250)
 })

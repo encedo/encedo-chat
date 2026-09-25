@@ -30,7 +30,9 @@
 # topic costs ~28 kB -> --max-topics 4 x connections. A 4-vCPU node starts at 800
 # until its own load test says otherwise. nginx must carry 2 x connections
 # (client + upstream): worker_connections 4096 (bs-setup.sh sets and checks it).
-# relay-health.sh reads --max-topics from ExecStart.
+# relay-health.sh reads --max-topics from ExecStart. --max-topics-per-peer 150:
+# a client holds one topic per contact and group plus a few of its own, twice
+# over during a daily rotation; 40 refused an address book of ~35.
 # --stats-redis needs the local Redis (relay/DEPLOY.md, step 4c).
 # --metrics-port serves live numbers on 127.0.0.1 ONLY, for infra/dash (over SSH).
 
@@ -43,7 +45,7 @@ Wants=network-online.target
 Type=simple
 User=www-data
 WorkingDirectory=/opt/github/encedo-chat/relay
-ExecStart=/usr/bin/node relay.mjs --port 9001 --pass <NODE>.onchato.com --host <NODE>.onchato.com --peers <PEERS> --v6-port 9002 --v6-host <V6> --siblings <SIBLINGS> --local-topics-only --leaf-announce --pick --announce-load --max-connections <MAX_CONNS> --max-topics <MAX_TOPICS> --stats 15 --quiet-msgs --stats-redis redis://127.0.0.1:6379 --stats-node <NODE> --stats-ttl-days 30 --metrics-port 9003
+ExecStart=/usr/bin/node relay.mjs --port 9001 --pass <NODE>.onchato.com --host <NODE>.onchato.com --peers <PEERS> --v6-port 9002 --v6-host <V6> --siblings <SIBLINGS> --local-topics-only --leaf-announce --pick --announce-load --max-connections <MAX_CONNS> --max-topics <MAX_TOPICS> --max-topics-per-peer 150 --stats 15 --quiet-msgs --stats-redis redis://127.0.0.1:6379 --stats-node <NODE> --stats-ttl-days 30 --metrics-port 9003
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production

@@ -35,8 +35,15 @@
  * which no per-peer number could sensibly bound.
  */
 
-/** Generous against the measured four per client, tight against one socket. */
-export const DEFAULT_PER_PEER = 40
+/**
+ * Per client: one topic per contact (presence), per group, per published
+ * invite, plus the self-topic and the load topic -- and twice that for the
+ * hour around a daily rotation. 40 (the first value) refused people with
+ * ~35 contacts; 150 carries a large address book through a rotation and is
+ * still a small share of a node's --max-topics (1600), so one socket cannot
+ * fill a node. Changed 2026-09-25.
+ */
+export const DEFAULT_PER_PEER = 150
 
 /**
  * Who asked for what.
