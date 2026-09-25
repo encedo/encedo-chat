@@ -691,10 +691,19 @@ EH-2 session; the case that fell through both is the one that hurts most — the
 peer is here, the handshake never completed, so `emitContent` parks every copy
 in the pre-handshake queue and the bubble sits on "wysyłam…" with no ↻ for as
 long as the room is open (reported 2026-09-03: phone → macMini1, 72 minutes at
-🤝 Securing…). Presence is the whole condition now; sending into an EMPTY room
-is still silent, because the retry budget stopped for that reason. The `acking`
-set went with the old guard — nothing read it any more. Pinned by
-`test/room-eh2.test.ts` "a peer that is present but never handshakes".
+🤝 Securing…). Presence is the whole condition now. The `acking` set went with
+the old guard — nothing read it any more. Pinned by `test/room-eh2.test.ts` "a
+peer that is present but never handshakes".
+
+**Sending into an EMPTY room is no longer silent** (2026-09-25). It used to be:
+the budget ran out with nobody there and the message was simply forgotten, so
+the bubble said "wysyłam…" forever and a late ack found nothing to confirm —
+reported from a phone whose peer had reloaded mid-conversation. Such a message
+is now **parked** (`parked` in `lib/room.ts`), marked ⚠ with a "↻ Ponów" button
+at once, and re-sent automatically, oldest first, when a session with a peer is
+established or `flushPending` runs after a reconnect; an ack that arrives for it
+turns the mark to ✓. Pinned by "a message sent while the peer is gone goes out
+when they are back".
 
 **Running out of budget does not throw the message away.** The bytes stay in
 `resendable`, the bubble gets a ⚠ marker with a **↻** button, and
