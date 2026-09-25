@@ -22,10 +22,17 @@
  * that is an answer, so `beginSave` returns null and nothing is written.
  * Anything else the picker throws (no gesture, an insecure context, a name it
  * refuses) is not the person's decision, and falls back to the anchor.
+ *
+ * A third route, the HOST, exists for the Android app: its WebView ignores
+ * the anchor altogether, so "Pobierz" did nothing there (reported
+ * 2026-09-25). The packaged shell shows the system "save as" screen and
+ * writes the file itself (`desk_save_*` in src-tauri/src/lib.rs). When it is
+ * there it is the only route: a host that fails is reported as a failure,
+ * because the anchor it would fall back to is the thing that does not work.
  */
 
 export interface SaveSink {
-  readonly kind: 'picker' | 'download'
+  readonly kind: 'picker' | 'download' | 'host'
   /** Put the bytes where the sink points. Rejects if the platform could not. */
   write(blob: Blob): Promise<void>
   /**
@@ -43,7 +50,21 @@ interface PickedHandle {
   remove?(): Promise<void>
 }
 
+/** A file the host opened for us: filled in chunks, then closed or abandoned. */
+export interface HostFile {
+  write(chunk: Uint8Array): Promise<void>
+  /** Done: the file is complete. */
+  close(): Promise<void>
+  /** Nothing (more) to write: leave no half-written file behind. */
+  abort(): Promise<void>
+}
+
+/** Bytes per trip across the bridge. Small enough to be one ordinary message, large enough that a 100 MB file is a few hundred trips. */
+export const HOST_CHUNK = 256 * 1024
+
 export interface SaveEnv {
+  /** The packaged app's own "save as" (Android); `null` = the person closed it. Read at call time. */
+  host?: (name: string) => Promise<HostFile | null>
   /** `window.showSaveFilePicker`, where the platform has it. */
   picker?: (opts: { suggestedName: string }) => Promise<PickedHandle>
   /** The classic route: an anchor with `download`; the browser picks the folder. */
@@ -51,6 +72,22 @@ export interface SaveEnv {
 }
 
 export async function beginSave(name: string, env: SaveEnv): Promise<SaveSink | null> {
+  if (env.host) {
+    const f = await env.host(name)
+    if (!f) return null
+    return {
+      kind: 'host',
+      async write(blob) {
+        try {
+          for (let at = 0; at < blob.size; at += HOST_CHUNK) {
+            await f.write(new Uint8Array(await blob.slice(at, at + HOST_CHUNK).arrayBuffer()))
+          }
+        } catch (e) { await f.abort().catch(() => {}); throw e }
+        await f.close()
+      },
+      async discard() { await f.abort().catch(() => {}) },
+    }
+  }
   if (env.picker) {
     let handle: PickedHandle | null = null
     try { handle = await env.picker({ suggestedName: name }) }

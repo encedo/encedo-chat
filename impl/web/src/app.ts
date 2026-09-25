@@ -42,7 +42,7 @@ import {
   closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable, isMobileShell,
   appimageStatus, appimageInstall, showWindow, openExternal,
   nativeScanAvailable, nativeScan, nativeScanCancel, nativeScanZoom, nativeScanSetZoom,
-  diagFileAvailable, diagPath, diagAppend,
+  diagFileAvailable, diagPath, diagAppend, hostSaveRoute,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { invQrView } from './invqr.ts'
@@ -60,7 +60,7 @@ import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/file
 import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
 import { webrtcLinkTauri, tauriRtcAvailable, tauriRtcSelftest } from '../../net/webrtc-tauri.ts'
 import { unwrapBlob } from '../../lib/fileenvelope.ts'
-import { beginSave, browserSaveEnv } from '../../lib/saveas.ts'
+import { beginSave, browserSaveEnv, type SaveEnv, type SaveSink } from '../../lib/saveas.ts'
 import { newInboxSecret, inboxSecretBytes } from '../../lib/invite.ts'
 import { cidMatches, isVerifiableCid } from '../../lib/cid.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
@@ -6612,8 +6612,23 @@ const previews = new WeakMap<FileEnv, string>()
  * page and files are not pinnable — which is what makes a bubble honest here.
  */
 const directBlobs = new WeakMap<FileEnv, Blob>()
-/** The platform's two ways to save (lib/saveas.ts): a picker where there is one, the anchor elsewhere. */
-const saveEnv = browserSaveEnv()
+/**
+ * The platform's ways to save (lib/saveas.ts): the phone app's host, a picker
+ * where there is one, the anchor elsewhere. `host` is a getter because the
+ * shell says what it is only after startup (`initDesktop`).
+ */
+const saveEnv: SaveEnv = { ...browserSaveEnv(), get host() { return hostSaveRoute() } }
+/** `beginSave` that reports a host failure on the button instead of throwing out of a click. */
+async function openSink(name: string, btn: HTMLButtonElement): Promise<SaveSink | null> {
+  try { return await beginSave(name, saveEnv) }
+  catch (e: any) {
+    ecLog('save failed: ' + (e?.message ?? e))
+    const was = btn.textContent
+    btn.textContent = tr('Błąd')
+    setTimeout(() => { if (btn.textContent === tr('Błąd')) btn.textContent = was }, 5000)
+    return null
+  }
+}
 
 /**
  * Save a transferred file. Where to is asked FIRST — the click is the gesture
@@ -6624,7 +6639,7 @@ const saveEnv = browserSaveEnv()
 async function saveDirect(env: FileEnv, btn: HTMLButtonElement) {
   const blob = directBlobs.get(env)
   if (!blob) return
-  const sink = await beginSave(env.name, saveEnv)
+  const sink = await openSink(env.name, btn)
   if (!sink) return
   btn.disabled = true
   try { await sink.write(blob); btn.textContent = tr('Zapisano') }
@@ -7024,7 +7039,7 @@ async function downloadFile(env: FileEnv, btn: HTMLButtonElement) {
   // Where to, BEFORE the fetch: the picker wants the click it was born from,
   // and the file is fetched and decrypted first. Asked afterwards it would
   // refuse, and the file would land in Downloads without a word.
-  const sink = await beginSave(env.name, saveEnv)
+  const sink = await openSink(env.name, btn)
   if (!sink) return
   btn.disabled = true; btn.textContent = tr('Pobieram…')
   // The same evidence line on the RECEIVING side, which is where it is most

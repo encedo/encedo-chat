@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { beginSave, type SaveEnv } from '../lib/saveas.ts'
+import { beginSave, HOST_CHUNK, type SaveEnv, type HostFile } from '../lib/saveas.ts'
 
 /**
  * The contract that matters is which errors mean what: a closed dialog is a
@@ -72,4 +72,55 @@ test('discard removes what the picker created, and is harmless everywhere else',
   await plain!.discard()   // nothing to do, nothing thrown
   const noRemove = await beginSave('x.bin', env(async () => ({ createWritable: async () => ({ write: async () => {}, close: async () => {} }) })).e)
   await noRemove!.discard()
+})
+
+/** A host file that records what reaches it; `failAt` makes the n-th write throw. */
+function hostFile(failAt = -1) {
+  const got: { chunks: Uint8Array[]; closed: number; aborted: number } = { chunks: [], closed: 0, aborted: 0 }
+  const f: HostFile = {
+    write: async (c) => { if (got.chunks.length === failAt) throw new Error('bridge down'); got.chunks.push(c) },
+    close: async () => { got.closed++ },
+    abort: async () => { got.aborted++ },
+  }
+  return { f, got }
+}
+
+test('the phone host: the file crosses in order, in bounded chunks, then is closed; picker and anchor untouched', async () => {
+  const size = HOST_CHUNK * 2 + 123
+  const bytes = new Uint8Array(size).map((_, i) => i % 251)
+  const { f, got } = hostFile()
+  let picked = 0
+  const { e, downloads } = env(async () => { picked++; throw err('AbortError') })
+  const names: string[] = []
+  e.host = async (n) => { names.push(n); return f }
+  const sink = await beginSave('zdjecie.jpg', e)
+  assert.equal(sink?.kind, 'host')
+  await sink!.write(new Blob([bytes]))
+  assert.deepEqual(names, ['zdjecie.jpg'])
+  assert.deepEqual(got.chunks.map((c) => c.length), [HOST_CHUNK, HOST_CHUNK, 123])
+  assert.deepEqual(Buffer.concat(got.chunks), Buffer.from(bytes), 'the bytes arrive whole and in order')
+  assert.equal(got.closed, 1); assert.equal(got.aborted, 0)
+  assert.equal(picked, 0); assert.equal(downloads.length, 0)
+})
+
+test('the phone host: a closed save screen is a "no", and a failure is a failure, not the anchor', async () => {
+  const { e, downloads } = env()
+  e.host = async () => null
+  assert.equal(await beginSave('x.bin', e), null)
+  e.host = async () => { throw new Error('no such command') }
+  await assert.rejects(beginSave('x.bin', e), /no such command/)
+  assert.equal(downloads.length, 0, 'the anchor does nothing on that WebView, so it is not a fallback')
+})
+
+test('the phone host: a write that breaks mid-file abandons it; discard abandons too', async () => {
+  const { e } = env()
+  const one = hostFile(1)
+  e.host = async () => one.f
+  const sink = await beginSave('x.bin', e)
+  await assert.rejects(sink!.write(new Blob([new Uint8Array(HOST_CHUNK + 1)])), /bridge down/)
+  assert.equal(one.got.aborted, 1); assert.equal(one.got.closed, 0)
+  const two = hostFile()
+  e.host = async () => two.f
+  await (await beginSave('x.bin', e))!.discard()
+  assert.equal(two.got.aborted, 1)
 })

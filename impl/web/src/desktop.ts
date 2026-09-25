@@ -27,6 +27,8 @@
  * title and body that `planNotification` produced, and those never contain
  * message text in any mode.
  */
+import { b64 } from '../../lib/wc.ts'
+import type { HostFile } from '../../lib/saveas.ts'
 
 export type Perm = 'granted' | 'denied' | 'default'
 
@@ -302,6 +304,25 @@ export const updateApply = () => invoke<void>('desk_update_apply')
  * dependency in the web bundle is worth the four lines.
  */
 export interface ScanZoom { min: number; max: number; current: number }
+
+/**
+ * "Save as" through the host, for the phone app (lib/saveas.ts explains why the
+ * webview cannot do it there). `undefined` where the webview can save by
+ * itself, so the browser's own routes stay in charge everywhere else.
+ */
+export function hostSaveRoute(): ((name: string) => Promise<HostFile | null>) | undefined {
+  if (!isMobileShell()) return undefined
+  return async (name) => {
+    const id = await invoke<number | null>('desk_save_begin', { name })
+    if (id == null) return null
+    return {
+      // Base64 text, never a raw body: raw IPC bodies arrive as JSON arrays.
+      write: (chunk) => invoke<void>('desk_save_write', { id, data: b64(chunk) }),
+      close: () => invoke<void>('desk_save_end', { id, keep: true }),
+      abort: () => invoke<void>('desk_save_end', { id, keep: false }),
+    }
+  }
+}
 
 /** Can this build scan natively? Only the packaged phone shell can. */
 export const nativeScanAvailable = (): boolean => isMobileShell()

@@ -43,6 +43,16 @@ tauri-plugin-notification = "2"
 # ships. Two copies now; if either ever changes, both must.
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-barcode-scanner = { path = "plugins/barcode-scanner" }
+# "Save" on a phone. Android's WebView ignores `<a download>` on a blob URL,
+# so the button did nothing there (reported 2026-09-25). The host asks the
+# system where to put the file (dialog: ACTION_CREATE_DOCUMENT, a content://
+# URI back) and writes it (fs: opens that URI). Both are driven from Rust, not
+# from the webview, so no JS permission surface comes with them.
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+# The webview hands file bytes over as base64 text: raw IPC bodies do not survive
+# the Android bridge intact (they arrive as JSON arrays, as on Linux).
+base64 = "0.22"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-autostart = "2"

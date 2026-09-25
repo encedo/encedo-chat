@@ -1271,7 +1271,13 @@ mod desk {
 /// frozen while the app is open.
 #[cfg(mobile)]
 mod mobile {
-    use tauri::{AppHandle, Builder, Wry};
+    use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+    use std::collections::HashMap;
+    use std::io::Write;
+    use std::sync::Mutex;
+    use tauri::{AppHandle, Builder, State, Wry};
+    use tauri_plugin_dialog::DialogExt;
+    use tauri_plugin_fs::{FsExt, OpenOptions};
     use tauri_plugin_notification::{NotificationExt, PermissionState};
 
     fn word(s: PermissionState) -> String {
@@ -1322,6 +1328,62 @@ mod mobile {
     #[tauri::command]
     fn desk_show() {}
 
+    // --- Save as -------------------------------------------------------------
+    //
+    // Android's WebView ignores `<a download>` on a blob URL: "Pobierz" did
+    // nothing on a phone while "Pokaz" worked (reported 2026-09-25), because the
+    // bytes were fine and only the last step had nowhere to go. So the host
+    // does that step. `desk_save_begin` shows the system "save as" screen
+    // (ACTION_CREATE_DOCUMENT via the dialog plugin) and opens the chosen
+    // document for writing (the fs plugin turns the content:// URI into a file
+    // descriptor); the webview then streams the file in chunks and closes it.
+    // The file stays open between calls, held here under a small number.
+    //
+    // Asked BEFORE the fetch, like the browser's picker (lib/saveas.ts): one
+    // order for every platform, and the person chooses while the file comes.
+
+    #[derive(Default)]
+    pub struct Saves {
+        next: Mutex<u32>,
+        open: Mutex<HashMap<u32, std::fs::File>>,
+    }
+
+    /// `None` = the person closed the screen: an answer, not an error.
+    #[tauri::command(async)]
+    fn desk_save_begin(app: AppHandle, saves: State<'_, Saves>, name: String) -> Result<Option<u32>, String> {
+        let Some(path) = app.dialog().file().set_file_name(&name).blocking_save_file() else {
+            return Ok(None);
+        };
+        let mut opts = OpenOptions::new();
+        opts.write(true).truncate(true);
+        let file = app.fs().open(path, opts).map_err(|e| e.to_string())?;
+        let mut next = saves.next.lock().map_err(|e| e.to_string())?;
+        *next = next.wrapping_add(1);
+        saves.open.lock().map_err(|e| e.to_string())?.insert(*next, file);
+        Ok(Some(*next))
+    }
+
+    #[tauri::command(async)]
+    fn desk_save_write(saves: State<'_, Saves>, id: u32, data: String) -> Result<(), String> {
+        let bytes = B64.decode(data.as_bytes()).map_err(|e| e.to_string())?;
+        let mut open = saves.open.lock().map_err(|e| e.to_string())?;
+        let file = open.get_mut(&id).ok_or("no such save")?;
+        file.write_all(&bytes).map_err(|e| e.to_string())
+    }
+
+    /// `keep: false` = the fetch failed after a name was chosen. The document
+    /// already exists by then and deleting it needs a DocumentsContract call
+    /// the plugins do not expose, so it is emptied instead - a half-written
+    /// file is worse than an empty one, which at least looks like a failure.
+    #[tauri::command(async)]
+    fn desk_save_end(saves: State<'_, Saves>, id: u32, keep: bool) -> Result<(), String> {
+        let file = saves.open.lock().map_err(|e| e.to_string())?.remove(&id).ok_or("no such save")?;
+        if !keep {
+            let _ = file.set_len(0);
+        }
+        file.sync_all().map_err(|e| e.to_string())
+    }
+
     pub fn wire(b: Builder<Wry>) -> Builder<Wry> {
         // The native QR scanner (CameraX + ML Kit). The webview's own scanner
         // stays for browsers; on a phone it cannot touch the lens, so a code at
@@ -1331,7 +1393,13 @@ mod mobile {
         // and by the decoder itself when it decides the code is too small.
         b.plugin(tauri_plugin_barcode_scanner::init())
             .plugin(tauri_plugin_notification::init())
+            .plugin(tauri_plugin_dialog::init())
+            .plugin(tauri_plugin_fs::init())
+            .manage(Saves::default())
             .invoke_handler(tauri::generate_handler![
+                desk_save_begin,
+                desk_save_write,
+                desk_save_end,
                 desk_notify,
                 desk_notify_permission,
                 desk_notify_request,
