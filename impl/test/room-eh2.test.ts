@@ -481,6 +481,40 @@ test('a secured peer whose acks never arrive gets the message marked resend-able
   assert.equal(undelivered[0], id, 'a secured-but-silent peer is flagged, so a ↻ exists to retry')
 })
 
+test('a message sent while the peer is gone goes out when they are back', async (t) => {
+  // Reported 2026-09-25 from a phone: the other side reloaded (a tapped link
+  // restarted the app), and three messages sent meanwhile sat on "wysylam..."
+  // for good, while the next one, sent after the peer was back, was confirmed
+  // at once. With nobody in the room the budget ran out silently and the
+  // message was forgotten. It is parked now and re-sent on the next session.
+  const delivered: string[] = []
+  const undelivered: string[] = []
+  const { A, B, rejoinB } = await rooms({
+    collect: [],
+    onDeliveredA: (id) => delivered.push(id),
+    onUndeliveredA: (id) => undelivered.push(id),
+    retry: { retryMs: [50, 80], giveUpMs: 100, maxInflightMs: 2_000 },
+  })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+  await B.sendPresence('leave') // the last word a closing window says
+  await until(() => A.who().length === 0, 8000)
+  B.stop()
+
+  const id1 = A.sendText('pierwsza, w pusty pokoj')
+  const id2 = A.sendText('druga, w pusty pokoj')
+  await new Promise((r) => setTimeout(r, 600)) // well past the whole budget
+  assert.deepEqual(undelivered, [id1, id2], 'no endless "sending": both are marked, so the user can retry')
+  assert.deepEqual(delivered, [], 'and nothing was confirmed')
+
+  const got2: string[] = []
+  const B2 = rejoinB('peer-c', got2)
+  t.after(() => { A.stop(); B2.stop() })
+  await until(() => got2.length === 2, 8000)
+  assert.deepEqual(got2, ['pierwsza, w pusty pokoj', 'druga, w pusty pokoj'], 'both arrive, in the order written')
+  await until(() => delivered.length === 2, 8000)
+  assert.deepEqual(delivered, [id1, id2], 'and both marks turn to delivered by themselves')
+})
+
 test('a peer that is present but never handshakes does not swallow the message', async (t) => {
   // Reported live 2026-09-03 (phone -> macMini1): both sides in the room, the
   // badge on Securing..., and a message sat on "wysyłam..." for 72 minutes with

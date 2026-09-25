@@ -5040,8 +5040,10 @@ function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
     const again = document.createElement('button')
     again.type = 'button'
     again.className = 'b-resend'
-    again.textContent = tr('↻')
-    again.title = tr('Wyślij ponownie')
+    // A word, not only the arrow: "wysylam..." that never ended was the report
+    // (2026-09-25), and the fix has to say what pressing does.
+    again.textContent = tr('↻ Ponów')
+    again.title = tr('Wyślij ponownie — przyjdzie też samo, gdy rozmówca wróci')
     again.addEventListener('click', () => {
       if (!activeRoom()?.conv?.resend(id)) return
       el.textContent = tr(' · wysyłam ponownie…')

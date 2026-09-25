@@ -286,6 +286,21 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     }
   }
 
+  /**
+   * Messages whose budget ran out while NOBODY was in the room. They used to be
+   * forgotten here, silently: no mark, no retry, and the bubble said "sending"
+   * for good. Reported 2026-09-25 from a phone: the other side reloaded (a
+   * tapped link restarted the app), three messages sent meanwhile never went,
+   * while the next one, sent after the peer was back, was confirmed at once.
+   * They are kept and go out again, oldest first, the moment a session with a
+   * peer is established. Bounded like `resendable`.
+   */
+  const parked = new Map<string, { bytes: Uint8Array; sentAt: number }>()
+  const park = (id: string, bytes: Uint8Array, sentAt: number) => {
+    parked.set(id, { bytes, sentAt })
+    if (parked.size > MAX_RESENDABLE) parked.delete(parked.keys().next().value as string)
+  }
+
   const clearPending = (id: string) => {
     const p = pending.get(id)
     if (p) { clearTimeout(p.timer); pending.delete(id) }
@@ -334,6 +349,14 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
           log(`no confirmation for message ${id} after ${p.tries + 1} sends over ${Math.round((nowMs() - p.sentAt) / 1000)}s -> marking undelivered`)
           keepForResend(id, p.bytes, p.sentAt)
           onUndelivered(id)
+        } else {
+          // Parked for the automatic second try, AND reported: "sending" with
+          // no end in sight is the state the user asked to replace with an
+          // honest mark and a Retry button (2026-09-25).
+          log(`nobody in the room for message ${id} -> parked until a peer is back, marked undelivered`)
+          park(id, p.bytes, p.sentAt)
+          keepForResend(id, p.bytes, p.sentAt)
+          onUndelivered(id)
         }
       }, GIVE_UP_MS)
       ;(p.timer as any).unref?.()
@@ -356,6 +379,32 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       armRetry(id)
     }, delay)
     ;(p.timer as any).unref?.()
+  }
+
+  /** Re-send everything unconfirmed, oldest first, each with a fresh budget. */
+  const flushAll = () => {
+    const ids = [...pending.keys()]
+    if (!ids.length) return
+    log(`flushing ${ids.length} unconfirmed message(s) in order`)
+    for (const id of ids) {
+      const p = pending.get(id)
+      if (!p) continue
+      clearTimeout(p.timer)
+      void emitContent(p.bytes)
+      p.tries = 0
+      p.since = nowMs() // fresh budget; `sentAt` still says when it was written
+      armRetry(id)
+    }
+  }
+  /** Parked messages back into the delivery queue AHEAD of anything newer, then out. */
+  const unpark = () => {
+    log(`a peer is back -> re-sending ${parked.size} parked message(s)`)
+    const newer = [...pending]
+    pending.clear()
+    for (const [id, k] of parked) pending.set(id, { bytes: k.bytes, sentAt: k.sentAt, since: nowMs(), tries: 0, timer: null })
+    parked.clear()
+    for (const [id, p] of newer) if (!pending.has(id)) pending.set(id, p)
+    flushAll()
   }
 
   /** Confirm a piece of content we just handed to the UI. */
@@ -433,6 +482,14 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       case 'ack': {
         touch(from)
         const a = env as AckEnv
+        const pk = parked.get(a.ref)
+        if (pk) { // the copy that went before the room emptied did arrive after all
+          parked.delete(a.ref)
+          resendable.delete(a.ref)
+          firstSentAt.delete(a.ref)
+          onDelivered(a.ref, nowMs() - pk.sentAt)
+          break
+        }
         const p = pending.get(a.ref)
         if (p) {
           clearPending(a.ref)
@@ -628,6 +685,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
           log(`EH-2 established with ${short(p)} (${role}) — ratchet live, ${queued.length} queued frame(s) to flush`)
           eh2.onState?.(p, 'established')
           void flushQueued()
+          // Someone is here again: what was parked for want of a recipient goes now.
+          if (parked.size) unpark()
         },
         (err: any) => {
           const p = attempt.peer
@@ -1171,6 +1230,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       const bytes = resendable.get(id)
       if (!bytes || pending.has(id)) return false
       log(`resending ${id} by hand`)
+      parked.delete(id) // it is in flight again; a returning peer must not get it twice
       void emitContent(bytes)
       trackDelivery(id, bytes)
       return true
@@ -1225,20 +1285,9 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
      * `pending` is a Map, so insertion order IS send order; that is the whole
      * mechanism. Nothing is re-queued that the peer already confirmed.
      */
-    flushPending: () => {
-      const ids = [...pending.keys()]
-      if (!ids.length) return
-      log(`flushing ${ids.length} unconfirmed message(s) in order`)
-      for (const id of ids) {
-        const p = pending.get(id)
-        if (!p) continue
-        clearTimeout(p.timer)
-        void emitContent(p.bytes)
-        p.tries = 0
-        p.since = nowMs() // fresh budget; `sentAt` still says when it was written
-        armRetry(id)
-      }
-    },
+    // The transport is back: whatever was parked for want of a recipient gets
+    // another go as well (and parks again if the room is still empty).
+    flushPending: () => (parked.size ? unpark() : flushAll()),
     /** Peers with a live EH-2 ratchet (empty in interim mode) — for the UI badge. */
     secured: () => (eh2 ? [...sessions.keys()] : []),
     stop: () => {

@@ -49,6 +49,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '🤝 Securing…': '🤝 Zabezpieczam…',
   },
   en: {
+    '↻ Ponów': '↻ Retry',
+    'Wyślij ponownie — przyjdzie też samo, gdy rozmówca wróci': 'Send again — it also goes by itself when the other person is back',
     '+{n} plików': { one: '+{n} file', other: '+{n} files' },
     'Naraz najwyżej {max} plików — wziąłem pierwsze {max}': 'At most {max} files at once — took the first {max}',
     'Razem za dużo — limit to {mb} MB na raz': 'Too much in total — the limit is {mb} MB at once',
@@ -621,7 +623,6 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Wylogować?': 'Sign out?',
     'Wyloguj': 'Sign out',
     'Wymiana zakończona — możecie rozmawiać': 'Exchange complete — you can talk now',
-    'Wyślij ponownie': 'Send again',
     'Wyślij ponownie mój klucz do wszystkich': 'Send my key to everyone again',
     'Wyślij ten link dowolnym kanałem. Nie zawiera niczego tajnego — sam klucz publiczny.':
       'Send this link by any channel. It holds nothing secret — a public key and a name.',
