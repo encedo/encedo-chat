@@ -1090,6 +1090,14 @@
        box-sizing is border-box globally, so this comes out of the height rather
        than adding to it. */
     .app{flex-direction:column;gap:0;padding:env(safe-area-inset-top) 0 0;height:var(--app-h,100dvh);min-height:0;max-width:none}
+    /* With the keyboard up, the WebView pans the VISIBLE area down inside the
+       page (visualViewport.offsetTop) to reveal the field. An app clamped to
+       the visible height but still drawn from the page's top then has its
+       header above the screen, under the status bar (reported 2026-09-25).
+       Start it where the visible area starts. A margin, not position or
+       transform: those would change what fixed and absolute children are
+       placed against. `--vv-top` is 0 whenever nothing covers the screen. */
+    .app{margin-top:var(--vv-top,0px)}
     .splitter{display:none}
     .sidebar,.chat{border-radius:0;border-left:none;border-right:none;box-shadow:none}
     .sidebar{width:100%;flex:1;min-height:0}

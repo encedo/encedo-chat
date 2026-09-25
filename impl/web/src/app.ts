@@ -8820,6 +8820,14 @@ function trackViewport() {
     // field — so a window centred without this lands under the keyboard even
     // when it is short enough to fit above it.
     document.documentElement.style.setProperty('--vv-top', typing && covered ? `${Math.round(vv?.offsetTop ?? 0)}px` : '0px')
+    // Once the app is clamped to the visible area, the whole of it fits above
+    // the keyboard, so any scroll of the DOCUMENT is left over from the moment
+    // the WebView panned to reveal the field -- before the clamp. Left there,
+    // it keeps the top of the app above the screen: on Android the header sat
+    // under the status bar with the keyboard open (reported 2026-09-25). Put
+    // the document back; this runs again on the scroll event it causes and
+    // then finds nothing to do.
+    if (typing && covered && (window.scrollY || document.scrollingElement?.scrollTop)) window.scrollTo(0, 0)
   }
   apply()
   vv?.addEventListener('resize', apply)
