@@ -23,8 +23,14 @@
 # only its own topics (--leaf-announce), and only a client's topic makes this
 # node carry it (--local-topics-only).
 #
-# --max-topics from measurement (2026-09-24, ~28 kB rss per topic): 2000 on a
-# 2 GB node, 1000 on a 1 GB node. relay-health.sh reads it from ExecStart.
+# Limits from measurement (relay/DEPLOY.md step 4, ~/develop/chat/RELAY-DIAG.md):
+# the relay is ONE Node process, so one core carries it whatever the machine has.
+# On a 1-vCPU node the UX stayed fine up to ~390 clients (load test 2026-09-25)
+# -> --max-connections 400. Clients hold ~4 topics each (one per contact) and a
+# topic costs ~28 kB -> --max-topics 4 x connections. A 4-vCPU node starts at 800
+# until its own load test says otherwise. nginx must carry 2 x connections
+# (client + upstream): worker_connections 4096 (bs-setup.sh sets and checks it).
+# relay-health.sh reads --max-topics from ExecStart.
 # --stats-redis needs the local Redis (relay/DEPLOY.md, step 4c).
 # --metrics-port serves live numbers on 127.0.0.1 ONLY, for infra/dash (over SSH).
 
@@ -37,7 +43,7 @@ Wants=network-online.target
 Type=simple
 User=www-data
 WorkingDirectory=/opt/github/encedo-chat/relay
-ExecStart=/usr/bin/node relay.mjs --port 9001 --pass <NODE>.onchato.com --host <NODE>.onchato.com --peers <PEERS> --v6-port 9002 --v6-host <V6> --siblings <SIBLINGS> --local-topics-only --leaf-announce --pick --announce-load --max-topics <MAX_TOPICS> --stats 15 --quiet-msgs --stats-redis redis://127.0.0.1:6379 --stats-node <NODE> --stats-ttl-days 30 --metrics-port 9003
+ExecStart=/usr/bin/node relay.mjs --port 9001 --pass <NODE>.onchato.com --host <NODE>.onchato.com --peers <PEERS> --v6-port 9002 --v6-host <V6> --siblings <SIBLINGS> --local-topics-only --leaf-announce --pick --announce-load --max-connections <MAX_CONNS> --max-topics <MAX_TOPICS> --stats 15 --quiet-msgs --stats-redis redis://127.0.0.1:6379 --stats-node <NODE> --stats-ttl-days 30 --metrics-port 9003
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
@@ -50,10 +56,10 @@ WantedBy=multi-user.target
 # The nodes today. <PEERS> for a node = the "mesh address" of every OTHER row,
 # space-separated; <SIBLINGS> = their PeerIds, comma-separated.
 #
-# node  PeerId                                                  <V6> (mesh address = /ip6/<V6>/tcp/9002/ws/p2p/<PeerId>)   RAM   <MAX_TOPICS>
-# bs1   12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp     2a03:ec41:0:9::cf                                            2 GB  2000
-# bs2   12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y     2a01:7e0:0:164::16c                                          1 GB  1000
-# bs3   12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5     2a03:b0c0:2:f0:0:1:ed56:d001                                 1 GB  1000
+# node  PeerId                                                  <V6> (mesh address = /ip6/<V6>/tcp/9002/ws/p2p/<PeerId>)   RAM   <MAX_TOPICS> <MAX_CONNS>
+# bs1   12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp     2a03:ec41:0:9::cf                                            2 GB  1600  400
+# bs2   12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y     2a01:7e0:0:164::16c                                          1 GB  1600  400
+# bs3   12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5     2a03:b0c0:2:f0:0:1:ed56:d001                                 1 GB  1600  400
 #
 # bs1 runs LimitNOFILE=524288: it also hosts the web, the IPFS store and the
 # feedback sink. The relay alone does not need more than 65536.

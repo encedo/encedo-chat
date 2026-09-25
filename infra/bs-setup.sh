@@ -6,7 +6,9 @@
 #   bs-setup.sh --host bs4.onchato.com         # install
 #
 # Options: --host <name>        the node's public name; also its --pass, i.e. its PeerId (never change it)
-#          --max-topics <n>     default from RAM: 2000 on >= 1.8 GB, else 1000 (measured 2026-09-24)
+#          --max-conns <n>      default from the node table, else from cores: 400 (1-2 vCPU, measured
+#                               2026-09-25), 800 on 4+ vCPU until its own load test
+#          --max-topics <n>     default: the node table, else 4 x --max-conns
 #          --push-url <url>     Uptime Kuma push URL for the health timer (else the timer is left off)
 #          --no-cert            skip certbot + the nginx site (a test box without DNS)
 #          --skip-dns-check     do not require the A record to point at this machine
@@ -33,6 +35,7 @@ set -euo pipefail
 MODE=install
 HOST=""
 MAXT=""
+MAXC=""
 PUSH_URL=""
 NO_CERT=0
 SKIP_DNS=0
@@ -46,6 +49,7 @@ while [ $# -gt 0 ]; do
     --dry-run) MODE=dry ;;
     --host) HOST="$2"; shift ;;
     --max-topics) MAXT="$2"; shift ;;
+    --max-conns) MAXC="$2"; shift ;;
     --push-url) PUSH_URL="$2"; shift ;;
     --no-cert) NO_CERT=1 ;;
     --skip-dns-check) SKIP_DNS=1 ;;
@@ -90,7 +94,8 @@ TEMPLATE=$TEMPLATE_REPO/relay/onchato-relay.service
 [ -f "$TEMPLATE" ] || die "no relay/onchato-relay.service in $REPO or $SRC_REPO"
 
 # Rows look like:  # bs1   12D3KooW...   2a03:ec41:0:9::cf   2 GB  2000
-table() { { grep -E '^# bs[0-9]+ +12D3KooW' "$TEMPLATE" || true; } | awk '{print $2, $3, $4, $7}'; }
+# name, PeerId, mesh IPv6, --max-topics, --max-connections
+table() { { grep -E '^# bs[0-9]+ +12D3KooW' "$TEMPLATE" || true; } | awk '{print $2, $3, $4, $7, $8}'; }
 # An old clone carries the 3-flag template with no node table: say so instead of
 # rendering nonsense (or, under `set -e`, dying without a word).
 [ -n "$(table)" ] || die "$TEMPLATE has no node table -- the clone predates it: git -C $TEMPLATE_REPO pull --ff-only"
@@ -109,10 +114,15 @@ fi
 
 V6=$(ip -6 addr show scope global 2>/dev/null | awk '/inet6/{print $2}' | cut -d/ -f1 | grep -v '^fd' | head -1 || true)
 RAM_MB=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
+CPUS=$(nproc 2>/dev/null || echo 1)
+if [ -z "$MAXC" ]; then
+  row_maxc=$(table | awk -v n="$short" '$1==n{print $5}')
+  if [ -n "$row_maxc" ]; then MAXC=$row_maxc
+  elif [ "$CPUS" -ge 4 ]; then MAXC=800; else MAXC=400; fi
+fi
 if [ -z "$MAXT" ]; then
   row_maxt=$(table | awk -v n="$short" '$1==n{print $4}')
-  if [ -n "$row_maxt" ]; then MAXT=$row_maxt
-  elif [ "$RAM_MB" -ge 1800 ]; then MAXT=2000; else MAXT=1000; fi
+  if [ -n "$row_maxt" ]; then MAXT=$row_maxt; else MAXT=$(( MAXC * 4 )); fi
 fi
 
 PEERS=""; SIBLINGS=""
@@ -126,7 +136,7 @@ PEERS=${PEERS# }; SIBLINGS=${SIBLINGS#,}
 # Only the two lines that carry fields are filled: the comments name the same
 # fields (<V6>, <PEERS>...) as documentation and must stay readable.
 render_unit() {
-  sed -E "/^(ExecStart|Description)=/{s|<NODE>|$short|g; s|<V6>|$V6|; s|<PEERS>|$PEERS|; s|<SIBLINGS>|$SIBLINGS|; s|<MAX_TOPICS>|$MAXT|}" "$TEMPLATE"
+  sed -E "/^(ExecStart|Description)=/{s|<NODE>|$short|g; s|<V6>|$V6|; s|<PEERS>|$PEERS|; s|<SIBLINGS>|$SIBLINGS|; s|<MAX_TOPICS>|$MAXT|; s|<MAX_CONNS>|$MAXC|}" "$TEMPLATE"
 }
 # One flag (with its values) per line, sorted: comparable whatever the order.
 flags() {
@@ -182,6 +192,11 @@ if [ "$MODE" = check ]; then
     [ "$short" = bs1 ] && ok "certificate: bs1 shares the web host's (not checked here)" || warn "no certificate for $HOST"
   fi
   $SUDO nginx -t >/dev/null 2>&1 && ok "nginx -t passes" || bad "nginx -t fails"
+  # Each WebSocket holds TWO nginx connections (client + upstream). The default
+  # 768 capped a node at ~380 clients before the relay's own limit (2026-09-25).
+  WC=$(grep -oE 'worker_connections[[:space:]]+[0-9]+' /etc/nginx/nginx.conf 2>/dev/null | grep -oE '[0-9]+' | head -1)
+  [ -n "$WC" ] && [ "$WC" -ge $(( MAXC * 5 / 2 )) ] && ok "nginx worker_connections $WC carries $MAXC clients" \
+    || bad "nginx worker_connections ${WC:-?} < 2.5 x $MAXC -- nginx refuses clients before the relay does"
   [ -z "$(ls /etc/nginx/sites-enabled/ 2>/dev/null | grep -E '\.(bak|orig|old)|~$')" ] && ok "no backup files in sites-enabled" \
     || bad "backup file in sites-enabled -- nginx LOADS it"
 
@@ -202,7 +217,7 @@ fi
 [ "$MODE" = dry ] && say "DRY RUN -- nothing below is executed or written." && echo
 say "node      $HOST"
 say "mesh v6   ${V6:-<none found>}"
-say "RAM       $RAM_MB MB -> --max-topics $MAXT"
+say "machine   $CPUS vCPU, $RAM_MB MB -> --max-connections $MAXC, --max-topics $MAXT"
 say "peers     ${PEERS:-<none: this is the first node>}"
 echo
 if [ -z "$V6" ]; then
@@ -310,6 +325,9 @@ else
   say "== 8. certificate + nginx"
   run "$SUDO certbot certonly --webroot -w /var/www/html -d $HOST --agree-tos --register-unsafely-without-email --non-interactive --deploy-hook 'systemctl reload nginx'"
   run "$SUDO install -m 644 $REPO/infra/nginx/relay-limits.conf /etc/nginx/conf.d/relay-limits.conf"
+  # Two nginx connections per client: the stock 768 is a ~380-client ceiling.
+  run "$SUDO sed -i -E 's/worker_connections [0-9]+;/worker_connections 4096;/' /etc/nginx/nginx.conf"
+  run "grep -q worker_rlimit_nofile /etc/nginx/nginx.conf || $SUDO sed -i -E 's/^(worker_processes [^;]+;)/\\1\\nworker_rlimit_nofile 8192;/' /etc/nginx/nginx.conf"
   sed "s/__HOST__/$HOST/g" "$TEMPLATE_REPO/infra/nginx/relay-node.conf" | put "/etc/nginx/sites-available/$HOST"
   run "$SUDO ln -sf /etc/nginx/sites-available/$HOST /etc/nginx/sites-enabled/$HOST"
   run "$SUDO nginx -t && $SUDO systemctl reload nginx"
@@ -324,6 +342,6 @@ say "2. On EACH existing node (all-to-all mesh), then restart it:"
 say "     sudo ufw allow from $V6 to any port 9002 proto tcp comment '$short relay mesh over IPv6'"
 say "     sudo sed -i 's|--peers |--peers /ip6/$V6/tcp/9002/ws/p2p/$PID |; s|--siblings |--siblings $PID,|' /etc/systemd/system/onchato-relay.service"
 say "3. In the repo: add the row to relay/onchato-relay.service"
-say "     # $short   $PID     $V6   $(( (RAM_MB + 512) / 1024 )) GB  $MAXT"
+say "     # $short   $PID     $V6   $(( (RAM_MB + 512) / 1024 )) GB  $MAXT  $MAXC"
 say "4. Then: bs-setup.sh --check here, net/light-test.ts and net/second-joiner.ts against it,"
 say "   and publishing (infra/nodes.json) only once it answers -- relay/DEPLOY.md step 9."

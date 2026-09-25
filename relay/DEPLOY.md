@@ -152,9 +152,9 @@ cd /opt/github/encedo-chat/relay
 V6=$(ip -6 addr show scope global | awk '/inet6/{print $2}' | cut -d/ -f1 | head -1)
 PEERS="/ip6/2a03:ec41:0:9::cf/tcp/9002/ws/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp /ip6/2a01:7e0:0:164::16c/tcp/9002/ws/p2p/12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y /ip6/2a03:b0c0:2:f0:0:1:ed56:d001/tcp/9002/ws/p2p/12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5"
 SIBLINGS="12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp,12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y,12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5"
-NODE=${HOST%%.*}; MAXT=1000                      # 2000 on a 2 GB machine
+NODE=${HOST%%.*}; MAXC=400; MAXT=1600          # 1-2 vCPU, measured 2026-09-25; 4+ vCPU: 800 / 3200 until tested
 # (or simply: infra/bs-setup.sh, which does all of steps 1-6 and 8 from the same template)
-sed -E "/^(ExecStart|Description)=/{s|<NODE>|$NODE|g; s|<V6>|$V6|; s|<PEERS>|$PEERS|; s|<SIBLINGS>|$SIBLINGS|; s|<MAX_TOPICS>|$MAXT|}" \
+sed -E "/^(ExecStart|Description)=/{s|<NODE>|$NODE|g; s|<V6>|$V6|; s|<PEERS>|$PEERS|; s|<SIBLINGS>|$SIBLINGS|; s|<MAX_TOPICS>|$MAXT|; s|<MAX_CONNS>|$MAXC|}" \
     onchato-relay.service | sudo tee /etc/systemd/system/onchato-relay.service >/dev/null
 grep -cE '^(ExecStart|Description)=.*<' /etc/systemd/system/onchato-relay.service   # must print 0: nothing left unfilled
 sudo systemctl daemon-reload
@@ -175,7 +175,7 @@ Pass: "bs4.onchato.com" -> PeerId: 12D3KooWNanm...CGKo   <- MUST equal the PeerI
   [ok] /ip6/2a01:7e0:0:164::16c/tcp/9002/ws/p2p/12D3KooWJJJt...   <- mesh to bs2 is up
   [ok] /ip6/2a03:b0c0:2:f0:0:1:ed56:d001/tcp/9002/ws/p2p/...      <- mesh to bs3 is up
 [ok] Relay uruchomiony na porcie 9001
-Tematy: limit 1000 równoczesnych, eviction po 120s ciszy (sweep 30s)
+Tematy: limit 1600 równoczesnych, eviction po 120s ciszy (sweep 30s)
 ```
 
 A different PeerId means the pass is wrong; fix the unit now, because an
