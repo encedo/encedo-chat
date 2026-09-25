@@ -57,6 +57,8 @@ import * as lp from 'it-length-prefixed'
 import { pushable } from 'it-pushable'
 import { PROTOCOL as PICK_PROTOCOL, T as PICK_T, decodeFrame as decodePickFrame, encodeDeliver, encodeRefused, encodePicked, encodeAck, makePicks } from './pick.mjs'
 import { redisSink } from './redis.mjs'
+import { makeMetrics, metricsHandler, SAMPLE_MS } from './metrics.mjs'
+import { createServer as createHttpServer } from 'http'
 import { appendFile } from 'fs'
 
 const args = process.argv.slice(2)
@@ -114,6 +116,9 @@ const V6HOST = get('--v6-host', '::')
 // busier node, shorten IDLE_TTL only if you are sure it stays well above the
 // clients' ~15 s Announce heartbeat (below it, live rooms would be evicted).
 const MAX_TOPICS = parseInt(get('--max-topics', '250'))
+// Live numbers for a dashboard (metrics.mjs), on 127.0.0.1 ONLY -- reached over
+// SSH, never exposed: they are metadata. Off unless a port is given.
+const METRICS_PORT = parseInt(get('--metrics-port', '0')) || 0
 const IDLE_TTL = parseInt(get('--idle-ttl', '120')) * 1000
 // Connection ceiling, a flag so stress tests raise it from ExecStart instead of
 // editing this file (a local edit conflicts on every git pull). Default sized for
@@ -228,6 +233,7 @@ const lastSeen = new Map() // topic -> last activity (ms); drives eviction
 // so an unflagged relay runs none of this. The gauges are read at the instant
 // the line is written, so "topics now" and "messages since" belong together.
 const statsNode = STATS_NODE ?? (HOST ? HOST.split('.')[0] : 'relay')
+const metrics = METRICS_PORT ? makeMetrics() : null
 const stats = STATS_MIN > 0
   ? startStats({
       windowMin: STATS_MIN,
@@ -284,7 +290,9 @@ if (PICK) {
           // Our own publish never comes back as a `message` event, so count it
           // here or a light client's traffic vanishes from the stats line.
           stats?.counters.msg(peer, f.data.length)
+          metrics?.msg(f.data.length)
           stats?.counters.push()
+          metrics?.push()
           send(encodeAck(f.topic, reach))
           continue
         }
@@ -294,14 +302,14 @@ if (PICK) {
         const already = relay.services.pubsub.getTopics().includes(f.topic)
         if (!quota.claim(peer, f.topic) || (!already && relay.services.pubsub.getTopics().length >= MAX_TOPICS)) {
           quota.release(peer, f.topic)
-          stats?.counters.topic('refuse')
+          stats?.counters.topic('refuse'); metrics?.topic('refuse')
           console.log(`[!topic] PICK by ${peer.slice(0, 12)}... REFUSED "${f.topic.slice(0, 16)}..."`)
           send(encodeRefused(f.topic))
           continue
         }
         if (!already) {
           relay.services.pubsub.subscribe(f.topic)
-          stats?.counters.topic('add')
+          stats?.counters.topic('add'); metrics?.topic('add')
           console.log(`[+topic] "${f.topic}" (pick)`)
         }
         lastSeen.set(f.topic, Date.now())
@@ -336,7 +344,7 @@ relay.services.pubsub.addEventListener('subscription-change', (evt) => {
       // Counted as a refusal, so it reaches the same alarm as the global cap.
       // Loud, because from the client's side this is indistinguishable from the
       // room simply being empty.
-      stats?.counters.topic('refuse')
+      stats?.counters.topic('refuse'); metrics?.topic('refuse')
       console.log(`[!topic] PEER ${asker.slice(0, 12)}... at its limit of ${PER_PEER} — REFUSING "${topic.slice(0, 16)}..."`)
       dump?.event('topic.refuse', { topic, peer: asker, perPeerLimit: PER_PEER })
       continue
@@ -346,14 +354,14 @@ relay.services.pubsub.addEventListener('subscription-change', (evt) => {
       if (relay.services.pubsub.getTopics().length >= MAX_TOPICS) {
         // The client gets no error for this — it just never sees anyone in the
         // room. Loud in the log, because it looks like "the app is broken".
-        stats?.counters.topic('refuse')
+        stats?.counters.topic('refuse'); metrics?.topic('refuse')
         console.log(`[!topic] LIMIT ${MAX_TOPICS} reached — REFUSING "${topic}" (raise --max-topics)`)
         dump?.event('topic.refuse', { topic, peer: evt.detail.peerId.toString(), limit: MAX_TOPICS })
         continue
       }
       relay.services.pubsub.subscribe(topic)
       lastSeen.set(topic, Date.now())
-      stats?.counters.topic('add')
+      stats?.counters.topic('add'); metrics?.topic('add')
       console.log(`[+topic] "${topic}"`)
       dump?.event('topic.add', { topic, peer: evt.detail.peerId.toString() })
     }
@@ -376,6 +384,7 @@ relay.services.pubsub.addEventListener('message', (evt) => {
   // in journald for no operational benefit.
   const from = evt.detail.from.toString().slice(0, 12)
   stats?.counters.msg(from, evt.detail.data.length)
+  metrics?.msg(evt.detail.data.length)
   if (!QUIET_MSGS) console.log(`[msg:${evt.detail.topic.slice(0, 12)}...] ${from}... ${evt.detail.data.length} B`)
 })
 
@@ -387,7 +396,7 @@ setInterval(() => {
     if (now - (lastSeen.get(topic) ?? 0) > IDLE_TTL) {
       relay.services.pubsub.unsubscribe(topic)
       lastSeen.delete(topic)
-      stats?.counters.topic('evict')
+      stats?.counters.topic('evict'); metrics?.topic('evict')
       console.log(`[-topic] evicted "${topic}" (idle > ${IDLE_TTL / 1000}s)`)
       dump?.event('topic.evict', { topic, idle_s: IDLE_TTL / 1000 })
     }
@@ -452,6 +461,31 @@ if (ANNOUNCE_LOAD) {
   console.log(`Obciążenie: ogłaszam co ${ANNOUNCE_MS / 1000}s jako "${statsNode}" (temat ${LOAD_TOPIC.slice(0, 12)}...)`)
 } else {
   console.log('Obciążenie: nasłuchuję, nie ogłaszam (--announce-load je włącza)')
+}
+
+if (metrics) {
+  // The build this process runs, once: a dashboard showing three nodes should
+  // say when one of them is behind.
+  let commit = null
+  try { commit = (await import('child_process')).execSync('git rev-parse --short HEAD', { cwd: new URL('.', import.meta.url).pathname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() } catch {}
+  let due = Date.now() + 1_000
+  setInterval(() => { const late = Date.now() - due; due = Date.now() + 1_000; if (late > 0) metrics.lag(late) }, 1_000).unref?.()
+  setInterval(() => metrics.sample(), SAMPLE_MS).unref?.()
+  const read = () => {
+    const conns = relay.getConnections()
+    const mesh = conns.filter((c) => SIBLINGS.has(c.remotePeer.toString())).length
+    const topics = relay.services.pubsub.getTopics().length
+    return metrics.snapshot({
+      node: statsNode, commit,
+      pct: loadPercent({ conns: conns.length, maxConns: MAX_CONNS, topics, maxTopics: MAX_TOPICS }),
+      conns: conns.length, conns_mesh: mesh, conns_clients: conns.length - mesh, max_conns: MAX_CONNS,
+      topics, max_topics: MAX_TOPICS,
+      picked_topics: PICK ? picks.topics().length : null,
+    })
+  }
+  createHttpServer(metricsHandler(read)).listen(METRICS_PORT, '127.0.0.1', () => {
+    console.log(`Metryki: http://127.0.0.1:${METRICS_PORT}/metrics (tylko lokalnie; dashboard przez SSH)`)
+  }).on('error', (e) => console.log(`Metryki: nie wstaly na 127.0.0.1:${METRICS_PORT}: ${e?.message ?? e}`))
 }
 // Loud on purpose: this line's ABSENCE from the journal is what proves a node
 // ran without the dump. Nothing is printed when DUMP is unset.
