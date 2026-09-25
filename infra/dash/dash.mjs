@@ -160,6 +160,11 @@ createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(PAGE); return
   }
   res.writeHead(404); res.end()
+}).on('error', (e) => {
+  // The usual cause is an earlier dash still running -- say so instead of a stack trace.
+  if (e?.code === 'EADDRINUSE') console.error(`port ${PORT} is taken -- is a dashboard already running? (stop it, or use --port <n>)`)
+  else console.error(`dash: ${e?.message ?? e}`)
+  process.exit(1)
 }).listen(PORT, '127.0.0.1', () => {
   console.log(`onchato dash: http://localhost:${PORT}  (${NODES.join(', ')}, every ${EVERY_S}s over SSH, metrics port ${METRICS_PORT})`)
 })
