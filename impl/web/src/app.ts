@@ -4866,6 +4866,12 @@ function ensureNetworkShell() {
       renderNetwork()
     }, 'net-nodes-official')()
 }
+/**
+ * The protocol's name as Settings shows it. The pick/push client is ours, over
+ * libp2p, and the user named it "libp2p-light" (2026-09-25); the engine keeps
+ * its short internal value `light`.
+ */
+const transportName = (t: string) => (t === 'light' ? 'libp2p-light' : t)
 function renderNetwork() {
   const pane = $('net-box'); if (!pane) return
   if (!client) { pane.innerHTML = `<div class="pane-label">${tr('Brak sesji — zaloguj się.')}</div>`; return }
@@ -4892,7 +4898,7 @@ function renderNetwork() {
     : ''
   $('net-live').innerHTML = `<div class="net-card">
     <div class="net-row"><span class="k">${tr('Status')}</span><span class="v"><span class="dot ${linkCls}"></span> ${linkTxt}${s.peers ? ` · ${tr('{n} poł.', { n: s.peers })}` : ''}</span></div>
-    <div class="net-row"><span class="k">${tr('Transport')}</span><span class="v">${escapeHtml(s.transport)}${WEBRTC_OFF ? ' <span class="net-tag">' + tr('bez WebRTC') + '</span>' : ''}</span></div>
+    <div class="net-row"><span class="k">${tr('Transport')}</span><span class="v">${escapeHtml(transportName(s.transport))}${WEBRTC_OFF ? ' <span class="net-tag">' + tr('bez WebRTC') + '</span>' : ''}</span></div>
     <div class="net-row"><span class="k">${tr('Węzeł (relay)')}</span><span class="v" title="${escapeHtml(s.relay)}">${escapeHtml(relayHost)}${isFailover ? ' <span class="net-tag">' + tr('failover') + '</span>' : ''}</span></div>
     ${nodesRow}
     ${relayPeer ? `<div class="net-row"><span class="k">${tr('PeerId węzła')}</span><span class="v mono" title="${escapeHtml(relayPeer)}">${escapeHtml(relayPeer)}</span></div>` : ''}
@@ -5206,7 +5212,7 @@ startDiag()
 // bar), so this costs the packaged app nothing.
 if (DEBUG) (globalThis as any).__diag = diag
 
-ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : USE_LIGHT ? 'libp2p light (pick/push)' : 'libp2p'}`
+ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : USE_LIGHT ? 'libp2p-light (pick/push)' : 'libp2p'}`
   + ` rotation=${FORCED_ROTATION_SEC == null ? 'per-pair offset' : `forced ${String(Math.floor(FORCED_ROTATION_SEC / 3600)).padStart(2, '0')}:${String(Math.floor((FORCED_ROTATION_SEC % 3600) / 60)).padStart(2, '0')} UTC`};`
   + ' add ?debug=1 for the full trace, ?mqtt=1 for the broker transport, ?rot=<hour> to force the rollover time')
 // Printed because the app-shell test is a guess about somebody else's software:
