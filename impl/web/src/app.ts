@@ -128,23 +128,22 @@ function drawFirst(on: NodeEntry[]): NodeEntry[] {
 /** The relay to dial this session — the drawn node, or the first published one as a floor. */
 function chosenRelay(): string { return chosenRelays()[0] || RELAY }
 /**
- * All enabled nodes in list order — the failover candidates (3b). The first is
- * the preferred relay; if it is down the session falls through to the next.
- * Because the relays are meshed this does not split users. Never empty: the
- * first published node is the floor, so a login with every node unchecked still
- * has something to dial.
+ * The ENABLED nodes (the checkboxes in Settings -> Network), with one of them
+ * drawn to lead -- the failover candidates (3b). The draw happens once per page
+ * load and holds for the session; the rest keep the list's order as the chain
+ * to fall through to. Because the relays are meshed this does not split users.
+ * Never empty: the first published node is the floor, so a login with every
+ * node unchecked still has something to dial.
  *
- * ORDER IS A DEPLOYMENT DECISION, and it lives in `infra/nodes.json`. Since
- * 2026-09-14 it is bs3, bs2, bs1: bs1 carried almost every client (200 dials a
- * day against 13 and 8) while also being the web host, and its network is the
- * one that drops the inter-relay links. Putting it last leaves it as the
- * fallback it should be. Nothing here reads a name — change the file, not this.
+ * Since 0.6.29 the list's order no longer decides WHERE a client starts: with
+ * no weights in `infra/nodes.json` (the case today) the first node is a
+ * uniform draw (`lib/nodepick.ts`), because "first in the list" put a whole
+ * demo room on one 1-vCPU node. Weights, when published, aim the draw;
+ * unchecking a node is how a person pins themselves to the rest.
  */
 function chosenRelays(): string[] {
   const on = loadNodes().filter((n) => n.enabled)
   if (!on.length) return [RELAY]
-  // With no weights in the published file — which is the case today —
-  // `pickFirst` returns 0 and this is the published order, unchanged.
   return drawFirst(on).map((n) => n.addr)
 }
 /**
