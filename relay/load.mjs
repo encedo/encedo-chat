@@ -54,10 +54,9 @@
  * one node (relay/topics.mjs), and they can be added when there is a number.
  */
 
-import { createHash } from 'node:crypto'
 
 /** RFC 4648 base32, lowercase, unpadded — the alphabet room topics use. */
-function base32(bytes) {
+export function base32(bytes) {
   const A = 'abcdefghijklmnopqrstuvwxyz234567'
   let bits = 0, value = 0, out = ''
   for (const b of bytes) {
@@ -73,7 +72,11 @@ function base32(bytes) {
  * The topic relays announce on. A constant, and shaped like every other topic:
  * 52 base32 characters, so it does not stand out in a list of them.
  */
-export const LOAD_TOPIC = base32(createHash('sha256').update('encedo-chat-relay-load-v1').digest()).slice(0, 52)
+// Written out, not computed at load: the CLIENT imports this module too
+// (lib/core.ts reads the load to choose its node), and `node:crypto` does not
+// exist in a browser -- computing it here crashed the web app at start.
+// load.test.mjs derives it again from sha256 and fails if the two differ.
+export const LOAD_TOPIC = 'dbpurn7xlenubexntkrtyghy34n6ulz3rmfdmqu2pt3mxbmiw4tq'
 
 /** How often a relay says where it is. Small enough to react, rare enough to ignore. */
 export const ANNOUNCE_MS = 30_000
@@ -139,4 +142,30 @@ export function freshest(readings, now = Date.now()) {
     if (!prev || r.at > prev.at) best.set(r.node, r)
   }
   return best
+}
+
+/**
+ * The last announcement of every node, as it came off the wire, so a client
+ * that asks for the load topic gets the whole picture AT ONCE instead of
+ * waiting up to ANNOUNCE_MS for each node to speak again. That wait is what
+ * would make load-aware node choice useless at login: the client decides in
+ * its first seconds or not at all.
+ *
+ * Kept per node, newest wins; `snapshot()` drops what has gone stale, for the
+ * same reason `freshest()` does.
+ */
+export function makeLoadCache() {
+  const last = new Map() // node -> { from, data, at }
+  return {
+    put(from, data) {
+      const r = decodeLoad(data)
+      if (!r) return false
+      const prev = last.get(r.node)
+      if (!prev || r.at >= prev.at) last.set(r.node, { from: String(from), data, at: r.at })
+      return true
+    },
+    snapshot(now = Date.now()) {
+      return [...last.values()].filter((e) => now - e.at <= STALE_MS && e.at <= now + ANNOUNCE_MS)
+    },
+  }
 }

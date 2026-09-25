@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { LOAD_TOPIC, loadPercent, encodeLoad, decodeLoad, freshest, STALE_MS, ANNOUNCE_MS } from './load.mjs'
+import { makeLoadCache, base32 } from './load.mjs'
+import { createHash } from 'node:crypto'
 
 test('the topic is shaped like every other topic, so it does not stand out', () => {
   // Room topics are 52 base32 characters out of HKDF. One readable name among
@@ -78,4 +80,21 @@ test('a reading from the future is not evidence', () => {
   const now = 1_700_000_000_000
   const seen = freshest([{ node: 'bs1', pct: 0, at: now + ANNOUNCE_MS * 5 }], now)
   assert.ok(!seen.has('bs1'))
+})
+
+test('the cache hands over the newest reading of every node, and nothing stale', () => {
+  const c = makeLoadCache()
+  const now = 1_000_000_000
+  assert.equal(c.put('p1', encodeLoad('bs1', 10, now - 40_000)), true)
+  c.put('p1', encodeLoad('bs1', 30, now - 5_000))      // newer: replaces
+  c.put('p1', encodeLoad('bs1', 99, now - 60_000))     // older: ignored
+  c.put('p2', encodeLoad('bs2', 50, now - 200_000))    // stale by the time it is asked for
+  c.put('p3', encodeLoad('bs3', 70, now - 1_000))
+  assert.equal(c.put('p4', new TextEncoder().encode('rubbish')), false)
+  const got = c.snapshot(now).map((e) => [decodeLoad(e.data).node, decodeLoad(e.data).pct, e.from]).sort()
+  assert.deepEqual(got, [['bs1', 30, 'p1'], ['bs3', 70, 'p3']])
+})
+
+test('the written-out topic is still base32(sha256("encedo-chat-relay-load-v1"))[:52]', () => {
+  assert.equal(LOAD_TOPIC, base32(createHash('sha256').update('encedo-chat-relay-load-v1').digest()).slice(0, 52))
 })

@@ -49,7 +49,7 @@ import { createHash } from 'crypto'
 import { createDump } from './dump.mjs'
 import { startStats } from './stats.mjs'
 import { siblingSet, shouldJoin } from './topics.mjs'
-import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad } from './load.mjs'
+import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad, makeLoadCache } from './load.mjs'
 import { makeQuota, DEFAULT_PER_PEER } from './quota.mjs'
 import { leafAnnouncements } from './leaf.mjs'
 import { pipe } from 'it-pipe'
@@ -103,6 +103,9 @@ const LEAF_ANNOUNCE = process.argv.includes('--leaf-announce')
 // without being a GossipSub peer for it (pick.mjs). OFF by default.
 const PICK = process.argv.includes('--pick')
 const picks = makePicks()
+// The last load announcement of every node, replayed to a client the moment it
+// picks LOAD_TOPIC -- it chooses its node in its first seconds (load.mjs).
+const loadCache = makeLoadCache()
 // Optional IPv6 listen port for inter-relay peering over a provider's private
 // network (where public IPv4 between VMs is blocked but IPv6 routes). Kept on a
 // SEPARATE port from PORT so the IPv4 nginx path (0.0.0.0:PORT) is untouched and
@@ -317,6 +320,9 @@ if (PICK) {
         // Said outright: a light client has no subscription announcement to
         // learn from that the relay is now in its topic.
         send(encodePicked(f.topic))
+        // The load topic: hand over what every node last said, now, rather than
+        // leave the client waiting up to 30 s for the next round.
+        if (f.topic === LOAD_TOPIC) for (const e of loadCache.snapshot()) send(encodeDeliver(e.from, LOAD_TOPIC, e.data))
       }
     }).catch(() => {}).finally(bye)
   })
@@ -370,6 +376,7 @@ relay.services.pubsub.addEventListener('subscription-change', (evt) => {
 
 relay.services.pubsub.addEventListener('message', (evt) => {
   lastSeen.set(evt.detail.topic, Date.now())
+  if (evt.detail.topic === LOAD_TOPIC) loadCache.put(evt.detail.from.toString(), evt.detail.data)
   if (PICK) {
     // GossipSub already de-duplicated this by message id; each pick-holder gets
     // it once. The publisher is passed on -- sessions are keyed by it.
@@ -453,7 +460,16 @@ if (ANNOUNCE_LOAD) {
       })
       // Fire and forget, like the statistics sink: a relay must never fall over
       // for the sake of telling anybody how busy it is.
-      void relay.services.pubsub.publish(LOAD_TOPIC, encodeLoad(statsNode, pct)).catch(() => {})
+      const mine = encodeLoad(statsNode, pct)
+      loadCache.put(relay.peerId.toString(), mine)
+      void relay.services.pubsub.publish(LOAD_TOPIC, mine).catch(() => {})
+      // Our own publish never comes back to us as a `message`, so the light
+      // clients that picked LOAD_TOPIC HERE would hear every node but this one
+      // -- the one they are on, the one whose overload matters most to them.
+      if (PICK) {
+        const frame = encodeDeliver(relay.peerId.toString(), LOAD_TOPIC, mine)
+        for (const sink of picks.sinksFor(LOAD_TOPIC)) sink(frame)
+      }
     } catch {}
   }
   setInterval(say, ANNOUNCE_MS).unref?.()
