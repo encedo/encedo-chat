@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>onchato — węzły</title>
+<style>
+  :root{
+    --bg:#f3f5f4; --card:#ffffff; --ink:#15201c; --muted:#63706b; --line:#dfe5e2;
+    --ok:#1f8a5b; --warn:#c98a12; --bad:#c7362c; --off:#9aa5a0; --accent:#0e6b57;
+    --mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0c1210; --card:#131b18; --ink:#e3ebe7; --muted:#8a9892; --line:#22302b;
+      --ok:#3ecf8e; --warn:#f0b43c; --bad:#ff6b5e; --off:#55625d; --accent:#3ecfa6; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans);padding:20px 16px 32px}
+  header{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 18px;max-width:1280px;margin:0 auto 16px}
+  h1{font-size:18px;margin:0;letter-spacing:.01em}
+  .sub{color:var(--muted);font-size:12.5px;font-family:var(--mono)}
+  .legend{margin-left:auto;display:flex;gap:12px;font-size:12px;color:var(--muted)}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;max-width:1280px;margin:0 auto}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px 12px;position:relative;overflow:hidden}
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--state,var(--off))}
+  .top{display:flex;align-items:center;gap:10px}
+  .name{font-weight:650;font-size:16px}
+  .meta{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-left:auto;text-align:right}
+  .big{display:flex;align-items:baseline;gap:10px;margin:8px 0 4px}
+  .pct{font-family:var(--mono);font-size:44px;font-weight:600;line-height:1;color:var(--state,var(--off));font-variant-numeric:tabular-nums}
+  .pctlbl{color:var(--muted);font-size:12px}
+  .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;position:relative;margin-bottom:10px}
+  .bar b{position:absolute;left:0;top:0;bottom:0;background:var(--state,var(--off));border-radius:3px}
+  .bar .tick{position:absolute;top:-2px;bottom:-2px;width:1px;background:var(--muted);opacity:.6}
+  dl{display:grid;grid-template-columns:repeat(3,1fr);gap:6px 12px;margin:0 0 10px}
+  dt{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+  dd{margin:0;font-family:var(--mono);font-size:14px;font-variant-numeric:tabular-nums}
+  .chart{margin:4px 0 2px}
+  /* Fixed heights: the drawing stretches sideways with the card, never upward. */
+  .chart svg{display:block;width:100%;height:64px}
+  .chart.s svg{height:48px}
+  .chart.h svg{height:34px}
+  .clbl{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);font-family:var(--mono)}
+  .err{font-family:var(--mono);font-size:12px;color:var(--bad);margin-top:6px;word-break:break-word}
+  .stale .pct,.stale dd{opacity:.45}
+  footer{max-width:1280px;margin:14px auto 0;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Węzły onchato</h1>
+  <span class="sub" id="upd">—</span>
+  <span class="legend"><span><i style="background:var(--ok)"></i>&lt; 75%</span><span><i style="background:var(--warn)"></i>75–90%</span><span><i style="background:var(--bad)"></i>≥ 90%</span><span><i style="background:var(--off)"></i>brak odczytu</span></span>
+</header>
+<main class="grid" id="grid"></main>
+<footer>Obciążenie = to samo, co węzeł ogłasza: max(połączenia / limit, tematy / limit). Wykres: ostatnie 30 min (co kilka sekund). Pasek: ostatnie 24 h z Redisa, okna 15 min (połączenia).</footer>
+<script>
+const fmtB = (b) => b == null ? '—' : b >= 1e9 ? (b / 1e9).toFixed(2) + ' GB' : (b / 1e6).toFixed(0) + ' MB'
+const fmtR = (r) => r == null ? '—' : r < 10 ? r.toFixed(1) : Math.round(r).toString()
+const color = (pct) => pct == null ? 'var(--off)' : pct >= 90 ? 'var(--bad)' : pct >= 75 ? 'var(--warn)' : 'var(--ok)'
+const ago = (ms) => ms < 60_000 ? Math.round(ms / 1000) + ' s' : Math.round(ms / 60_000) + ' min'
+
+/** A line chart on one scale; `max` fixes the top so 85% reads as 85%. */
+function spark(points, { max, h = 64, w = 320, stroke = 'currentColor', marks = [] }) {
+  if (points.length < 2) return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="za mało danych"><text x="${w / 2}" y="${h / 2}" fill="var(--muted)" font-size="11" text-anchor="middle">zbieram…</text></svg>`
+  const t0 = points[0].t, t1 = points[points.length - 1].t, span = Math.max(1, t1 - t0)
+  const top = max ?? Math.max(1, ...points.map((p) => p.v ?? 0)) * 1.15
+  const x = (t) => ((t - t0) / span) * (w - 2) + 1
+  const y = (v) => h - 2 - ((v ?? 0) / top) * (h - 6)
+  const d = points.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ')
+  const area = `${d} L${x(t1).toFixed(1)},${h - 1} L${x(t0).toFixed(1)},${h - 1} Z`
+  const lines = marks.map((m) => `<line x1="0" x2="${w}" y1="${y(m.v).toFixed(1)}" y2="${y(m.v).toFixed(1)}" stroke="${m.c}" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>`).join('')
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="wykres"><path d="${area}" fill="${stroke}" opacity=".12"/>${lines.replaceAll('<line ', '<line vector-effect="non-scaling-stroke" ')}<path d="${d}" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>`
+}
+
+/** 24 h of 15-minute windows as bars (connections). */
+function hist(rows, maxConns) {
+  const w = 320, h = 34, n = rows.length || 1, bw = w / n
+  const top = Math.max(maxConns ? maxConns * 0.25 : 10, ...rows.map((r) => r.conns ?? 0))
+  const bars = rows.map((r, i) => r.conns == null ? '' :
+    `<rect x="${(i * bw + 0.5).toFixed(1)}" y="${(h - (r.conns / top) * (h - 2)).toFixed(1)}" width="${Math.max(1, bw - 1).toFixed(1)}" height="${((r.conns / top) * (h - 2)).toFixed(1)}" fill="var(--accent)" opacity=".7"><title>${new Date(r.t).toLocaleString()} — ${r.conns} poł., ${r.topics ?? '—'} tematów, CPU ${r.cpu ?? '—'}%</title></rect>`).join('')
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="24 godziny połączeń">${bars}</svg>`
+}
+
+function card(node, s, now, every) {
+  const L = s.last
+  const age = L ? now - L.t : null
+  const stale = !L || age > every * 3000
+  const pct = stale ? null : L.pct
+  const st = color(pct)
+  const series = (k) => s.samples.map((p) => ({ t: p.t, v: p[k] }))
+  const commit = L?.commit ? `@${L.commit}` : ''
+  return `<section class="card ${stale ? 'stale' : ''}" style="--state:${st}">
+    <div class="top"><span class="name">${node}</span>
+      <span class="meta">${commit}${L ? ` · up ${ago(L.uptime * 1000)}` : ''}<br>${L ? `odczyt ${ago(age)} temu` : 'brak odczytu'}</span></div>
+    <div class="big"><span class="pct">${pct == null ? '—' : pct + '%'}</span><span class="pctlbl">obciążenie</span></div>
+    <div class="bar"><b style="width:${pct ?? 0}%"></b><span class="tick" style="left:75%"></span><span class="tick" style="left:90%"></span></div>
+    <dl>
+      <div><dt>Klienci</dt><dd>${L?.clients ?? '—'}<span style="color:var(--muted)"> / ${L?.maxConns ?? '—'}</span></dd></div>
+      <div><dt>Tematy</dt><dd>${L?.topics ?? '—'}<span style="color:var(--muted)"> / ${L?.maxTopics ?? '—'}</span></dd></div>
+      <div><dt>Mesh</dt><dd style="color:${L && L.mesh >= 2 ? 'inherit' : 'var(--bad)'}">${L?.mesh ?? '—'}</dd></div>
+      <div><dt>CPU</dt><dd>${L?.cpu ?? '—'}%</dd></div>
+      <div><dt>RAM</dt><dd>${fmtB(L?.rss)}</dd></div>
+      <div><dt>Lag pętli</dt><dd>${L?.lag ?? '—'} ms</dd></div>
+      <div><dt>Wiad./s</dt><dd>${fmtR(L?.msgs)}</dd></div>
+      <div><dt>Push/s</dt><dd>${fmtR(L?.pushes)}</dd></div>
+      <div><dt>Odmowy/s</dt><dd style="color:${L?.refused ? 'var(--bad)' : 'inherit'}">${fmtR(L?.refused)}</dd></div>
+    </dl>
+    <div class="clbl"><span>obciążenie, 30 min</span><span>75 · 90</span></div>
+    <div class="chart" style="color:${st}">${spark(series('pct'), { max: 100, marks: [{ v: 75, c: 'var(--warn)' }, { v: 90, c: 'var(--bad)' }] })}</div>
+    <div class="clbl"><span>wiadomości/s, 30 min</span><span></span></div>
+    <div class="chart s" style="color:var(--accent)">${spark(series('msgs'), { h: 48 })}</div>
+    <div class="clbl"><span>połączenia, 24 h</span><span>okna 15 min</span></div>
+    <div class="chart h">${hist(s.history, L?.maxConns)}</div>
+    ${s.error ? `<div class="err">${s.error.msg} (${ago(now - s.error.at)} temu)</div>` : ''}
+  </section>`
+}
+
+async function refresh() {
+  try {
+    const r = await fetch('/data', { cache: 'no-store' })
+    const d = await r.json()
+    document.getElementById('grid').innerHTML = d.nodes.map((n) => card(n, d.state[n], d.now, d.every)).join('')
+    document.getElementById('upd').textContent = `odświeżone ${new Date(d.now).toLocaleTimeString()} · co ${d.every} s przez SSH`
+  } catch (e) {
+    document.getElementById('upd').textContent = 'dashboard nie odpowiada — czy dash.mjs działa?'
+  }
+}
+refresh(); setInterval(refresh, 2000)
+</script>
+</body>
+</html>
