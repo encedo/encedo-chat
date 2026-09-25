@@ -1424,6 +1424,41 @@ async function main() {
       if (ownVox.see) throw new Error('the sender was offered Play for a note it can already play')
       if (!/Pobierz|Download/.test(String(ownVox.act))) throw new Error(`the file action says "${ownVox.act}"`)
       step('the player is there as soon as the upload finishes, without leaving the room')
+
+      // Several photos in one pick (a colleague's request, 2026-09-25). The
+      // chip carries the first and a count; Send makes one bubble per file, in
+      // pick order, with the caption on the first only.
+      scenario('several files picked at once go out as one message each')
+      const multiTok = `multi-${Date.now().toString(36)}`
+      const chip = await A.eval<any>(`
+        const dt = new DataTransfer();
+        for (const n of [1, 2, 3]) dt.items.add(new File([new Uint8Array(500 * n)], '%TOK%-' + n + '.jpg', { type: 'image/jpeg' }));
+        const i = document.getElementById('file-input');
+        i.files = dt.files; i.dispatchEvent(new Event('change'));
+        return { multiple: i.multiple, name: document.getElementById('attach-name').textContent,
+                 size: document.getElementById('attach-size').textContent };
+      `.replace(/%TOK%/g, multiTok))
+      if (!chip.multiple) throw new Error('the file picker does not allow several files')
+      if (!chip.name.includes(multiTok + '-1') || !/\+2/.test(chip.size)) throw new Error(`the chip does not say two more files come along: ${JSON.stringify(chip)}`)
+      step('the chip shows the first file and "+2"')
+      await A.eval(`
+        document.getElementById('msg-input').value = 'trzy zdjecia';
+        document.getElementById('send').click();
+        return 1;
+      `)
+      await B.waitFor('all three files arrived', `
+        return [...document.querySelectorAll('#messages .b-file .f-name')]
+          .filter((n) => n.textContent.includes(${JSON.stringify(multiTok)})).length === 3;
+      `, 40_000)
+      const multi = await B.eval<any>(`
+        const rows = [...document.querySelectorAll('#messages .mrow')]
+          .filter((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(multiTok)}));
+        return rows.map((r) => ({ name: r.querySelector('.f-name').textContent,
+                                  cap: (r.querySelector('.b-caption') || {}).textContent || '' }));
+      `)
+      if (multi.map((m: any) => m.name.slice(-5)).join() !== '1.jpg,2.jpg,3.jpg') throw new Error(`the files arrived out of order: ${JSON.stringify(multi)}`)
+      if (multi[0].cap !== 'trzy zdjecia' || multi[1].cap || multi[2].cap) throw new Error(`the caption is not on the first file only: ${JSON.stringify(multi)}`)
+      step('three bubbles on the other side, in pick order, the caption on the first')
     }
 
     // ---- replying, and correcting -------------------------------------------

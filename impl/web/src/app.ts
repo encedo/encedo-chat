@@ -3314,6 +3314,16 @@ $('btn-signout').addEventListener('click', async () => {
  */
 let pendingAttach: File | null = null
 /**
+ * The rest of a multi-file pick (a colleague's request, 2026-09-25: "several
+ * photos at once"). The chip shows the first and a count; Send sends every one
+ * as its own file message, the caption and the reply going with the first.
+ * Always empty on the direct door: the engine carries one transfer at a time.
+ */
+let pendingMore: File[] = []
+/** How many files one pick may carry, and how much in total. All of them are
+ *  encrypted and uploaded at once, so the total bounds the memory it takes. */
+const PICK_MAX = 10
+/**
  * Which door the pending file is going through. The paperclip's menu is where
  * that is chosen, and the answer has to survive until Send — before this, the
  * direct entry sent the file the instant it was picked, so there was never a
@@ -3323,10 +3333,11 @@ let pendingDirect = false
 
 /** The chip is the whole of the pending state's UI, so this is the only place
  *  the variable and the DOM can drift apart — set them together, always. */
-function showAttach(f: File | null, direct = false) {
+function showAttach(f: File | null, direct = false, more: File[] = []) {
   if (f) cancelEdit() // a correction is text; the chip would take the send from it
   pendingAttach = f
   pendingDirect = !!f && direct
+  pendingMore = f && !direct ? more : []
   $('attach-chip').hidden = !f
   const thumb = $('attach-thumb') as HTMLImageElement
   // Whatever the chip was showing stops being anybody's business the moment it
@@ -3336,7 +3347,9 @@ function showAttach(f: File | null, direct = false) {
   if (!f) return
   $('attach-name').textContent = f.name
   $('attach-name').title = f.name // the chip elides; the tooltip has the whole name
-  $('attach-size').textContent = humanSize(f.size)
+  $('attach-size').textContent = pendingMore.length
+    ? `${humanSize(pendingMore.reduce((a, m) => a + m.size, f.size))} \u00b7 ${tr('+{n} plików', { n: pendingMore.length })}`
+    : humanSize(f.size)
   // A pasted screenshot arrives called "image.png". The name is no help at all,
   // so the chip shows the picture — the one place where paste and the clip
   // genuinely differ is what the file is CALLED, and this closes it.
@@ -3565,7 +3578,9 @@ $('xfer-no').addEventListener('click', () => {
   xferClose()
 })
 
-function offerFile(f: File | null | undefined, count = 1, direct = false) {
+function offerFile(list: FileList | File[] | null | undefined, direct = false) {
+  const all = [...(list ?? [])]
+  const f = all[0]
   if (!f) return
   // Paste and drop can happen with no conversation on screen, which the clip
   // cannot — the composer is not there to click.
@@ -3581,11 +3596,23 @@ function offerFile(f: File | null | undefined, count = 1, direct = false) {
   // was refused by a limit that did not apply to it (reported 2026-09-20) - and
   // refused before the transfer it WAS allowed to use could say otherwise.
   const cap = direct ? MAX_DIRECT : MAX_FILE
-  if (f.size > cap) { toast(tr('Plik jest za duży — limit to {mb} MB', { mb: Math.floor(cap / 1024 / 1024) })); return }
-  showAttach(f, direct)
-  // The composer holds one file, so say which one was taken rather than
-  // silently dropping the rest of a multi-file drop on the floor.
-  if (count > 1) toast(tr('Jeden plik naraz — wziąłem {name}', { name: f.name }))
+  const tooBig = all.find((x) => x.size > cap)
+  if (tooBig) { toast(tr('Plik jest za duży — limit to {mb} MB', { mb: Math.floor(cap / 1024 / 1024) })); return }
+  // The direct door carries one file; say which one was taken rather than
+  // silently dropping the rest on the floor.
+  if (direct) {
+    showAttach(f, true)
+    if (all.length > 1) toast(tr('Bezpośrednio jeden plik naraz — wziąłem {name}', { name: f.name }))
+    return
+  }
+  const picked = all.slice(0, PICK_MAX)
+  // Every file of a pick is encrypted and uploaded at once, so the store's
+  // per-file ceiling is also the ceiling for the whole pick.
+  if (picked.length > 1 && picked.reduce((a, x) => a + x.size, 0) > MAX_FILE) {
+    toast(tr('Razem za dużo — limit to {mb} MB na raz', { mb: Math.floor(MAX_FILE / 1024 / 1024) })); return
+  }
+  showAttach(f, false, picked.slice(1))
+  if (all.length > PICK_MAX) toast(tr('Naraz najwyżej {max} plików — wziąłem pierwsze {max}', { max: PICK_MAX }))
 }
 
 /**
@@ -3647,10 +3674,10 @@ document.addEventListener('click', (e: any) => {
 })
 ;($('file-input') as HTMLInputElement).addEventListener('change', (e: any) => {
   const files: FileList | undefined = e.target.files
-  const f = files?.[0]
+  const picked = [...(files ?? [])] // copied before the reset below empties the live list
   e.target.value = '' // so picking the same file twice still fires
   const direct = pickMode === 'direct'; pickMode = 'store'
-  offerFile(f, files?.length ?? 1, direct)
+  offerFile(picked, direct)
 })
 $('attach-drop').addEventListener('click', () => showAttach(null))
 
@@ -3761,7 +3788,7 @@ $('rec-stop')?.addEventListener('click', () => {
   $('rec-preview').innerHTML = ''
   // Straight out through the same door every other file uses, so a voice note
   // can still carry a caption or answer a message.
-  offerFile(take)
+  offerFile([take])
   void sendComposer()
 })
 
@@ -3796,7 +3823,7 @@ document.addEventListener('paste', (e: ClipboardEvent) => {
   // aimed at untouched — including the key field, where pasting is the way in.
   if (!files?.length) return
   e.preventDefault()
-  offerFile(files[0], files.length)
+  offerFile(files)
 })
 
 {
@@ -3815,7 +3842,7 @@ document.addEventListener('paste', (e: ClipboardEvent) => {
     pane.addEventListener('drop', (e) => {
       e.preventDefault(); off()
       const files = (e as DragEvent).dataTransfer?.files
-      if (files?.length) offerFile(files[0], files.length)
+      if (files?.length) offerFile(files)
     })
   }
 }
@@ -6906,7 +6933,7 @@ async function revealImage(env: FileEnv, btn: HTMLButtonElement, play = true) {
  * travels in the envelope over the ratchet or a group sender key. The store
  * gets a nameless blob and its size, and holds it for minutes.
  */
-async function attachFile(f: File) {
+async function attachFile(f: File, after?: Promise<unknown>) {
   const gid = activeGid
   const room = gid ? null : activeRoom()
   if (!gid && !room?.conv) return
@@ -6985,6 +7012,9 @@ async function attachFile(f: File) {
     // Fill the SAME object the log already holds, so the pending bubble becomes
     // the finished one and a replay after switching rooms shows the real file.
     Object.assign(pending, meta)
+    // Files of one pick upload side by side but are SENT in pick order, so a
+    // small one that finished first does not overtake a bigger one before it.
+    if (after) await after.catch(() => {})
     pending.id = gid ? await groupsUI.get(gid)!.room!.sendFile(meta) : room!.conv!.sendFile(meta)
     // The bubble was drawn before the message had an id — it could not have
     // one, the send had not happened — so it is wired now, through the same
@@ -7747,7 +7777,15 @@ function sendComposer() {
     // are — its note has a much smaller ceiling than a chat message, and the
     // person needs what they wrote in order to shorten it.
     if (pendingDirect) { startTransfer(f); return }
-    showAttach(null); void attachFile(f); return
+    const more = pendingMore
+    // All at once and in order: each call takes its room, its bubble and (the
+    // first only) the caption and the reply before its first await, so the
+    // bubbles land in pick order in THIS conversation even if the screen
+    // moves on while they upload; each send waits for the one before it.
+    showAttach(null)
+    let prev = attachFile(f)
+    for (const m of more) prev = attachFile(m, prev)
+    return
   }
   const t = inp.value.trim(); if (!t) return
   if (activeGid) { // a group is on screen — broadcast to it

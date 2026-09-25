@@ -40,6 +40,7 @@ type Entry = string | Forms
  */
 const CATALOG: Record<string, Record<string, Entry>> = {
   pl: {
+    '+{n} plików': { one: '+{n} plik', few: '+{n} pliki', many: '+{n} plików', other: '+{n} pliku' },
     '{n} członków': { one: '{n} członek', few: '{n} członkowie', many: '{n} członków', other: '{n} członka' },
     '{n} poł.': { one: '{n} poł.', few: '{n} poł.', many: '{n} poł.', other: '{n} poł.' },
     '⚠️ Not secure': '⚠️ Niezabezpieczona',
@@ -48,6 +49,10 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '🤝 Securing…': '🤝 Zabezpieczam…',
   },
   en: {
+    '+{n} plików': { one: '+{n} file', other: '+{n} files' },
+    'Naraz najwyżej {max} plików — wziąłem pierwsze {max}': 'At most {max} files at once — took the first {max}',
+    'Razem za dużo — limit to {mb} MB na raz': 'Too much in total — the limit is {mb} MB at once',
+    'Bezpośrednio jeden plik naraz — wziąłem {name}': 'Direct transfer takes one file at a time — took {name}',
     ' · czekam na sieć…': ' · waiting for the network…',
     'Brak połączenia z przekaźnikiem — wyślę, gdy wróci': 'No connection to the relay — it will go out when it is back',
     ' · czeka na rozmówcę…': ' · waiting for the other person…',
@@ -458,7 +463,6 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Pokazuj obrazy od kontaktów automatycznie': 'Show images from contacts automatically',
     'Pokazanie obrazka to jego pobranie — bajty lecą ze schowka plików dopiero wtedy. Dlatego przychodzące obrazy czekają na kliknięcie, a to ustawienie robi z tego automat.': 'Showing an image is downloading it — the bytes leave the file store only then. That is why an incoming image waits for a click, and why this setting turns that into an automatic one.',
     'Pokaż': 'Show',
-    'Jeden plik naraz — wziąłem {name}': 'One file at a time — took {name}',
     'Najpierw otwórz rozmowę': 'Open a conversation first',
     'Aplikacja na komputerze': 'The desktop app',
     'Zamknięcie okna chowa do zasobnika': 'Closing the window hides it in the tray',
