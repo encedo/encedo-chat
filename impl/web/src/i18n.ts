@@ -49,6 +49,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '🤝 Securing…': '🤝 Zabezpieczam…',
   },
   en: {
+    'Dodaj kontakt z tego zaproszenia': 'Add the contact from this invite',
     '↻ Ponów': '↻ Retry',
     'Wyślij ponownie — przyjdzie też samo, gdy rozmówca wróci': 'Send again — it also goes by itself when the other person is back',
     '+{n} plików': { one: '+{n} file', other: '+{n} files' },

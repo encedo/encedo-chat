@@ -2443,6 +2443,20 @@ function takeInviteFromUrl(): Invite | null {
  * person most likely to click an invite is someone already signed in on this
  * device — and without this it presents as a link that does nothing at all.
  */
+/**
+ * The invite in a link, if the link is to THIS app: the canonical address the
+ * packaged builds hand out, or the page we are on (a self-hosted or test
+ * deployment hands out itself). Anything else is somebody else's page, and a
+ * fragment that merely looks like an invite does not make it ours.
+ */
+function ownInvite(href: string): Invite | null {
+  let u: URL
+  try { u = new URL(href) } catch { return null }
+  const at = (origin: string, path: string) => u.origin === origin && u.pathname.replace(/\/$/, '') === path.replace(/\/$/, '')
+  if (!at(CANONICAL_ORIGIN, CANONICAL_PATH) && !at(location.origin, location.pathname)) return null
+  return decodeInvite(u.hash)
+}
+
 window.addEventListener('hashchange', () => {
   const inv = takeInviteFromUrl()
   if (!inv) return
@@ -7399,7 +7413,7 @@ if (isDesktopShell()) showWindow()
 if (isDesktopShell()) document.addEventListener('click', (e) => {
   if (isMobileShell()) return
   const a = (e.target as HTMLElement | null)?.closest?.('a[target="_blank"]') as HTMLAnchorElement | null
-  if (!a?.href || !/^https?:/i.test(a.href)) return
+  if (!a?.href || !/^https?:/i.test(a.href) || a.dataset.invite) return
   e.preventDefault()
   openExternal(a.href)
 }, true)
@@ -7482,6 +7496,20 @@ function renderBody(into: HTMLElement, text: string) {
     a.rel = 'noopener noreferrer'
     a.referrerPolicy = 'no-referrer'
     const host = l.asciiHost ?? new URL(l.href).host
+    // An invite to THIS app is not a way out of it. It opened a new tab like
+    // any other link, and on an iPhone that cost a conversation (2026-09-25:
+    // "cos kliknalem i wcielo konwersacje") - the old tab went to the
+    // background where Safari may drop it, or the new tab signed in and the
+    // duplicate-window rule closed both. It opens the add-contact window here,
+    // with nothing to warn about, since nothing is left.
+    const inv = ownInvite(l.href)
+    if (inv) {
+      a.dataset.invite = '1' // the desktop shell's link catcher leaves it alone
+      a.title = tr('Dodaj kontakt z tego zaproszenia')
+      a.addEventListener('click', (e) => { e.preventDefault(); void showInvite(inv) })
+      into.appendChild(a)
+      continue
+    }
     a.title = l.warn === 'idn'
       ? tr('Otwórz — uwaga, adres używa znaków spoza ASCII; przeglądarka pójdzie do {host}', { host })
       : tr('Otwórz {host} w nowej karcie', { host })

@@ -2639,6 +2639,33 @@ async function main() {
     await B.eval(`document.getElementById('import-cancel').click(); return 1`)
     step('a signed-in B notices an invite that only changed the fragment')
 
+    // The same link arriving IN A MESSAGE, which is how it came on 2026-09-25:
+    // the arrow opened a new tab like any other link, and on an iPhone that
+    // cost the conversation. An invite to this app opens here instead.
+    await send(A, `Tu masz zaproszenie ${share.link}`)
+    await B.waitFor('the invite message arrived', `
+      return [...document.querySelectorAll('#messages .b-text a.lnk')].some((a) => a.dataset.invite === '1');
+    `, 25_000)
+    const inMsg = await B.eval<any>(`
+      window.__opened = 0; const wo = window.open; window.open = (...a) => { window.__opened++; return null };
+      const before = location.href, rows = document.querySelectorAll('#messages .mrow').length;
+      const a = [...document.querySelectorAll('#messages .b-text a.lnk')].reverse().find((x) => x.dataset.invite === '1');
+      const ev = new MouseEvent('click', { bubbles: true, cancelable: true });
+      a.dispatchEvent(ev);
+      window.open = wo;
+      return { prevented: ev.defaultPrevented, opened: window.__opened, same: location.href === before,
+               ask: document.getElementById('ask-modal').classList.contains('open'),
+               rowsKept: document.querySelectorAll('#messages .mrow').length === rows && rows > 0 };
+    `)
+    await B.waitFor('the invite in a message opens the add-contact window', `
+      return document.getElementById('import-modal').classList.contains('open');
+    `, 10_000)
+    if (!inMsg.prevented || inMsg.opened || !inMsg.same) throw new Error(`an invite link in a message left the page: ${JSON.stringify(inMsg)}`)
+    if (inMsg.ask) throw new Error('an invite to this app asked about leaving it')
+    if (!inMsg.rowsKept) throw new Error(`the conversation did not survive the click: ${JSON.stringify(inMsg)}`)
+    await B.eval(`document.getElementById('import-cancel').click(); return 1`)
+    step('an invite link in a message opens the add-contact window in place, the conversation stays')
+
     // The desktop app has NO ADDRESS BAR, so a link sent by any other channel
     // can only get in by being pasted — until this existed, invites were a
     // web-only feature there. Pasted with the sentence around it, because that
