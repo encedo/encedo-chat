@@ -689,11 +689,18 @@
   /* A file bubble: an icon, a name that may be long, and one action. The name
      truncates rather than wrapping — a filename is not worth three lines of a
      phone screen. */
-  .b-file{display:flex;align-items:center;gap:10px;min-width:0}
+  .b-file{display:flex;align-items:center;gap:6px 10px;min-width:0;flex-wrap:wrap}
   .b-file .f-ico{font-size:20px;flex-shrink:0}
-  .b-file .f-info{min-width:0;flex:1}
+  /* Two units that may wrap: icon+name, and the buttons. The buttons sit
+     beside the name only when the whole name fits; otherwise they drop to
+     their own line, right-aligned, and the name keeps the full width. Before
+     this a phone bubble gave the name one letter and pushed Download out past
+     the bubble's edge (reported 2026-09-25). */
+  .b-file .f-head{display:flex;align-items:center;gap:10px;flex:1 1 auto;min-width:0}
+  .b-file .f-info{min-width:0;flex:1 1 auto}
   .b-file .f-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
-  .b-file .f-sub{font-size:11.5px;color:var(--muted)}
+  .b-file .f-sub{font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .b-file .f-acts{display:flex;align-items:center;gap:4px;margin-left:auto;flex-shrink:0}
   /* The transport, not the size, is what tells the two kinds of file bubble
      apart -- and it has to survive both themes, so it takes the accent
      token rather than a literal green. */

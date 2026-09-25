@@ -6379,6 +6379,11 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
   sub.textContent = humanSize(env.size) + (fileGone(env) ? ' · ' + tr('wygasł') : '')
   info.append(name, sub)
   const act = document.createElement('button'); act.className = 'f-act'
+  // The buttons travel as one group: on a narrow bubble the group drops to a
+  // second line instead of squeezing the name to one letter (index.html).
+  const acts = document.createElement('div'); acts.className = 'f-acts'; acts.appendChild(act)
+  // Icon and name are one unit too, so a wrap never tears the icon off its name.
+  const head = document.createElement('div'); head.className = 'f-head'; head.append(ico, info)
   const direct = directBlobs.has(env)
   if (direct) {
     // Same bubble on both sides — name, size, when — and ONE action, the same
@@ -6412,7 +6417,7 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
     act.textContent = tr('Zapisz')
     act.addEventListener('click', () => { void saveDirect(env, act) })
     fileEls.set(env, { act, sub })
-    wrap.append(ico, info, act)
+    wrap.append(head, acts)
     bub.appendChild(wrap)
     paintPreview(env)   // a picture or a voice note shows inline, like a sent one does
   } else {
@@ -6424,7 +6429,7 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
     else setFileAction(act, env)
     if (!pending) act.addEventListener('click', () => void downloadFile(env, act))
     fileEls.set(env, { act, sub })
-    wrap.append(ico, info, act)
+    wrap.append(head, acts)
     bub.appendChild(wrap)
   }
 
@@ -6441,7 +6446,7 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
       // pressing it does, and both mean the same fetch underneath.
       see.textContent = previewKind(env.mime) === 'audio' ? tr('Odtwórz') : tr('Pokaż')
       see.addEventListener('click', () => void revealImage(env, see))
-      wrap.insertBefore(see, act)
+      acts.insertBefore(see, act)
       fileEls.get(env)!.see = see
       // The setting, and the cap that keeps it honest: a fetch nobody asked for
       // must not be able to pull eighty megabytes because a `mime` said so.
