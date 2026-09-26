@@ -646,12 +646,19 @@ Galaxy S24/Ultra, landscape, tablet), including the keyboard case. A layout bug
 is a visual fact; assertions about computed styles miss overlap and clipping.
 Two more that are easy to get wrong:
 
-- **Height is `--app-h`, kept in step with `visualViewport`.** A software
-  keyboard does not resize `100vh` — that is the screen — so the composer ends up
-  underneath it. The clamp applies **only** while a field is focused and
-  something really covers the screen (>120px): `visualViewport` reports a smaller
-  height for other reasons too, and an unconditional clamp shrank the app to 63%
-  of the window under an emulated viewport.
+- **Height is `--app-h` — and `--app-h` has never been set.** `trackViewport`
+  (web/src/app.ts), which was meant to keep it in step with `visualViewport`,
+  was written with this layout and **never called** (found 2026-09-26), so the
+  app has always been `100dvh`. On Android the keyboard is handled natively
+  since 0.6.32: the activity is `adjustResize` and takes the IME inset as
+  padding (`src-tauri/android/patch.mjs`), so the webview itself shrinks. Turning
+  `trackViewport` on would change mobile BROWSERS (iPhone Safari) and is a
+  decision to take with a device in hand.
+- **"Short screen" means short AND wide** (`max-height:560px and
+  min-aspect-ratio:3/2`). A resized portrait phone with the keyboard up is
+  ~390x350 — short, but nearly square — and the height-only rule switched the
+  header and sidebar to their landscape shapes mid-typing. The phone-layout
+  scenario in `browser-test` pins it.
 - **`min-height` had to go on phones.** The desktop `.app{min-height:560px}`
   floors the height, and a floored height with the keyboard open pushes the
   composer off screen — exactly what `--app-h` exists to prevent.
