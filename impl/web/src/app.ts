@@ -5709,6 +5709,7 @@ function attachReveal(row: HTMLElement, bub: HTMLElement) {
   row.classList.add('has-act')
   bub.addEventListener('click', (e: any) => {
     if (e.target.closest('button')) return // a control inside the bubble (↻ resend, a file action)
+    if (e.target.closest('.b-thumb')) return // the picture opens the viewer instead
     const sel = window.getSelection()
     if (sel && !sel.isCollapsed && sel.anchorNode && bub.contains(sel.anchorNode)) return
     const open = row.classList.contains('tapped')
@@ -6892,6 +6893,7 @@ function paintPreview(env: FileEnv): HTMLElement | undefined {
   } else {
     const img = document.createElement('img')
     img.className = 'b-thumb'; img.alt = env.name; img.src = url
+    thumbEnv.set(img, env)
     el = img
   }
   // Above the file row, so the name, the size and Download stay exactly where
@@ -6901,6 +6903,135 @@ function paintPreview(env: FileEnv): HTMLElement | undefined {
   els.see = undefined
   refreshJump()
   return el
+}
+
+// ---- the picture viewer ---------------------------------------------------
+/**
+ * A tapped picture, full screen (asked for 2026-09-26). Nothing is fetched:
+ * the thumbnail is already the decrypted picture, held as a blob URL, and the
+ * viewer shows that same URL. Pinch or double-tap to zoom, drag to look
+ * around, wheel on a desktop; close with the cross, Escape, the phone's Back
+ * (a history entry is pushed for exactly that) or a swipe down.
+ */
+const thumbEnv = new WeakMap<HTMLElement, FileEnv>()
+let viewing: { env: FileEnv; url: string; pushed: boolean; back: Element | null } | null = null
+let lbS = 1, lbX = 0, lbY = 0
+const LB_MAX = 6
+function lbPaint(fade = 1) {
+  const img = $('lb-img') as HTMLImageElement
+  img.style.transform = `translate(${lbX}px, ${lbY}px) scale(${lbS})`
+  img.style.opacity = String(fade)
+  $('lb-stage').classList.toggle('zoomed', lbS > 1)
+}
+function lbReset() { lbS = 1; lbX = 0; lbY = 0; lbPaint() }
+function openViewer(env: FileEnv, url: string) {
+  viewing = { env, url, pushed: false, back: document.activeElement }
+  const img = $('lb-img') as HTMLImageElement
+  img.src = url; img.alt = env.name
+  $('lb-name').textContent = env.name
+  $('lb-size').textContent = humanSize(env.size)
+  ;($('lb-save') as HTMLButtonElement).textContent = tr('Zapisz')
+  lbReset()
+  $('lightbox').hidden = false
+  // Back on a phone walks the webview's history, so an entry of our own is
+  // what makes Back close the picture rather than leave the app.
+  try { history.pushState({ ecViewer: 1 }, ''); viewing.pushed = true } catch {}
+  ;($('lb-close') as HTMLElement).focus()
+}
+function closeViewer(fromHistory = false) {
+  const v = viewing
+  if (!v) return
+  viewing = null
+  $('lightbox').hidden = true
+  ;($('lb-img') as HTMLImageElement).removeAttribute('src')
+  if (v.pushed && !fromHistory) history.back()
+  ;(v.back as HTMLElement | null)?.focus?.()
+}
+$('messages').addEventListener('click', (e: any) => {
+  const t = e.target.closest?.('.b-thumb') as HTMLImageElement | null
+  if (!t) return
+  const env = thumbEnv.get(t)
+  if (env && t.src) openViewer(env, t.src)
+})
+window.addEventListener('popstate', () => { if (viewing) closeViewer(true) })
+$('lb-close').addEventListener('click', () => closeViewer())
+// Capture, ahead of every other Escape: the viewer sits above all of them.
+document.addEventListener('keydown', (e: KeyboardEvent) => {
+  if (!viewing || e.key !== 'Escape') return
+  e.preventDefault(); e.stopImmediatePropagation()
+  closeViewer()
+}, true)
+$('lb-save').addEventListener('click', async () => {
+  const v = viewing; if (!v) return
+  const btn = $('lb-save') as HTMLButtonElement
+  const sink = await openSink(v.env.name, btn)
+  if (!sink) return
+  btn.disabled = true
+  try {
+    await sink.write(await (await fetch(v.url)).blob())
+    btn.textContent = tr('Zapisano')
+  } catch (e: any) {
+    void sink.discard()
+    btn.textContent = tr('Błąd'); ecLog('save failed: ' + (e?.message ?? e))
+  }
+  setTimeout(() => { btn.textContent = tr('Zapisz'); btn.disabled = false }, 3000)
+})
+{
+  // Gestures, by hand: two pointers pinch, one pans a zoomed picture or
+  // drags an unzoomed one down to close, a quick second tap toggles zoom.
+  const stage = $('lb-stage')
+  const pts = new Map<number, { x: number; y: number }>()
+  let base = { s: 1, x: 0, y: 0, d: 0, mx: 0, my: 0 }
+  let moved = 0, lastTap = 0
+  const mid = () => { const a = [...pts.values()]; return { x: a.reduce((t, p) => t + p.x, 0) / a.length, y: a.reduce((t, p) => t + p.y, 0) / a.length } }
+  const dist = () => { const [a, b] = [...pts.values()]; return b ? Math.hypot(a.x - b.x, a.y - b.y) : 0 }
+  const rebase = () => { const m = mid(); base = { s: lbS, x: lbX, y: lbY, d: dist(), mx: m.x, my: m.y } }
+  stage.addEventListener('pointerdown', (e: PointerEvent) => {
+    if (!viewing) return
+    stage.setPointerCapture?.(e.pointerId)
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (pts.size === 1) moved = 0
+    rebase()
+  })
+  stage.addEventListener('pointermove', (e: PointerEvent) => {
+    if (!pts.has(e.pointerId)) return
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    const m = mid()
+    const dx = m.x - base.mx, dy = m.y - base.my
+    moved = Math.max(moved, Math.hypot(dx, dy))
+    if (pts.size >= 2 && base.d > 0) {
+      lbS = Math.min(LB_MAX, Math.max(1, base.s * dist() / base.d))
+      lbX = base.x + dx; lbY = base.y + dy
+      lbPaint()
+    } else if (lbS > 1) {
+      lbX = base.x + dx; lbY = base.y + dy; lbPaint()
+    } else {
+      lbX = 0; lbY = Math.max(0, dy) // only downwards: that is the gesture that closes
+      lbPaint(Math.max(0.3, 1 - lbY / 400))
+    }
+  })
+  const up = (e: PointerEvent) => {
+    if (!pts.delete(e.pointerId)) return
+    if (pts.size) { rebase(); return }
+    if (lbS <= 1) {
+      if (lbY > 120) { closeViewer(); return }
+      lbReset()
+    }
+    if (moved < 10) { // a tap, not a drag
+      const now = Date.now()
+      if (now - lastTap < 300) { lastTap = 0; if (lbS > 1) lbReset(); else { lbS = 2.5; lbX = 0; lbY = 0; lbPaint() } }
+      else lastTap = now
+    }
+  }
+  stage.addEventListener('pointerup', up)
+  stage.addEventListener('pointercancel', up)
+  stage.addEventListener('wheel', (e: WheelEvent) => {
+    if (!viewing) return
+    e.preventDefault()
+    lbS = Math.min(LB_MAX, Math.max(1, lbS * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
+    if (lbS === 1) { lbX = 0; lbY = 0 }
+    lbPaint()
+  }, { passive: false })
 }
 
 /** Fetch and decrypt one file's bytes. The single place that does it, so

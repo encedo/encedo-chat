@@ -1390,6 +1390,29 @@ async function main() {
       `, 40_000)
       step('one click fetches, decrypts and draws it — and Download stays')
 
+      // The picture, full screen (asked for 2026-09-26): the same blob, no
+      // second fetch, and Escape (Back on a phone) closes it without leaving.
+      const lbOpen = await B.eval<any>(`
+        const row = [...document.querySelectorAll('#messages .mrow')]
+          .find((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(imgTok2)}));
+        const thumb = row.querySelector('.b-thumb');
+        const before = location.href;
+        thumb.click();
+        const lb = document.getElementById('lightbox'), img = document.getElementById('lb-img');
+        const r = img.getBoundingClientRect();
+        return { shown: !lb.hidden, same: img.src === thumb.src, name: document.getElementById('lb-name').textContent,
+                 full: Math.round(lb.getBoundingClientRect().width) === innerWidth, drawn: r.width > 0 && r.height > 0,
+                 barOpen: row.classList.contains('tapped'), url: location.href === before };
+      `)
+      if (!lbOpen.shown || !lbOpen.same || !lbOpen.full || !lbOpen.drawn) throw new Error(`tapping the picture did not show it full screen: ${JSON.stringify(lbOpen)}`)
+      if (!lbOpen.name.includes(imgTok2)) throw new Error(`the viewer names another file: ${lbOpen.name}`)
+      if (lbOpen.barOpen) throw new Error('tapping the picture also popped the bubble bar')
+      await B.eval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return 1`)
+      await B.waitFor('Escape closes the viewer', `return document.getElementById('lightbox').hidden`, 5_000)
+      const lbAfter = await B.eval<any>(`return { rows: document.querySelectorAll('#messages .mrow').length, src: document.getElementById('lb-img').getAttribute('src') }`)
+      if (!lbAfter.rows || lbAfter.src) throw new Error(`closing the viewer lost the conversation or kept the picture: ${JSON.stringify(lbAfter)}`)
+      step('a tap shows the picture full screen, Escape closes it, the conversation stays')
+
       // ---- and the voice note the SENDER just sent -------------------------
       // Reported from a phone (0.5.58): "recording works, but I cannot listen
       // to it after sending — there is no such option". The bubble is drawn

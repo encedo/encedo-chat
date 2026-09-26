@@ -717,7 +717,25 @@
      screenshot is wide and a photo is tall, and cropping either one to a square
      hides the thing somebody sent. It sits ABOVE the file row, which keeps its
      name, size and Download exactly where they were. */
-  .b-thumb{display:block;max-width:100%;max-height:320px;border-radius:8px;margin-bottom:6px}
+  .b-thumb{display:block;max-width:100%;max-height:320px;border-radius:8px;margin-bottom:6px;cursor:zoom-in}
+  /* The picture viewer: a tapped thumbnail, full screen. Black in both themes
+     on purpose - it is a photo on its own, the way a phone's gallery shows it,
+     and a themed ground would tint every picture. Fixed, so it pays the system
+     bars itself (safe-area is not inherited by an overlay). */
+  .lightbox{position:fixed;inset:0;z-index:70;background:#000;display:flex;flex-direction:column;overscroll-behavior:contain}
+  .lb-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;cursor:zoom-in}
+  .lb-stage.zoomed{cursor:grab}
+  .lb-img{max-width:100%;max-height:100%;object-fit:contain;transform-origin:center center;user-select:none;-webkit-user-drag:none;will-change:transform}
+  .lb-close{position:absolute;top:calc(10px + env(safe-area-inset-top,0px));right:10px;width:44px;height:44px;border-radius:50%;
+    border:none;background:rgba(0,0,0,.55);color:#fff;font-size:20px;cursor:pointer;z-index:1}
+  .lb-bar{display:flex;align-items:center;gap:12px;padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));background:rgba(20,20,20,.9);color:#eee}
+  .lb-info{flex:1;min-width:0}
+  .lb-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+  .lb-size{color:#aaa;font-size:12px}
+  .lb-save{flex-shrink:0;border:1px solid rgba(255,255,255,.4);background:rgba(255,255,255,.12);color:#fff;border-radius:8px;
+    padding:8px 14px;font-weight:600;cursor:pointer;min-height:40px}
+  .lb-save[disabled]{opacity:.55;cursor:default}
+  .lb-close:focus-visible,.lb-save:focus-visible{outline:2px solid #fff;outline-offset:2px}
   .b-file .f-see{flex-shrink:0;border:none;background:none;color:var(--accent);font-size:12px;
     padding:6px 8px;border-radius:8px;cursor:pointer}
   .b-file .f-see[disabled]{opacity:.55;cursor:default}
@@ -1466,6 +1484,16 @@
        is open, and a popup clipped by its own pane is a popup nobody sees. -->
   <div class="mention-pop" id="mention-pop" hidden></div>
   <div class="scrim" id="scrim"></div>
+  <!-- The picture viewer (app.ts openViewer). Outside #app so no layout of
+       the app can clip it, and above every modal. -->
+  <div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="Podgląd zdjęcia" data-i18n-aria-label="Podgląd zdjęcia" hidden>
+    <button class="lb-close" id="lb-close" type="button" title="Zamknij" data-i18n-title="Zamknij" aria-label="Zamknij" data-i18n-aria-label="Zamknij">✕</button>
+    <div class="lb-stage" id="lb-stage"><img class="lb-img" id="lb-img" alt="" draggable="false"></div>
+    <div class="lb-bar">
+      <div class="lb-info"><div class="lb-name" id="lb-name"></div><div class="lb-size" id="lb-size"></div></div>
+      <button class="lb-save" id="lb-save" type="button" data-i18n="Zapisz">Zapisz</button>
+    </div>
+  </div>
   <div class="toast" id="toast"></div>
 
   <div id="upd-bar" hidden><span id="upd-txt"></span><div class="upd-track"><div id="upd-fill"></div></div></div>
