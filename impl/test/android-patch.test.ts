@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { patchManifest, patchActivity, PERMISSIONS, OPTIONAL_FEATURES, patchIconBackground, RUNNING_STRING, stringsXml } from '../src-tauri/android/patch.mjs'
+import { patchManifest, patchActivity, patchSoftInput, PERMISSIONS, OPTIONAL_FEATURES, patchIconBackground, RUNNING_STRING, stringsXml } from '../src-tauri/android/patch.mjs'
 
 /**
  * The real templates, copied from tauri-cli 2.11.4 with its placeholders
@@ -218,4 +218,24 @@ test('the camera and the microphone are declared OPTIONAL', () => {
       xml.includes(`<uses-feature android:name="${f}" android:required="false" />`),
       `${f} must be declared optional, or a device without it cannot run the app`)
   }
+})
+
+test('the keyboard resizes the app instead of sliding it under the status bar', () => {
+  // Reported twice (2026-09-25, 2026-09-26): with the keyboard up the whole
+  // window was panned and the header disappeared under the status bar. The
+  // template sets no mode, so Android chose PAN.
+  assert.ok(!MANIFEST.includes('windowSoftInputMode'), 'the template itself sets no mode')
+  const out = patchManifest(MANIFEST)
+  const act = out.slice(out.indexOf('<activity'), out.indexOf('</activity>'))
+  assert.ok(act.includes('android:windowSoftInputMode="adjustResize"'), 'the activity asks to be resized')
+  assert.equal(patchSoftInput(out), out, 'patching twice changes nothing')
+  assert.equal(out.split('windowSoftInputMode').length, 2, 'set exactly once')
+  // Under edge-to-edge the system reports the keyboard as an inset instead of
+  // resizing, so the activity must take it as padding - after the content
+  // view exists, i.e. after super.onCreate.
+  const kt = patchActivity(ACTIVITY)
+  assert.ok(!ACTIVITY.includes('WindowInsetsCompat.Type.ime()'))
+  assert.ok(kt.includes('WindowInsetsCompat.Type.ime()'))
+  assert.ok(kt.includes('v.setPadding(0, 0, 0, ime)'))
+  assert.ok(kt.indexOf('setOnApplyWindowInsetsListener') > kt.indexOf('super.onCreate(savedInstanceState)'))
 })

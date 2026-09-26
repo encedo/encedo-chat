@@ -72,9 +72,27 @@ export const OPTIONAL_FEATURES = [
   'android.hardware.microphone',
 ]
 
+/**
+ * The keyboard. The template sets no `windowSoftInputMode`, so Android picked
+ * PAN for us: with the keyboard up the whole window slid up by its height and
+ * the conversation's header went under the status bar (reported twice,
+ * 2026-09-25 and 2026-09-26; a page-side fix could not help, because a panned
+ * window looks exactly like an untouched one from inside the webview). Resize
+ * is the mode that lets the app keep its header; under edge-to-edge the
+ * activity has to apply the keyboard's inset itself (`KEYBOARD` below).
+ * Idempotent on its own, because it came after the rest of this patch.
+ */
+export function patchSoftInput(xml) {
+  if (xml.includes('android:windowSoftInputMode')) return xml
+  const anchor = 'android:name=".MainActivity"'
+  if (!xml.includes(anchor)) throw new Error('manifest: the MainActivity anchor is gone')
+  return xml.replace(anchor, anchor + '\n            android:windowSoftInputMode="adjustResize"')
+}
+
 export function patchManifest(xml) {
   const anchor = '<uses-permission android:name="android.permission.INTERNET" />'
   if (!xml.includes(anchor)) throw new Error('manifest: the INTERNET permission anchor is gone')
+  xml = patchSoftInput(xml)
   if (xml.includes('OnchatoService')) return xml // already patched
 
   const perms = PERMISSIONS.map((p) => `    <uses-permission android:name="${p}" />`).join('\n')
@@ -102,6 +120,33 @@ export function patchManifest(xml) {
   return xml.replace(close, service + close)
 }
 
+/**
+ * The other half of `patchSoftInput`. Edge-to-edge means the system no longer
+ * shrinks the window for the keyboard; it reports the keyboard as an inset and
+ * leaves the rest to us. The content view takes it as bottom padding, so the
+ * webview gets the height above the keyboard and the page's own layout (the
+ * composer at the bottom, the header at the top) simply fits. While the
+ * keyboard is up the navigation bar sits under it, so the webview is told
+ * there is no bottom bar - otherwise the composer keeps a bar-high gap above
+ * the keys.
+ */
+export const KEYBOARD = `
+    // The keyboard: see patchSoftInput in android/patch.mjs.
+    val content = findViewById<android.view.View>(android.R.id.content)
+    androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
+      val t = androidx.core.view.WindowInsetsCompat.Type.ime()
+      val ime = insets.getInsets(t).bottom
+      v.setPadding(0, 0, 0, ime)
+      if (ime == 0) insets else {
+        val nav = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars())
+        androidx.core.view.WindowInsetsCompat.Builder(insets)
+          .setInsets(androidx.core.view.WindowInsetsCompat.Type.navigationBars(),
+            androidx.core.graphics.Insets.of(nav.left, nav.top, nav.right, 0))
+          .setInsets(t, androidx.core.graphics.Insets.NONE)
+          .build()
+      }
+    }`
+
 export function patchActivity(kt) {
   if (kt.includes('OnchatoService')) return kt // already patched
   const anchor = `  override fun onCreate(savedInstanceState: Bundle?) {
@@ -113,6 +158,7 @@ export function patchActivity(kt) {
   const body = `  override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+${KEYBOARD.slice(1)}
     // Asked here rather than at the moment a notification is drawn: by then the
     // app is in the background, where a permission dialog cannot be shown.
     val wanted = arrayOf(
