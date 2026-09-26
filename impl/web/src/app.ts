@@ -8996,6 +8996,12 @@ const showChatPane = (on: boolean) => $('app').classList.toggle('chat-open', on)
 $('btn-back').addEventListener('click', () => { showChatPane(false); renderContacts(); renderGroups() })
 
 /**
+ * WARNING: never called. Written with the phone layout (1ed904e, 2026-07-31)
+ * and never wired, so `--app-h` and `--vv-top` have only ever held their CSS
+ * defaults (found 2026-09-26). The Android app now resizes natively for the
+ * keyboard; switching this on would change mobile BROWSERS (iPhone Safari),
+ * which is a decision to take with a device in hand, not a cleanup.
+ *
  * Keep the app exactly as tall as the VISIBLE viewport.
  *
  * A software keyboard does not resize `100vh` — that is the screen — so the

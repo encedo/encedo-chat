@@ -1118,7 +1118,9 @@
        header above the screen, under the status bar (reported 2026-09-25).
        Start it where the visible area starts. A margin, not position or
        transform: those would change what fixed and absolute children are
-       placed against. `--vv-top` is 0 whenever nothing covers the screen. */
+       placed against. `--vv-top` is 0 whenever nothing covers the screen.
+       NOTE: inert - `trackViewport` in app.ts was never called, so the
+       variable is never set; the Android fix is native (android/patch.mjs). */
     .app{margin-top:var(--vv-top,0px)}
     .splitter{display:none}
     .sidebar,.chat{border-radius:0;border-left:none;border-right:none;box-shadow:none}
@@ -1152,8 +1154,13 @@
        off-centre rather than any centring rule being wrong. */
     .login-links{flex-wrap:wrap;justify-content:center;gap:8px 16px}
   }
-  /* A short screen has no room for a wrapped header: keep it on one line. */
-  @media (max-height:560px){
+  /* A short screen has no room for a wrapped header: keep it on one line.
+     Short AND wide: a phone on its side is ~2:1. Height alone was the rule,
+     and since the Android app resizes for the keyboard (0.6.32) a portrait
+     phone typing is ~350px tall too - nearly square - so the header and the
+     sidebar jumped to their landscape shapes the moment the keyboard opened
+     (reported 2026-09-26, a 2px shift of the header). */
+  @media (max-height:560px) and (min-aspect-ratio:3/2){
     .chat-head{flex-wrap:nowrap;overflow-x:auto;padding:8px 12px}
 
     /* ---- and no room for the sidebar's chrome either -----------------------

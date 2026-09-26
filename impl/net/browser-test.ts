@@ -2302,6 +2302,22 @@ async function main() {
     await B.waitFor('the conversation again', `return document.getElementById('app').classList.contains('chat-open')`, 15_000)
     await sleep(400)
     step(`${label}: one pane, a way back, and a composer above the fold`)
+    const shortShape = await B.eval<boolean>(`return getComputedStyle(document.querySelector('.chat-head')).paddingTop === '8px'`)
+    if (shortShape !== (label === 'landscape')) throw new Error(`phone layout (${label}): the short-screen header is ${shortShape ? 'on' : 'off'}`)
+    if (label === 'portrait') {
+      // The keyboard, as the Android app sees it since 0.6.32: a field has
+      // focus and the window is resized to the part above the keys. A portrait
+      // phone typing is not a phone on its side (2026-09-26: the header jumped).
+      const head0 = await B.eval<string>(`return getComputedStyle(document.querySelector('.chat-head')).paddingTop`)
+      await B.eval(`document.getElementById('msg-input').focus(); return 1`)
+      await B.resize(390, 350)
+      const typing = await B.eval<any>(`return { pad: getComputedStyle(document.querySelector('.chat-head')).paddingTop, h: innerHeight, w: innerWidth }`)
+      if (typing.pad !== head0) throw new Error(`phone layout: the keyboard switched to the landscape shape: ${JSON.stringify(typing)} (was ${head0})`)
+      await B.eval(`document.getElementById('msg-input').blur(); return 1`)
+      await B.resize(390, 780)
+      await sleep(200)
+      step('portrait with the keyboard up keeps its header: no landscape shape')
+    }
     }
     await B.resize(1200, 800)
 
