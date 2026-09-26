@@ -49,6 +49,12 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '🤝 Securing…': '🤝 Zabezpieczam…',
   },
   en: {
+    '{ok} z {n} dostarczone': '{ok} of {n} delivered',
+    'Klient rozmówcy potwierdził odbiór każdego pliku': 'The other side confirmed every file',
+    'Nie wszystkie pliki doszły — przy tych, które nie doszły, jest „Ponów”': 'Not every file arrived — the ones that did not have “Retry”',
+    'Czekam na potwierdzenie pozostałych': 'Waiting for the rest to be confirmed',
+    'Poprzednie': 'Previous',
+    'Następne': 'Next',
     'Podgląd zdjęcia': 'Picture preview',
     'Dodaj kontakt z tego zaproszenia': 'Add the contact from this invite',
     '↻ Ponów': '↻ Retry',

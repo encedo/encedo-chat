@@ -64,7 +64,7 @@ import { beginSave, browserSaveEnv, type SaveEnv, type SaveSink } from '../../li
 import { newInboxSecret, inboxSecretBytes } from '../../lib/invite.ts'
 import { cidMatches, isVerifiableCid } from '../../lib/cid.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
-import type { FileEnv } from '../../lib/envelope.ts'
+import type { FileEnv, AlbumRef } from '../../lib/envelope.ts'
 import { nowMs, localHHMM, utcISO } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
@@ -405,6 +405,7 @@ function paintPending() {
     if (!el.dataset.pending) continue
     if (el.textContent !== l.text) { el.textContent = l.text; el.title = l.title }
   }
+  for (const a of albumEls.values()) paintAlbumState(a.row)
 }
 
 function paintStatus() {
@@ -1490,7 +1491,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
       // already watched. Logout does not need this - it reloads the page.
       stopInboxWatches()
       $('messages').innerHTML = ''
-      msgEls.clear(); stateEls.clear(); setTyping(false)
+      msgEls.clear(); stateEls.clear(); albumEls.clear(); setTyping(false)
       appendSys(tr('Wykryto drugie okno zalogowane na tę samą tożsamość.')
         + tr(' Obie sesje zostały zamknięte — jedna tożsamość, jedna aktywna sesja.')
         + tr(' Zamknij nadmiarową kartę i odśwież tę, w której chcesz rozmawiać.'))
@@ -5036,6 +5037,8 @@ function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
   const el = stateEls.get(id)
   if (!el) return
   delete el.dataset.pending // settled one way or the other: no longer "waiting for"
+  el.dataset.state = state
+  const albumRow = el.closest('.alb-cell') ? el.closest('.mrow') as HTMLElement | null : null
   if (state === 'ok') {
     el.textContent = tr(' · ✓ ') + tr('dostarczone')
     el.title = tr('Klient rozmówcy potwierdził odbiór{when} — to nie jest „przeczytane”', { when: ms !== undefined ? tr(' po {ms} ms', { ms }) : '' })
@@ -5063,9 +5066,12 @@ function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
       el.textContent = tr(' · wysyłam ponownie…')
       el.title = tr('Czekam na potwierdzenie od klienta rozmówcy')
       el.dataset.pending = '1'
+      el.dataset.state = 'pending'
+      if (albumRow) paintAlbumState(albumRow)
     })
     el.appendChild(again)
   }
+  if (albumRow) paintAlbumState(albumRow)
 }
 
 /**
@@ -6409,12 +6415,33 @@ function sendEditComposer(): boolean {
  *  event so switching rooms replays it from the log. */
 function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string, au?: string) {
   const box = $('messages')
-  const row = document.createElement('div'); row.className = 'mrow ' + (kind === 'me' ? 'out' : 'in')
-  const bub = document.createElement('div'); bub.className = 'bubble'
-  if (who && kind === 'peer') {
-    const w = document.createElement('div'); w.className = 'b-who'; w.textContent = who; bub.appendChild(w)
+  // Several files picked together land in ONE bubble (`env.album`): the first
+  // to arrive builds it, the rest become cells in its grid. A direct transfer
+  // is always a single file.
+  const album = env.album && !directBlobs.has(env) ? env.album : undefined
+  const akey = album ? `${kind}:${au ?? ''}:${album.id}` : ''
+  const existing = album ? albumEls.get(akey) : undefined
+  let row: HTMLElement, bub: HTMLElement, holder: HTMLElement
+  if (existing) {
+    row = existing.row; bub = existing.bub; holder = albumCell(existing.grid, album!.i)
+  } else {
+    row = document.createElement('div'); row.className = 'mrow ' + (kind === 'me' ? 'out' : 'in')
+    bub = document.createElement('div'); bub.className = 'bubble'
+    if (who && kind === 'peer') {
+      const w = document.createElement('div'); w.className = 'b-who'; w.textContent = who; bub.appendChild(w)
+    }
+    if (album) {
+      bub.classList.add('album')
+      const grid = document.createElement('div'); grid.className = 'b-album'
+      bub.appendChild(grid)
+      albumEls.set(akey, { row, bub, grid })
+      holder = albumCell(grid, album.i)
+    } else holder = bub
   }
-  if (env.re) bub.appendChild(quoteBlock(env.re))
+  if (env.re) {
+    const q = quoteBlock(env.re)
+    if (album) bub.insertBefore(q, bub.querySelector('.b-album')); else bub.appendChild(q)
+  }
   const wrap = document.createElement('div'); wrap.className = 'b-file' + (fileGone(env) ? ' gone' : '')
   const ico = document.createElement('span'); ico.className = 'f-ico'; ico.textContent = '📄'
   const info = document.createElement('div'); info.className = 'f-info'
@@ -6462,7 +6489,7 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
     act.addEventListener('click', () => { void saveDirect(env, act) })
     fileEls.set(env, { act, sub })
     wrap.append(head, acts)
-    bub.appendChild(wrap)
+    holder.appendChild(wrap)
     paintPreview(env)   // a picture or a voice note shows inline, like a sent one does
   } else {
     // No cid yet means it is still being encrypted or uploaded: the button shows
@@ -6474,7 +6501,7 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
     if (!pending) act.addEventListener('click', () => void downloadFile(env, act))
     fileEls.set(env, { act, sub })
     wrap.append(head, acts)
-    bub.appendChild(wrap)
+    holder.appendChild(wrap)
   }
 
   // An image gets a second, quieter action. Not a replacement for Download:
@@ -6511,7 +6538,35 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
   if (env.body) {
     const cap = document.createElement('div'); cap.className = 'b-text b-caption'
     renderBody(cap, env.body)
-    bub.appendChild(cap)
+    // In an album the caption sits under the grid, above the album's one meta
+    // line - which exists already when this is not the first file to arrive.
+    bub.insertBefore(cap, existing ? bub.querySelector(':scope > .b-meta') : null)
+  }
+
+  if (album) {
+    // One delivery marker per FILE still exists - it is what `setDelivery`
+    // updates and what carries the retry - but it lives in the cell and shows
+    // only when that file failed; the album's line sums the rest up.
+    let cellSt: HTMLElement | undefined
+    if (kind === 'me') {
+      cellSt = document.createElement('span'); cellSt.className = 'b-state'
+      const l = pendingLabel()
+      cellSt.textContent = l.text; cellSt.title = l.title; cellSt.dataset.pending = '1'; cellSt.dataset.state = 'pending'
+      holder.appendChild(cellSt)
+    }
+    if (!existing) {
+      const meta = document.createElement('div'); meta.className = 'b-meta'; stampTime(meta, ts)
+      if (kind === 'me') { const sum = document.createElement('span'); sum.className = 'alb-state'; meta.appendChild(sum) }
+      const rx = document.createElement('div'); rx.className = 'b-reactions'
+      bub.append(meta, rx)
+      if (au) row.dataset.au = au
+      row.appendChild(bub)
+      box.appendChild(row)
+    }
+    wireBubbleId(row, env.id, cellSt)
+    paintAlbumState(row)
+    refreshJump()
+    return
   }
 
   const meta = document.createElement('div'); meta.className = 'b-meta'; stampTime(meta, ts)
@@ -6573,23 +6628,54 @@ function appendFile(kind: 'me' | 'peer', env: FileEnv, ts: number, who?: string,
  * Idempotent, because the sending path calls it twice by construction: once at
  * draw time with no id yet, once when the send returns one.
  */
-function wireBubbleId(row: HTMLElement, id: string) {
-  if (!id || row.dataset.mid === id) return
+function wireBubbleId(row: HTMLElement, id: string, stEl?: HTMLElement) {
+  if (!id) return
   const bub = row.querySelector('.bubble') as HTMLElement | null
   const rx = row.querySelector('.b-reactions') as HTMLElement | null
   if (!bub || !rx) return
   msgEls.set(id, rx)          // where an incoming reaction is drawn
-  row.dataset.mid = id        // what a reply and a scroll-to-quote look for
-  attachReactionBar(row, id)  // the controls
-  attachReveal(row, bub)      // and the press that shows them
+  // An album is one bubble holding several ids: every one of them finds its
+  // reactions here, and the FIRST one wired owns the bar and the press, which
+  // must not be attached twice (two reveal handlers cancel each other out).
+  if (!row.dataset.mid) {
+    row.dataset.mid = id        // what a reply and a scroll-to-quote look for
+    attachReactionBar(row, id)  // the controls
+    attachReveal(row, bub)      // and the press that shows them
+  }
   // And the delivery marker, for the same reason the rest of this helper
   // exists: a file we send is drawn BEFORE its id is minted, so registering it
   // at draw time would file it under the empty string and every later
   // confirmation would miss it. A direct transfer's marker is already final
   // (`settled`) and no delivery event will ever name its id, so it stays out.
-  const st = row.querySelector('.b-state') as HTMLElement | null
+  const st = stEl ?? row.querySelector('.b-state') as HTMLElement | null
   if (st && !st.dataset.settled) stateEls.set(id, st)
   paintRoute(id)
+}
+
+/** Album bubbles on screen, by `${kind}:${author}:${album id}`; cleared with the transcript. */
+const albumEls = new Map<string, { row: HTMLElement; bub: HTMLElement; grid: HTMLElement }>()
+/** A cell for file `i`, placed in album order whatever order the files arrive in. */
+function albumCell(grid: HTMLElement, i: number): HTMLElement {
+  const cell = document.createElement('div'); cell.className = 'alb-cell'; cell.dataset.i = String(i)
+  const after = [...grid.children].find((c) => Number((c as HTMLElement).dataset.i) > i) ?? null
+  grid.insertBefore(cell, after)
+  return cell
+}
+/** The album's one delivery line, summed up from its files' own markers. */
+function paintAlbumState(row: HTMLElement) {
+  const sum = row.querySelector('.alb-state') as HTMLElement | null
+  if (!sum) return
+  const cells = [...row.querySelectorAll<HTMLElement>('.alb-cell .b-state')]
+  const ok = cells.filter((c) => c.dataset.state === 'ok' || c.dataset.state === 'late').length
+  const lost = cells.filter((c) => c.dataset.state === 'lost').length
+  if (cells.length && ok === cells.length) {
+    sum.textContent = tr(' · ✓ ') + tr('dostarczone'); sum.title = tr('Klient rozmówcy potwierdził odbiór każdego pliku')
+  } else if (ok || lost) {
+    sum.textContent = ' · ' + tr('{ok} z {n} dostarczone', { ok, n: cells.length })
+    sum.title = lost ? tr('Nie wszystkie pliki doszły — przy tych, które nie doszły, jest „Ponów”') : tr('Czekam na potwierdzenie pozostałych')
+  } else {
+    const l = pendingLabel(); sum.textContent = l.text; sum.title = l.title
+  }
 }
 
 
@@ -6883,7 +6969,8 @@ function voicePlayer(url: string): HTMLElement {
 function paintPreview(env: FileEnv): HTMLElement | undefined {
   const url = previews.get(env); if (!url) return
   const els = fileEls.get(env); if (!els) return
-  const bub = els.act.closest('.bubble') as HTMLElement | null
+  // In an album the picture belongs to its CELL, not to the whole bubble.
+  const bub = (els.act.closest('.alb-cell') ?? els.act.closest('.bubble')) as HTMLElement | null
   const wrap = els.act.closest('.b-file') as HTMLElement | null
   if (!bub || !wrap || bub.querySelector('.b-thumb, .b-voice')) return
   const kind = previewKind(env.mime)
@@ -6914,7 +7001,7 @@ function paintPreview(env: FileEnv): HTMLElement | undefined {
  * (a history entry is pushed for exactly that) or a swipe down.
  */
 const thumbEnv = new WeakMap<HTMLElement, FileEnv>()
-let viewing: { env: FileEnv; url: string; pushed: boolean; back: Element | null } | null = null
+let viewing: { env: FileEnv; url: string; pushed: boolean; back: Element | null; list: { env: FileEnv; url: string }[]; at: number } | null = null
 let lbS = 1, lbX = 0, lbY = 0
 const LB_MAX = 6
 function lbPaint(fade = 1) {
@@ -6924,14 +7011,25 @@ function lbPaint(fade = 1) {
   $('lb-stage').classList.toggle('zoomed', lbS > 1)
 }
 function lbReset() { lbS = 1; lbX = 0; lbY = 0; lbPaint() }
-function openViewer(env: FileEnv, url: string) {
-  viewing = { env, url, pushed: false, back: document.activeElement }
+/** Show picture `at` of the viewer's list: an album's pictures, or just the one. */
+function lbShow(at: number) {
+  const v = viewing; if (!v) return
+  v.at = (at + v.list.length) % v.list.length
+  const { env, url } = v.list[v.at]
+  v.env = env; v.url = url
   const img = $('lb-img') as HTMLImageElement
   img.src = url; img.alt = env.name
   $('lb-name').textContent = env.name
-  $('lb-size').textContent = humanSize(env.size)
+  $('lb-size').textContent = (v.list.length > 1 ? `${v.at + 1} / ${v.list.length} · ` : '') + humanSize(env.size)
   ;($('lb-save') as HTMLButtonElement).textContent = tr('Zapisz')
+  $('lb-prev').hidden = $('lb-next').hidden = v.list.length < 2
   lbReset()
+}
+const lbGo = (d: number) => { if (viewing && viewing.list.length > 1) lbShow(viewing.at + d) }
+function openViewer(env: FileEnv, url: string, list?: { env: FileEnv; url: string }[]) {
+  const all = list?.length ? list : [{ env, url }]
+  viewing = { env, url, pushed: false, back: document.activeElement, list: all, at: Math.max(0, all.findIndex((x) => x.url === url)) }
+  lbShow(viewing.at)
   $('lightbox').hidden = false
   // Back on a phone walks the webview's history, so an entry of our own is
   // what makes Back close the picture rather than leave the app.
@@ -6951,13 +7049,22 @@ $('messages').addEventListener('click', (e: any) => {
   const t = e.target.closest?.('.b-thumb') as HTMLImageElement | null
   if (!t) return
   const env = thumbEnv.get(t)
-  if (env && t.src) openViewer(env, t.src)
+  if (!env || !t.src) return
+  // In an album, every picture already shown in it can be reached from here.
+  const grid = t.closest('.b-album')
+  const list = grid ? [...grid.querySelectorAll<HTMLImageElement>('.b-thumb')]
+    .map((x) => ({ env: thumbEnv.get(x)!, url: x.src })).filter((x) => x.env && x.url) : undefined
+  openViewer(env, t.src, list)
 })
+$('lb-prev').addEventListener('click', () => lbGo(-1))
+$('lb-next').addEventListener('click', () => lbGo(1))
 window.addEventListener('popstate', () => { if (viewing) closeViewer(true) })
 $('lb-close').addEventListener('click', () => closeViewer())
 // Capture, ahead of every other Escape: the viewer sits above all of them.
 document.addEventListener('keydown', (e: KeyboardEvent) => {
-  if (!viewing || e.key !== 'Escape') return
+  if (!viewing) return
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); lbGo(e.key === 'ArrowLeft' ? -1 : 1); return }
+  if (e.key !== 'Escape') return
   e.preventDefault(); e.stopImmediatePropagation()
   closeViewer()
 }, true)
@@ -7005,6 +7112,8 @@ $('lb-save').addEventListener('click', async () => {
       lbPaint()
     } else if (lbS > 1) {
       lbX = base.x + dx; lbY = base.y + dy; lbPaint()
+    } else if (Math.abs(dx) > Math.abs(dy) && (viewing?.list.length ?? 0) > 1) {
+      lbX = dx; lbY = 0; lbPaint() // sideways: to the next picture of the album
     } else {
       lbX = 0; lbY = Math.max(0, dy) // only downwards: that is the gesture that closes
       lbPaint(Math.max(0.3, 1 - lbY / 400))
@@ -7015,6 +7124,7 @@ $('lb-save').addEventListener('click', async () => {
     if (pts.size) { rebase(); return }
     if (lbS <= 1) {
       if (lbY > 120) { closeViewer(); return }
+      if (Math.abs(lbX) > 80) { lbGo(lbX < 0 ? 1 : -1); return }
       lbReset()
     }
     if (moved < 10) { // a tap, not a drag
@@ -7080,7 +7190,7 @@ async function revealImage(env: FileEnv, btn: HTMLButtonElement, play = true) {
  * travels in the envelope over the ratchet or a group sender key. The store
  * gets a nameless blob and its size, and holds it for minutes.
  */
-async function attachFile(f: File, after?: Promise<unknown>) {
+async function attachFile(f: File, after?: Promise<unknown>, album?: AlbumRef) {
   const gid = activeGid
   const room = gid ? null : activeRoom()
   if (!gid && !room?.conv) return
@@ -7117,6 +7227,7 @@ async function attachFile(f: File, after?: Promise<unknown>) {
     key: '', chunk: 0, chunks: 0, alg: '',
     ...(caption ? { body: caption } : {}),
     ...(re ? { re } : {}),
+    ...(album ? { album } : {}),
   } as unknown as FileEnv
   // A file we are sending previews for FREE: we hold the plaintext, so there is
   // no fetch to justify and nothing to ask. Registered before the bubble is
@@ -7147,6 +7258,7 @@ async function attachFile(f: File, after?: Promise<unknown>) {
       exp: nowMs() + FILE_TTL_MS,
       ...(caption ? { body: caption } : {}),
       ...(re ? { re } : {}),
+      ...(album ? { album } : {}),
     }
     // Evidence line (debug only). Everything needed to fetch the blob from the
     // store and open it — which is the point: paste it into net/file-decrypt.ts
@@ -7168,7 +7280,9 @@ async function attachFile(f: File, after?: Promise<unknown>) {
     // helper the draw path uses. Doing it by hand here is what left a file we
     // sent with a reaction bar and no way to open it.
     const idRow = fileEls.get(pending)?.act.closest('.mrow') as HTMLElement | null
-    if (idRow) wireBubbleId(idRow, pending.id)
+    // In an album this file's own delivery marker is in its cell.
+    const cellSt = fileEls.get(pending)?.act.closest('.alb-cell')?.querySelector('.b-state') as HTMLElement | null
+    if (idRow) wireBubbleId(idRow, pending.id, cellSt ?? undefined)
     show(tr('Pobierz'), humanSize(f.size))
     const els = fileEls.get(pending)
     if (els) {
@@ -7743,7 +7857,7 @@ async function activateRoom(pub: string) {
   // Read what was kept BEFORE the replay: the pins go to the head of the log, so
   // the replay itself puts them at the top with no special case.
   await loadPins(pub, room.log)
-  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false); cancelReply(); cancelEdit()
+  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); albumEls.clear(); setTyping(false); cancelReply(); cancelEdit()
   for (const ev of room.log) applyEv(ev)
   paintSecurity(room); paintTransport(room); paintStatus(); paintKnockButton()
   startRotation(); renderContacts()
@@ -7944,8 +8058,13 @@ function sendComposer() {
     // bubbles land in pick order in THIS conversation even if the screen
     // moves on while they upload; each send waits for the one before it.
     showAttach(null)
-    let prev = attachFile(f)
-    for (const m of more) prev = attachFile(m, prev)
+    // One pick, one album (PROTOCOL.md 7.4): each file still its own message,
+    // tagged so the other side draws them as one bubble.
+    const n = 1 + more.length
+    const aid = n > 1 ? [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, '0')).join('') : ''
+    const albumOf = (i: number): AlbumRef | undefined => (n > 1 ? { id: aid, i, n } : undefined)
+    let prev = attachFile(f, undefined, albumOf(0))
+    more.forEach((m, k) => { prev = attachFile(m, prev, albumOf(k + 1)) })
     return
   }
   const t = inp.value.trim(); if (!t) return
@@ -8754,7 +8873,7 @@ async function activateGroup(gid: string) {
   $('transport-badge').title = tr('Grupa idzie przez relay (GossipSub) — nie WebRTC')
   $('sess-peerid').textContent = gid.slice(0, 12) + '…'
   await loadPins(gid, gu.log) // as in activateRoom: before the replay, so they land first
-  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); setTyping(false); cancelReply(); cancelEdit()
+  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); albumEls.clear(); setTyping(false); cancelReply(); cancelEdit()
   for (const ev of gu.log) applyEv(ev)
   startRotation(); renderGroups()
 }

@@ -111,7 +111,24 @@ export interface FileEnv extends BaseEnv {
   body?: string
   /** The message this file answers, quoted — same field, same rules as `MsgEnv`. */
   re?: QuoteRef
+  /**
+   * Several files picked together (§7.4). Each file stays its own message -
+   * its own upload, key, ack and retry, so one failure blocks nothing - and
+   * this says which ones belong together, so the receiver draws them as ONE
+   * album instead of guessing from timing. An older build ignores the field
+   * and shows the files one by one, as it always did.
+   */
+  album?: AlbumRef
 }
+
+/** `id`: 16 hex chars, random per pick. `i`: this file's place, 0-based. `n`: how many. */
+export interface AlbumRef { id: string; i: number; n: number }
+/** A receiver accepts albums up to this size (a sender picks at most 10). */
+export const ALBUM_MAX = 32
+export const isAlbumRef = (a: any): a is AlbumRef =>
+  !!a && typeof a === 'object' && typeof a.id === 'string' && /^[0-9a-f]{16}$/.test(a.id)
+  && Number.isInteger(a.n) && a.n >= 2 && a.n <= ALBUM_MAX
+  && Number.isInteger(a.i) && a.i >= 0 && a.i < a.n
 /**
  * Delivery confirmation. Instant-only product: this says "it reached the other
  * client", nothing about reading it — there are no read receipts by design.
@@ -207,6 +224,8 @@ const PRESENCE = new Set<string>(['active', 'away', 'leave'])
  */
 /** Drop a `re` that would not render; keep the envelope it rode in on. */
 const sanitizeQuote = (m: any) => { if (m.re !== undefined && !isQuoteRef(m.re)) delete m.re; return m }
+/** Same rule for an album: a broken `album` costs the grouping, never the file. */
+const sanitizeAlbum = (m: any) => { if (m.album !== undefined && !isAlbumRef(m.album)) delete m.album; return m }
 
 export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
   let m: any
@@ -235,7 +254,7 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
       && typeof m.key === 'string' && typeof m.alg === 'string'
       && Number.isInteger(m.chunk) && m.chunk > 0
       && Number.isInteger(m.chunks) && m.chunks > 0
-      && (m.body === undefined || typeof m.body === 'string')) ? (sanitizeQuote(m) as FileEnv) : null
+      && (m.body === undefined || typeof m.body === 'string')) ? (sanitizeAlbum(sanitizeQuote(m)) as FileEnv) : null
     case 'rtc': return (typeof m.to === 'string' && m.sig != null) ? (m as RtcEnv) : null
     case 'ack': return (typeof m.ref === 'string' && typeof m.rts === 'number') ? (m as AckEnv) : null
     case 'group-skd': return (typeof m.gid === 'string' && typeof m.gkPub === 'string' && typeof m.epoch === 'number'

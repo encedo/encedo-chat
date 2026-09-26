@@ -1451,7 +1451,7 @@ async function main() {
       // Several photos in one pick (a colleague's request, 2026-09-25). The
       // chip carries the first and a count; Send makes one bubble per file, in
       // pick order, with the caption on the first only.
-      scenario('several files picked at once go out as one message each')
+      scenario('several files picked at once go out as one album')
       const multiTok = `multi-${Date.now().toString(36)}`
       const chip = await A.eval<any>(`
         const dt = new DataTransfer();
@@ -1473,15 +1473,44 @@ async function main() {
         return [...document.querySelectorAll('#messages .b-file .f-name')]
           .filter((n) => n.textContent.includes(${JSON.stringify(multiTok)})).length === 3;
       `, 40_000)
+      // One pick is one ALBUM (PROTOCOL.md 7.4, 2026-09-26): each file is
+      // still its own message, but the other side draws them as ONE bubble.
       const multi = await B.eval<any>(`
         const rows = [...document.querySelectorAll('#messages .mrow')]
-          .filter((r) => (r.querySelector('.f-name') || {}).textContent?.includes(${JSON.stringify(multiTok)}));
-        return rows.map((r) => ({ name: r.querySelector('.f-name').textContent,
-                                  cap: (r.querySelector('.b-caption') || {}).textContent || '' }));
+          .filter((r) => r.textContent.includes(${JSON.stringify(multiTok)}));
+        const r = rows[0];
+        return { rows: rows.length, album: !!r?.querySelector('.b-album'),
+                 names: [...(r?.querySelectorAll('.alb-cell .f-name') ?? [])].map((n) => n.textContent.slice(-5)),
+                 caps: [...(r?.querySelectorAll('.b-caption') ?? [])].map((c) => c.textContent) };
       `)
-      if (multi.map((m: any) => m.name.slice(-5)).join() !== '1.jpg,2.jpg,3.jpg') throw new Error(`the files arrived out of order: ${JSON.stringify(multi)}`)
-      if (multi[0].cap !== 'trzy zdjecia' || multi[1].cap || multi[2].cap) throw new Error(`the caption is not on the first file only: ${JSON.stringify(multi)}`)
-      step('three bubbles on the other side, in pick order, the caption on the first')
+      if (multi.rows !== 1 || !multi.album) throw new Error(`the three files are not one album bubble: ${JSON.stringify(multi)}`)
+      if (multi.names.join() !== '1.jpg,2.jpg,3.jpg') throw new Error(`the album's files are out of order: ${JSON.stringify(multi)}`)
+      if (multi.caps.length !== 1 || multi.caps[0] !== 'trzy zdjecia') throw new Error(`the album does not carry the caption once: ${JSON.stringify(multi)}`)
+      step('one album bubble on the other side: three files in pick order, one caption')
+      await A.waitFor('the album says delivered once every file is', `
+        const r = [...document.querySelectorAll('#messages .mrow')].find((x) => x.textContent.includes(${JSON.stringify(multiTok)}));
+        const s = r && r.querySelector('.alb-state');
+        return !!s && s.textContent.includes('dostarczone') && !s.textContent.includes(' z ');
+      `, 40_000)
+      step('the sender sees one delivery line for the whole album')
+      // The viewer walks the album: the sender holds all three pictures.
+      await A.waitFor('the sender has the album thumbnails', `
+        const r = [...document.querySelectorAll('#messages .mrow')].find((x) => x.textContent.includes(${JSON.stringify(multiTok)}));
+        return !!r && r.querySelectorAll('.b-album .b-thumb').length === 3;
+      `, 20_000)
+      const walk = await A.eval<any>(`
+        const r = [...document.querySelectorAll('#messages .mrow')].find((x) => x.textContent.includes(${JSON.stringify(multiTok)}));
+        r.querySelector('.b-album .b-thumb').click();
+        const first = document.getElementById('lb-size').textContent, n1 = document.getElementById('lb-name').textContent;
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+        const second = document.getElementById('lb-size').textContent, n2 = document.getElementById('lb-name').textContent;
+        const next = !document.getElementById('lb-next').hidden;
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        return { first, second, n1, n2, next, closed: document.getElementById('lightbox').hidden };
+      `)
+      if (!walk.first.startsWith('1 / 3') || !walk.second.startsWith('2 / 3') || !walk.n2.endsWith('2.jpg') || !walk.next || !walk.closed)
+        throw new Error(`the viewer does not walk the album: ${JSON.stringify(walk)}`)
+      step('the viewer walks the album: 1 / 3, then 2 / 3')
     }
 
     // ---- replying, and correcting -------------------------------------------

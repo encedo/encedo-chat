@@ -67,3 +67,22 @@ test('an SKD without ctr still decodes (it means 0); a nonsense ctr does not', (
   assert.equal(decodeEnvelope(te.encode(JSON.stringify({ ...base, ctr: -1 }))), null)
   assert.equal(decodeEnvelope(te.encode(JSON.stringify({ ...base, ctr: 'x' }))), null)
 })
+
+test('an album travels with each file, and a broken one costs the grouping, never the file', () => {
+  const meta = { cid: 'Qm123', name: 'a.jpg', size: 10, mime: 'image/jpeg', key: 'AAAA', chunk: 4096, chunks: 1, alg: 'A256GCM-chunked-v1' }
+  const album = { id: '0123456789abcdef', i: 1, n: 3 }
+  const f = rt(envFile(5, { ...meta, album }))
+  assert.deepEqual(f.album, album, 'a well-formed album survives the round trip')
+  assert.equal(rt(envFile(5, meta)).album, undefined, 'no album, no field')
+  for (const bad of [
+    { id: 'short', i: 0, n: 2 }, { id: '0123456789ABCDEF', i: 0, n: 2 }, // not 16 lowercase hex
+    { id: '0123456789abcdef', i: 2, n: 2 }, { id: '0123456789abcdef', i: -1, n: 2 }, // outside the album
+    { id: '0123456789abcdef', i: 0, n: 1 }, { id: '0123456789abcdef', i: 0, n: 33 }, // one is not an album; too many
+    { id: '0123456789abcdef', i: 0.5, n: 2 }, 'album', null,
+  ]) {
+    const d = rt(envFile(5, { ...meta, album: bad as any }))
+    assert.ok(d, `a file with album ${JSON.stringify(bad)} still decodes`)
+    assert.equal(d.album, undefined, `and loses the broken album ${JSON.stringify(bad)}`)
+    assert.equal(d.name, 'a.jpg')
+  }
+})
