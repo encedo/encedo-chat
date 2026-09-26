@@ -2319,6 +2319,27 @@ async function main() {
       step('portrait with the keyboard up keeps its header: no landscape shape')
     }
     }
+
+    // The row's hidden actions (2026-09-26: tapping the right of a contact
+    // row, where nothing shows, opened "rename"). On a touch phone the
+    // invisible pencil must not be hit; after the long-press that reveals it,
+    // it must be. elementFromPoint IS the hit test a tap makes.
+    await B.resize(390, 780, true)
+    await B.eval(`document.getElementById('btn-back').click(); return 1`)
+    const hit = await B.eval<any>(`
+      const row = [...document.querySelectorAll('#pane-contacts .contact')].find((r) => r.querySelector('.c-edit'));
+      if (!row) return { row: false };
+      const at = (sel) => { const r = row.querySelector(sel).getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) };
+      const hidden = { edit: !!at('.c-edit')?.closest('.c-edit'), x: !!at('.c-x')?.closest('.c-x'), row: at('.c-edit')?.closest('.contact') === row };
+      row.classList.add('show-actions');
+      const shown = { edit: !!at('.c-edit')?.closest('.c-edit'), x: !!at('.c-x')?.closest('.c-x') };
+      row.classList.remove('show-actions');
+      return { row: true, hidden, shown };
+    `)
+    if (!hit.row) throw new Error('no contact row with actions to test')
+    if (hit.hidden.edit || hit.hidden.x || !hit.hidden.row) throw new Error(`a tap on an invisible row action hits it: ${JSON.stringify(hit)}`)
+    if (!hit.shown.edit || !hit.shown.x) throw new Error(`revealed row actions cannot be tapped: ${JSON.stringify(hit)}`)
+    step('a tap where a row action is hidden opens the row; revealed, the action takes the tap')
     await B.resize(1200, 800)
 
     } // end !GROUP_ONLY

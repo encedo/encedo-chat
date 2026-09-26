@@ -839,6 +839,17 @@
     .contact.show-actions .c-edit,.contact.show-actions .g-edit{opacity:1}
     .contact.show-actions .c-x{opacity:.7;padding:0 6px}
   }
+  /* Hidden must also mean NOT THERE. opacity:0 hides the look and keeps the
+     target: a tap on the right of a row, where nothing shows, hit the invisible
+     pencil and opened "rename" instead of the conversation (reported
+     2026-09-26, packaged app and phone browser; the x and the group icons did
+     the same). An action takes clicks only while it is visible: under a
+     hovering mouse, or after the long-press that reveals it on touch. */
+  .c-edit,.g-edit,.contact .c-x{pointer-events:none}
+  @media (hover:hover){
+    .contact:hover .c-edit,.contact:hover .g-edit,.contact:hover .c-x{pointer-events:auto}
+  }
+  .contact.show-actions .c-edit,.contact.show-actions .g-edit,.contact.show-actions .c-x{pointer-events:auto}
   .btn-send:hover{filter:brightness(1.08)}
   .empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:32px;text-align:center}
   /* The mark, sized like the glyph it replaced, with the gap the heading used
