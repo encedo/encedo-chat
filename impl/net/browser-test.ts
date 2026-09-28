@@ -52,7 +52,11 @@ const APP_URL = process.env.APP_URL ?? `http://127.0.0.1:${LOCAL_PORT}/?eh2=1&de
 const withParam = (url: string, p: string) => `${url}${url.includes('?') ? '&' : '?'}${p}`
 const ALL_GOSSIP = !!process.env.GOSSIP && process.env.GOSSIP !== '0'
 const A_URL = ALL_GOSSIP ? withParam(APP_URL, 'light=0') : APP_URL
-const B_BASE = ALL_GOSSIP || (process.env.GOSSIP_B && process.env.GOSSIP_B !== '0') ? withParam(APP_URL, 'light=0') : APP_URL
+// B_APP_URL: browser B on ANOTHER build (serve an old tag's web/dist on a
+// second port) - what a tab left open over a release looks like to a peer
+// that already reloaded. Only the opening scenarios mean anything then.
+const B_APP = process.env.B_APP_URL ?? APP_URL
+const B_BASE = ALL_GOSSIP || (process.env.GOSSIP_B && process.env.GOSSIP_B !== '0') ? withParam(B_APP, 'light=0') : B_APP
 // B always runs the wire dump (`?debug=2`): the route scenario reads it back as
 // the evidence that what crossed each plane was ciphertext. A later `debug=2`
 // in the query wins over the harness's `debug=1`.
