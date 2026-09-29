@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { peerIdOf, siblingSet, shouldJoin } from './topics.mjs'
+import { peerIdOf, siblingSet, shouldJoin, evictable } from './topics.mjs'
 
 // The real ids, so a change in their shape breaks here rather than in a room
 // that quietly stops forming.
@@ -57,4 +57,12 @@ test('the peer id is compared as text, whatever the caller hands over', () => {
   const siblings = siblingSet([BS1], [])
   const asObject = { toString: () => BS1 }
   assert.equal(shouldJoin(asObject, { siblings, localOnly: true }), false)
+})
+
+test('an idle topic is evicted only when no client holds it through a pick', () => {
+  const ttlMs = 120_000, now = 1_000_000
+  assert.equal(evictable({ now, lastSeen: now - 200_000, holders: 0, ttlMs }), true, 'idle and unheld: freed')
+  assert.equal(evictable({ now, lastSeen: now - 200_000, holders: 1, ttlMs }), false, 'idle but picked: kept (2026-09-29)')
+  assert.equal(evictable({ now, lastSeen: now - 10_000, holders: 0, ttlMs }), false, 'recent traffic: kept')
+  assert.equal(evictable({ now, lastSeen: undefined, holders: 0, ttlMs }), true, 'never seen and unheld: freed')
 })

@@ -48,7 +48,7 @@ import { multiaddr } from '@multiformats/multiaddr'
 import { createHash } from 'crypto'
 import { createDump } from './dump.mjs'
 import { startStats } from './stats.mjs'
-import { siblingSet, shouldJoin } from './topics.mjs'
+import { siblingSet, shouldJoin, evictable } from './topics.mjs'
 import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad, makeLoadCache } from './load.mjs'
 import { makeQuota, DEFAULT_PER_PEER } from './quota.mjs'
 import { leafAnnouncements } from './leaf.mjs'
@@ -400,7 +400,7 @@ relay.services.pubsub.addEventListener('message', (evt) => {
 setInterval(() => {
   const now = Date.now()
   for (const topic of relay.services.pubsub.getTopics()) {
-    if (now - (lastSeen.get(topic) ?? 0) > IDLE_TTL) {
+    if (evictable({ now, lastSeen: lastSeen.get(topic), holders: picks.holders(topic), ttlMs: IDLE_TTL })) {
       relay.services.pubsub.unsubscribe(topic)
       lastSeen.delete(topic)
       stats?.counters.topic('evict'); metrics?.topic('evict')

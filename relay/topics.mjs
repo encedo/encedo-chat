@@ -79,3 +79,19 @@ export function shouldJoin(peerId, { siblings, localOnly }) {
   if (!localOnly) return true
   return !siblings.has(String(peerId))
 }
+
+/**
+ * May the idle sweep drop this topic? Only when nothing happened on it for
+ * `ttlMs` AND no client on this relay holds it through the pick stream.
+ *
+ * The second half is new (2026-09-29). A light client's topics are held by its
+ * PICK, not by traffic: a hidden tab that Chrome throttles to one timer a
+ * minute can leave a quiet presence or group topic without a frame for over
+ * two minutes. The sweep then unsubscribed the relay from it, the pick entry
+ * stayed, and the client - told nothing - no longer heard anyone reaching it
+ * through another relay. A held topic is not abandoned; when its holder's
+ * stream closes, the pick goes and the ordinary TTL applies again.
+ */
+export function evictable({ now, lastSeen = 0, holders = 0, ttlMs }) {
+  return holders === 0 && now - lastSeen > ttlMs
+}
