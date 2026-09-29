@@ -271,7 +271,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'https://onchato.com/chat#i=… albo sam kod': 'https://onchato.com/chat#i=… or just the code',
     'Wklej link albo kod zaproszenia.': 'Paste an invite link or code.',
     'To nie wygląda na zaproszenie — sprawdź, czy skopiowałeś całość.': 'That does not look like an invite — check you copied all of it.',
-    'Zaproszenie z {date}': 'Invite from {date}',
+    'Zaproszenie – {name}': 'Invitation – {name}',
     'Opublikowane — każde można wycofać osobno': 'Published — each can be retired on its own',
     'Nie masz opublikowanych zaproszeń. Takie zaproszenie możesz powiesić na stronie: kto je ma, może do Ciebie zapukać.':
       'No published invites yet. You can hang one on a web page: whoever has it can knock.',

@@ -2947,6 +2947,9 @@ async function main() {
     // caught the way the export scenario catches a download. Reading the secret
     // off localStorage is no longer possible — §10 reached that key, and this
     // scenario broke on it, which is the storage-format lesson arriving again.
+    // The proposed title names the profile, in the app's language (2026-09-29).
+    const proposed = await A.eval<string>(`return document.getElementById('invite-label').value`)
+    if (proposed !== 'Zaproszenie – sim-a') throw new Error(`a new invite is proposed as "${proposed}", not after the profile`)
     const inv = await A.eval<any>(`
       document.getElementById('invite-label').value = 'dla informatorów';
       document.getElementById('invite-save').click();

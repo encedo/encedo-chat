@@ -4383,7 +4383,9 @@ function promptInvite(current?: PubInvite): Promise<{ label: string; expires?: n
     const when = $('invite-when') as HTMLInputElement
     $('invite-title').textContent = current ? tr('Zaproszenie') : tr('Nowe zaproszenie')
     clr('invite-msg')
-    input.value = current?.label ?? tr('Zaproszenie z {date}', { date: new Date(nowMs()).toISOString().slice(0, 10) })
+    // Named after the profile it invites to (the user's call, 2026-09-29): the
+    // date said nothing a reader of the list could use.
+    input.value = current?.label ?? (session?.handle ? tr('Zaproszenie – {name}', { name: session.handle }) : tr('Zaproszenie'))
     // An existing deadline comes back as the exact instant, not as the preset it
     // was picked from: the presets are shorthand for "from now", and reopening a
     // week later would silently move the date if they were re-applied.
