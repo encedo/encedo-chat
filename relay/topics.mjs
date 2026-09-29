@@ -95,3 +95,20 @@ export function shouldJoin(peerId, { siblings, localOnly }) {
 export function evictable({ now, lastSeen = 0, holders = 0, ttlMs }) {
   return holders === 0 && now - lastSeen > ttlMs
 }
+
+/**
+ * Siblings to reset: connected, yet nothing has come FROM them for `maxSilenceMs`.
+ *
+ * Every relay announces its load on the mesh every 30 s, flood-published to
+ * each sibling, so a connected sibling that has sent us nothing for three
+ * rounds is not quiet - its stream to us is dead. Seen in production
+ * (2026-09-29): when a relay reconnected while the old connection was still
+ * open, the survivor kept writing its GossipSub stream into the OLD one. The
+ * TCP link stayed up, the load topic still arrived the long way round through
+ * the third relay, and every client topic between the two relays was silently
+ * cut in one direction. Only closing the connection cleanly fixed it, so that
+ * is what the watchdog does. The clock starts at connect, not at zero.
+ */
+export function staleSiblings({ now, connected, lastHeard, connectedAt, maxSilenceMs }) {
+  return connected.filter((id) => now - Math.max(lastHeard.get(id) ?? 0, connectedAt.get(id) ?? now) > maxSilenceMs)
+}

@@ -48,7 +48,7 @@ import { multiaddr } from '@multiformats/multiaddr'
 import { createHash } from 'crypto'
 import { createDump } from './dump.mjs'
 import { startStats } from './stats.mjs'
-import { siblingSet, shouldJoin, evictable } from './topics.mjs'
+import { siblingSet, shouldJoin, evictable, staleSiblings } from './topics.mjs'
 import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad, makeLoadCache } from './load.mjs'
 import { makeQuota, DEFAULT_PER_PEER } from './quota.mjs'
 import { leafAnnouncements } from './leaf.mjs'
@@ -90,6 +90,10 @@ const LOCAL_TOPICS = process.argv.includes('--local-topics-only')
 // (load.mjs explains why it is not a file over HTTP). OFF by default, like
 // everything else that changes behaviour.
 const ANNOUNCE_LOAD = process.argv.includes('--announce-load')
+/** How often this node announces its load (tests shorten it). */
+const LOAD_EVERY_MS = parseInt(get('--load-every', String(ANNOUNCE_MS / 1000))) * 1000
+/** A connected sibling silent this long has a dead stream to us (3.5 rounds). */
+const MESH_SILENCE_MS = parseInt(get('--mesh-silence', String(Math.round(3.5 * LOAD_EVERY_MS / 1000)))) * 1000
 // How many topics ONE peer may make this node carry. Without it the only limit
 // was global, so a single socket could claim all of --max-topics and every real
 // room after that was refused SILENTLY (quota.mjs).
@@ -472,9 +476,34 @@ if (ANNOUNCE_LOAD) {
       }
     } catch {}
   }
-  setInterval(say, ANNOUNCE_MS).unref?.()
-  setTimeout(say, 5_000).unref?.() // one early reading, once the node has settled
-  console.log(`Obciążenie: ogłaszam co ${ANNOUNCE_MS / 1000}s jako "${statsNode}" (temat ${LOAD_TOPIC.slice(0, 12)}...)`)
+  setInterval(say, LOAD_EVERY_MS).unref?.()
+  setTimeout(say, Math.min(5_000, LOAD_EVERY_MS)).unref?.() // one early reading, once the node has settled
+  console.log(`Obciążenie: ogłaszam co ${LOAD_EVERY_MS / 1000}s jako "${statsNode}" (temat ${LOAD_TOPIC.slice(0, 12)}...)`)
+
+  // ---- mesh watchdog (topics.mjs staleSiblings) -----------------------------
+  // On only where every relay announces, which is what makes silence evidence.
+  const lastHeard = new Map() // sibling id -> when anything last arrived FROM it
+  const connectedAt = new Map()
+  const lastReset = new Map()
+  relay.services.pubsub.addEventListener('gossipsub:message', (evt) => {
+    const id = evt.detail.propagationSource?.toString()
+    if (id && SIBLINGS.has(id)) lastHeard.set(id, Date.now())
+  })
+  relay.addEventListener('peer:connect', (evt) => {
+    const id = evt.detail.toString()
+    if (SIBLINGS.has(id)) { connectedAt.set(id, Date.now()); lastHeard.delete(id) }
+  })
+  setInterval(() => {
+    const now = Date.now()
+    const connected = [...new Set(relay.getConnections().map((c) => c.remotePeer.toString()))].filter((id) => SIBLINGS.has(id))
+    for (const id of staleSiblings({ now, connected, lastHeard, connectedAt, maxSilenceMs: MESH_SILENCE_MS })) {
+      if (now - (lastReset.get(id) ?? 0) < 2 * MESH_SILENCE_MS) continue
+      lastReset.set(id, now)
+      console.log(`[mesh] nothing from sibling ${id.slice(0, 16)}... for ${Math.round(MESH_SILENCE_MS / 1000)}s while connected — resetting the connection`)
+      for (const c of relay.getConnections()) if (c.remotePeer.toString() === id) void c.close().catch(() => c.abort?.(new Error('mesh watchdog')))
+    }
+  }, Math.min(10_000, MESH_SILENCE_MS / 3)).unref?.()
+  console.log(`Siatka: strażnik — reset połączenia z przekaźnikiem milczącym ${MESH_SILENCE_MS / 1000}s`)
 } else {
   console.log('Obciążenie: nasłuchuję, nie ogłaszam (--announce-load je włącza)')
 }

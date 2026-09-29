@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { peerIdOf, siblingSet, shouldJoin, evictable } from './topics.mjs'
+import { peerIdOf, siblingSet, shouldJoin, evictable, staleSiblings } from './topics.mjs'
 
 // The real ids, so a change in their shape breaks here rather than in a room
 // that quietly stops forming.
@@ -65,4 +65,13 @@ test('an idle topic is evicted only when no client holds it through a pick', () 
   assert.equal(evictable({ now, lastSeen: now - 200_000, holders: 1, ttlMs }), false, 'idle but picked: kept (2026-09-29)')
   assert.equal(evictable({ now, lastSeen: now - 10_000, holders: 0, ttlMs }), false, 'recent traffic: kept')
   assert.equal(evictable({ now, lastSeen: undefined, holders: 0, ttlMs }), true, 'never seen and unheld: freed')
+})
+
+test('a connected sibling that has sent nothing for too long is reset; the clock starts at connect', () => {
+  const now = 1_000_000, maxSilenceMs = 105_000
+  const lastHeard = new Map([['alive', now - 20_000], ['dead', now - 200_000]])
+  const connectedAt = new Map([['alive', now - 500_000], ['dead', now - 500_000], ['fresh', now - 30_000], ['old-never', now - 300_000]])
+  const got = staleSiblings({ now, connected: ['alive', 'dead', 'fresh', 'old-never'], lastHeard, connectedAt, maxSilenceMs })
+  assert.deepEqual(got.sort(), ['dead', 'old-never'], 'silent too long, whether or not it ever spoke; a fresh link gets its grace')
+  assert.deepEqual(staleSiblings({ now, connected: [], lastHeard, connectedAt, maxSilenceMs }), [], 'nothing connected, nothing to reset')
 })

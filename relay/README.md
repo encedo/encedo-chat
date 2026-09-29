@@ -400,6 +400,19 @@ trivial few-hundred-socket DoS into a real bandwidth problem.
   (This is what bit us on 2026-07-29: the deployed relay still ran the
   pre-eviction build with a hard cap of 50, had refused every new topic for a
   while, and only a restart cleared it.)
+  A topic a light client still holds through `--pick` is never evicted, however
+  quiet (2026-09-29: a throttled hidden tab's quiet topic was dropped from the
+  mesh and the client was never told).
+- `--announce-load` also turns on the **mesh watchdog**: a connected sibling
+  that has sent us nothing for `--mesh-silence` seconds (default 3.5 × the
+  announce interval, **105 s**) has a dead GossipSub stream to us, and the
+  connection is reset so the re-dial builds fresh streams. It logs
+  `[mesh] nothing from sibling … resetting the connection`. Why: when a relay
+  reconnects while the old connection is still open, the survivor keeps
+  writing into the old one — TCP up, load topic arriving the long way round,
+  client topics silently cut (production, 2026-09-29; reproduced by
+  `impl/net/mesh-watchdog-test.ts`). `--load-every <s>` (default 30) exists for
+  that test.
 - The per-message log is **metadata only** (truncated topic, sender prefix, byte
   count) — the payload is ciphertext and logging it only parked user metadata in
   journald. The full frame goes to disk only under `DUMP=<dir>` (next
