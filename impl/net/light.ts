@@ -74,6 +74,14 @@ export interface LightOpts {
   /** Injected in tests: opens a pick stream to `relayId` and feeds frames back through `onFrame`. */
   openStream?: (relayId: string, onFrame: (f: any) => void, onClose: () => void) => Promise<PickStream>
   ackTimeoutMs?: number
+  /**
+   * The CURRENT pick stream ended on its own (not by detach or a newer attach).
+   * The connection may still be up - a stream reset leaves it standing - and
+   * then nothing else would ever notice: the session re-opens the stream on
+   * this (lib/core.ts). Before 2026-09-29 such a client stayed "online",
+   * swallowed every publish error and received nothing until a reload.
+   */
+  onPickClosed?: () => void
 }
 
 /**
@@ -109,6 +117,8 @@ export function pickAdapter(self: string, opts: LightOpts) {
       resolve?.(f.recipients)
     }
   }
+  /** Which attach owns the live stream; anything else closing is history. */
+  let current: object | null = null
   const onClose = () => {
     stream = null
     picked.clear()
@@ -121,12 +131,23 @@ export function pickAdapter(self: string, opts: LightOpts) {
     async attach(toRelayId: string, open: (relayId: string, onFrame: (f: any) => void, onClose: () => void) => Promise<PickStream>) {
       try { stream?.close() } catch {}
       stream = null; picked.clear(); relayId = toRelayId
-      const s = await open(toRelayId, onFrame, onClose)
+      // Each stream closes only ITSELF. They used to share one onClose, so an
+      // old stream ending late (after this attach) nulled the NEW one - the
+      // client-side twin of the relay's per-peer cleanup bug.
+      const mine = {}
+      current = mine
+      const s = await open(toRelayId, onFrame, () => {
+        if (current !== mine) return
+        current = null
+        onClose()
+        opts.onPickClosed?.()
+      })
+      if (current !== mine) { try { s.close() } catch {}; return } // superseded or already closed while opening
       stream = s
       for (const t of held) s.send(encodePick(t))
       log(`light: pick stream open to ${toRelayId.slice(0, 12)}..., re-picked ${held.size} topic(s)`)
     },
-    detach() { try { stream?.close() } catch {}; onClose() },
+    detach() { current = null; try { stream?.close() } catch {}; onClose() },
     connected: () => stream !== null,
     pubsub: {
       addEventListener: (_e: string, h: (evt: any) => void) => { listeners.push(h) },
@@ -201,6 +222,8 @@ export async function createLightPeer(opts: LightOpts = {}) {
     addEventListener: (e: string, h: any) => node.addEventListener(e, h),
     removeEventListener: (e: string, h: any) => node.removeEventListener(e, h),
     async stop() { adapter.detach(); await node.stop() },
+    /** Is the pick stream up? A connection without it carries nothing. */
+    pickConnected: () => adapter.connected(),
     /** `dial(node, addr, opts)` in net/peer.ts lands here: connect, then open the pick stream. */
     async dial(addr: any, dialOpts?: any) {
       const ma = typeof addr === 'string' ? multiaddr(addr) : addr

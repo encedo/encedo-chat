@@ -710,6 +710,8 @@ export interface SessionOpts {
    * system that is said rather than silent). GossipSub never reports this.
    */
   onRefused?: (topic: string) => void
+  /** Test seam: the transport node this session runs on, e.g. to break it on purpose. */
+  onTransport?: (node: any) => void
   /** Broker URL for `transport: 'mqtt'` (`wss://host/mqtt`, or `mqtt://host:1883` in Node). */
   broker?: string
   params?: RoomParams
@@ -807,8 +809,21 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   const node: any = viaMqtt
     ? await createMqttPeer({ url: opts.broker!, onLog: opts.onLog })
     : opts.transport === 'light'
-      ? await createLightPeer({ onLog: opts.onLog, onRefused: opts.onRefused })
+      ? await createLightPeer({
+        onLog: opts.onLog, onRefused: opts.onRefused,
+        // A stream that ended on a live connection: re-open it, a moment later
+        // so an attach already under way can finish first.
+        onPickClosed: () => {
+          const t = setTimeout(() => {
+            if (closed || redialing || connected()) return
+            log('pick stream lost on a live connection — re-opening it')
+            void reconnect()
+          }, 1_500)
+          ;(t as any).unref?.()
+        },
+      })
       : await createPeer()
+  opts.onTransport?.(node)
   /**
    * Dial, or re-dial. MQTT reconnects its one broker; libp2p sweeps the relay
    * candidates (first that connects wins) and remembers which one, so a dead or
@@ -877,8 +892,11 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     log(`link: ${s}`)
     opts.onLink?.(s)
   }
+  // A light client is connected only while its pick stream is: a connection
+  // without it carries nothing, and counting it as "online" is how a client
+  // went deaf and mute with a green header (2026-09-29).
   const connected = () => {
-    try { return node.getConnections().length > 0 } catch { return false }
+    try { return node.getConnections().length > 0 && (node.pickConnected?.() ?? true) } catch { return false }
   }
   /**
    * `force` is for the case where the transport SAYS it is connected and is not:

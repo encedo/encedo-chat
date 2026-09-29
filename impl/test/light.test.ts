@@ -111,3 +111,24 @@ test('losing the stream forgets the picks and answers pending pushes with nothin
   assert.equal(a.pubsub.getSubscribers('T').length, 1)
   await sleep(1)
 })
+
+test('an old stream ending late does not take the new one; the current one ending is reported', async () => {
+  // The client-side twin of the relay's per-peer cleanup (2026-09-29): every
+  // stream shared one onClose, so a stream that ended after a newer attach
+  // nulled the NEW stream, and nothing re-opened it.
+  let closedReports = 0
+  const a = pickAdapter('me', { onPickClosed: () => { closedReports++ } })
+  const s1 = fakeStream()
+  await a.attach(RELAY, s1.open)
+  a.pubsub.subscribe('T')
+  const s2 = fakeStream()
+  await a.attach(RELAY, s2.open)
+  s2.answer(encodePicked('T'))
+  s1.drop() // the old stream's pipes finish now, after the new attach
+  assert.equal(a.connected(), true, 'the new stream is still the live one')
+  assert.equal(a.pubsub.getSubscribers('T').length, 1, 'and its pick still stands')
+  assert.equal(closedReports, 0, 'history closing is not news')
+  s2.drop()
+  assert.equal(a.connected(), false)
+  assert.equal(closedReports, 1, 'the live stream ending is reported, so the session can re-open it')
+})
