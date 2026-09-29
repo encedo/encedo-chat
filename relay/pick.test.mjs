@@ -101,3 +101,24 @@ test('a peer id is compared as text, whatever libp2p hands over', () => {
   assert.equal(p.holders(TOPIC), 1)
   assert.equal(p.sinksFor(TOPIC, ALICE).length, 0, 'the same peer was not recognised as the sender')
 })
+
+test('a late close of an OLD stream leaves what the same peer picked on its NEW stream', () => {
+  // Seen in production (2026-09-29): a client reconnects with the same PeerId
+  // and picks again before the relay notices the old connection died. The old
+  // stream's cleanup then wiped the new picks: sending worked, receiving did
+  // not, and only a reload helped.
+  const p = makePicks()
+  const oldSink = () => {}, newSink = () => {}
+  p.add('peer-a', 'T', oldSink); p.add('peer-a', 'U', oldSink)
+  p.add('peer-a', 'T', newSink) // the new stream re-picks T (U not yet)
+  const released = p.forget('peer-a', oldSink)
+  assert.deepEqual(released, ['U'], 'only what the old stream still owned is released')
+  assert.deepEqual(p.sinksFor('T'), [newSink], 'the new stream still receives T')
+  assert.equal(p.holders('U'), 0)
+  // A DROP from the old stream is no DROP for the new one either.
+  assert.equal(p.drop('peer-a', 'T', oldSink), false)
+  assert.equal(p.holders('T'), 1)
+  // ...while the new stream's own close does release it.
+  assert.deepEqual(p.forget('peer-a', newSink), ['T'])
+  assert.equal(p.holders('T'), 0)
+})

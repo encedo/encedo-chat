@@ -264,7 +264,7 @@ if (PICK) {
     const send = (bytes) => { try { out.push(bytes) } catch {} }
     // Everything this stream ever picked goes with it when it closes.
     const bye = () => {
-      for (const t of picks.forget(peer)) quota.release(peer, t)
+      for (const t of picks.forget(peer, send)) quota.release(peer, t)
       try { out.end() } catch {}
     }
     void pipe(out, (src) => lp.encode(src), stream.sink).catch(() => {}).finally(bye)
@@ -272,7 +272,7 @@ if (PICK) {
       for await (const chunk of src) {
         const f = decodePickFrame(chunk.subarray())
         if (!f) continue
-        if (f.type === PICK_T.DROP) { picks.drop(peer, f.topic); quota.release(peer, f.topic); continue }
+        if (f.type === PICK_T.DROP) { if (picks.drop(peer, f.topic, send)) quota.release(peer, f.topic); continue }
         if (f.type === PICK_T.PUSH) {
           // Publish on the client's behalf, bytes untouched (the sender is
           // inside the origin envelope, never read here), then hand the same

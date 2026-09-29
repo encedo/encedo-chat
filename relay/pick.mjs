@@ -161,19 +161,36 @@ export function makePicks() {
       let s = byPeer.get(p); if (!s) { s = new Set(); byPeer.set(p, s) }
       s.add(topic)
     },
-    drop(peer, topic) {
+    /**
+     * `sink`, when given, must be the one that picked: a DROP or a close on an
+     * OLD stream must not take away what the same peer's NEW stream picked.
+     * Returns whether anything was removed.
+     */
+    drop(peer, topic, sink = null) {
       const p = String(peer)
-      byTopic.get(topic)?.delete(p)
+      const m = byTopic.get(topic)
+      if (!m?.has(p) || (sink && m.get(p) !== sink)) return false
+      m.delete(p)
       if (byTopic.get(topic)?.size === 0) byTopic.delete(topic)
       byPeer.get(p)?.delete(topic)
       if (byPeer.get(p)?.size === 0) byPeer.delete(p)
+      return true
     },
-    /** The peer went away: every topic it picked is released. Returns them. */
-    forget(peer) {
+    /**
+     * A stream went away: every topic IT picked is released, and returned.
+     *
+     * By stream, not by peer (2026-09-29). A client that reconnects keeps its
+     * PeerId, opens a new stream and picks everything again - while the relay
+     * still holds the old, half-open connection for the 15-70 s its ping needs
+     * to give up. Cleaning up by peer then wiped the NEW stream's picks: the
+     * client could still send and received nothing, with no error anywhere,
+     * until a page reload (seen in the logs: dozens of late closes a week).
+     * Without `sink` it still releases everything the peer holds.
+     */
+    forget(peer, sink = null) {
       const p = String(peer)
       const topics = [...(byPeer.get(p) ?? [])]
-      for (const t of topics) this.drop(p, t)
-      return topics
+      return topics.filter((t) => this.drop(p, t, sink))
     },
     /** Sinks to deliver a message on `topic` to, minus the sender. */
     sinksFor(topic, exceptPeer = null) {
