@@ -897,6 +897,14 @@ async function main() {
     await A.waitFor('delivery mark on A', `return document.getElementById('messages').textContent.includes('dostarczone')`, 20_000)
     await B.waitFor('delivery mark on B', `return document.getElementById('messages').textContent.includes('dostarczone')`, 20_000)
     step('both sides show [ok] dostarczone (ack path works in a browser)')
+    // The dot rule (lib/dotstate.ts): green = a secured channel AND the peer
+    // answering now. On a live conversation both dots must be green.
+    await A.waitFor('green dots on a live conversation', `
+      const head = document.getElementById('peer-dot');
+      const row = [...document.querySelectorAll('#pane-contacts .contact')].find((r) => r.textContent.includes('sim-b'));
+      return head.classList.contains('ok') && !!row && row.querySelector('.dot').classList.contains('ok');
+    `, 20_000)
+    step('a live conversation shows green in the header and on the contact')
 
     // ---- links: found, but not clickable text -------------------------------
     // The security properties are the point, not the decoration. The URL must

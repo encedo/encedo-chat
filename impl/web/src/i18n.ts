@@ -49,6 +49,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '🤝 Securing…': '🤝 Zabezpieczam…',
   },
   en: {
+    'Kanał zestawiony, ale rozmówca teraz nie odpowiada — wiadomości poczekają': 'Channel set up, but the other side is not answering now — messages will wait',
     '{ok} z {n} dostarczone': '{ok} of {n} delivered',
     'Klient rozmówcy potwierdził odbiór każdego pliku': 'The other side confirmed every file',
     'Nie wszystkie pliki doszły — przy tych, które nie doszły, jest „Ponów”': 'Not every file arrived — the ones that did not have “Retry”',

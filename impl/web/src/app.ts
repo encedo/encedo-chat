@@ -65,6 +65,7 @@ import { newInboxSecret, inboxSecretBytes } from '../../lib/invite.ts'
 import { cidMatches, isVerifiableCid } from '../../lib/cid.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
 import type { FileEnv, AlbumRef } from '../../lib/envelope.ts'
+import { dotFor } from '../../lib/dotstate.ts'
 import { nowMs, localHHMM, utcISO } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
@@ -426,14 +427,11 @@ function paintStatus() {
     txt.textContent = gu ? tr('{n} członków', { n: gu.members.length }) : ''
     return
   }
-  // Green = a live EH-2 channel (secured), not merely "peer active" — the
-  // same delivery-promise meaning as the contact-list dot. A peer that is
-  // present but not yet secured (or gone away/quiet with the channel dropped)
-  // is orange; text still carries the exact presence word.
+  // One rule with the contact list (lib/dotstate.ts): green = a secured
+  // channel AND the peer answering now; the text carries the exact presence word.
   const r = activeRoom()
-  const lp = r?.lastPresence
   const secured = !!r?.conv && r.conv.secured().length > 0
-  dot.className = 'dot ' + (secured ? 'ok' : lp && lp !== 'leave' ? 'online' : '')
+  dot.className = 'dot ' + dotFor({ secured, presence: r?.inRoom ? r.lastPresence : 'leave' })
   txt.textContent = r?.peerLabel ?? tr('łączę…')
 }
 let rotTimer: any = null
@@ -1789,14 +1787,15 @@ function renderContacts() {
     const inRoom = !!room?.inRoom
     const online = onlinePubs.has(c.pub)
     const unseen = room?.unseen ?? 0
-    // Green only for a live EH-2 channel; announcing-without-a-channel is
-    // orange (see the .dot CSS). secured() reads the engine's live session
-    // set, so it drops the instant the peer is forgotten.
+    // lib/dotstate.ts: green needs a secured channel AND the peer answering
+    // now. A session outlives silence on purpose, so "secured" alone kept dots
+    // green on conversations that received nothing (2026-09-29).
     const secured = !!room?.conv && room.conv.secured().length > 0
-    const dotClass = secured ? 'ok' : (inRoom || online) ? 'online' : ''
-    const dotTitle = secured ? tr('Bezpieczny kanał (EH-2)')
-      : (inRoom || online) ? tr('Dostępny — otwórz rozmowę, żeby zestawić kanał')
-        : tr('Offline')
+    const dotClass = dotFor({ secured, presence: room?.inRoom ? room.lastPresence : null, announcing: online })
+    const dotTitle = dotClass === 'ok' ? tr('Bezpieczny kanał (EH-2)')
+      : dotClass === 'online' ? tr('Dostępny — otwórz rozmowę, żeby zestawić kanał')
+        : secured ? tr('Kanał zestawiony, ale rozmówca teraz nie odpowiada — wiadomości poczekają')
+          : tr('Offline')
     const src = c.source === 'hem' ? { i: '🔒', t: tr('W HEM (trwałe, przenośne)') } : { i: '💻', t: tr('Lokalnie (ta przeglądarka)') }
     const b = document.createElement('button'); b.className = 'contact' + (activePub === c.pub && chatOnScreen() ? ' active' : '') + (unseen ? ' unread' : '')
     // The unread pill is the whole point of the background model: a message that
