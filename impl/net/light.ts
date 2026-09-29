@@ -177,7 +177,12 @@ export function pickAdapter(self: string, opts: LightOpts) {
           stream!.send(encodePush(topic, data))
         })
         // The room reads `recipients.length`; null keeps "no evidence" distinct from zero.
-        return { recipients: reach === null ? null : new Array(reach).fill(0) } as any
+        // `acked`: the relay ANSWERED. Its reach counts only the other holders,
+        // so a client alone in its room gets 0 - and on GossipSub the relay itself
+        // would have been counted. An ACK is proof the transport works, and the
+        // room must not read "alone" as "dead" (2026-09-29: a client waiting for
+        // its contact hung up every two heartbeats and hopped relays).
+        return { recipients: reach === null ? null : new Array(reach).fill(0), acked: reach !== null } as any
       },
     },
   }

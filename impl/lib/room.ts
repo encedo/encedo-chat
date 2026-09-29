@@ -1059,7 +1059,9 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       // Test doubles do not report recipients; absence is not evidence.
       const reach = res?.recipients?.length
       if (typeof reach !== 'number') return
-      if (reach > 0) {
+      // A relay that acknowledged (light transport) has proven the transport,
+      // whatever the reach: zero there means "nobody else here yet", not "dead".
+      if (reach > 0 || res?.acked === true) {
         if (unheard >= ISOLATED_AFTER) log('heartbeat is reaching the relay again')
         unheard = 0
         return

@@ -67,6 +67,7 @@ test('publish is a PUSH whose ACK becomes the recipient count the room reads', a
   s.answer(encodeAck('T', 0))
   assert.equal((await p1).recipients.length, 3, 'first ack answers the first push')
   assert.equal((await p2).recipients.length, 0, 'zero is a real zero')
+  assert.equal((await p2).acked, true, 'and the relay answered: the transport is alive even at zero')
 })
 
 test('no ACK in time is "no evidence", not zero; no stream is an error', async () => {
@@ -75,6 +76,7 @@ test('no ACK in time is "no evidence", not zero; no stream is an error', async (
   await a.attach(RELAY, s.open)
   const r = await a.pubsub.publish('T', Uint8Array.from([1]))
   assert.equal(r.recipients, null)
+  assert.equal(r.acked, false, 'no answer is not an acknowledgement')
   a.detach()
   await assert.rejects(a.pubsub.publish('T', Uint8Array.from([1])), /no pick stream/)
 })
