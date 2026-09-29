@@ -184,3 +184,45 @@ test('nextRotationAfter: two different offsets give different instants (spread, 
   const now = Date.UTC(2026, 7, 3, 12, 0, 0)
   assert.notEqual(nextRotationAfter(now, 3 * 3600 * 1000), nextRotationAfter(now, 15 * 3600 * 1000))
 })
+
+/** A node that records what was subscribed and unsubscribed, and delivers nothing. */
+function recordingNode() {
+  const subs = new Set<string>(), unsubs: string[] = []
+  return {
+    subs, unsubs,
+    node: {
+      peerId: { toString: () => 'me' },
+      services: { pubsub: {
+        addEventListener: () => {}, removeEventListener: () => {},
+        subscribe: (t: string) => { subs.add(t) },
+        unsubscribe: (t: string) => { subs.delete(t); unsubs.push(t) },
+        publish: async () => ({ recipients: [] }),
+        getSubscribers: () => [],
+      } },
+    },
+  }
+}
+
+test('rotation does not unsubscribe a day an open room still holds', async () => {
+  // 2026-09-29: a background room and the light watch of the same contact share
+  // the pair topic. When the day rotated, the watch dropped yesterday's topic -
+  // and the transport, which does not count holders, dropped it for the room.
+  const mac = await macKey()
+  for (const [held, label] of [[true, 'held by a room'], [false, 'held by nobody']] as const) {
+    const r = recordingNode()
+    let t = at('2026-07-31T12:00:00Z')
+    const me = watchPresenceRotating(r.node, 'me', deriveFor(mac), {
+      now: () => t, offsetMs: 0, heartbeatMs: 1000, tickMs: 20,
+      onOnline: () => {}, onOffline: () => {}, onIncomingHandshake: () => {},
+      keep: (topic) => held && topic === 'pair-2026-07-31',
+    })
+    await sleep(40)
+    assert.ok(r.subs.has('pair-2026-07-31'), 'today is watched')
+    t = at('2026-08-01T12:00:00Z') // a day later, well past the overlap
+    await sleep(80)
+    assert.ok(r.subs.has('pair-2026-08-01'), 'the new day is watched')
+    if (held) assert.ok(r.subs.has('pair-2026-07-31') && !r.unsubs.includes('pair-2026-07-31'), `${label}: yesterday stays subscribed`)
+    else assert.ok(r.unsubs.includes('pair-2026-07-31'), `${label}: yesterday is released`)
+    me.stop()
+  }
+})

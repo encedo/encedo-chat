@@ -599,11 +599,15 @@ How it holds together:
   down; the back-arrow just hides the pane and the room stays open. Still pinned by
   the `browser-test` "returning to a mobile room does not tear it down" (checks
   `sess-peerid` unchanged across the round trip).
-- **`syncPresence` excludes every OPEN room**, not just the visible one — each
-  open room owns (was handed) its pair topic, so watching it would spawn a second
-  watcher there. core restores the light watch on `leave`. Rooms persist until the
-  contact is removed (`closeRoom` → `leave` + drop) or the tab closes; ordinary
-  switches keep them all alive (ratchet + WebRTC per room).
+- **`syncPresence` excludes only the ON-SCREEN room** (since 8afca5f): every
+  other contact, background rooms included, keeps a light watch, which then
+  SHARES the room's pair topic. The transports do not count holders, so a watch
+  must never unsubscribe a topic an open room holds: core tracks room topics
+  (`roomTopics`) and passes `keep` to every watch. Before this (2026-09-29) the
+  watch's daily rotation unsubscribed yesterday's topic from under a background
+  room, which went deaf with a green dot. core restores the light watch on
+  `leave`. Rooms persist until the contact is removed (`closeRoom` → `leave` +
+  drop) or the tab closes; ordinary switches keep them all alive.
 - Pinned by the `browser-test` scenario "an incoming message opens in the
   background, not in your face": while A reads `ghost`, B writes → A shows an
   unread pill on `sim-b`, the view does **not** move and the message is **not** in

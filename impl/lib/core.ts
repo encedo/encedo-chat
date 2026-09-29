@@ -981,6 +981,15 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // back to a watch.
   interface Watched { peer: Peer; watch: PresenceWatch }
   const presence = new Map<string, Watched>() // key = peer.pub
+  /**
+   * Topics an open room holds, counted: a presence watch must never unsubscribe
+   * one of these (see PresenceOpts.keep). A background room and a light watch of
+   * the same contact share the pair topic, and the watch's rotation used to
+   * unsubscribe it from under the room.
+   */
+  const roomTopics = new Map<string, number>()
+  const holdTopic = (t: string) => roomTopics.set(t, (roomTopics.get(t) ?? 0) + 1)
+  const releaseTopic = (t: string) => { const n = (roomTopics.get(t) ?? 0) - 1; if (n > 0) roomTopics.set(t, n); else roomTopics.delete(t) }
   /** One per published invite; stopped with the session (DISCOVERY-PROPOSAL.md §2). */
   const inboxes = new Set<InboxWatch>()
   // The day a contact's handshake arrived on, remembered until we open the room
@@ -1047,6 +1056,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
         onOffline: () => presenceHandlers.onOffline?.(peer),
         onIncomingHandshake: (_f, _from, dateUTC) => { upgradeDate.set(peer.pub, { date: dateUTC, at: Date.now() }); presenceHandlers.onWantsConversation?.(peer) },
         onLog: opts.onLog,
+        keep: (t) => roomTopics.has(t),
       })
       presence.set(peer.pub, { peer, watch })
     } catch (e: any) { log(`presence watch for ${peer.pub.slice(0, 12)}... failed: ${e?.message ?? e}`) }
@@ -1156,10 +1166,15 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
         ensureConnected: async () => { if (!connected()) await reconnect() },
         register: (r: OpenRoom) => { rooms.add(r); return () => rooms.delete(r) },
       })
+      holdTopic(conv.topic)
+      let released = false
       return {
         ...conv,
         rotationOffsetSec: offsetSec,
-        leave: async () => { await conv.leave(); if (wasWatched && !closed) await startWatch(peer) },
+        leave: async () => {
+          if (!released) { released = true; releaseTopic(conv.topic) }
+          await conv.leave(); if (wasWatched && !closed) await startWatch(peer)
+        },
       }
     },
     async watchContacts(contacts: Peer[], handlers) {

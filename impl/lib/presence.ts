@@ -51,6 +51,14 @@ export interface PresenceOpts {
   /** An EH-2 frame arrived on the topic -> the contact wants to talk; upgrade. */
   onIncomingHandshake: (frame: Uint8Array, from: string) => void
   onLog?: (msg: string, level?: 'info' | 'debug') => void
+  /**
+   * Is somebody ELSE on this node holding `topic` (an open room)? Then a stop
+   * must not unsubscribe it. The transports do not count subscribers: one
+   * unsubscribe drops the topic for every holder, and a watch that shared a
+   * background room's topic went on to unsubscribe it at the day's rotation -
+   * the room went deaf with a green dot and nothing in any log (2026-09-29).
+   */
+  keep?: (topic: string) => boolean
 }
 
 export function watchPresence(node: any, topic: string, macKey: CryptoKey, self: string, opts: PresenceOpts): PresenceWatch {
@@ -120,7 +128,7 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
       // On a handoff to a room (unsubscribe=false) the subscription and its warm
       // mesh stay; the room owns the topic from here and unsubscribes on its own
       // teardown.
-      if (unsubscribe) { try { node.services.pubsub.unsubscribe(topic) } catch {} }
+      if (unsubscribe && !opts.keep?.(topic)) { try { node.services.pubsub.unsubscribe(topic) } catch {} }
     },
   }
 }
@@ -194,6 +202,8 @@ export interface RotatingPresenceOpts extends RotationConfig {
   now?: () => number
   /** How often to re-evaluate the active day-set (default 60 s). */
   tickMs?: number
+  /** Passed to each day's watch: see `PresenceOpts.keep`. */
+  keep?: (topic: string) => boolean
 }
 
 /**
@@ -244,6 +254,7 @@ export function watchPresenceRotating(
         onOffline: () => { slot.online = false; recompute() },
         onIncomingHandshake: (f, from) => opts.onIncomingHandshake(f, from, d),
         onLog: opts.onLog,
+        keep: opts.keep,
       })
     }
     for (const [d, slot] of [...watches]) {
