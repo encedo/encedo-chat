@@ -413,6 +413,13 @@ trivial few-hundred-socket DoS into a real bandwidth problem.
   client topics silently cut (production, 2026-09-29; reproduced by
   `impl/net/mesh-watchdog-test.ts`). `--load-every <s>` (default 30) exists for
   that test.
+- The **overlap reset** catches that moment directly (always on with
+  siblings): a sibling that opens a new connection while an OLDER one (> 30 s)
+  is still open gets every connection closed at once, so the re-dial starts
+  clean in seconds instead of after the watchdog's 105 s. At most once a
+  minute per sibling; two fresh connections (both sides dialling at start) are
+  left alone. Logs `[mesh] sibling … reconnected over a still-open connection`.
+  `--no-overlap-reset` exists for the test's negative case.
 - The per-message log is **metadata only** (truncated topic, sender prefix, byte
   count) — the payload is ciphertext and logging it only parked user metadata in
   journald. The full frame goes to disk only under `DUMP=<dir>` (next

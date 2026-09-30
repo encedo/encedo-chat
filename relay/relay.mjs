@@ -48,7 +48,7 @@ import { multiaddr } from '@multiformats/multiaddr'
 import { createHash } from 'crypto'
 import { createDump } from './dump.mjs'
 import { startStats } from './stats.mjs'
-import { siblingSet, shouldJoin, evictable, staleSiblings } from './topics.mjs'
+import { siblingSet, shouldJoin, evictable, staleSiblings, overlapReset } from './topics.mjs'
 import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad, makeLoadCache } from './load.mjs'
 import { makeQuota, DEFAULT_PER_PEER } from './quota.mjs'
 import { leafAnnouncements } from './leaf.mjs'
@@ -418,6 +418,25 @@ relay.addEventListener('peer:connect', (evt) => { stats?.counters.conn(1); conso
 // A peer that leaves takes its topic claims with it, or a reconnecting client
 // would stay locked out by its own previous session.
 relay.addEventListener('peer:disconnect', (evt) => { quota.forget(evt.detail.toString()) })
+
+// ---- mesh: a reconnect over a still-open connection (topics.mjs overlapReset) ----
+// The instant the mesh fault of 2026-09-29 is born: close EVERY connection to
+// that sibling so the re-dial (ensure(), every 10 s, on whichever side has it
+// in --peers) builds fresh streams - seconds, instead of the watchdog's 105 s.
+if (SIBLINGS.size && !process.argv.includes('--no-overlap-reset')) {
+  const lastOverlapReset = new Map()
+  relay.addEventListener('connection:open', (evt) => {
+    const conn = evt.detail
+    const id = conn.remotePeer.toString()
+    if (!SIBLINGS.has(id)) return
+    const now = Date.now()
+    const others = relay.getConnections().filter((c) => c.remotePeer.toString() === id && c.id !== conn.id)
+    if (!overlapReset({ now, openedAt: others.map((c) => c.timeline?.open ?? now), lastReset: lastOverlapReset.get(id) ?? 0 })) return
+    lastOverlapReset.set(id, now)
+    console.log(`[mesh] sibling ${id.slice(0, 16)}... reconnected over a still-open connection — resetting all ${others.length + 1} to start clean`)
+    for (const c of relay.getConnections()) if (c.remotePeer.toString() === id) void c.close().catch(() => c.abort?.(new Error('mesh overlap')))
+  })
+}
 relay.addEventListener('peer:disconnect', (evt) => { stats?.counters.conn(-1); console.log('[-]', evt.detail.toString().slice(0, 16) + '...') })
 // connections, subscriptions, every frame, reservations, start/stop -> JSONL
 dump?.attach(relay, { flags: args })

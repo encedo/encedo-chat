@@ -112,3 +112,21 @@ export function evictable({ now, lastSeen = 0, holders = 0, ttlMs }) {
 export function staleSiblings({ now, connected, lastHeard, connectedAt, maxSilenceMs }) {
   return connected.filter((id) => now - Math.max(lastHeard.get(id) ?? 0, connectedAt.get(id) ?? now) > maxSilenceMs)
 }
+
+/**
+ * A new connection from a sibling we are ALREADY connected to: is this the
+ * overlap that leaves GossipSub writing into a dead connection?
+ *
+ * That overlap is the moment the mesh fault of 2026-09-29 is born: the peer
+ * reconnected before we noticed its old connection died, no peer:connect
+ * fires for the new one, and our stream stays on the old. The watchdog
+ * (staleSiblings) repairs it after 105 s of silence; catching the overlap
+ * repairs it at once, by closing EVERY connection to that sibling so the
+ * re-dial starts clean. Two fresh connections (both sides dialling at start)
+ * are not an overlap - the older one must be older than `minAgeMs` - and a
+ * sibling is reset at most once per `minGapMs`, so this cannot flap.
+ */
+export function overlapReset({ now, openedAt, lastReset = 0, minAgeMs = 30_000, minGapMs = 60_000 }) {
+  // openedAt: open times of this sibling's OTHER connections (not the new one).
+  return openedAt.some((t) => now - t > minAgeMs) && now - lastReset > minGapMs
+}

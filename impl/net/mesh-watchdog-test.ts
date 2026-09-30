@@ -1,7 +1,7 @@
 /**
  * mesh-watchdog-test.ts — a relay whose stream to a sibling died is reset.
  *
- *   node net/mesh-watchdog-test.ts [--no-watchdog]
+ *   node net/mesh-watchdog-test.ts [--no-watchdog] [--no-overlap]
  *
  * Reproduces what production showed on 2026-09-29. R1 and R2 are meshed
  * siblings. R2 is frozen (SIGSTOP), so R1 still holds its connection; a new R2
@@ -9,8 +9,10 @@
  * then the frozen one is killed. R1's GossipSub then keeps writing into the
  * old connection: clients on the two relays stop hearing each other in that
  * direction, with every TCP link up. The watchdog (relay/topics.mjs
- * staleSiblings) must notice the silence and reset the link. With
- * --no-watchdog the silence limit is set out of reach, to show the breakage.
+ * staleSiblings) must notice the silence and reset the link, and the overlap
+ * reset (topics.mjs overlapReset) must catch the moment itself, in seconds.
+ * --no-watchdog puts the silence limit out of reach, --no-overlap turns the
+ * overlap reset off; with both, the breakage must stay.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -20,6 +22,7 @@ import { dial } from './peer.ts'
 
 const RELAY_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'relay')
 const NO_WATCHDOG = process.argv.includes('--no-watchdog')
+const NO_OVERLAP = process.argv.includes('--no-overlap')
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const procs: ChildProcess[] = []
 const logs: Record<string, string> = {}
@@ -27,7 +30,8 @@ const logs: Record<string, string> = {}
 function startRelay(name: string, port: number, extra: string[] = []): Promise<{ addr: string; proc: ChildProcess }> {
   return new Promise((resolve, reject) => {
     const p = spawn('node', ['relay.mjs', '--pass', `mwd-${name.replace(/'$/, '')}`, '--port', String(port), '--pick', '--quiet-msgs',
-      '--announce-load', '--load-every', '2', '--mesh-silence', NO_WATCHDOG ? '100000' : '7', ...extra], { cwd: RELAY_DIR })
+      '--announce-load', '--load-every', '2', '--mesh-silence', NO_WATCHDOG ? '100000' : '7',
+      ...(NO_OVERLAP ? ['--no-overlap-reset'] : []), ...extra], { cwd: RELAY_DIR })
     procs.push(p)
     let out = ''
     const t = setTimeout(() => reject(new Error(`relay ${name} did not start: ${out.slice(-300)}`)), 15_000)
@@ -74,6 +78,9 @@ try {
   await sleep(2_000)
   console.log(`before: R2->R1 ${await reaches(B.n, A, T, 'b1') ? 'ok' : 'BROKEN'}, R1->R2 ${await reaches(A.n, B, T, 'a1') ? 'ok' : 'BROKEN'}`)
 
+  // The overlap rule acts only on an old connection (> 30 s): a real reconnect
+  // after a drop, not two relays dialling each other at start.
+  await sleep(32_000)
   // The production sequence: R2 hangs, a new R2 (same PeerId) dials R1 while
   // R1 still holds the old connection, then the old one dies.
   R2.proc.kill('SIGSTOP')
@@ -92,9 +99,11 @@ try {
     healed = await reaches(A.n, B2, T, `a3-${secs}`)
     secs = Math.round((Date.now() - t0) / 1000)
   }
-  const reset = (logs['R1'] ?? '').includes('[mesh] nothing from sibling') || (logs["R2'"] ?? '').includes('[mesh] nothing from sibling')
-  console.log(healed ? `R1->R2' healed after ${secs} s${reset ? ' (watchdog reset the link)' : ''}` : `R1->R2' still BROKEN after ${secs} s`)
-  ok = NO_WATCHDOG ? !healed : healed
+  const all = (logs['R1'] ?? '') + (logs["R2'"] ?? '')
+  const how = all.includes('reconnected over a still-open connection') ? ' (overlap reset)' : all.includes('[mesh] nothing from sibling') ? ' (watchdog reset)' : ''
+  console.log(healed ? `R1->R2' healed after ${secs} s${how}` : `R1->R2' still BROKEN after ${secs} s`)
+  // Both defences off: it must stay broken. The overlap reset alone: healed, fast.
+  ok = NO_WATCHDOG && NO_OVERLAP ? !healed : healed && (NO_OVERLAP || secs <= 15)
   for (const c of [A, B, B2]) await c.n.stop().catch(() => {})
   console.log(ok ? 'PRZESZLO' : 'NIE PRZESZLO')
 } catch (e: any) {

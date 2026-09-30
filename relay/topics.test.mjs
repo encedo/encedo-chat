@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { peerIdOf, siblingSet, shouldJoin, evictable, staleSiblings } from './topics.mjs'
+import { peerIdOf, siblingSet, shouldJoin, evictable, staleSiblings, overlapReset } from './topics.mjs'
 
 // The real ids, so a change in their shape breaks here rather than in a room
 // that quietly stops forming.
@@ -74,4 +74,12 @@ test('a connected sibling that has sent nothing for too long is reset; the clock
   const got = staleSiblings({ now, connected: ['alive', 'dead', 'fresh', 'old-never'], lastHeard, connectedAt, maxSilenceMs })
   assert.deepEqual(got.sort(), ['dead', 'old-never'], 'silent too long, whether or not it ever spoke; a fresh link gets its grace')
   assert.deepEqual(staleSiblings({ now, connected: [], lastHeard, connectedAt, maxSilenceMs }), [], 'nothing connected, nothing to reset')
+})
+
+test('a reconnect over a still-open old connection is reset at once; a fresh pair or a recent reset is not', () => {
+  const now = 1_000_000
+  assert.equal(overlapReset({ now, openedAt: [now - 3_600_000] }), true, 'old connection still open: the overlap')
+  assert.equal(overlapReset({ now, openedAt: [now - 2_000] }), false, 'both just opened (dialled each other at start)')
+  assert.equal(overlapReset({ now, openedAt: [] }), false, 'no other connection: an ordinary connect')
+  assert.equal(overlapReset({ now, openedAt: [now - 3_600_000], lastReset: now - 10_000 }), false, 'reset a moment ago: no flapping')
 })
