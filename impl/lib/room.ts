@@ -1292,6 +1292,28 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     flushPending: () => (parked.size ? unpark() : flushAll()),
     /** Peers with a live EH-2 ratchet (empty in interim mode) — for the UI badge. */
     secured: () => (eh2 ? [...sessions.keys()] : []),
+    /** The topic the room is on now (it can move: `retarget`). */
+    currentTopic: () => topic,
+    /**
+     * Move the conversation to another topic IN PLACE - the pair's current
+     * rendezvous day - keeping the transcript-side state: pending messages,
+     * sessions, dedup. A room is pinned to the day it opened on, which is
+     * right while both sides stay; when the other side reopens (reload,
+     * restart) it lands on today's topic and the pinned room never meets it
+     * again - orange dots both ways, no handshake, until a restart
+     * (2026-10-01). lib/core.ts decides when to move.
+     */
+    retarget: (newTopic: string, macKey: CryptoKey): boolean => {
+      if (!newTopic || newTopic === topic) return false
+      const old = topic
+      topic = newTopic
+      keys = { ...keys, macKey }
+      try { node.services.pubsub.subscribe(topic) } catch {}
+      try { node.services.pubsub.unsubscribe(old) } catch {}
+      log(`moved from ${old.slice(0, 12)}... to the current topic ${topic.slice(0, 12)}...`)
+      void announce()
+      return true
+    },
     stop: () => {
       // Handshake timers first, and by peer: `clearAttempt` owns both the
       // timeout and the msg1 re-sender, and clearing the maps without it left

@@ -969,8 +969,11 @@ on the one transport, **not** twenty handshakes.
     watch holds one `watchPresence` per **active day** and re-evaluates on a 60 s
     tick; `session.open` derives the room on the pair's **current rendezvous day**,
     not `params.dateUTC`, so new conversations rotate too. A conversation held open
-    **across** a rotation keeps its topic to the end (both sides consistent) —
-    live-conversation re-rendezvous is deliberately out of scope.
+    **across** a rotation keeps its topic while the other side is on it; once
+    nobody is left there, or the contact handshakes on the current day, core
+    MOVES the room in place (`room.retarget`, core `realign`, checked every
+    60 s and on an incoming handshake). Pinning it "to the end" broke a pair
+    after one side restarted (2026-10-01); `net/rotation-pin-test.ts` pins it.
   - **Per-pair rotation instant, no 00:00 spike.** Each pair rotates at
     `midnight + offset`, where `offset = rotationOffsetSec(ss)` (`lib/rendezvous.ts`:
     `HKDF(ss, "encedo-chat-rotation-v1", info = network_id||0x00)`, **date-independent**

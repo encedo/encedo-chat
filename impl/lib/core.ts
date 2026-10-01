@@ -562,6 +562,8 @@ export interface Conversation {
   refresh(): void | Promise<void> // UI calls when the tab becomes visible again (throttled/frozen)
   who(): string[]
   secured(): string[] // peers with a live EH-2 ratchet (empty in interim mode)
+  /** Move to `topic` in place (the pair's current rendezvous day). See room.ts retarget. */
+  retarget(topic: string, macKey: CryptoKey): boolean
   /**
    * Send a file straight down the DataChannel, bypassing the store entirely
    * (`lib/xfer.ts`, `TRANSFER-DESIGN.md`). `'no-channel'` whenever content is
@@ -712,6 +714,8 @@ export interface SessionOpts {
   onRefused?: (topic: string) => void
   /** Test seam: the transport node this session runs on, e.g. to break it on purpose. */
   onTransport?: (node: any) => void
+  /** Test seam: how often a room pinned to an old rendezvous day is checked (default 60 s). */
+  realignEveryMs?: number
   /** Broker URL for `transport: 'mqtt'` (`wss://host/mqtt`, or `mqtt://host:1883` in Node). */
   broker?: string
   params?: RoomParams
@@ -1008,6 +1012,34 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   const roomTopics = new Map<string, number>()
   const holdTopic = (t: string) => roomTopics.set(t, (roomTopics.get(t) ?? 0) + 1)
   const releaseTopic = (t: string) => { const n = (roomTopics.get(t) ?? 0) - 1; if (n > 0) roomTopics.set(t, n); else roomTopics.delete(t) }
+  /**
+   * Open conversations by contact, so a room pinned to an old rendezvous day
+   * can be moved to the current one (2026-10-01: after one side reopened,
+   * the pair met only through presence - orange both ways, no handshake -
+   * until the side with the old room restarted too).
+   */
+  const openConvs = new Map<string, { conv: Conversation; peer: Peer }>()
+  /** Move `pub`'s room to `dateUTC`'s topic (default: the pair's current day), if it is elsewhere. */
+  const realign = async (pub: string, why: string, dateUTC?: string) => {
+    const o = openConvs.get(pub); if (!o || closed) return
+    const off = await offsetSecFor(o.peer)
+    const day = dateUTC ?? rendezvousDay(Date.now(), off * 1000)
+    const { topic, macKey } = await presenceFromSecret(await pairSecret(o.peer), { ...params, dateUTC: day })
+    const old = o.conv.topic
+    if (topic === old || openConvs.get(pub) !== o) return
+    if (o.conv.retarget(topic, macKey)) {
+      releaseTopic(old); holdTopic(topic)
+      log(`conversation with ${pub.slice(0, 12)}... moved to the ${day} topic (${why})`)
+    }
+  }
+  // The on-screen room has no presence watch to hear a handshake on the new
+  // day, so also check once a minute: a room whose peer is not on its (old)
+  // topic moves to the current one. A peer still there keeps it put - a live
+  // conversation is never moved mid-sentence; it follows once one side leaves.
+  const realignTimer = setInterval(() => {
+    for (const [pub, o] of openConvs) if (o.conv.who().length === 0) void realign(pub, 'nobody on the old topic').catch(() => {})
+  }, opts.realignEveryMs ?? 60_000)
+  ;(realignTimer as any).unref?.()
   /** One per published invite; stopped with the session (DISCOVERY-PROPOSAL.md §2). */
   const inboxes = new Set<InboxWatch>()
   // The day a contact's handshake arrived on, remembered until we open the room
@@ -1072,7 +1104,12 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
         offsetMs: offsetSec * 1000,
         onOnline: () => presenceHandlers.onOnline?.(peer),
         onOffline: () => presenceHandlers.onOffline?.(peer),
-        onIncomingHandshake: (_f, _from, dateUTC) => { upgradeDate.set(peer.pub, { date: dateUTC, at: Date.now() }); presenceHandlers.onWantsConversation?.(peer) },
+        onIncomingHandshake: (_f, _from, dateUTC) => {
+          // A room already open with this contact, on another day's topic:
+          // the contact is handshaking HERE, so move the room here.
+          if (openConvs.has(peer.pub)) { void realign(peer.pub, 'the contact is handshaking there', dateUTC).catch(() => {}); return }
+          upgradeDate.set(peer.pub, { date: dateUTC, at: Date.now() }); presenceHandlers.onWantsConversation?.(peer)
+        },
         onLog: opts.onLog,
         keep: (t) => roomTopics.has(t),
       })
@@ -1095,6 +1132,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     presence.clear(); upgradeDate.clear()
     selfWatch?.stop()
     clearInterval(linkWatch)
+    clearInterval(realignTimer)
     for (const r of rooms) { try { r.sendPresence('leave') } catch {} }
     await new Promise((r) => setTimeout(r, FLUSH_MS))
     for (const r of rooms) { try { r.stop() } catch {} }
@@ -1185,15 +1223,18 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
         register: (r: OpenRoom) => { rooms.add(r); return () => rooms.delete(r) },
       })
       holdTopic(conv.topic)
+      openConvs.set(peer.pub, { conv, peer })
       let released = false
-      return {
-        ...conv,
+      const roomLeave = conv.leave
+      // Object.assign, not a spread: `topic` is a getter (the room can move) and
+      // a spread would freeze it at today's value.
+      return Object.assign(conv, {
         rotationOffsetSec: offsetSec,
         leave: async () => {
-          if (!released) { released = true; releaseTopic(conv.topic) }
-          await conv.leave(); if (wasWatched && !closed) await startWatch(peer)
+          if (!released) { released = true; releaseTopic(conv.topic); if (openConvs.get(peer.pub)?.conv === conv) openConvs.delete(peer.pub) }
+          await roomLeave(); if (wasWatched && !closed) await startWatch(peer)
         },
-      }
+      })
     },
     async watchContacts(contacts: Peer[], handlers) {
       presenceHandlers = handlers
@@ -1373,7 +1414,9 @@ async function openRoom(
 
   return {
     peerId: self,
-    topic,
+    // A getter: the room can move to the current rendezvous day (retarget).
+    get topic() { return room.currentTopic() },
+    retarget: (t: string, k: CryptoKey) => room.retarget(t, k),
     sendText: (body, re) => { const mid = room.sendText(body, re); stopTyping(); return mid },
     resend: (mid) => room.resend(mid),
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),

@@ -34,3 +34,28 @@ test('alone in a room behind a relay that answers is not "the transport is dead"
     assert.equal(isolated > 0, expectIsolated, `${label}: isolated ${isolated}x`)
   }
 })
+
+test('a room moves to another topic in place: new subscribed, old released, announces go to the new one', async () => {
+  const macKey = await announceMacKey(new Uint8Array(32).fill(7), { networkId: 'test', dateUTC: '2026-10-01' })
+  const subs = new Set<string>(), published: string[] = []
+  const n = {
+    peerId: { toString: () => 'me' },
+    services: { pubsub: {
+      addEventListener: () => {}, removeEventListener: () => {},
+      subscribe: (t: string) => { subs.add(t) }, unsubscribe: (t: string) => { subs.delete(t) },
+      getSubscribers: () => ['relay'],
+      publish: async (t: string) => { published.push(t); return { recipients: [], acked: true } },
+    } },
+  }
+  const room: any = joinChat(n, 'day-1', { macKey } as any, { heartbeatMs: 20, firstAnnounceMs: 5 })
+  await sleep(60)
+  assert.equal(room.currentTopic(), 'day-1')
+  assert.equal(room.retarget('day-1', macKey), false, 'the same topic is no move')
+  published.length = 0
+  assert.equal(room.retarget('day-2', macKey), true)
+  await sleep(60)
+  room.stop()
+  assert.equal(room.currentTopic(), 'day-2')
+  assert.ok(!subs.has('day-1'), 'the old topic is released')
+  assert.ok(published.length > 0 && published.every((t) => t === 'day-2'), `everything after the move goes to the new topic: ${published}`)
+})
