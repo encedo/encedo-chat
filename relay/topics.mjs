@@ -130,3 +130,22 @@ export function overlapReset({ now, openedAt, lastReset = 0, minAgeMs = 30_000, 
   // openedAt: open times of this sibling's OTHER connections (not the new one).
   return openedAt.some((t) => now - t > minAgeMs) && now - lastReset > minGapMs
 }
+
+/**
+ * After a sibling link was lost, may THIS relay dial it now?
+ *
+ * Both relays of a pair have each other in --peers, so after a reset both
+ * re-dialled within the same 10 s and the pair got two fresh connections at
+ * once. libp2p then drops one, and GossipSub's stream sometimes stayed on the
+ * dropped one: the direction was dead again two minutes after the watchdog
+ * had reset it (seen four times in the night of 2026-09-30, each costing two
+ * to eight minutes). So one side goes first, deterministically: the relay
+ * with the smaller PeerId dials at once; the other waits `graceMs` and dials
+ * only if the link is still down - the fallback for a pair where the first
+ * one cannot or does not dial. The first dial after start is never held back.
+ */
+export function mayRedial({ selfId, peerId, now, lostAt, graceMs = 20_000 }) {
+  if (lostAt == null) return true            // never connected, or start-up
+  if (String(selfId) < String(peerId)) return true
+  return now - lostAt >= graceMs
+}

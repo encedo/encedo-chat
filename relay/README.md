@@ -420,6 +420,13 @@ trivial few-hundred-socket DoS into a real bandwidth problem.
   minute per sibling; two fresh connections (both sides dialling at start) are
   left alone. Logs `[mesh] sibling … reconnected over a still-open connection`.
   `--no-overlap-reset` exists for the test's negative case.
+- After a sibling link is lost, **only one side re-dials at once**: the relay
+  with the smaller PeerId dials immediately, the other waits 20 s and dials
+  only if the link is still down. Both re-dialling within the same 10 s gave
+  the pair two fresh connections, libp2p dropped one, and GossipSub's stream
+  sometimes stayed on the dropped one (night of 2026-09-30, four times).
+  Every sibling connection is logged as
+  `[mesh-conn] open|close <peer> inbound|outbound <addr> conn=<id> age=<s> open-now=<n>`.
 - The per-message log is **metadata only** (truncated topic, sender prefix, byte
   count) — the payload is ciphertext and logging it only parked user metadata in
   journald. The full frame goes to disk only under `DUMP=<dir>` (next

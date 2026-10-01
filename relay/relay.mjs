@@ -48,7 +48,7 @@ import { multiaddr } from '@multiformats/multiaddr'
 import { createHash } from 'crypto'
 import { createDump } from './dump.mjs'
 import { startStats } from './stats.mjs'
-import { siblingSet, shouldJoin, evictable, staleSiblings, overlapReset } from './topics.mjs'
+import { siblingSet, shouldJoin, evictable, staleSiblings, overlapReset, mayRedial } from './topics.mjs'
 import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad, makeLoadCache } from './load.mjs'
 import { makeQuota, DEFAULT_PER_PEER } from './quota.mjs'
 import { leafAnnouncements } from './leaf.mjs'
@@ -445,13 +445,33 @@ dump?.attach(relay, { flags: args })
 // ("operation was aborted") or the link can drop later, and with no re-dial the
 // mesh silently never forms. So dial each peer, then re-check every 10 s and
 // re-dial whenever we are not connected to it.
+// When a sibling link is lost, only one side re-dials at once (topics.mjs mayRedial).
+const siblingLostAt = new Map()
+relay.addEventListener('peer:disconnect', (evt) => { const id = evt.detail.toString(); if (SIBLINGS.has(id)) siblingLostAt.set(id, Date.now()) })
+relay.addEventListener('peer:connect', (evt) => { siblingLostAt.delete(evt.detail.toString()) })
+
+// Every connection to a sibling, opened and closed, with direction and age:
+// the mesh faults are about WHICH connection a stream sits on, and the
+// [+]/[-] lines above only show the first one in and the last one out.
+const meshConnLine = (what, c) => {
+  const id = c.remotePeer.toString()
+  if (!SIBLINGS.has(id)) return
+  const age = c.timeline?.open ? Math.round((Date.now() - c.timeline.open) / 1000) : '?'
+  const n = relay.getConnections().filter((x) => x.remotePeer.toString() === id).length
+  console.log(`[mesh-conn] ${what} ${id.slice(0, 16)}... ${c.direction} ${c.remoteAddr?.toString()} conn=${c.id} age=${age}s open-now=${n}`)
+}
+relay.addEventListener('connection:open', (evt) => meshConnLine('open', evt.detail))
+relay.addEventListener('connection:close', (evt) => meshConnLine('close', evt.detail))
+
 if (PEERS.length > 0) {
   console.log(`\nŁączę z ${PEERS.length} innymi relay (keep-alive z ponawianiem)...`)
+  const selfId = relay.peerId.toString()
   for (const addr of PEERS) {
     const ma = multiaddr(addr)
     const pid = ma.getPeerId()
     const ensure = async () => {
       if (pid && relay.getConnections().some((c) => c.remotePeer.toString() === pid)) return
+      if (pid && !mayRedial({ selfId, peerId: pid, now: Date.now(), lostAt: siblingLostAt.get(pid) })) return
       try { await relay.dial(ma); console.log(`  [ok] ${addr.slice(0, 60)}`) }
       catch (e) { console.log(`  [fail] ${addr.slice(0, 50)}... (${e.message}) — ponawiam`) }
     }

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { peerIdOf, siblingSet, shouldJoin, evictable, staleSiblings, overlapReset } from './topics.mjs'
+import { peerIdOf, siblingSet, shouldJoin, evictable, staleSiblings, overlapReset, mayRedial } from './topics.mjs'
 
 // The real ids, so a change in their shape breaks here rather than in a room
 // that quietly stops forming.
@@ -82,4 +82,12 @@ test('a reconnect over a still-open old connection is reset at once; a fresh pai
   assert.equal(overlapReset({ now, openedAt: [now - 2_000] }), false, 'both just opened (dialled each other at start)')
   assert.equal(overlapReset({ now, openedAt: [] }), false, 'no other connection: an ordinary connect')
   assert.equal(overlapReset({ now, openedAt: [now - 3_600_000], lastReset: now - 10_000 }), false, 'reset a moment ago: no flapping')
+})
+
+test('after a lost sibling link the smaller PeerId re-dials at once, the larger only after the grace', () => {
+  const now = 1_000_000
+  assert.equal(mayRedial({ selfId: 'A', peerId: 'B', now, lostAt: now - 1_000 }), true, 'smaller id: dial now')
+  assert.equal(mayRedial({ selfId: 'B', peerId: 'A', now, lostAt: now - 1_000 }), false, 'larger id: let the other go first')
+  assert.equal(mayRedial({ selfId: 'B', peerId: 'A', now, lostAt: now - 25_000 }), true, 'larger id, still down after the grace: fallback')
+  assert.equal(mayRedial({ selfId: 'B', peerId: 'A', now, lostAt: undefined }), true, 'start-up: never held back')
 })

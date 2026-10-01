@@ -70,7 +70,10 @@ try {
   for (const p of procs.splice(0)) p.kill()
   await sleep(800)
   const shape = (sib: string) => ['--local-topics-only', '--leaf-announce', '--siblings', sib]
-  const R1 = await startRelay('R1', 9981, shape(id2))
+  // Production shape: each relay of a pair has the other in --peers (R1 lists
+  // both the address R2 starts on and the one its successor will use), so the
+  // re-dial after a reset goes first from whichever has the smaller PeerId.
+  const R1 = await startRelay('R1', 9981, ['--peers', `/ip4/127.0.0.1/tcp/9982/ws/p2p/${id2}`, `/ip4/127.0.0.1/tcp/9983/ws/p2p/${id2}`, ...shape(id2)])
   const R2 = await startRelay('R2', 9982, ['--peers', R1.addr, ...shape(id1)])
   const T = 'mwd-' + Date.now().toString(36)
   const A = await client(R1.addr, T)
