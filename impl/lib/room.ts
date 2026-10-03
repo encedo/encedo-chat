@@ -1292,6 +1292,16 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     flushPending: () => (parked.size ? unpark() : flushAll()),
     /** Peers with a live EH-2 ratchet (empty in interim mode) — for the UI badge. */
     secured: () => (eh2 ? [...sessions.keys()] : []),
+    /**
+     * Peers a presence watch on this same topic heard announcing a moment ago
+     * (core hands them over when the room takes the topic). Treated exactly
+     * like a fresh Announce - presence, an answering Announce, the handshake -
+     * so the first message does not wait for the contact's next heartbeat.
+     * Older than the quiet threshold is not "here" any more and is ignored.
+     */
+    seed: (peers: Array<{ peer: string; at: number }>) => {
+      for (const { peer, at } of peers) if (peer !== self && nowMs() - at <= quietMs && !lastSeen.has(peer)) touch(peer)
+    },
     /** The topic the room is on now (it can move: `retarget`). */
     currentTopic: () => topic,
     /**

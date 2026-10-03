@@ -562,6 +562,8 @@ export interface Conversation {
   refresh(): void | Promise<void> // UI calls when the tab becomes visible again (throttled/frozen)
   who(): string[]
   secured(): string[] // peers with a live EH-2 ratchet (empty in interim mode)
+  /** Peers heard on this topic a moment ago by the presence watch (see room.ts seed). */
+  seed(peers: Array<{ peer: string; at: number }>): void
   /** Move to `topic` in place (the pair's current rendezvous day). See room.ts retarget. */
   retarget(topic: string, macKey: CryptoKey): boolean
   /**
@@ -714,6 +716,10 @@ export interface SessionOpts {
   onRefused?: (topic: string) => void
   /** Test seam: the transport node this session runs on, e.g. to break it on purpose. */
   onTransport?: (node: any) => void
+  /** Test seam: the presence watches' heartbeat (default 15 s; a hidden tab or phone stretches it to 60 s). */
+  presenceHeartbeatMs?: number
+  /** Test seam: false turns off handing the watch's heard peers to a new room (presence.ts seen). */
+  presenceHints?: boolean
   /** Test seam: how often a room pinned to an old rendezvous day is checked (default 60 s). */
   realignEveryMs?: number
   /** Broker URL for `transport: 'mqtt'` (`wss://host/mqtt`, or `mqtt://host:1883` in Node). */
@@ -1102,6 +1108,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       offsetCache.set(peer.pub, offsetSec)
       const watch = watchPresenceRotating(node, self, (dateUTC) => presenceFromSecret(ss, { ...params, dateUTC }), {
         offsetMs: offsetSec * 1000,
+        heartbeatMs: opts.presenceHeartbeatMs,
         onOnline: () => presenceHandlers.onOnline?.(peer),
         onOffline: () => presenceHandlers.onOffline?.(peer),
         onIncomingHandshake: (_f, _from, dateUTC) => {
@@ -1112,6 +1119,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
         },
         onLog: opts.onLog,
         keep: (t) => roomTopics.has(t),
+        reply: opts.presenceHints !== false,
       })
       presence.set(peer.pub, { peer, watch })
     } catch (e: any) { log(`presence watch for ${peer.pub.slice(0, 12)}... failed: ${e?.message ?? e}`) }
@@ -1196,6 +1204,8 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       // and its warm mesh) so the room does not have to re-graft. Restore a fresh
       // watch on leave.
       const wasWatched = presence.has(peer.pub)
+      // What the watch already knows travels with the topic: who is here.
+      const heard = presence.get(peer.pub)?.watch.seen?.() ?? []
       presence.get(peer.pub)?.watch.stop(false) // false = handoff, do not unsubscribe
       presence.delete(peer.pub)
       const ss = await pairSecret(peer) // paid for once; the watch and the offset used the same one
@@ -1224,6 +1234,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       })
       holdTopic(conv.topic)
       openConvs.set(peer.pub, { conv, peer })
+      if (opts.presenceHints !== false) conv.seed(heard.filter((h) => h.topic === conv.topic))
       let released = false
       const roomLeave = conv.leave
       // Object.assign, not a spread: `topic` is a getter (the room can move) and
@@ -1417,6 +1428,7 @@ async function openRoom(
     // A getter: the room can move to the current rendezvous day (retarget).
     get topic() { return room.currentTopic() },
     retarget: (t: string, k: CryptoKey) => room.retarget(t, k),
+    seed: (peers) => room.seed(peers),
     sendText: (body, re) => { const mid = room.sendText(body, re); stopTyping(); return mid },
     resend: (mid) => room.resend(mid),
     sendReaction: (toId, emoji) => room.sendReaction(toId, emoji),

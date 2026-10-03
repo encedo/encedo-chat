@@ -42,6 +42,12 @@ export interface PresenceWatch {
    * node leaving and re-grafting, which stalled the presence->conversation upgrade.
    */
   stop(unsubscribe?: boolean): void
+  /**
+   * Who this watch has heard announcing, when, and on which topic. Handed to a
+   * room opened on the same topic, so it can start the handshake at once
+   * instead of waiting up to a heartbeat (15 s) to hear the contact again.
+   */
+  seen(): Array<{ peer: string; at: number; topic: string }>
 }
 
 export interface PresenceOpts {
@@ -59,6 +65,8 @@ export interface PresenceOpts {
    * the room went deaf with a green dot and nothing in any log (2026-09-29).
    */
   keep?: (topic: string) => boolean
+  /** Answer a newcomer at once (default true; off only in a test of the slow path). */
+  reply?: boolean
 }
 
 export function watchPresence(node: any, topic: string, macKey: CryptoKey, self: string, opts: PresenceOpts): PresenceWatch {
@@ -69,6 +77,9 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
   let lastSeen = 0
   let online = false
   let stopped = false
+  /** Announcers heard here (PeerId -> when), for a room taking the topic over. */
+  const heard = new Map<string, number>()
+  let lastReply = 0
 
   const announce = async () => {
     if (stopped) return
@@ -89,6 +100,13 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
     if (seenNonces.has(res.nonce!)) return
     seenNonces.add(res.nonce!)
     lastSeen = nowMs()
+    // A newcomer (a room just opened on this topic, or a fresh session) is
+    // answered at once, as the room does: otherwise it waits up to our 15 s
+    // heartbeat to learn we are here, and only then opens the handshake.
+    // Once per 3 s at most, whatever the number of newcomers.
+    const fresh = !heard.has(res.peer) || lastSeen - heard.get(res.peer)! > ttlMs
+    heard.set(res.peer, lastSeen)
+    if (fresh && opts.reply !== false && lastSeen - lastReply > 3_000) { lastReply = lastSeen; void announce() }
     if (!online) { online = true; log(`contact online on ${topic.slice(0, 12)}...`); opts.onOnline() }
   }
 
@@ -120,6 +138,7 @@ export function watchPresence(node: any, topic: string, macKey: CryptoKey, self:
 
   return {
     announce() { void announce() },
+    seen: () => [...heard].filter(([, at]) => nowMs() - at <= ttlMs).map(([peer, at]) => ({ peer, at, topic })),
     stop(unsubscribe = true) {
       stopped = true
       for (const t of earlyBeacons) clearTimeout(t)
@@ -204,6 +223,8 @@ export interface RotatingPresenceOpts extends RotationConfig {
   tickMs?: number
   /** Passed to each day's watch: see `PresenceOpts.keep`. */
   keep?: (topic: string) => boolean
+  /** Passed to each day's watch: see `PresenceOpts.reply`. */
+  reply?: boolean
 }
 
 /**
@@ -255,6 +276,7 @@ export function watchPresenceRotating(
         onIncomingHandshake: (f, from) => opts.onIncomingHandshake(f, from, d),
         onLog: opts.onLog,
         keep: opts.keep,
+        reply: opts.reply,
       })
     }
     for (const [d, slot] of [...watches]) {
@@ -269,6 +291,7 @@ export function watchPresenceRotating(
 
   return {
     announce() { for (const s of watches.values()) s.watch?.announce() },
+    seen: () => [...watches.values()].flatMap((s) => s.watch?.seen() ?? []),
     stop(unsubscribe = true) {
       stopped = true
       clearInterval(timer)
