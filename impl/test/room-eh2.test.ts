@@ -24,7 +24,8 @@ const P = { networkId: 'test', dateUTC: '2026-07-29' }
  * mesh forms, and a handshake that cannot survive it stalls forever.
  */
 function hub(
-  drop?: (data: Uint8Array, from: string) => boolean,
+  /** `to` lets a test hide a frame from one receiver only. */
+  drop?: (data: Uint8Array, from: string, to?: string) => boolean,
   duplicate?: (data: Uint8Array) => boolean,
   /** Hold a frame back instead of dropping it — how a sleeping peer answers late. */
   delayMs?: (data: Uint8Array, from: string) => number,
@@ -54,12 +55,12 @@ function hub(
               // The predicates look at the frame TYPE (first byte), which sits
               // inside the origin envelope the client now puts on every frame.
               const inner = unwrap(data)?.frame ?? data
-              if (drop?.(inner, id)) return
+              if (drop?.(inner, id)) return // dropped for everybody
               const times = duplicate?.(inner) ? 2 : 1
               const held = delayMs?.(inner, id) ?? 0
               const fanOut = () => {
                 for (let n = 0; n < times; n++) {
-                  for (const [peer, deliver] of nodes) if (peer !== id) deliver(topic, data, id)
+                  for (const [peer, deliver] of nodes) if (peer !== id && !(drop && drop.length >= 3 && drop(inner, id, peer))) deliver(topic, data, id)
                 }
               }
               if (held > 0) { const t = setTimeout(fanOut, held); (t as any).unref?.() } else fanOut()
@@ -85,7 +86,7 @@ const until = async (cond: () => boolean, ms = 5000) => {
 /** Two rooms sharing a topic + Announce key, with EH-2 wired for both peers. */
 async function rooms(opts: {
   collect: string[]
-  drop?: (d: Uint8Array, from: string) => boolean
+  drop?: (d: Uint8Array, from: string, to?: string) => boolean
   backA?: string[]
   duplicate?: (d: Uint8Array) => boolean
   onDeliveredA?: (id: string, ms: number) => void
@@ -125,7 +126,14 @@ async function rooms(opts: {
 
   const retry = opts.retry ?? { retryMs: [1_500, 4_000], giveUpMs: 4_000 }
   const replaced: string[] = []
+  // Both rooms narrate into a ring the test can print when it times out: a
+  // flake on a loaded CI runner is only fixable if the failure says which
+  // step of the handshake stalled (see 'a peer that answers from a NEW PeerId').
+  const logs: string[] = []
+  const t0 = Date.now()
+  const note = (who: string) => (m: string) => { logs.push(`${String(Date.now() - t0).padStart(6)} ${who} ${m}`); if (logs.length > 400) logs.shift() }
   const A = joinChat(nodeA, TOPIC, { macKey, eh2: eh2(ikA, ikB.pub) }, {
+    onLog: note('A'),
     firstAnnounceMs: 5,
     heartbeatMs: opts.heartbeatMs,
     onMessage: (_from, m) => opts.backA?.push(m.body),
@@ -137,6 +145,7 @@ async function rooms(opts: {
     ...retry,
   })
   const B = joinChat(nodeB, TOPIC, { macKey, eh2: eh2(ikB, ikA.pub) }, {
+    onLog: note('B'),
     firstAnnounceMs: 5,
     heartbeatMs: opts.heartbeatMs,
     onMessage: (from, m, meta) => { opts.collect.push(m.body); opts.onMessageB?.(from, m, meta) },
@@ -150,7 +159,7 @@ async function rooms(opts: {
       onMessage: (_from, m) => collect.push(m.body),
       onLog: logs ? (m) => logs.push(m) : undefined,
     })
-  return { A, B, states, rejoinB, replaced, net, macKey }
+  return { A, B, states, rejoinB, replaced, net, macKey, logs }
 }
 
 test('the handshake runs on discovery and content rides the ratchet', async (t) => {
@@ -205,9 +214,15 @@ test('a peer that answers from a NEW PeerId is followed, not ignored', async (t)
   // A open a handshake with it. A's msg1 goes to the TOPIC, so B hears it and
   // answers from its own id — the id A never learned about.
   const got: string[] = []
-  const { A, B, net, macKey } = await rooms({
+  const { A, B, net, macKey, logs } = await rooms({
     collect: got,
-    drop: (d, from) => d[0] === 0x7b && from !== 'peer-ghost', // 0x7b = '{': an Announce
+    // 0x7b = '{': an Announce. Real announces are dropped both ways, and the
+    // ghost's reaches A ONLY. It used to reach B too, so B opened its own
+    // handshake with the ghost (the room log shows 'B EH-2 initiator attempt
+    // -> peer-ghost'), a race the test never meant to set up. Only A was meant
+    // to know the ghost. Suspected cause of the 30 s CI timeout on 2026-10-03
+    // (not reproduced locally); if it recurs, the printed log will say more.
+    drop: (d, from, to) => d[0] === 0x7b && (from !== 'peer-ghost' || to === 'peer-b'),
   })
   t.after(() => { A.stop(); B.stop() })
 
@@ -220,7 +235,10 @@ test('a peer that answers from a NEW PeerId is followed, not ignored', async (t)
   // mesh is still grafting — the next attempt is ~15 s behind it. So a 10 s
   // budget was not "slow CI", it was a budget that fitted one attempt and not a
   // retry, and it went red on a loaded runner while passing everywhere else.
-  await until(() => A.secured().includes('peer-b'), 30_000)
+  // This one has flaked on loaded CI runners past even 30 s; when it does,
+  // the rooms' own narration is printed so the stalled step is on record.
+  try { await until(() => A.secured().includes('peer-b'), 30_000) }
+  catch (e) { console.log('--- room log (ms since start):\n' + logs.join('\n')); throw e }
   assert.deepEqual(A.secured(), ['peer-b'], 'the session belongs to the peer that answered')
 
   A.sendText('po przeprowadzce')
