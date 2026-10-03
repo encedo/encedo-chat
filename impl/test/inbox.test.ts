@@ -192,13 +192,16 @@ test('the decoy schedule is deterministic for one identity, and differs per invi
   const j = await generateX25519()
   const run = async (inbox: Uint8Array) => {
     const h = hub(); const c = clock()
-    const w = watchInbox(h.node, inbox, j, P, { now: c.now, tickMs: 5, decoyEveryMs: 1_000, onKnock: () => {} })
+    // Driven by pump(), never by the interval: a publish observed after a real
+    // 15 ms sleep was stamped one step late on a loaded machine and the two
+    // runs of one identity disagreed (2026-10-03). pump() settles the pass.
+    const w = watchInbox(h.node, inbox, j, P, { now: c.now, tickMs: 3_600_000, decoyEveryMs: 1_000, onKnock: () => {} })
     await w.decoy()               // settle the setup chain, then measure the schedule
     h.published.length = 0
     const at: number[] = []
     for (let i = 0; i < 20; i++) {
       const before = h.published.length
-      c.add(300); await sleep(15)
+      c.add(300); await w.pump()
       if (h.published.length > before) at.push(c.now())
     }
     w.stop()
@@ -221,13 +224,16 @@ test('the schedule depends on the IDENTITY too, not only on the invite', async (
   const inbox = secret(6)
   const run = async (j: Awaited<ReturnType<typeof generateX25519>>) => {
     const h = hub(); const c = clock()
-    const w = watchInbox(h.node, inbox, j, P, { now: c.now, tickMs: 5, decoyEveryMs: 1_000, onKnock: () => {} })
+    // Driven by pump(), never by the interval: a publish observed after a real
+    // 15 ms sleep was stamped one step late on a loaded machine and the two
+    // runs of one identity disagreed (2026-10-03). pump() settles the pass.
+    const w = watchInbox(h.node, inbox, j, P, { now: c.now, tickMs: 3_600_000, decoyEveryMs: 1_000, onKnock: () => {} })
     await w.decoy()               // settle the setup chain, then measure the schedule
     h.published.length = 0
     const at: number[] = []
     for (let i = 0; i < 20; i++) {
       const before = h.published.length
-      c.add(300); await sleep(15)
+      c.add(300); await w.pump()
       if (h.published.length > before) at.push(c.now())
     }
     w.stop()
