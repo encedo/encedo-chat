@@ -2370,12 +2370,18 @@ async function main() {
     const hit = await B.eval<any>(`
       const row = [...document.querySelectorAll('#pane-contacts .contact')].find((r) => r.querySelector('.c-edit'));
       if (!row) return { row: false };
-      const at = (sel) => { const r = row.querySelector(sel).getBoundingClientRect(); return document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2) };
-      const hidden = { edit: !!at('.c-edit')?.closest('.c-edit'), x: !!at('.c-x')?.closest('.c-x'), row: at('.c-edit')?.closest('.contact') === row };
+      // Measure where the actions are while REVEALED, then tap those same
+      // points with them hidden. Since 0.6.42 a hidden action takes no room on
+      // touch (display:none, its box is 0x0 at the corner), so its own box
+      // says nothing about the spot a finger lands on.
       row.classList.add('show-actions');
-      const shown = { edit: !!at('.c-edit')?.closest('.c-edit'), x: !!at('.c-x')?.closest('.c-x') };
+      const pt = (sel) => { const r = row.querySelector(sel).getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] };
+      const pe = pt('.c-edit'), px = pt('.c-x');
+      const hitAt = ([x, y]) => document.elementFromPoint(x, y);
+      const shown = { edit: !!hitAt(pe)?.closest('.c-edit'), x: !!hitAt(px)?.closest('.c-x') };
       row.classList.remove('show-actions');
-      return { row: true, hidden, shown };
+      const hidden = { edit: !!hitAt(pe)?.closest('.c-edit'), x: !!hitAt(px)?.closest('.c-x'), row: hitAt(pe)?.closest('.contact') === row && hitAt(px)?.closest('.contact') === row };
+      return { row: true, hidden, shown, pe, px };
     `)
     if (!hit.row) throw new Error('no contact row with actions to test')
     if (hit.hidden.edit || hit.hidden.x || !hit.hidden.row) throw new Error(`a tap on an invisible row action hits it: ${JSON.stringify(hit)}`)
