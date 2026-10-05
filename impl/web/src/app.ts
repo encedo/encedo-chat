@@ -346,7 +346,11 @@ interface Room {
   lastPresence: string | null
   /** The presence line on screen, so a burst rewrites it instead of repeating
    *  itself. Null until the first join or leave. */
-  presenceLine?: { ev: { t: 'sys'; text: string; sid?: string }; at: number; flaps: number } | null
+  presenceLine?: { ev: { t: 'sys'; text: string; sid?: string }; at: number; flaps: number; since: number } | null
+  /** What happened to this conversation's connection, oldest first, for the
+   *  window behind the transport badge (openConnInfo). In memory only, like
+   *  the transcript. */
+  activity?: { at: number; kind: '' | 'ok' | 'warn'; text: string }[]
 }
 const rooms = new Map<string, Room>() // key = contact.pub
 let activePub: string | null = null
@@ -1460,6 +1464,11 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
 
     onLog: ecLog,
     onLink: (state) => {
+      if (state !== linkState) {
+        const what = state === 'online' ? tr('Połączenie z węzłem wróciło')
+          : state === 'reconnecting' ? tr('Wznawiam połączenie z węzłem') : tr('Twoje połączenie z węzłem przerwane')
+        for (const r of rooms.values()) noteActivity(r, state === 'online' ? 'ok' : 'warn', what)
+      }
       linkState = state; paintStatus()
       diag.note(`link ${state}`)
       // The relay came back: 1:1 rooms are refreshed by core, but groups are passive
@@ -5359,17 +5368,24 @@ function noteSecurity(room: Room, peer: string, state: 'handshaking' | 'establis
   if (state === 'established' && room.contact && waiting.has(room.contact.pub)) {
     stopKnocking(room.contact.pub)
   }
+  const was = bestSecurity(room)
   if (peer) room.security.set(peer, state)
   else { room.security.clear(); room.security.set('', state) }
+  const now = bestSecurity(room)
+  if (now !== was && now === 'established') noteActivity(room, 'ok', tr('Sesja zabezpieczona (EH-2)'))
+  if (now !== was && now === 'failed') noteActivity(room, 'warn', tr('Uzgadnianie klucza nie doszło do skutku'))
   if (room === activeRoom()) { paintSecurity(room); paintKnockButton(); paintStatus() }
   // The channel just came up or went down — the contact-list dot is
   // green-vs-orange on exactly that, so repaint the list too.
   renderContacts()
 }
-function paintSecurity(room: Room) {
+function bestSecurity(room: Room): 'handshaking' | 'established' | 'failed' {
   const states = [...room.security.values()]
-  const best = states.includes('established') ? 'established'
+  return states.includes('established') ? 'established'
     : states.includes('handshaking') ? 'handshaking' : states.length ? 'failed' : 'handshaking'
+}
+function paintSecurity(room: Room) {
+  const best = bestSecurity(room)
   const b = $('e2e-badge')
   if (best === 'established') setBadge(b, 'badge direct', tr('🔐 Secure'), tr('Handshake EH-2 uzgodniony — forward secrecy per wiadomość, hybryda PQ (ML-KEM-768)'))
   else if (best === 'handshaking') setBadge(b, 'badge e2e', tr('🤝 Securing…'), tr('Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)'))
@@ -5409,13 +5425,8 @@ function applyBadgeTitle(el: HTMLElement) {
 // security state and the rotation countdown — was unreachable exactly where
 // the header is tightest. A tap says it out loud instead; the desktop keeps
 // its hover and loses nothing to the extra click.
-$('e2e-badge').addEventListener('click', () => {
-  const b = $('e2e-badge')
-  const line = [b.dataset.rot, b.dataset.baseTitle].filter(Boolean).join('\n')
-  // Two lines need more than the default blink — but this is the only caller
-  // that does; everything else keeps the short toast.
-  if (line) toast(line, 4000)
-})
+$('e2e-badge').addEventListener('click', () => openSecInfo())
+$('transport-badge').addEventListener('click', () => openConnInfo())
 
 function noteTransport(room: Room, state: string) {
   // `demoted=` belongs here too: a stall hands content back to GossipSub for the
@@ -5426,14 +5437,125 @@ function noteTransport(room: Room, state: string) {
   // The badge is a security indicator, so it follows PROOF, not state: the
   // link reports probe=ok once its ping came back, and only then does the room
   // send content down the channel. Anything that ends the channel ends the proof.
+  const was = !!room.directProven
   if (state === 'probe=ok') room.directProven = true
   if (state === 'probe=failed' || /^(conn=(failed|disconnected|closed)|demoted=)/.test(state)) room.directProven = false
+  if (!was && room.directProven) noteActivity(room, 'ok', tr('Połączenie bezpośrednie (WebRTC) zestawione'))
+  if (was && !room.directProven) noteActivity(room, 'warn', tr('Połączenie bezpośrednie zamknięte — dalej przez węzeł'))
   if (room === activeRoom()) paintTransport(room)
 }
 function paintTransport(room: Room) {
   const b = $('transport-badge')
-  if (room.directProven) setBadge(b, 'badge direct', tr('🟢 Direct'), tr('Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing'))
-  else setBadge(b, 'badge relay', tr('⚪ Relay'), tr('Treść przez relay (GossipSub)'))
+  const ring = isFlapping(room) ? ' flapping' : ''
+  if (room.directProven) setBadge(b, 'badge direct' + ring, tr('🟢 Direct'), tr('Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing'))
+  else setBadge(b, 'badge relay' + ring, tr('⚪ Relay'), tr('Treść przez relay (GossipSub)'))
+}
+
+/** Time to this pair's next room rotation as HH:MM - the security badge's
+ *  tooltip and the security window both show it. */
+function rotationLeft(conv: { rotationOffsetSec?: number }): string {
+  const now = Date.now()
+  const next = nextRotationAfter(now, (conv.rotationOffsetSec ?? 0) * 1000)
+  let s = Math.max(0, Math.floor((next - now) / 1000))
+  const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60
+  // Hours and minutes only: this counts to a DAILY rotation, and seconds are
+  // precision nobody acts on. Rounded UP, so it never reads 00:00 while
+  // there is still time left.
+  const mm = s > 0 ? m + 1 : m
+  return `${String(h + (mm === 60 ? 1 : 0)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`
+}
+
+// ---- the windows behind the header badges -----------------------------------
+// A tap on a badge says what it stands for. The transport badge opens the route
+// and the connection's history (including a connection that keeps dropping -
+// that used to be a sentence in the transcript); the security badge opens the
+// encryption and the contact's fingerprint (it used to be a two-line toast).
+let infoShown: '' | 'conn' | 'sec' = ''
+MODAL_EXIT['info-modal'] = () => { infoShown = '' }
+$('info-close').addEventListener('click', () => dropModal('info-modal'))
+function showInfo(kind: 'conn' | 'sec', html: string) {
+  infoShown = kind
+  $('info-body').innerHTML = html
+  pushModal('info-modal') // already open: a repaint
+}
+
+function nodeLabel(addr: string): string {
+  return loadNodes().find((n) => n.addr === addr)?.name
+    ?? (addr.match(/dns4\/([^/]+)/) ?? addr.match(/ip6\/([^/]+)/) ?? [, addr.slice(0, 28)])[1] as string
+}
+
+function routeHtml(ico: string, title: string, note: string): string {
+  return `<div class="ix-route"><div class="ix-ico">${escapeHtml(ico)}</div><div><b>${escapeHtml(title)}</b><span>${escapeHtml(note)}</span></div></div>`
+}
+
+function openConnInfo() {
+  const gu = activeGid ? groupsUI.get(activeGid) : null
+  const room = gu ? null : activeRoom()
+  if (!gu && !room) return
+  const relay = client?.netStatus().relay
+  const node = relay ? nodeLabel(relay) : ''
+  const route = linkState !== 'online'
+    ? routeHtml('⚠️', tr('Brak połączenia z węzłem'), tr('Wiadomości poczekają i wyjdą, gdy połączenie wróci'))
+    : room?.directProven
+      ? routeHtml('🟢', tr('Bezpośrednio (WebRTC)'), tr('Węzeł nie widzi Waszych wiadomości — tylko obecność'))
+      : routeHtml('⚪', tr('Przez węzeł {node}', { node }), gu ? tr('Grupa idzie przez relay (GossipSub) — nie WebRTC')
+        : tr('Treść zaszyfrowana — węzeł widzi tylko rozmiar i czas'))
+  if (gu) {
+    showInfo('conn', `<h2>${escapeHtml(tr('Połączenie grupy'))}</h2>${route}`)
+    return
+  }
+  const r = room as Room
+  const pl = r.presenceLine
+  const flap = isFlapping(r) && pl
+    ? `<div class="ix-alert"><span class="ix-t">${escapeHtml(tr('{name}: połączenie się rwie', { name: r.contact.name }))}</span>`
+      + escapeHtml(tr('Zmian obecności w ostatnich {m} min: {n}.', { m: Math.max(1, Math.round((pl.at - pl.since) / 60_000)), n: pl.flaps + 1 }))
+      + ' ' + escapeHtml(tr('Zwykle to telefon, który usypia radio albo traci zasięg. Wiadomości czekają i dochodzą, gdy wróci.')) + '</div>'
+    : ''
+  const items = (r.activity ?? []).slice().reverse()
+  const history = items.length
+    ? `<ol class="ix-tl">${items.map((a) => `<li class="${a.kind}"><time>${localHHMM(a.at)}</time><span>${escapeHtml(a.text)}</span></li>`).join('')}</ol>`
+    : `<div class="ix-empty">${escapeHtml(tr('Nic się jeszcze nie wydarzyło'))}</div>`
+  showInfo('conn', `<h2>${escapeHtml(tr('Połączenie — {name}', { name: r.contact.name }))}</h2>`
+    + `<div class="msub">${escapeHtml(tr('Którędy idą Wasze wiadomości i co działo się z połączeniem'))}</div>`
+    + route + flap + `<div class="ix-h">${escapeHtml(tr('Historia'))}</div>` + history)
+}
+
+function openSecInfo() {
+  const check = (t: string) => `<div class="ix-check"><i>✓</i><span>${escapeHtml(t)}</span></div>`
+  const gu = activeGid ? groupsUI.get(activeGid) : null
+  if (gu) {
+    showInfo('sec', `<h2>${escapeHtml(tr('🔐 Grupa zabezpieczona'))}</h2>`
+      + `<div class="msub">${escapeHtml(tr('Szyfrowanie end-to-end — klucze znają tylko członkowie grupy'))}</div>`
+      + check(tr('Każdy członek szyfruje własnym kluczem nadawcy (Sender Keys)'))
+      + check(tr('Osobny podpis dla każdego odbiorcy (HMAC) — nikt nie udowodni, kto co napisał'))
+      + check(tr('Klucz zmienia się, gdy zmienia się skład grupy'))
+      + `<div class="ix-h">${escapeHtml(tr('Szczegóły'))}</div>`
+      + `<dl class="ix-kv"><dt>${escapeHtml(tr('Uczestnicy'))}</dt><dd>${escapeHtml(tr('{n} członków', { n: gu.members.length }))}</dd></dl>`)
+    return
+  }
+  const room = activeRoom()
+  if (!room) return
+  const c = room.contact
+  const best = bestSecurity(room)
+  const head = best === 'established'
+    ? `<h2>${escapeHtml(tr('🔐 Rozmowa zabezpieczona'))}</h2><div class="msub">${escapeHtml(tr('Szyfrowanie end-to-end — klucze znają tylko Wasze dwa urządzenia'))}</div>`
+      + check(tr('Klucz sesji uzgodniony (EH-2)'))
+      + check(tr('Każda wiadomość ma własny klucz — przejęcie jednego nie odsłania innych'))
+      + check(tr('Odporne na komputery kwantowe (hybryda X25519 + ML-KEM-768)'))
+    : best === 'handshaking'
+      ? `<h2>${escapeHtml(tr('🤝 Zabezpieczam rozmowę…'))}</h2><div class="msub">${escapeHtml(tr('Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)'))}</div>`
+      : `<h2>${escapeHtml(tr('⚠️ Rozmowa niezabezpieczona'))}</h2><div class="msub">${escapeHtml(tr('Handshake nie doszedł do skutku — ponowi się przy następnym Announce'))}</div>`
+  const fp = fpCache.get(c.pub) ?? '…'
+  const src = c.source === 'hem' ? tr('W HEM (trwałe, przenośne)') : tr('Lokalnie (ta przeglądarka)')
+  const rot = room.conv ? rotationLeft(room.conv) : ''
+  showInfo('sec', head
+    + `<div class="ix-h">${escapeHtml(tr('Odcisk klucza rozmówcy'))}</div><div class="ix-fp">${escapeHtml(fp)}</div>`
+    + `<div class="ix-note">${escapeHtml(tr('Porównaj go z rozmówcą osobiście lub przez telefon. Jeśli się zgadza, nikt się pod Was nie podszywa.'))}</div>`
+    + `<div class="ix-h">${escapeHtml(tr('Szczegóły'))}</div><dl class="ix-kv">`
+    + `<dt>${escapeHtml(tr('Kontakt zapisany'))}</dt><dd>${escapeHtml(src)}</dd>`
+    + (c.kid ? `<dt>KID</dt><dd>${escapeHtml(shortKid(c.kid))}</dd>` : '')
+    + (rot ? `<dt>${escapeHtml(tr('Pokój zmieni się za'))}</dt><dd>${escapeHtml(rot)}</dd>` : '')
+    + '</dl>')
 }
 
 
@@ -7878,27 +8000,49 @@ async function activateRoom(pub: string) {
  * so each transition was true. But a transcript is a record of a conversation,
  * and forty true lines about the same radio drown it.
  *
- * So the FIRST change still gets its own line, exactly as before. A second
- * change soon after rewrites that line into what is actually going on, and
- * counts. Once things settle for a few minutes the next change starts a fresh
- * line again — the collapse is about a burst, not about hiding presence.
+ * So the FIRST change still gets its own line. A change soon after rewrites
+ * that line to the current state, and the burst itself - how often, since
+ * when - goes to the connection window behind the transport badge, which wears
+ * a warning ring meanwhile. A sentence about it in the transcript was here and
+ * is gone (the user's call, 2026-10-05: "it reads as a mess"). Once things
+ * settle for a few minutes the next change starts a fresh line again.
  */
 const FLAP_WINDOW_MS = 5 * 60_000
+/** Changes in one burst before it counts as a flapping connection: a reload is
+ *  a leave and a join, and that is not a connection problem. */
+const FLAP_MIN = 3
 
-function notePresenceLine(room: Room, label: string) {
+function isFlapping(room: Room): boolean {
+  const pl = room.presenceLine
+  return !!pl && pl.flaps + 1 >= FLAP_MIN && nowMs() - pl.at < FLAP_WINDOW_MS
+}
+
+const ACTIVITY_MAX = 200
+function noteActivity(room: Room, kind: '' | 'ok' | 'warn', text: string) {
+  const a = (room.activity ??= [])
+  a.push({ at: nowMs(), kind, text })
+  if (a.length > ACTIVITY_MAX) a.shift()
+  if (infoShown === 'conn' && !activeGid && room === activeRoom()) openConnInfo() // live while open
+}
+
+function notePresenceLine(room: Room, label: string, joined: boolean) {
   const now = nowMs()
+  const text = `${room.contact.name} ${label}`
+  noteActivity(room, joined ? 'ok' : 'warn', text)
   const last = room.presenceLine
   if (last && now - last.at < FLAP_WINDOW_MS) {
     last.at = now
     last.flaps++
-    last.ev.text = tr('{name} — połączenie się rwie: wchodzi i wychodzi ({n}×)',
-      { name: room.contact.name, n: last.flaps + 1 })
+    last.ev.text = text
     if (isViewing(room)) repaintSys(last.ev)
+    if (room === activeRoom()) paintTransport(room)
+    // The ring goes when the burst does, whether or not anything repaints then.
+    setTimeout(() => { if (room === activeRoom() && !activeGid) paintTransport(room) }, FLAP_WINDOW_MS + 1_000)
     return
   }
-  const line: Ev = { t: 'sys', text: `${room.contact.name} ${label}`, sid: 'p' + now.toString(36) }
+  const line: Ev = { t: 'sys', text, sid: 'p' + now.toString(36) }
   record(room, line)
-  room.presenceLine = { ev: line as { t: 'sys'; text: string; sid?: string }, at: now, flaps: 0 }
+  room.presenceLine = { ev: line as { t: 'sys'; text: string; sid?: string }, at: now, flaps: 0, since: now }
 }
 
 /**
@@ -7918,6 +8062,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
   }
   rooms.set(contact.pub, room)
   record(room, { t: 'sys', text: tr('Pokój otwarty — czekam na {name}…', { name: contact.name }) })
+  noteActivity(room, '', tr('Pokój otwarty'))
   if (foreground) await activateRoom(contact.pub)
   else renderContacts()
 
@@ -7990,7 +8135,7 @@ async function openRoomFor(contact: Contact, foreground: boolean) {
         // Presence belongs in the header, not in the transcript. Every tab switch
         // flips away->active; only entering and leaving are worth a line, and only
         // when the state really changed.
-        if ((ev === 'join' || ev === 'leave') && room.lastPresence !== ev) notePresenceLine(room, label)
+        if ((ev === 'join' || ev === 'leave') && room.lastPresence !== ev) notePresenceLine(room, label, ev === 'join')
         room.lastPresence = ev
         room.peerLabel = ev === 'leave' ? tr('poza pokojem') : label
         if (room === activeRoom()) { paintStatus(); if (ev === 'leave') { peerTyping = false; setTyping(false) } }
@@ -9211,15 +9356,7 @@ function startRotation() {
     const b = document.getElementById('e2e-badge'); if (!b) return
     const conv = activeGid ? null : activeRoom()?.conv
     if (!conv) { delete b.dataset.rot; applyBadgeTitle(b); return }
-    const now = Date.now()
-    const next = nextRotationAfter(now, (conv.rotationOffsetSec ?? 0) * 1000)
-    let s = Math.max(0, Math.floor((next - now) / 1000))
-    const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60
-    // Hours and minutes only: this counts to a DAILY rotation, and seconds are
-    // precision nobody acts on. Rounded UP, so it never reads 00:00 while
-    // there is still time left.
-    const mm = s > 0 ? m + 1 : m
-    const t = `${String(h + (mm === 60 ? 1 : 0)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`
+    const t = rotationLeft(conv)
     b.dataset.rot = tr('Rotacja pokoju tej pary (północ UTC + offset, §5.4) za {t}', { t })
     applyBadgeTitle(b)
   }
