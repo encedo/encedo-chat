@@ -762,7 +762,7 @@ test('a second tab on the same identity is recognised, not handshaked with forev
   // expects the CONTACT's identity key and is offered its own. What they can do
   // is notice, and stop.
   const got: string[] = []
-  const { A, B, rejoinB } = await rooms({ collect: got })
+  const { A, B, rejoinB, logs } = await rooms({ collect: got })
   await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
 
   const logs2: string[] = []
@@ -778,6 +778,10 @@ test('a second tab on the same identity is recognised, not handshaked with forev
   assert.equal(atTab(), settled, 'no further attempts once the peer is known to be foreign')
 
   // ...and the real conversation is untouched by any of it.
+  // Failed once in CI (2026-10-05, run 37311267639): the message never reached
+  // B within 8 s while every earlier step had passed at once; not reproduced
+  // locally (10 parallel runs). The log says which side lost it next time.
   A.sendText('mimo drugiej zakładki')
-  await until(() => got.includes('mimo drugiej zakładki'), 8000)
+  try { await until(() => got.includes('mimo drugiej zakładki'), 8000) }
+  catch (e) { console.log('--- A/B room log (ms since start):\n' + logs.join('\n') + '\n--- second tab log:\n' + logs2.join('\n')); throw e }
 })
