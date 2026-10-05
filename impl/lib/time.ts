@@ -38,6 +38,10 @@ export const localHHMM = (ts: number): string => {
   return `${p2(d.getHours())}:${p2(d.getMinutes())}`
 }
 
+/** "HH:MM:SS" on the reader's own clock - the connection history, where
+ *  several events land in one minute and their order is the point. */
+export const localHHMMSS = (ts: number): string => `${localHHMM(ts)}:${p2(new Date(ts).getSeconds())}`
+
 /** "HH:MM:SS" in UTC. */
 export const utcHHMMSS = (ts: number): string => `${utcHHMM(ts)}:${p2(new Date(ts).getUTCSeconds())}`
 

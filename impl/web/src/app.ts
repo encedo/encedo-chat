@@ -66,7 +66,7 @@ import { cidMatches, isVerifiableCid } from '../../lib/cid.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
 import type { FileEnv, AlbumRef } from '../../lib/envelope.ts'
 import { dotFor } from '../../lib/dotstate.ts'
-import { nowMs, localHHMM, utcISO } from '../../lib/time.ts'
+import { nowMs, localHHMM, localHHMMSS, utcISO } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
 import { unb64, b64, randomBytes } from '../../lib/wc.ts'
@@ -5513,7 +5513,7 @@ function openConnInfo() {
     : ''
   const items = (r.activity ?? []).slice().reverse()
   const history = items.length
-    ? `<ol class="ix-tl">${items.map((a) => `<li class="${a.kind}"><time>${localHHMM(a.at)}</time><span>${escapeHtml(a.text)}</span></li>`).join('')}</ol>`
+    ? `<ol class="ix-tl">${items.map((a) => `<li class="${a.kind}"><time>${localHHMMSS(a.at)}</time><span>${escapeHtml(a.text)}</span></li>`).join('')}</ol>`
     : `<div class="ix-empty">${escapeHtml(tr('Nic się jeszcze nie wydarzyło'))}</div>`
   showInfo('conn', `<h2>${escapeHtml(tr('Połączenie — {name}', { name: r.contact.name }))}</h2>`
     + `<div class="msub">${escapeHtml(tr('Którędy idą Wasze wiadomości i co działo się z połączeniem'))}</div>`

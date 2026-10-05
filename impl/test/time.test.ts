@@ -8,7 +8,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { localHHMM, utcHHMM, utcDateOf, addUTCDays } from '../lib/time.ts'
+import { localHHMM, localHHMMSS, utcHHMM, utcDateOf, addUTCDays } from '../lib/time.ts'
 
 /** Run `fn` as if the machine stood in `tz`. Node reads TZ per call. */
 function inTZ<T>(tz: string, fn: () => T): T {
@@ -24,6 +24,8 @@ const TS = Date.parse('2026-07-15T22:40:00Z')
 test('a bubble is stamped on the reader’s clock', () => {
   assert.equal(inTZ('UTC', () => localHHMM(TS)), '22:40')
   assert.equal(inTZ('Europe/Warsaw', () => localHHMM(TS)), '00:40') // CEST, +2
+  assert.equal(inTZ('Europe/Warsaw', () => localHHMMSS(TS + 7_000)), '00:40:07', 'seconds ride the same local clock')
+  assert.equal(inTZ('UTC', () => localHHMMSS(TS + 7_000)), '22:40:07')
   assert.equal(inTZ('America/New_York', () => localHHMM(TS)), '18:40') // EDT, −4
   assert.equal(inTZ('Asia/Kolkata', () => localHHMM(TS)), '04:10') // +5:30 — not a whole hour
 })
