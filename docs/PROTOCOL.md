@@ -178,6 +178,25 @@ Contacts are public keys (confidentiality not critical); **integrity is critical
 - **The local contact book** (software identities; the local cache for HEM ones): a **keyed MAC over the stored text** — `HMAC(k)` with `k = HKDF(base, salt="encedo-chat-contact-book-v1", info=idKey)`, `base` from the §10 schedule — verified once at sign-in. The key is derivable only by the identity holder, and binding `info` to the identity's key makes a book copied between profiles fail. `unsigned` (a pre-MAC book) is accepted and upgraded; **`tampered` is not used and not overwritten** — the mismatching text is evidence. MAC, not encryption, by decision: reads stay synchronous, and secrecy of public keys buys nothing.
 - **At import**, both: out-of-band fingerprint verification (`SHA-256(pub)`), and pinning what was verified.
 
+#### 4.4.1 Safety number (verifying a contact you already hold)
+
+The fingerprint above identifies **one** key, so each side sees a different string and a check is two comparisons. The safety number is one string for the **pair**, identical on both screens (Signal's numeric fingerprint, adapted):
+
+```
+half(pub)  = h_5200, where  h_0 = SHA-512("encedo-chat-safety-v1" || 0x00 || pub)
+                            h_i = SHA-512(h_(i-1) || pub)
+             -> first 30 bytes -> six 5-byte big-endian integers, each mod 100000,
+                zero-padded to 5 digits -> 30 digits
+number     = min(half(IK_a), half(IK_b)) || max(...)       (string order; 60 digits)
+QR payload = "onchato-sn1:" || number
+```
+
+- **Two halves, each bound to one key** — not one hash over both. A single hash lets a man in the middle search for two key pairs of his own that collide on what is displayed (a birthday search, the square root of the space); a half bound to the key he does not control has to be hit exactly, which costs the full ~2^100 per half times the 5200 iterations.
+- **No stable identifier** where Signal uses the phone number: the X25519 key is the identity (§4); the label carries domain separation and the version.
+- **Purely local.** Nothing travels; both clients compute it from keys they already hold. It changes only when one of the identity keys does.
+- Shown as twelve groups of five. On a phone the other screen's QR code can be scanned, and the client reports match / mismatch against its own number.
+- Pinned by a fixed vector and by a second implementation of the construction in `impl/test/safety.test.ts`; `impl/lib/safety.ts` is the code.
+
 ### 4.5 Software identity
 
 A first-class identity backend for onboarding without hardware (and the packaged clients' default): a WebCrypto **X25519 keypair generated on device**, private half sealed with a password (PBKDF2-SHA256, 1 000 000 iterations, per-profile random salt → AES-GCM) in localStorage. It implements the same `Identity` contract as a HEM — one `ecdh` capability — and interoperates byte-for-byte with HEM identities; nothing downstream knows which backend it talks to.

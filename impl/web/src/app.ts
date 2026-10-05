@@ -45,6 +45,7 @@ import {
   diagFileAvailable, diagPath, diagAppend, hostSaveRoute,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
+import { safetyNumber, safetyGroups, safetyQr, parseSafetyQr } from '../../lib/safety.ts'
 import { invQrView } from './invqr.ts'
 import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
 import { iceServersFor } from '../../lib/ice.ts'
@@ -3172,9 +3173,27 @@ function closeScan() {
 }
 // However it is dismissed — its own button, Escape, the backdrop, or a flow
 // that moved on — the camera goes out with it.
-MODAL_EXIT['scan-modal'] = () => stopScanCamera()
+MODAL_EXIT['scan-modal'] = () => {
+  stopScanCamera()
+  scanVerify = null
+  const sub = document.querySelector('#scan-modal .msub') as HTMLElement | null
+  if (sub?.dataset.was != null) { sub.textContent = sub.dataset.was; delete sub.dataset.was }
+}
+
+/** Set while the scanner checks a safety number instead of reading an invite. */
+let scanVerify: { expect: string; name: string } | null = null
 
 function handleScanned(text: string) {
+  if (scanVerify) {
+    const n = parseSafetyQr(text)
+    // Not a safety code: keep looking, as for an invite.
+    if (!n) { setMsg('scan-msg', tr('To nie jest kod numeru bezpieczeństwa'), 'err'); return }
+    const v = scanVerify
+    closeScan() // back to the security window, which shows the verdict
+    if (n === v.expect) setMsg('sn-result', tr('✓ Numer zgodny — klucz {name} jest ten sam u Was obojga', { name: v.name }), 'ok')
+    else setMsg('sn-result', tr('✗ Numer się NIE zgadza — to nie jest klucz, który masz dla {name}. Nie piszcie nic poufnego, dopóki tego nie wyjaśnicie.', { name: v.name }), 'err')
+    return
+  }
   const inv = inviteFromPaste(text)
   // Not an invite: keep looking rather than closing on the first stray barcode.
   if (!inv) { setMsg('scan-msg', tr('To nie jest kod zaproszenia — pokaż kod z okna „Udostępnij swój profil”'), 'err'); return }
@@ -5451,18 +5470,14 @@ function paintTransport(room: Room) {
   else setBadge(b, 'badge relay' + ring, tr('⚪ Relay'), tr('Treść przez relay (GossipSub)'))
 }
 
-/** Time to this pair's next room rotation as HH:MM - the security badge's
- *  tooltip and the security window both show it. */
-function rotationLeft(conv: { rotationOffsetSec?: number }): string {
+/** When this pair's room changes next, on the reader's clock: "21:34:12", or
+ *  "jutro 06:10:05" when that is tomorrow. An absolute time, not a countdown -
+ *  "za 21:34" read as both "at 21:34" and "in 21 h 34 min" (2026-10-05). */
+function rotationAt(conv: { rotationOffsetSec?: number }): string {
   const now = Date.now()
   const next = nextRotationAfter(now, (conv.rotationOffsetSec ?? 0) * 1000)
-  let s = Math.max(0, Math.floor((next - now) / 1000))
-  const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); s -= m * 60
-  // Hours and minutes only: this counts to a DAILY rotation, and seconds are
-  // precision nobody acts on. Rounded UP, so it never reads 00:00 while
-  // there is still time left.
-  const mm = s > 0 ? m + 1 : m
-  return `${String(h + (mm === 60 ? 1 : 0)).padStart(2, '0')}:${String(mm % 60).padStart(2, '0')}`
+  const t = localHHMMSS(next)
+  return new Date(next).toDateString() === new Date(now).toDateString() ? t : tr('jutro {t}', { t })
 }
 
 // ---- the windows behind the header badges -----------------------------------
@@ -5520,42 +5535,66 @@ function openConnInfo() {
     + route + flap + `<div class="ix-h">${escapeHtml(tr('Historia'))}</div>` + history)
 }
 
+/** Safety numbers by contact key; the iterated hash is ~0.2 s, so once. */
+const safetyCache = new Map<string, Promise<string>>()
+const b64bytes = (b: string) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0))
+function safetyFor(pub: string): Promise<string> | null {
+  if (!session) return null
+  let p = safetyCache.get(pub)
+  if (!p) { p = safetyNumber(b64bytes(session.pub), b64bytes(pub)); safetyCache.set(pub, p) }
+  return p
+}
+
 function openSecInfo() {
-  const check = (t: string) => `<div class="ix-check"><i>✓</i><span>${escapeHtml(t)}</span></div>`
+  // Short on purpose (the user's call, 2026-10-05): what the badge means is in
+  // the title, and the number is the thing to act on. No explanatory prose.
   const gu = activeGid ? groupsUI.get(activeGid) : null
   if (gu) {
     showInfo('sec', `<h2>${escapeHtml(tr('🔐 Grupa zabezpieczona'))}</h2>`
-      + `<div class="msub">${escapeHtml(tr('Szyfrowanie end-to-end — klucze znają tylko członkowie grupy'))}</div>`
-      + check(tr('Każdy członek szyfruje własnym kluczem nadawcy (Sender Keys)'))
-      + check(tr('Osobny podpis dla każdego odbiorcy (HMAC) — nikt nie udowodni, kto co napisał'))
-      + check(tr('Klucz zmienia się, gdy zmienia się skład grupy'))
-      + `<div class="ix-h">${escapeHtml(tr('Szczegóły'))}</div>`
-      + `<dl class="ix-kv"><dt>${escapeHtml(tr('Uczestnicy'))}</dt><dd>${escapeHtml(tr('{n} członków', { n: gu.members.length }))}</dd></dl>`)
+      + `<dl class="ix-kv"><dt>${escapeHtml(tr('Szyfrowanie'))}</dt><dd>Sender Keys + HMAC</dd>`
+      + `<dt>${escapeHtml(tr('Uczestnicy'))}</dt><dd>${escapeHtml(tr('{n} członków', { n: gu.members.length }))}</dd></dl>`)
     return
   }
   const room = activeRoom()
   if (!room) return
   const c = room.contact
   const best = bestSecurity(room)
-  const head = best === 'established'
-    ? `<h2>${escapeHtml(tr('🔐 Rozmowa zabezpieczona'))}</h2><div class="msub">${escapeHtml(tr('Szyfrowanie end-to-end — klucze znają tylko Wasze dwa urządzenia'))}</div>`
-      + check(tr('Klucz sesji uzgodniony (EH-2)'))
-      + check(tr('Każda wiadomość ma własny klucz — przejęcie jednego nie odsłania innych'))
-      + check(tr('Odporne na komputery kwantowe (hybryda X25519 + ML-KEM-768)'))
-    : best === 'handshaking'
-      ? `<h2>${escapeHtml(tr('🤝 Zabezpieczam rozmowę…'))}</h2><div class="msub">${escapeHtml(tr('Trwa uzgadnianie klucza sesji (msg1→msg2→msg3)'))}</div>`
-      : `<h2>${escapeHtml(tr('⚠️ Rozmowa niezabezpieczona'))}</h2><div class="msub">${escapeHtml(tr('Handshake nie doszedł do skutku — ponowi się przy następnym Announce'))}</div>`
-  const fp = fpCache.get(c.pub) ?? '…'
+  const title = best === 'established' ? tr('🔐 Rozmowa zabezpieczona')
+    : best === 'handshaking' ? tr('🤝 Zabezpieczam rozmowę…') : tr('⚠️ Rozmowa niezabezpieczona')
   const src = c.source === 'hem' ? tr('W HEM (trwałe, przenośne)') : tr('Lokalnie (ta przeglądarka)')
-  const rot = room.conv ? rotationLeft(room.conv) : ''
-  showInfo('sec', head
-    + `<div class="ix-h">${escapeHtml(tr('Odcisk klucza rozmówcy'))}</div><div class="ix-fp">${escapeHtml(fp)}</div>`
-    + `<div class="ix-note">${escapeHtml(tr('Porównaj go z rozmówcą osobiście lub przez telefon. Jeśli się zgadza, nikt się pod Was nie podszywa.'))}</div>`
-    + `<div class="ix-h">${escapeHtml(tr('Szczegóły'))}</div><dl class="ix-kv">`
+  const rot = room.conv ? rotationAt(room.conv) : ''
+  showInfo('sec', `<h2>${escapeHtml(title)}</h2>`
+    + `<div class="ix-h">${escapeHtml(tr('Numer bezpieczeństwa — u obojga identyczny'))}</div>`
+    + `<div class="sn" id="sn-grid"><span>…</span></div>`
+    + `<div class="sn-qr" id="sn-qr" hidden></div>`
+    + `<div class="msg" id="sn-result"></div>`
+    + `<div class="sn-acts"><button class="btn-ghost" id="sn-show">${escapeHtml(tr('Pokaż kod QR'))}</button>`
+    + (scanSupported() ? `<button class="btn-ghost" id="sn-scan">${escapeHtml(tr('Zeskanuj kod'))}</button>` : '') + '</div>'
+    + `<dl class="ix-kv">`
     + `<dt>${escapeHtml(tr('Kontakt zapisany'))}</dt><dd>${escapeHtml(src)}</dd>`
     + (c.kid ? `<dt>KID</dt><dd>${escapeHtml(shortKid(c.kid))}</dd>` : '')
-    + (rot ? `<dt>${escapeHtml(tr('Pokój zmieni się za'))}</dt><dd>${escapeHtml(rot)}</dd>` : '')
+    + (rot ? `<dt>${escapeHtml(tr('Następna zmiana pokoju'))}</dt><dd>${escapeHtml(rot)}</dd>` : '')
     + '</dl>')
+  const sn = safetyFor(c.pub)
+  if (!sn) return
+  void sn.then((n) => {
+    const grid = document.getElementById('sn-grid')
+    if (!grid || infoShown !== 'sec') return // closed, or another window took its place
+    grid.innerHTML = safetyGroups(n).map((g) => `<span>${g}</span>`).join('')
+    const qr = document.getElementById('sn-qr') as HTMLElement
+    document.getElementById('sn-show')?.addEventListener('click', (e) => {
+      const show = qr.hidden
+      if (show && !qr.innerHTML) qr.innerHTML = qrSvg(safetyQr(n), { size: 220, dark: '#000', light: '#fff' })
+      qr.hidden = !show; grid.hidden = show
+      ;(e.currentTarget as HTMLElement).textContent = show ? tr('Pokaż numer') : tr('Pokaż kod QR')
+    })
+    document.getElementById('sn-scan')?.addEventListener('click', () => {
+      scanVerify = { expect: n, name: c.name }
+      const sub = document.querySelector('#scan-modal .msub') as HTMLElement | null
+      if (sub) { sub.dataset.was = sub.textContent ?? ''; sub.textContent = tr('Zeskanuj kod numeru bezpieczeństwa z ekranu {name}.', { name: c.name }) }
+      void openScan()
+    })
+  })
 }
 
 
@@ -9356,8 +9395,7 @@ function startRotation() {
     const b = document.getElementById('e2e-badge'); if (!b) return
     const conv = activeGid ? null : activeRoom()?.conv
     if (!conv) { delete b.dataset.rot; applyBadgeTitle(b); return }
-    const t = rotationLeft(conv)
-    b.dataset.rot = tr('Rotacja pokoju tej pary (północ UTC + offset, §5.4) za {t}', { t })
+    b.dataset.rot = tr('Następna zmiana pokoju tej pary (§5.4): {t}', { t: rotationAt(conv) })
     applyBadgeTitle(b)
   }
   // Still every second: the value changes on a minute boundary, and polling for
