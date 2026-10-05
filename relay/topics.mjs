@@ -109,8 +109,27 @@ export function evictable({ now, lastSeen = 0, holders = 0, ttlMs }) {
  * cut in one direction. Only closing the connection cleanly fixed it, so that
  * is what the watchdog does. The clock starts at connect, not at zero.
  */
-export function staleSiblings({ now, connected, lastHeard, connectedAt, maxSilenceMs }) {
-  return connected.filter((id) => now - Math.max(lastHeard.get(id) ?? 0, connectedAt.get(id) ?? now) > maxSilenceMs)
+export function staleSiblings({ now, connected, lastHeard, connectedAt, maxSilenceMs, lastDup = new Map() }) {
+  return connected.filter((id) => now - Math.max(lastHeard.get(id) ?? 0, lastDup.get(id) ?? 0, connectedAt.get(id) ?? now) > maxSilenceMs)
+}
+
+/**
+ * Siblings that only DUPLICATES proved alive: no first copy for `maxSilenceMs`,
+ * but a copy that lost the race did arrive over their link.
+ *
+ * `gossipsub:message` names one source per message, the first to deliver it,
+ * and drops later copies without an event. In a triangle every announce of A
+ * reaches B twice - directly and through C - and when the two routes are
+ * equally fast (bs1-bs2 direct 28 ms, through bs3 12 + 16 ms) C can win
+ * several rounds in a row. The watchdog then saw a silent sibling and reset a
+ * healthy link (bs2 alone: 3, 7, 10 resets on 2026-10-02..04; bs3, the middle
+ * of the triangle, never). A copy that came over THE link proves the link, so
+ * `staleSiblings` counts it; this names the cases where it made the
+ * difference, for the log.
+ */
+export function dupOnlySiblings({ now, connected, lastHeard, connectedAt, maxSilenceMs, lastDup }) {
+  const stale = new Set(staleSiblings({ now, connected, lastHeard, connectedAt, maxSilenceMs, lastDup }))
+  return staleSiblings({ now, connected, lastHeard, connectedAt, maxSilenceMs }).filter((id) => !stale.has(id))
 }
 
 /**

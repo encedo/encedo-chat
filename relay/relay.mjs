@@ -48,7 +48,7 @@ import { multiaddr } from '@multiformats/multiaddr'
 import { createHash } from 'crypto'
 import { createDump } from './dump.mjs'
 import { startStats } from './stats.mjs'
-import { siblingSet, shouldJoin, evictable, staleSiblings, overlapReset, mayRedial } from './topics.mjs'
+import { siblingSet, shouldJoin, evictable, staleSiblings, dupOnlySiblings, overlapReset, mayRedial } from './topics.mjs'
 import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad, makeLoadCache } from './load.mjs'
 import { makeQuota, DEFAULT_PER_PEER } from './quota.mjs'
 import { leafAnnouncements } from './leaf.mjs'
@@ -528,6 +528,20 @@ if (ANNOUNCE_LOAD) {
     const id = evt.detail.propagationSource?.toString()
     if (id && SIBLINGS.has(id)) lastHeard.set(id, Date.now())
   })
+  // The event above names only the FIRST copy of a message. A copy that lost
+  // the race to the third relay still came over THIS link and proves it alive
+  // (topics.mjs dupOnlySiblings). GossipSub has no event for it; the score's
+  // duplicate hook is the one place every late copy passes, with its sender.
+  const lastDup = new Map()
+  const score = relay.services.pubsub.score
+  if (typeof score?.duplicateMessage === 'function') {
+    const orig = score.duplicateMessage.bind(score)
+    score.duplicateMessage = (from, ...rest) => {
+      if (SIBLINGS.has(from)) lastDup.set(from, Date.now())
+      return orig(from, ...rest)
+    }
+  } else console.log('[mesh] GossipSub has no duplicate hook - the watchdog counts first copies only')
+  const dupSaved = new Set() // logged once per episode, not every 10 s
   relay.addEventListener('peer:connect', (evt) => {
     const id = evt.detail.toString()
     if (SIBLINGS.has(id)) { connectedAt.set(id, Date.now()); lastHeard.delete(id) }
@@ -535,7 +549,14 @@ if (ANNOUNCE_LOAD) {
   setInterval(() => {
     const now = Date.now()
     const connected = [...new Set(relay.getConnections().map((c) => c.remotePeer.toString()))].filter((id) => SIBLINGS.has(id))
-    for (const id of staleSiblings({ now, connected, lastHeard, connectedAt, maxSilenceMs: MESH_SILENCE_MS })) {
+    const w = { now, connected, lastHeard, connectedAt, maxSilenceMs: MESH_SILENCE_MS, lastDup }
+    const saved = dupOnlySiblings(w)
+    for (const id of saved) if (!dupSaved.has(id)) {
+      dupSaved.add(id)
+      console.log(`[mesh] sibling ${id.slice(0, 16)}... only duplicates for ${Math.round(MESH_SILENCE_MS / 1000)}s - another relay wins the race, the link is alive, no reset`)
+    }
+    for (const id of dupSaved) if (!saved.includes(id)) dupSaved.delete(id)
+    for (const id of staleSiblings(w)) {
       if (now - (lastReset.get(id) ?? 0) < 2 * MESH_SILENCE_MS) continue
       lastReset.set(id, now)
       console.log(`[mesh] nothing from sibling ${id.slice(0, 16)}... for ${Math.round(MESH_SILENCE_MS / 1000)}s while connected — resetting the connection`)

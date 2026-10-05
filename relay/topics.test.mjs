@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { peerIdOf, siblingSet, shouldJoin, evictable, staleSiblings, overlapReset, mayRedial } from './topics.mjs'
+import { peerIdOf, siblingSet, shouldJoin, evictable, staleSiblings, dupOnlySiblings, overlapReset, mayRedial } from './topics.mjs'
 
 // The real ids, so a change in their shape breaks here rather than in a room
 // that quietly stops forming.
@@ -74,6 +74,20 @@ test('a connected sibling that has sent nothing for too long is reset; the clock
   const got = staleSiblings({ now, connected: ['alive', 'dead', 'fresh', 'old-never'], lastHeard, connectedAt, maxSilenceMs })
   assert.deepEqual(got.sort(), ['dead', 'old-never'], 'silent too long, whether or not it ever spoke; a fresh link gets its grace')
   assert.deepEqual(staleSiblings({ now, connected: [], lastHeard, connectedAt, maxSilenceMs }), [], 'nothing connected, nothing to reset')
+})
+
+test('a duplicate that came over the link keeps a sibling alive; only first copies silent is not a dead link', () => {
+  // 2026-10-05: bs3 won the race for bs1's announces several rounds in a row,
+  // and bs2 reset a healthy bs1 link that was still delivering the copies.
+  const now = 1_000_000, maxSilenceMs = 105_000
+  const connectedAt = new Map([['raced', now - 900_000], ['dead', now - 900_000], ['alive', now - 900_000]])
+  const lastHeard = new Map([['raced', now - 300_000], ['dead', now - 300_000], ['alive', now - 5_000]])
+  const lastDup = new Map([['raced', now - 10_000], ['dead', now - 300_000]])
+  const args = { now, connected: ['raced', 'dead', 'alive'], lastHeard, connectedAt, maxSilenceMs }
+  assert.deepEqual(staleSiblings({ ...args, lastDup }), ['dead'], 'a recent duplicate spares the link; an old one does not')
+  assert.deepEqual(staleSiblings(args).sort(), ['dead', 'raced'], 'without duplicates (the old watchdog) the raced link was reset')
+  assert.deepEqual(dupOnlySiblings({ ...args, lastDup }), ['raced'], 'the log names the link that only duplicates saved')
+  assert.deepEqual(dupOnlySiblings({ ...args, lastDup: new Map() }), [], 'no duplicates, nothing to report')
 })
 
 test('a reconnect over a still-open old connection is reset at once; a fresh pair or a recent reset is not', () => {
