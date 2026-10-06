@@ -115,7 +115,7 @@ server {
     # celują w /chat/app.<hash>.bundle.js → try_files oddaje index.html jako
     # JavaScript i aplikacja nie wstaje. Objaw: biała strona, w konsoli błąd
     # składni w miejscu, gdzie jest HTML.
-    location = /chat/ { return 301 https://app.onchato.com/; }
+    location = /chat/ { return 301 https://app.onchato.com/$is_args$args; }
 
     # Cały build jednym plikiem — źródło dla publikacji na IPFS i dla kogoś,
     # kto chce hostować swoją kopię. Leży OBOK dist, nie w środku: plik w
@@ -255,7 +255,8 @@ server {
     # 301 i przeglądarka dokleja fragment ("#i=..." zaproszenia) do celu, bo
     # Location go nie zawiera — linki rozdane wcześniej i te z nieaktualnych
     # paczek dalej trafiają do aplikacji (app.ts LEGACY_PATH je rozpoznaje).
-    location = /chat { return 301 https://app.onchato.com/; }
+    # $is_args$args niesie ?debug=1 / ?light=0 — samo `return` je gubi.
+    location = /chat { return 301 https://app.onchato.com/$is_args$args; }
 
     # index.html + reszta: zawsze rewaliduj → deploy łapany natychmiast
     location / {
