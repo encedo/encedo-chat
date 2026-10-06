@@ -39,15 +39,15 @@ architectural work at all.**
 
 ## What is not a component yet
 
-The UI. `web/src/app.ts` is ~5800 lines (re-measured 2026-08-30; it was 2748
-when this plan was priced — **the file doubled**, so every estimate keyed to it
-is a lower bound now) that assume they *are* the page:
+The UI. `web/src/app.ts` is **9403 lines** (re-measured 2026-10-06; 2748 when
+this plan was priced, ~5800 on 2026-08-30 — **it has more than tripled**, so
+every estimate keyed to it is a lower bound) that assume they *are* the page:
 
-| what | count (2026-08-30) | why it blocks embedding |
-|---|---:|---|
-| `document.*` | ~129 | queries the whole document, not a subtree it owns |
-| listeners bound at module scope | ~80 | **importing the module runs the app**, and requires the ids to already exist |
-| direct `localStorage` | ~57 | `ec-*` keys are global to the origin: no namespace, collides with a second instance |
+| what | 2026-08-30 | 2026-10-06 | why it blocks embedding |
+|---|---:|---:|---|
+| `document.*` | ~129 | 211 | queries the whole document, not a subtree it owns |
+| listeners bound at module scope | ~80 | more | **importing the module runs the app**, and requires the ids to already exist |
+| direct `localStorage` | ~57 | 64 | `ec-*` keys are global to the origin: no namespace, collides with a second instance |
 | module-level singletons | well past 10 (`session`, `rooms`, `activePub`, …) | one instance per page, by construction |
 | CSS | in `index.html` `<style>` | would leak both ways between us and the host page |
 
@@ -91,6 +91,9 @@ that is genuinely ready.
 separately, and A kept as the same package in a different mode** for anyone who
 cannot accept the host reading the keys.
 
+**Order revised 2026-10-06:** A first, as the Open Mercato PR, and B only if A
+earns it — see *Sequence as of 2026-10-06* below.
+
 ## What has to change on our side, in order
 
 1. **`mount(root, opts)` / `destroy()`** instead of import-time side effects;
@@ -102,7 +105,7 @@ cannot accept the host reading the keys.
    so two instances and the host cannot tread on each other's keys.
 4. **Locale from the host.** `i18n.ts` already supports the switch; what is
    missing is the entry point.
-5. **Lazy loading.** The bundle is ~1.32 MiB minified (2026-08-30). In someone
+5. **Lazy loading.** The bundle is ~1.6 MB minified (2026-10-06; 1.32 MiB on 2026-08-30). In someone
    else's application it must load when the chat is opened, not when the page is.
 6. **Teardown on unmount**, including the libp2p node and every open room.
 
@@ -150,10 +153,34 @@ later: **the host's server can substitute a key and become a man in the
 middle.**
 
 What makes it survivable is already built: the fingerprint comparison in the
-import dialog, and treating the first key seen for a contact as pinned. A
-substituted key then becomes *detectable* by anyone who checks — not
-*impossible*. Anything that hides the fingerprint to make the integration
-smoother throws away the only defence there is.
+import dialog, treating the first key seen for a contact as pinned, and — since
+0.6.45 — the pair's **safety number** with a QR scan (PROTOCOL.md §4.4.1), one
+string both people see identically. A substituted key then becomes
+*detectable* by anyone who checks — not *impossible*. Anything that hides the
+safety number to make the integration smoother throws away the only defence
+there is.
+
+**The directory is a convenience, not a protocol requirement** (discussed
+2026-10-06). Someone has to tell Anna that Bartek's key is X; there are three
+ways, and the module should offer the first and third:
+
+1. **A person, no server** — invite link, live QR, a published invite with a
+   knock (§5.7), exactly as onchato works today. Nothing in the middle to
+   substitute; the cost is friction (every pair exchanges keys once).
+2. **An administrator through the HEM** — enrolling colleagues' keys into each
+   user's HEM contacts (§2.3 "admin enrollment"). No directory server, but a
+   trusted person.
+3. **A column in the host's user table** — not a new server: the ERP already
+   has the users. The client publishes its public key there on first sign-in
+   and reads a colleague's on "message Bartek". Best UX, and the database
+   operator can attempt a substitution.
+
+Recommended: 3 for convenience, with what makes it honest — **the first key
+is pinned** and a different one later is shown loudly, never switched to
+silently (*to build*: a key-change warning; today a new key is simply a new
+contact); the safety number checks the directory at any time; 1 stays
+available. The directory only suggests whom to start with; trust still rests
+on the keys and the check.
 
 ### c) One identity, one session (§9.1)
 
@@ -173,6 +200,37 @@ like a bug.
   proxy, as in `infra/README.md`. Uploads expire in minutes by design; a CRM may
   well want the opposite, which is the same conversation as (a).
 
+## Product value — revisited 2026-10-06
+
+Asked before any code: is a Node module plus a cut-up app worth it for **us**,
+not only for Open Mercato? Two decisions with very different balances.
+
+**`@encedo/chat-core` — yes.** It is a B2B channel, and every product that
+embeds the chat embeds HEM support with it, which sells devices, not only
+reach. It enables integrations without us (bots, system notifications as a
+separate identity, other runtimes), gives the cryptographer a clearly bounded
+unit with a public API, and costs 2–3 days.
+
+The real cost is that a published API is a contract while the protocol still
+moves (§5.4 rooms moving in place and §7.4 albums changed this month; the
+review is open). An app pinned to an old core stops seeing the network after a
+protocol change, and it looks like an outage. **Prerequisite, before
+publishing: a compatibility rule** — a protocol version on the wire and a
+clear "the other side runs an older version" instead of silence.
+
+**Componentising `app.ts` — not as a big project.** Three to five weeks at
+today's size, with regression risk landing just before 0.7.0 and the first
+external demos. Its value to us (a file that can be tested and maintained) is
+real but can be collected incrementally: extract what a change touches anyway
+(the connection and security windows of 0.6.43–0.6.45 are natural first
+modules). `mount()` waits until somebody actually needs the component.
+
+**What this means for Open Mercato.** Their model is: we propose and open a
+PR (confirmed 2026-10-06). The first PR needs no app refactor — an OM module
+that embeds the chat in an **iframe** (postMessage bridge, a public-key column
+per user, CSP), pointing at our static build hosted by us or by them. On our
+side: a small `embed` page plus the compatibility rule.
+
 ## One rule that must not be broken
 
 **One protocol, one build, everybody.** Rendezvous, the per-pair rotation offset
@@ -189,6 +247,9 @@ Ours:
    shape, and document it, or lead with the iframe?
 2. Does `mount()` land in this repo's `web/src/`, or does the UI move into its
    own package with the web app as its first consumer?
+
+Settled 2026-10-06: the host is Open Mercato, and the way in is a PR to their
+repository. The directory is option 3 above with pinning and the safety number.
 
 Theirs, and (a) blocks everything:
 
@@ -230,8 +291,22 @@ appearance and in storage partitioning.
 Sequenced honestly: **iframe demo first (about a week), component afterwards if
 the demo earns it.** Stage 1 is worth doing either way.
 
+### Sequence as of 2026-10-06
+
+The table above stays as the full-component estimate (stage 3 is now a floor
+of 15 days rather than 8). The order of work changed:
+
+| # | Step | Days | Note |
+|---|---|---:|---|
+| 1 | **0.7.0** and the group test | — | first, unchanged; nothing here starts before it |
+| 2 | **Compatibility rule**: protocol version on the wire, a visible "older version" message | 2–3 | prerequisite for anything external; also touches PROTOCOL.md (user's GO, cryptographer note) |
+| 3 | **`@encedo/chat-core`** (stage 1 above) | 2–3 | |
+| 4 | **Embed page + Open Mercato PR, iframe mode** — module, postMessage bridge, key column, pinning + key-change warning, CSP | 5–7 | answers (a) with their maintainers in the PR discussion |
+| 5 | **Component** (stages 2–4 above) | 18–30 | only if the iframe module earns it; `mount()` spike first |
+
 ## Next step
 
-A `mount()` spike on a single screen. Not for the code — to measure honestly
-what untangling those 37 module-scope listeners costs, before anyone quotes a
-date.
+Nothing is coded yet (2026-10-06, the user's call). After 0.7.0: write the
+compatibility rule as a PROTOCOL.md proposal for the user's GO, then the
+Open Mercato proposal text that opens the PR discussion — leading with the
+instant-only question (a), because it decides whether the rest is worth it.
