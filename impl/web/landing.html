@@ -280,7 +280,7 @@
           handshake has been post-quantum since the first line of code.
         </p>
         <div class="cta">
-          <a class="btn" href="/chat">Open onchato</a>
+          <a class="btn" href="https://app.onchato.com/">Open onchato</a>
           <a class="btn ghost" href="#run">Run your own network</a>
         </div>
 
@@ -398,7 +398,7 @@
           <div class="get-top">
             <h2>The browser is the zero-install way.<br><span class="soft2">The installed app is the resilient one.</span></h2>
             <p>
-              <a href="/chat">Open onchato in the browser</a> — nothing to install, the same crypto.
+              <a href="https://app.onchato.com/">Open onchato in the browser</a> — nothing to install, the same crypto.
               The packages below keep working if this domain ever disappears, update themselves,
               and every file ships with a <a href="https://jedisct1.github.io/minisign/">minisign</a> signature beside it.
             </p>
@@ -468,7 +468,7 @@
       </section>
 
       <footer>
-        <a href="/chat">Open the app</a>
+        <a href="https://app.onchato.com/">Open the app</a>
         <a href="https://github.com/encedo/encedo-chat">Source (MIT)</a>
         <a href="https://github.com/encedo/encedo-chat/blob/main/docs/PROTOCOL.md">Protocol</a>
         <span class="spacer"></span>
@@ -479,11 +479,11 @@
 </div>
 
 <script>
-// An invite link written before the app moved to /chat points here, and its
-// payload lives in the fragment — which the server never sees, so only this
-// page can forward it. Without these four lines those invitations die silently
-// on a marketing page.
-if (location.hash.startsWith('#i=')) location.replace('/chat' + location.hash);
+// An invite link written before the app moved to /chat (and from 0.7.0 to its
+// own origin, app.onchato.com) points here, and its payload lives in the
+// fragment — which the server never sees, so only this page can forward it.
+// Without this line those invitations die silently on a marketing page.
+if (location.hash.startsWith('#i=')) location.replace('https://app.onchato.com/' + location.hash);
 
 /*
  * The rail's topic is DERIVED here, not written into the markup.

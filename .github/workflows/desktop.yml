@@ -150,7 +150,7 @@ jobs:
 
           Recompute the first one from whatever the server gives you:
 
-              curl -sL https://onchato.com/chat | ipfs add --cid-version=1 --raw-leaves --only-hash -q
+              curl -sL https://app.onchato.com/ | ipfs add --cid-version=1 --raw-leaves --only-hash -q
 
           Computed by CI from the tagged tree. The build is reproducible, so a
           number that does not match is a statement about the server, not noise.

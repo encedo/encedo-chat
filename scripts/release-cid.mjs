@@ -4,7 +4,7 @@
  * oddaje ten kod, który wyszedł z taga.
  *
  *   node scripts/release-cid.mjs                          # z impl/web/dist
- *   node scripts/release-cid.mjs --check https://onchato.com/chat
+ *   node scripts/release-cid.mjs --check https://app.onchato.com/
  *
  * Łańcuch jest krótki, bo aplikacja ma tylko trzy pliki, które przeglądarka
  * może pobrać: `index.html`, bundle i ikonę. A odkąd bundle jest nazwany w

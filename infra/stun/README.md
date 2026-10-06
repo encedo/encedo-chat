@@ -66,7 +66,7 @@ should be the public address of the machine you ran it from. `--bad` also fires
 the datagrams that must be ignored (a TURN Allocate, a wrong magic cookie, a
 truncated header) and fails if any of them is answered.
 
-In a browser: `https://onchato.com/chat?debug=1`, open Settings → the WebRTC
+In a browser: `https://app.onchato.com/?debug=1`, open Settings → the WebRTC
 self-test. Its STUN stage dials the first node in the list and reports whether
 a reflexive candidate came back.
 

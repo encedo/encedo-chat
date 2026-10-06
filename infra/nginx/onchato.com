@@ -38,7 +38,7 @@ limit_req_zone  $binary_remote_addr zone=fb_req:10m rate=1r/s;
 # --- HTTP redirect: onchato.com + chat.encedo.com ---
 server {
     listen 80;
-    server_name onchato.com chat.encedo.com;
+    server_name onchato.com chat.encedo.com app.onchato.com;
 
     # ── NOWE: wyzwanie ACME MUSI dostać odpowiedź przed przekierowaniem ─────
     # "^~" wygrywa z regexami i z "location /", więc 301 niżej go nie zjada.
@@ -115,7 +115,7 @@ server {
     # celują w /chat/app.<hash>.bundle.js → try_files oddaje index.html jako
     # JavaScript i aplikacja nie wstaje. Objaw: biała strona, w konsoli błąd
     # składni w miejscu, gdzie jest HTML.
-    location = /chat/ { return 301 /chat; }
+    location = /chat/ { return 301 https://app.onchato.com/; }
 
     # Cały build jednym plikiem — źródło dla publikacji na IPFS i dla kogoś,
     # kto chce hostować swoją kopię. Leży OBOK dist, nie w środku: plik w
@@ -251,18 +251,11 @@ server {
         add_header Cache-Control "public, max-age=31536000, immutable";
     }
 
-    # ── Aplikacja: JEDYNA ścieżka, która potrzebuje index.html nie mając pliku ──
-    # Wyodrębniona z "location /", bo fallback niżej przestał oddawać index.html
-    # nieznanym adresom. Dopasowanie dokładne ("=") wygrywa z prefiksowym, więc
-    # ten blok łapie /chat zanim tamten zdąży. CANONICAL_PATH w app.ts to '/chat'
-    # i aplikacja nigdy nie zmienia ścieżki (replaceState zdejmuje tylko fragment),
-    # więc żadna inna ścieżka aplikacji nie istnieje.
-    location = /chat {
-        add_header Cross-Origin-Opener-Policy   "same-origin";
-        add_header Cross-Origin-Embedder-Policy "require-corp";
-        add_header Cache-Control "no-cache";
-        try_files /index.html =404;
-    }
+    # ── /chat: aplikacja do 0.6.x, od 0.7.0 na app.onchato.com ──────────────
+    # 301 i przeglądarka dokleja fragment ("#i=..." zaproszenia) do celu, bo
+    # Location go nie zawiera — linki rozdane wcześniej i te z nieaktualnych
+    # paczek dalej trafiają do aplikacji (app.ts LEGACY_PATH je rozpoznaje).
+    location = /chat { return 301 https://app.onchato.com/; }
 
     # index.html + reszta: zawsze rewaliduj → deploy łapany natychmiast
     location / {
@@ -290,6 +283,57 @@ server {
     }
 }
 
+# --- HTTPS: app.onchato.com — APLIKACJA, od 0.7.0 na własnym originie ---
+# Klucze w localStorage nie dzielą originu z niczym: ani ze stroną główną,
+# /how, /privacy, ani przede wszystkim z magazynem /f, który oddaje to, co
+# wgrali obcy (decyzja 2026-10-06; fput i tak podaje to jako octet-stream, to
+# druga warstwa). Sprawy bramki ipfs.encedo.com (aplikacja uruchamiana z IPFS)
+# to NIE zamyka. /f i /feedback ZOSTAJĄ na onchato.com — aplikacja woła je
+# między originami, jak paczki Tauri od zawsze (CORS i CORP są tam ustawione;
+# COEP require-corp tutaj tego wymaga). Stary adres onchato.com/chat robi 301
+# tutaj, a fragment "#i=" zaproszenia przeżywa przekierowanie.
+server {
+    listen 443 ssl;
+    server_name app.onchato.com;
+
+    ssl_certificate     /etc/letsencrypt/live/app.onchato.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/app.onchato.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    root /opt/github/encedo-chat/impl/web/dist;
+
+    # Aplikacja stoi na "/" (CANONICAL_PATH w app.ts). Nagłówki powtórzone w
+    # każdym bloku świadomie: add_header się nie dziedziczy.
+    location = / {
+        add_header Cross-Origin-Opener-Policy   "same-origin";
+        add_header Cross-Origin-Embedder-Policy "require-corp";
+        add_header Cache-Control "no-cache";
+        try_files /index.html =404;
+    }
+
+    location ~* \.bundle\.js$ {
+        add_header Cross-Origin-Opener-Policy   "same-origin";
+        add_header Cross-Origin-Embedder-Policy "require-corp";
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+
+    # Strony produktu mieszkają na onchato.com — tu ich nie podajemy, żeby
+    # nie żyły na originie aplikacji.
+    location = /landing.html { return 301 https://onchato.com/; }
+    location ~ ^/how(\.html)?$ { return 301 https://onchato.com/how; }
+
+    # Pozostałe pliki builda (ikony itp.); nieznany adres wraca do aplikacji.
+    location / {
+        add_header Cross-Origin-Opener-Policy   "same-origin";
+        add_header Cross-Origin-Embedder-Policy "require-corp";
+        add_header Cache-Control "no-cache";
+        try_files $uri =404;
+        error_page 404 = @app;
+    }
+    location @app { return 302 /; }
+}
+
 # --- HTTPS: chat.encedo.com — TYLKO landing, aplikacja stoi na onchato.com ---
 # Dlaczego nie druga instancja czatu pod tą nazwą: localStorage jest per origin,
 # więc profil software, kontakty lokalne, cache grup (§10, z emp_pub) i przypięte
@@ -297,7 +341,7 @@ server {
 # a raz tam, widzi dwa różne światy i "traci" grupy. Do tego blokada "jedna
 # tożsamość, jedna aktywna sesja" opiera się na localStorage, więc przez drugi
 # origin nie widzi drugiej sesji. Linki zaproszeń i tak są kanoniczne
-# (CANONICAL_ORIGIN = https://onchato.com), więc druga instancja nie byłaby
+# (CANONICAL_ORIGIN = https://app.onchato.com), więc druga instancja nie byłaby
 # spójna nawet sama ze sobą.
 #
 # Landing jest samowystarczalny (żadnych lokalnych assetów, tylko /chat i kotwice),

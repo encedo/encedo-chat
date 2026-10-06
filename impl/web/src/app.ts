@@ -2463,7 +2463,7 @@ function ownInvite(href: string): Invite | null {
   let u: URL
   try { u = new URL(href) } catch { return null }
   const at = (origin: string, path: string) => u.origin === origin && u.pathname.replace(/\/$/, '') === path.replace(/\/$/, '')
-  if (!at(CANONICAL_ORIGIN, CANONICAL_PATH) && !at(location.origin, location.pathname)) return null
+  if (!at(CANONICAL_ORIGIN, CANONICAL_PATH) && !at(SITE_ORIGIN, LEGACY_PATH) && !at(location.origin, location.pathname)) return null
   return decodeInvite(u.hash)
 }
 
@@ -2491,8 +2491,21 @@ window.addEventListener('hashchange', () => {
  * means nothing anywhere else. Sharing your key from a phone produced a link
  * that looked right and that nobody could open.
  */
-const CANONICAL_ORIGIN = 'https://onchato.com'
-const CANONICAL_PATH = '/chat'
+const CANONICAL_ORIGIN = 'https://app.onchato.com'
+const CANONICAL_PATH = '/'
+/**
+ * The product's own site: the landing, /how, /privacy - and the file store
+ * (/f) and the feedback sink, which stay HERE on purpose. Since 0.7.0 the app
+ * has an origin of its own (app.onchato.com) and the keys in its storage share
+ * it with nothing: not with the marketing pages, and above all not with the
+ * store, whose path gateway serves what strangers upload. Packaged builds have
+ * always talked to the store across origins; the web app now does the same.
+ */
+const SITE_ORIGIN = 'https://onchato.com'
+/** Where the app lived until 0.7.0. Links already handed out still say this
+ *  (and builds not yet updated go on saying it); nginx redirects it to the app
+ *  and the fragment rides along, so it is still OUR invite. */
+const LEGACY_PATH = '/chat'
 
 /**
  * A packaged build has no origin that serves the file store, so it is told one.
@@ -2509,13 +2522,13 @@ const CANONICAL_PATH = '/chat'
  * `/f` blocks in nginx must answer with `Access-Control-Allow-Origin`. Ship the
  * two together or the packaged apps stay exactly as broken.
  */
-if (isDesktopShell()) setStoreOrigin(CANONICAL_ORIGIN)
+if (isDesktopShell() || location.origin === CANONICAL_ORIGIN) setStoreOrigin(SITE_ORIGIN)
 // The login card's way back to the landing. The markup carries the same address
 // so the link survives a dead bundle; this makes the constant the one that decides,
 // so a moved domain cannot leave a stale link on the screen people log in from.
 {
   const home = document.getElementById('home-link') as HTMLAnchorElement | null
-  if (home) { home.href = CANONICAL_ORIGIN + '/'; home.textContent = new URL(CANONICAL_ORIGIN).host }
+  if (home) { home.href = SITE_ORIGIN + '/'; home.textContent = new URL(SITE_ORIGIN).host }
 }
 
 /**
@@ -6366,7 +6379,7 @@ $('btn-diag-copy')?.addEventListener('click', async () => {
 const FEEDBACK_URL = (() => {
   const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
   const q = local ? new URLSearchParams(location.search).get('fb') : null
-  return q || `${CANONICAL_ORIGIN}/feedback`
+  return q || `${SITE_ORIGIN}/feedback`
 })()
 initFeedback({
   version: __EC_VERSION__,

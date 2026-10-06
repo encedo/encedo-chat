@@ -269,7 +269,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Mam zaproszenie': 'I have an invite',
     'Wklej to, co dostałeś — cały adres albo sam kod.': 'Paste what you were given — the whole address, or just the code.',
     'Link albo kod zaproszenia': 'Invite link or code',
-    'https://onchato.com/chat#i=… albo sam kod': 'https://onchato.com/chat#i=… or just the code',
+    'https://app.onchato.com/#i=… albo sam kod': 'https://app.onchato.com/#i=… or just the code',
     'Wklej link albo kod zaproszenia.': 'Paste an invite link or code.',
     'To nie wygląda na zaproszenie — sprawdź, czy skopiowałeś całość.': 'That does not look like an invite — check you copied all of it.',
     'Zaproszenie – {name}': 'Invitation – {name}',

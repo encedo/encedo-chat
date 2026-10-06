@@ -1217,6 +1217,18 @@ git submodule update --init --recursive     # hem-sdk-js: the build imports it d
 cd impl && npm run web:deploy               # → impl/web/dist (what nginx serves)
 ```
 
+**The app has an origin of its own: `https://app.onchato.com/`** (since 0.7.0;
+`onchato.com/chat` before, now a 301 that keeps the `#i=` fragment). The keys in
+browser storage share their origin with nothing — not with the landing, `/how`
+or `/privacy` on `onchato.com`, and above all not with the file store `/f`,
+whose path gateway serves what strangers upload. `/f` and `/feedback` stay on
+`onchato.com`; the web app calls them across origins exactly as the packaged
+builds always have (`SITE_ORIGIN` in `app.ts`; CORS + CORP on those blocks are
+load-bearing, because the app runs under COEP `require-corp`). Old invite links
+(`onchato.com/chat#i=`, and those older builds keep producing) are still ours:
+`LEGACY_PATH`. Moving the origin wipes every browser's local state — it was done
+together with the 0.7.0 tester reset on purpose; never move it again casually.
+
 nginx config is versioned at `infra/nginx/onchato.com` — edit locally, `scp` to
 `sites-enabled`, `nginx -t`, reload. It carries the `/relay` and `/mqtt` per-IP
 limits (the DDoS protection — libp2p's own is off), the CORS on both `/f`
@@ -1315,7 +1327,7 @@ to the build that needs it. Changing `webpack.config.cjs` invalidates it
 automatically (`buildDependencies`).
 
 `sudo systemctl reload nginx` only if you changed nginx config. Verify with
-`curl -s https://onchato.com/ | grep -o 'app\.[a-z0-9]*\.bundle\.js'` — the
+`curl -s https://app.onchato.com/ | grep -o 'app\.[a-z0-9]*\.bundle\.js'` — the
 content hash must change; if it did not, the build did not land where nginx
 serves from. Bundle names are hashed but `index.html` is not, so keep its
 cache short (users otherwise keep requesting the previous hash). The build now
