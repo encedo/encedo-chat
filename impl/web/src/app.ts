@@ -5465,9 +5465,8 @@ function noteTransport(room: Room, state: string) {
 }
 function paintTransport(room: Room) {
   const b = $('transport-badge')
-  const ring = isFlapping(room) ? ' flapping' : ''
-  if (room.directProven) setBadge(b, 'badge direct' + ring, tr('🟢 Direct'), tr('Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing'))
-  else setBadge(b, 'badge relay' + ring, tr('⚪ Relay'), tr('Treść przez relay (GossipSub)'))
+  if (room.directProven) setBadge(b, 'badge direct', tr('🟢 Direct'), tr('Treść bezpośrednio P2P — relay ślepy na treść/rozmiary/timing'))
+  else setBadge(b, 'badge relay', tr('⚪ Relay'), tr('Treść przez relay (GossipSub)'))
 }
 
 /** When this pair's room changes next, on the reader's clock: "21:34:12", or
@@ -8041,8 +8040,9 @@ async function activateRoom(pub: string) {
  *
  * So the FIRST change still gets its own line. A change soon after rewrites
  * that line to the current state, and the burst itself - how often, since
- * when - goes to the connection window behind the transport badge, which wears
- * a warning ring meanwhile. A sentence about it in the transcript was here and
+ * when - goes to the connection window behind the transport badge. The badge
+ * wore a warning ring for it until the user turned it off (2026-10-06: on a
+ * phone it lit for the phone's own sleep, blaming the contact). A sentence about it in the transcript was here and
  * is gone (the user's call, 2026-10-05: "it reads as a mess"). Once things
  * settle for a few minutes the next change starts a fresh line again.
  */
@@ -8074,9 +8074,6 @@ function notePresenceLine(room: Room, label: string, joined: boolean) {
     last.flaps++
     last.ev.text = text
     if (isViewing(room)) repaintSys(last.ev)
-    if (room === activeRoom()) paintTransport(room)
-    // The ring goes when the burst does, whether or not anything repaints then.
-    setTimeout(() => { if (room === activeRoom() && !activeGid) paintTransport(room) }, FLAP_WINDOW_MS + 1_000)
     return
   }
   const line: Ev = { t: 'sys', text, sid: 'p' + now.toString(36) }
