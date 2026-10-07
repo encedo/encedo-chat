@@ -19,6 +19,21 @@ no failover). The software keystore is a **test** store with the private key in
 a plain file and is not the browser's sealed profile format — a profile
 exported from the app cannot be used here. Today it is a developer tool.
 
+## Progress
+
+- **Stage 1 - done 2026-10-07.** `cli/onchato.ts` (`npm run onchato`) replaces
+  `cli/ec.ts`: `profile new|list|import|export`, `whoami`, `pubkey`,
+  `contacts`, `add`, `chat`; `--profile` / `--hem`; masked password prompt or
+  `$ONCHATO_PASSWORD`. Storage `cli/store.ts` - the browser's `ec-*` keys in
+  `~/.config/onchato/store.json` (0600, dir 0700, atomic writes). Profiles are
+  the app's own sealed format (`cli/profiles.ts` over `lib/profile.ts`,
+  `lib/migrate.ts`, `lib/passmeter.ts`); the signed contact book moved out of
+  `app.ts` into `lib/localbook.ts`, shared by both. Pinned by
+  `test/cli-profiles.test.ts`: a browser profile with contacts moves to the CLI
+  and back with the same key and a signature that still checks, and a book
+  edited behind the CLI's back is caught. The plaintext keystore remains only
+  for the live test scripts (`bob`, `carl`).
+
 ## Principles
 
 - **Same engine, same network.** Another consumer of `lib/core.ts`, like the

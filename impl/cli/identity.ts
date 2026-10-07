@@ -22,6 +22,12 @@ export type { Identity }
  * identity, which looks like an empty contact book rather than like an error.
  */
 export async function hemIdentity(url: string, password: string, handleHint = 'me'): Promise<Identity> {
+  return (await hemSignIn(url, password, handleHint)).id
+}
+
+/** The same sign-in, also handing back the device and the KID - the contact book
+ *  in the HEM (lib/core.ts hemContactBook) needs both. */
+export async function hemSignIn(url: string, password: string, handleHint = 'me'): Promise<{ id: Identity; hem: any; kid: string }> {
   const hem = new HEM(url)
   await hem.hemCheckin()
   const listTok = await hem.authorizePassword(password, 'keymgmt:list')
@@ -46,7 +52,7 @@ export async function hemIdentity(url: string, password: string, handleHint = 'm
   }
   const useTok = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
   const { pubkey } = await hem.getPubKey(useTok, kid)
-  return hemIdentityFrom(hem, kid, handle, pubkey)
+  return { id: hemIdentityFrom(hem, kid, handle, pubkey), hem, kid }
 }
 
 /** Software identity (dev/test). Creates the keystore if missing. */

@@ -20,7 +20,7 @@
     "bob": "node cli/peer.ts bob",
     "carl": "node cli/peer.ts carl",
     "alice": "node alice/alice.ts",
-    "ec": "node cli/ec.ts",
+    "onchato": "node cli/onchato.ts",
     "web:build": "webpack --config web/webpack.config.cjs --mode production",
     "web:deploy": "cmp -s package-lock.json node_modules/.lock-stamp || { npm ci && cp package-lock.json node_modules/.lock-stamp; } && npm run web:build && npm run web:pack",
     "web:dev": "webpack serve --config web/webpack.config.cjs --mode development",

@@ -170,6 +170,10 @@ Working end-to-end, verified live:
   from `--pass bs1.onchato.com` → `12D3KooWP6Sp…cDmp`), `net/peer.ts` (v5 config +
   http-path ws filter), `lib/announce.ts` (§5.5 HMAC), `lib/rendezvous-net.ts`.
   `net/meet.ts` PASS: two peers meet via the real relay.
+- **The terminal client** is `cli/onchato.ts` (`npm run onchato`; CLI-PLAN.md has the
+  stages). It keeps the browser's `ec-*` keys in `~/.config/onchato/store.json`, so a profile
+  moves between the app and the terminal through `lib/migrate.ts` unchanged, and the signed
+  contact book is ONE implementation for both (`lib/localbook.ts`).
 - **Interactive CLI chat** — `lib/room.ts` (joinChat), `cli/repl.ts` +
   `cli/chat-session.ts` (IRC-style, /who /me /react /quit). `bob join` /
   `alice join` open a live encrypted chat with typing / away / graceful-leave
