@@ -20,11 +20,12 @@ demon, powiadomienia, pliki, grupy) jest w [CLI-PLAN.md](CLI-PLAN.md).
 5. [Zaproszenia, które odpowiadają same](#5-zaproszenia-które-odpowiadają-same)
 6. [Weryfikacja: numer bezpieczeństwa](#6-weryfikacja-numer-bezpieczeństwa)
 7. [Klient rozmów](#7-klient-rozmów)
-8. [Spis komend](#8-spis-komend)
-9. [Opcje i zmienne środowiskowe](#9-opcje-i-zmienne-środowiskowe)
-10. [Gdzie są dane i jak są chronione](#10-gdzie-są-dane-i-jak-są-chronione)
-11. [Ograniczenia, które warto znać](#11-ograniczenia-które-warto-znać)
-12. [Rozwiązywanie problemów](#12-rozwiązywanie-problemów)
+8. [Skrypty i demon](#8-skrypty-i-demon)
+9. [Spis komend](#9-spis-komend)
+10. [Opcje i zmienne środowiskowe](#10-opcje-i-zmienne-środowiskowe)
+11. [Gdzie są dane i jak są chronione](#11-gdzie-są-dane-i-jak-są-chronione)
+12. [Ograniczenia, które warto znać](#12-ograniczenia-które-warto-znać)
+13. [Rozwiązywanie problemów](#13-rozwiązywanie-problemów)
 
 ---
 
@@ -90,7 +91,7 @@ onchato profile export ala ala.ocmig         # i odwrotnie
 
 Przenoszone są tożsamość, kontakty, zaproszenia i lista węzłów. To jest
 **przeniesienie, nie kopia**: ta sama tożsamość otwarta w dwóch miejscach naraz
-zamyka obie sesje (zob. rozdział 11).
+zamyka obie sesje (zob. rozdział 12).
 
 ### HEM
 
@@ -273,7 +274,108 @@ poczeka, aż okno się otworzy.
 
 ---
 
-## 8. Spis komend
+## 8. Skrypty i demon
+
+Do automatów, monitoringu i powiadomień. Bot to zwykła tożsamość — najlepiej osobny
+profil (np. `ops-bot`) — którą admini mają w kontaktach i weryfikują numerem
+bezpieczeństwa jak każdego.
+
+### Wysyłanie
+
+```sh
+onchato send ewa "backup gotowy"                 # 0 = doręczono, 3 = nie doręczono w czasie
+echo "dysk 92% na db1" | onchato send ewa -      # tekst ze standardowego wejścia
+onchato send ewa "deploy OK" --wait 60 --json    # dłużej czekaj, wynik jako JSON
+```
+
+`send` czeka na **potwierdzenie od klienta odbiorcy** (domyślnie 20 s, `--wait`).
+Kod wyjścia `3` znaczy: odbiorca nie potwierdził w tym czasie — zwykle jest offline.
+Co dalej z wiadomością, zależy od tego, czy działa demon:
+
+| | demon działa | demonu nie ma |
+|---|---|---|
+| jak | `send` oddaje wiadomość demonowi przez gniazdo i od razu wraca | `send` otwiera własną krótką sesję |
+| odbiorca online | doręczona w ok. sekundę | doręczona po zestawieniu sesji (kilka sekund) |
+| odbiorca offline | **czeka w demonie** i wychodzi sama, gdy odbiorca wróci | **przepada** (komunikat o tym na stderr) |
+
+Wynik `--json`: `{"ok":true,"status":"delivered","id":"…","ms":412,"to":"ewa","via":"daemon"}`
+(`status` = `delivered` albo `queued`, `via` = `daemon` albo `direct`).
+
+### Odbieranie
+
+```sh
+onchato listen                       # 22:41 <ewa> restart nginx?
+onchato listen --json | jq -c 'select(.t=="msg")'
+```
+
+Zdarzenia JSON (jedna linia = jedno zdarzenie):
+
+```json
+{"t":"msg","from":"ewa","pub":"…","text":"restart nginx?","ts":1791400121000,"id":"…"}
+{"t":"presence","from":"ewa","pub":"…","state":"online"}
+{"t":"delivered","to":"ewa","id":"…","ms":412}
+{"t":"link","state":"reconnecting"}
+```
+
+Z działającym demonem `listen` podłącza się do niego; bez demona otwiera własną sesję.
+
+### Demon
+
+```sh
+onchato daemon --profile ops-bot     # na pierwszym planie; zatrzymanie: Ctrl+C / SIGTERM
+```
+
+Demon trzyma połączenie, obecność kontaktów i otwarte rozmowy, i odpowiada na
+lokalnym gnieździe `$XDG_RUNTIME_DIR/onchato.sock` (prawa `0600` — gniazdo jest całym
+jego uwierzytelnieniem, więc nikt poza Tobą nie może z niego korzystać). Drugiego demona
+na tym samym gnieździe nie da się uruchomić.
+
+Przykładowa jednostka systemd (użytkownika), z hasłem przez `LoadCredential` — nie
+w pliku jednostki ani w zmiennej środowiskowej:
+
+```ini
+# ~/.config/systemd/user/onchato.service
+[Unit]
+Description=onchato daemon (ops-bot)
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/onchato daemon --profile ops-bot
+LoadCredential=onchato-password:%h/.config/onchato/ops-bot.pass
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+```
+
+```sh
+install -m 600 /dev/stdin ~/.config/onchato/ops-bot.pass <<< 'hasło profilu ops-bot'
+systemctl --user daemon-reload
+systemctl --user enable --now onchato
+loginctl enable-linger $USER          # żeby demon działał także bez zalogowanej sesji
+```
+
+Przykład — powiadomienie o logowaniu przez SSH:
+
+```sh
+# /etc/pam.d/sshd
+session optional pam_exec.so /usr/local/bin/onchato-login-notify
+
+# /usr/local/bin/onchato-login-notify   (uruchamiany jako root - wskaż gniazdo demona bota)
+#!/bin/sh
+[ "$PAM_TYPE" = open_session ] || exit 0
+# root nie ma ~/.local/bin w PATH - pełna ścieżka; root łączy się z gniazdem 0600 innego użytkownika
+ONCHATO_SOCKET=/run/user/1000/onchato.sock /home/bot/.local/bin/onchato send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
+```
+
+Kolejka w demonie żyje w pamięci: restart demona gubi to, co czekało. Trwała kolejka
+z czasem ważności i łączeniem powtarzalnych zdarzeń to następny etap
+([CLI-PLAN.md](CLI-PLAN.md), 4b).
+
+---
+
+## 9. Spis komend
 
 | komenda | opis |
 |---|---|
@@ -291,6 +393,9 @@ poczeka, aż okno się otworzy.
 | `onchato invites` · `invites new [etykieta] [--expires 24h] [--qr]` · `invites qr <nr>` · `invites revoke <nr>` | zaproszenia ze skrzynką |
 | `onchato verify <nazwa> [--qr] [numer]` | numer bezpieczeństwa; porównanie z podanym |
 | `onchato chat [<nazwa>] [--debug]` | klient rozmów |
+| `onchato send <kontakt> <tekst \| -> [--wait s] [--json]` | jedna wiadomość (rozdział 8) |
+| `onchato listen [--json]` | strumień przychodzących wiadomości |
+| `onchato daemon` | demon z gniazdem lokalnym |
 
 ### Kody wyjścia
 
@@ -298,12 +403,13 @@ poczeka, aż okno się otworzy.
 |---|---|
 | `0` | w porządku |
 | `1` | błąd (komunikat na stderr: złe hasło, brak kontaktu, brak terminala…) |
+| `3` | `send`: odbiorca nie potwierdził w czasie (czeka w demonie albo przepadła — zob. rozdział 8) |
 | `4` | `verify`: numery się **nie** zgadzają |
 | `130` | przerwane Ctrl+C przy pytaniu o hasło |
 
 ---
 
-## 9. Opcje i zmienne środowiskowe
+## 10. Opcje i zmienne środowiskowe
 
 | opcja / zmienna | działanie |
 |---|---|
@@ -311,7 +417,10 @@ poczeka, aż okno się otworzy.
 | `--hem <url>` | tożsamość z HEM zamiast profilu |
 | `--handle <nazwa>` | która tożsamość na HEM (bez pytania) |
 | `--password <hasło>` / `ONCHATO_PASSWORD` | hasło bez pytania — uwaga: widoczne w historii powłoki i liście procesów; w skryptach lepiej zmienna albo prompt |
+| `--password-file <plik>` | hasło z pierwszej linii pliku (`0600`); pod systemd zamiast tego `LoadCredential=onchato-password:…` |
 | `--yes` | bez pytania t/N (skrypty) |
+| `--wait <s>`, `--json` | `send`: jak długo czekać na potwierdzenie; wynik jako JSON |
+| `ONCHATO_SOCKET` | gniazdo demona (domyślnie `$XDG_RUNTIME_DIR/onchato.sock`) |
 | `--debug` | w kliencie: dziennik silnika w oknie statusu |
 | `--libp2p` | w kliencie: pełny transport GossipSub zamiast lekkiego (diagnostyka) |
 | `ONCHATO_HOME` | katalog danych (domyślnie `$XDG_CONFIG_HOME/onchato`, czyli `~/.config/onchato`) |
@@ -320,7 +429,7 @@ Hasło bez terminala (potok): `onchato` czyta pierwszą linię ze standardowego 
 
 ---
 
-## 10. Gdzie są dane i jak są chronione
+## 11. Gdzie są dane i jak są chronione
 
 Wszystko jest w `~/.config/onchato/store.json` (katalog `0700`, plik `0600`,
 zapisywany atomowo). Klucze i formaty są takie same jak w aplikacji, dlatego
@@ -337,7 +446,7 @@ Na serwerze lepszy jest HEM: klucz nie opuszcza urządzenia, a kradzież pliku n
 
 ---
 
-## 11. Ograniczenia, które warto znać
+## 12. Ograniczenia, które warto znać
 
 - **Rozmowa wymaga obecności.** onchato nie przechowuje wiadomości w sieci. Wiadomość
   dochodzi, gdy rozmówca jest online; jeśli nie jest, czeka u Ciebie, dopóki klient
@@ -348,11 +457,11 @@ Na serwerze lepszy jest HEM: klucz nie opuszcza urządzenia, a kradzież pliku n
 - **Zaproszenie słucha tylko, gdy klient działa.** Bez uruchomionego `onchato chat`
   pukanie nie ma dokąd dojść.
 - **Jeszcze nie ma**: pobierania i wysyłania plików, grup, przewijania historii okna
-  (PgUp), wskaźnika pisania, trybu skryptowego i demona. Kolejność w [CLI-PLAN.md](CLI-PLAN.md).
+  (PgUp), wskaźnika pisania, trwałej kolejki powiadomień. Kolejność w [CLI-PLAN.md](CLI-PLAN.md).
 
 ---
 
-## 12. Rozwiązywanie problemów
+## 13. Rozwiązywanie problemów
 
 **Alt+cyfra nie przełącza okien.** Terminal wysyła Alt inaczej (np. jako znak z
 akcentem). Ustaw w terminalu „Meta wysyła Escape” (GNOME Terminal, Konsole, iTerm2:

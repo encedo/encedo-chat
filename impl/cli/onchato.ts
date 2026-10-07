@@ -16,6 +16,9 @@
  *   onchato add <name> <pubB64>                a contact by raw key
  *   onchato verify <name> [--qr] [<number>]    the pair's safety number; compare one read out to you
  *   onchato chat [<name>] [--debug]           the irssi-style client (windows, Alt+N, /help)
+ *   onchato send <name> <text|-> [--wait s] [--json]   one message; exit 0 delivered, 3 queued/offline
+ *   onchato listen [--json]                    incoming messages as lines (JSON lines with --json)
+ *   onchato daemon                             keep the session up; send/listen go through its socket
  *
  * Which identity: --profile <name> (a software profile here), or --hem <url>
  * [--handle h] (a HEM). With neither, the only profile there is.
@@ -27,6 +30,10 @@ import { fileKV, type FileKV } from './store.ts'
 import { listProfiles, createProfile, openProfile, exportProfileFile, importProfileFile, identityKey } from './profiles.ts'
 import { hemSignIn, hemCreate, type HemChoice } from './identity.ts'
 import { runClient } from './client.ts'
+import { Hub, type HubEvent } from './hub.ts'
+import { serve, connectDaemon, ask, lineReader, socketPath } from './daemon.ts'
+import { existsSync, unlinkSync } from 'node:fs'
+import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { openLocalBook, cacheBaseOf } from '../lib/localbook.ts'
 import { hemContactBook, mergedContactBook, localOnlyManager, type ContactManager, type Identity } from '../lib/core.ts'
@@ -77,6 +84,10 @@ const die = (msg: string): never => { console.error('onchato: ' + msg); process.
 async function secret(prompt: string, envName = 'ONCHATO_PASSWORD'): Promise<string> {
   const flag = opt('--password'); if (flag) return flag
   if (process.env[envName]) return process.env[envName]!
+  // A file (0600), or systemd's LoadCredential=onchato-password:<path> - how a
+  // daemon gets its password without it sitting in the unit or the environment.
+  const file = opt('--password-file') ?? (process.env.CREDENTIALS_DIRECTORY ? join(process.env.CREDENTIALS_DIRECTORY, 'onchato-password') : undefined)
+  if (file && existsSync(file)) return readFileSync(file, 'utf8').split('\n')[0]
   const stdin = process.stdin
   if (!stdin.isTTY) {
     let buf = ''; for await (const c of stdin) buf += c
@@ -310,7 +321,73 @@ try {
       })
       break
     }
+    case 'send': {
+      const [to, ...words] = args
+      let text = words.join(' ')
+      // Standard input only when asked for with '-': guessing from a missing
+      // argument would hang a script whose stdin never closes.
+      if (text === '-') { let b = ''; for await (const c of process.stdin) b += c; text = b.replace(/\n+$/, '') }
+      if (!to || !text) die('użycie: send <kontakt> <tekst | ->  [--wait sekundy] [--json]')
+      const waitMs = Number(opt('--wait', '20')) * 1000
+      const out = (r: any) => {
+        if (rest.includes('--json')) console.log(JSON.stringify(r))
+        else if (r.status === 'delivered') console.log(`doręczono do ${r.to} (${r.ms} ms)`)
+        else console.error(r.via === 'daemon'
+          ? `${r.to} nie potwierdził(a) w ${waitMs / 1000} s - wiadomość czeka w demonie i wyjdzie, gdy będzie online`
+          : `${r.to} nie potwierdził(a) w ${waitMs / 1000} s - bez demona wiadomość NIE czeka (onchato daemon)`)
+        process.exit(r.status === 'delivered' ? 0 : 3)
+      }
+      const sock = await connectDaemon()
+      if (sock) {
+        const r = await ask(sock, { op: 'send', to, text, wait: waitMs })
+        sock.end()
+        if (!r.ok) die(r.error)
+        out({ ...r, via: 'daemon' })
+      }
+      const { id, contacts } = await signIn(kv)
+      const hub = new Hub({ id, contacts, relays: relayList(kv) })
+      await hub.start()
+      try { out({ ...(await hub.send(to, text, waitMs)), via: 'direct' }) } finally { await hub.close() }
+      break
+    }
+    case 'listen': {
+      const json = rest.includes('--json')
+      const show = (e: HubEvent) => {
+        if (json) { console.log(JSON.stringify(e)); return }
+        if (e.t === 'msg') console.log(`${new Date(e.ts).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })} <${e.from}> ${e.text}`)
+        if (e.t === 'presence') console.log(`-!- ${e.from} ${e.state === 'online' ? 'online' : 'offline'}`)
+      }
+      const sock = await connectDaemon()
+      if (sock) {
+        sock.on('data', lineReader((o) => { if (o.t) show(o as HubEvent) }))
+        sock.on('close', () => process.exit(0))
+        sock.write(JSON.stringify({ op: 'listen' }) + '\n')
+        await new Promise(() => {})
+      }
+      const { id, contacts } = await signIn(kv)
+      const hub = new Hub({ id, contacts, relays: relayList(kv) })
+      hub.on(show)
+      await hub.start()
+      const stop = async () => { await hub.close(); process.exit(0) }
+      process.on('SIGINT', stop); process.on('SIGTERM', stop)
+      await new Promise(() => {})
+      break
+    }
+    case 'daemon': {
+      const { id, contacts, kind } = await signIn(kv)
+      const say = (m: string) => console.log(`[onchato] ${m}`)
+      const hub = new Hub({ id, contacts, relays: relayList(kv), log: rest.includes('--debug') ? say : undefined })
+      hub.on((e) => { if (e.t === 'link') say(`łącze: ${e.state}`); if (e.t === 'presence') say(`${e.from}: ${e.state}`) })
+      await hub.start()
+      const path = socketPath()
+      const srv = await serve(hub, path, say)
+      say(`${id.handle} (${kind}) · ${hub.contactList.length} kontaktów · gniazdo ${path}`)
+      const stop = async () => { say('zatrzymuję'); srv.close(); try { unlinkSync(path) } catch {} ; await hub.close(); process.exit(0) }
+      process.on('SIGINT', stop); process.on('SIGTERM', stop)
+      await new Promise(() => {})
+      break
+    }
     default:
-      console.log('użycie: onchato profile new|list|import|export · hem new <nazwa> --hem <url> · whoami · pubkey · contacts · invite [--qr]\n         add <link|kod> | add <nazwa> <klucz> · verify <nazwa> [--qr] [numer] · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
+      console.log('użycie: onchato profile new|list|import|export · hem new <nazwa> --hem <url> · send · listen · daemon · whoami · pubkey · contacts · invite [--qr]\n         add <link|kod> | add <nazwa> <klucz> · verify <nazwa> [--qr] [numer] · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
   }
 } catch (e: any) { die(e?.message ?? String(e)) }

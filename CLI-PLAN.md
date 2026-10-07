@@ -67,6 +67,17 @@ exported from the app cannot be used here. Today it is a developer tool.
   announces, then says so. Input lines now run in order, so a message typed
   right after `/query` waits for the window. Proved live by
   `net/cli-invite-test.ts` (CLI to CLI over the real relays).
+- **Stage 4 - done 2026-10-08.** `cli/hub.ts` (headless engine: one session,
+  presence, rooms on demand, events, `send` that waits for the recipient's ack),
+  `cli/daemon.ts` (the hub behind `$XDG_RUNTIME_DIR/onchato.sock`, 0600, JSON
+  lines; a live daemon is never displaced, a stale socket is), commands
+  `send` (exit 0 delivered / 3 queued; through the daemon if one runs, else
+  its own short session), `listen [--json]`, `daemon`; passwords from
+  `--password-file` or systemd `LoadCredential`. Proved live by
+  `net/cli-daemon-test.ts`: delivered through the socket, a listen stream,
+  `onchato send` as a process via the daemon and without one, and a send to an
+  offline recipient that reaches him by itself when he is back. The queue is
+  in memory until 4b.
 - **HEM**: sign-in never creates an identity (`onchato hem new <name>` does),
   and several identities on one device are offered as a numbered list.
 
