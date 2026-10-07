@@ -230,7 +230,9 @@ Working days for one person who knows the code; a judgement, not a measurement.
 | 6 | **Groups** | create, list, join, group windows; owed invitations and group state sealed to a file (§10) | 3–4 |
 | 7 | **Packaging and tests** | npm publish, a Docker image for servers, README / `--help`, a CLI ↔ browser scenario in the harness | 2–3 |
 
-**Total ≈ 20–26 days.** Stages 3, 4b and 6 carry the spread.
+| 8 | **Direct connection (WebRTC), opt-in** | `node-datachannel` as an OPTIONAL dependency behind the `makeLink` seam of `net/webrtc-plane.ts` (as the Linux desktop plugs webrtc-rs); `--direct` in the client and the daemon. Off by default, as in the app: the default hides the IP from the other side (the user's call, 2026-10-08 - kept after WebRTC became reliable). Without the library everything goes through the nodes, as today | 2–3 |
+
+**Total ≈ 20–26 days**, plus 2–3 for stage 8. Stages 3, 4b and 6 carry the spread.
 
 Stages 1–2 are the best value: a usable client for one geek and one contact.
 Stages 4 and 4b are the admin argument — monitoring and bots as their own identity, with notifications that wait for the admin.
