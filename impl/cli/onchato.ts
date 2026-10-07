@@ -11,7 +11,7 @@
  *   onchato add <link|code> [--name n] [--yes] a contact from an invite - fingerprint shown, confirmed
  *   onchato add <name> <pubB64>                a contact by raw key
  *   onchato verify <name> [--qr] [<number>]    the pair's safety number; compare one read out to you
- *   onchato chat <name> [--mqtt [url]]
+ *   onchato chat [<name>] [--debug]           the irssi-style client (windows, Alt+N, /help)
  *
  * Which identity: --profile <name> (a software profile here), or --hem <url>
  * [--handle h] (a HEM). With neither, the only profile there is.
@@ -22,11 +22,11 @@
 import { fileKV, type FileKV } from './store.ts'
 import { listProfiles, createProfile, openProfile, exportProfileFile, importProfileFile, identityKey } from './profiles.ts'
 import { hemSignIn } from './identity.ts'
-import { runChatSession } from './chat-session.ts'
+import { runClient } from './client.ts'
+import { readFileSync } from 'node:fs'
 import { openLocalBook, cacheBaseOf } from '../lib/localbook.ts'
 import { hemContactBook, mergedContactBook, localOnlyManager, type ContactManager, type Identity } from '../lib/core.ts'
 import { BadPassword } from '../lib/profile.ts'
-import { todayUTC } from '../lib/rendezvous.ts'
 import { inviteFromPaste, inviteLink } from '../lib/invite.ts'
 import { safetyNumber, safetyGroups, safetyQr, parseSafetyQr } from '../lib/safety.ts'
 import { qrForTerminal } from './termqr.ts'
@@ -46,7 +46,20 @@ async function confirm(q: string): Promise<boolean> {
   return a === 't' || a === 'y' || a === 'tak' || a === 'yes'
 }
 
-const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
+/**
+ * The relays, in failover order: the node list a profile brought from the app
+ * (`ec-nodes`, enabled ones, the app's own format), else the published list
+ * compiled into the repo (infra/nodes.json, the same file the app ships).
+ */
+function relayList(kv: FileKV): string[] {
+  try {
+    const mine = JSON.parse(kv.get('ec-nodes') ?? 'null')
+    const on = Array.isArray(mine) ? mine.filter((n: any) => n?.enabled !== false && typeof n?.addr === 'string').map((n: any) => n.addr) : []
+    if (on.length) return on
+  } catch {}
+  const pub = JSON.parse(readFileSync(new URL('../../infra/nodes.json', import.meta.url), 'utf8'))
+  return pub.nodes.map((n: any) => n.addr)
+}
 const [cmd, ...rest] = process.argv.slice(2)
 const opt = (name: string, def?: string) => { const i = rest.indexOf(name); return i >= 0 && rest[i + 1] && !rest[i + 1].startsWith('--') ? rest[i + 1] : def }
 const args = rest.filter((a, i) => !a.startsWith('--') && !(i > 0 && rest[i - 1].startsWith('--') && opt(rest[i - 1]) === a))
@@ -202,12 +215,19 @@ try {
       break
     }
     case 'chat': {
-      const name = args[0]; if (!name) die('użycie: chat <nazwa>')
-      const { id, contacts } = await signIn(kv)
-      const c = (await contacts.list()).find((x) => x.name === name)
-      if (!c) die(`nie ma kontaktu ${name} (onchato contacts)`)
-      const mqtt = rest.includes('--mqtt') ? (opt('--mqtt', 'mqtt://127.0.0.1:1883') as string) : null
-      await runChatSession(id, c!.pub, id.handle, name, RELAY, { networkId: 'main', dateUTC: todayUTC() }, mqtt)
+      if (!process.stdin.isTTY || !process.stdout.isTTY) die('klient interaktywny wymaga terminala')
+      const { id, contacts, kind } = await signIn(kv)
+      const stdin = process.stdin
+      await runClient({
+        id, kind, contacts, relays: relayList(kv), openFirst: args[0], debug: rest.includes('--debug'),
+        transport: rest.includes('--libp2p') ? 'libp2p' : 'light',
+        io: {
+          out: process.stdout,
+          onInput: (cb) => { stdin.setRawMode(true); stdin.setEncoding('utf8'); stdin.resume(); stdin.on('data', (d) => cb(String(d))) },
+          onResize: (cb) => { process.stdout.on('resize', cb) },
+          exit: (code) => { try { stdin.setRawMode(false) } catch {} ; process.exit(code) },
+        },
+      })
       break
     }
     default:

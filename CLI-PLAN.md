@@ -44,6 +44,17 @@ exported from the app cannot be used here. Today it is a developer tool.
   Tested: the terminal QR rasterised back decodes to its text with the app's
   jsQR (and a swapped mapping does not); a screenshot of the real output
   decodes too.
+- **Stage 3 - done 2026-10-07** (3a windows/keys/editor, 3b screen, 3c client).
+  `onchato chat [<name>]` is the irssi-style client (`cli/client.ts`): one
+  session over the published node list with failover (or the profile's own
+  `ec-nodes`), light transport, a presence watch for every contact, an
+  incoming conversation opening in a background window (told on status,
+  `Act:` lit, the view not moved), `/win` Alt+N `/query` `/close` `/list` `/who`
+  `/me` `/react` `/verify` `/invite` `/clear` `/help` `/quit`, the status line
+  with link, node, the lock after EH-2 and activity. Proved live by
+  `net/cli-client-test.ts`: two clients on emulated terminals over the real
+  relays, every assertion read off the screen. Not yet: PgUp scrollback,
+  typing indicators, files (stage 5), group windows (stage 6).
 
 ## Principles
 
