@@ -33,6 +33,17 @@ exported from the app cannot be used here. Today it is a developer tool.
   and back with the same key and a signature that still checks, and a book
   edited behind the CLI's back is caught. The plaintext keystore remains only
   for the live test scripts (`bob`, `carl`).
+- **Stage 2 - done 2026-10-07.** `invite [--qr]` prints the link
+  (`app.onchato.com/#i=`) and draws the code in the terminal (`cli/termqr.ts`:
+  lib/qr.ts's matrix in half blocks, forced dark-on-light, quiet zone);
+  `add <link|code>` reads every shape through `inviteFromPaste` (moved from
+  app.ts to lib/invite.ts, one parser for both), shows the fingerprint, asks
+  (or `--yes`; refused without a terminal), and prints the reply link marked
+  `r:1`; `verify <name> [--qr] [number]` shows the safety number
+  (lib/safety.ts) and compares one read out - exit 0 match, 4 mismatch.
+  Tested: the terminal QR rasterised back decodes to its text with the app's
+  jsQR (and a swapped mapping does not); a screenshot of the real output
+  decodes too.
 
 ## Principles
 

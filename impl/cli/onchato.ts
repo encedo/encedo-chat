@@ -7,7 +7,10 @@
  *   onchato profile import <file.ocmig>        the app's "move profile" file
  *   onchato profile export <name> <file>
  *   onchato whoami | pubkey | contacts
- *   onchato add <name> <pubB64>
+ *   onchato invite [--qr]                     my invite link (and the code, drawn in the terminal)
+ *   onchato add <link|code> [--name n] [--yes] a contact from an invite - fingerprint shown, confirmed
+ *   onchato add <name> <pubB64>                a contact by raw key
+ *   onchato verify <name> [--qr] [<number>]    the pair's safety number; compare one read out to you
  *   onchato chat <name> [--mqtt [url]]
  *
  * Which identity: --profile <name> (a software profile here), or --hem <url>
@@ -24,6 +27,24 @@ import { openLocalBook, cacheBaseOf } from '../lib/localbook.ts'
 import { hemContactBook, mergedContactBook, localOnlyManager, type ContactManager, type Identity } from '../lib/core.ts'
 import { BadPassword } from '../lib/profile.ts'
 import { todayUTC } from '../lib/rendezvous.ts'
+import { inviteFromPaste, inviteLink } from '../lib/invite.ts'
+import { safetyNumber, safetyGroups, safetyQr, parseSafetyQr } from '../lib/safety.ts'
+import { qrForTerminal } from './termqr.ts'
+import { createInterface } from 'node:readline/promises'
+
+/** Where invite links point (app.ts CANONICAL_ORIGIN/PATH): the CLI has no address bar either. */
+const APP_ORIGIN = 'https://app.onchato.com', APP_PATH = '/'
+const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
+
+/** y/N on a terminal; refused without one unless --yes was given. */
+async function confirm(q: string): Promise<boolean> {
+  if (rest.includes('--yes')) return true
+  if (!process.stdin.isTTY) die('bez terminala potrzebne jest --yes')
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  const a = (await rl.question(q + ' [t/N] ')).trim().toLowerCase()
+  rl.close()
+  return a === 't' || a === 'y' || a === 'tak' || a === 'yes'
+}
 
 const RELAY = '/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
 const [cmd, ...rest] = process.argv.slice(2)
@@ -124,13 +145,60 @@ try {
       console.log(list.length ? (await Promise.all(list.map(async (c) => `  ${c.name.padEnd(16)} ${await fingerprint(c.pub)}  ${c.source}`))).join('\n') : '(brak kontaktów - onchato add <nazwa> <klucz>)')
       break
     }
+    case 'invite': {
+      const { id } = await signIn(kv)
+      const link = inviteLink(APP_ORIGIN, APP_PATH, { pub: id.pub, name: id.handle })
+      console.log(`Twoje zaproszenie (${id.handle}, odcisk ${await fingerprint(id.pub)}):\n${link}`)
+      if (rest.includes('--qr')) console.log('\n' + qrForTerminal(link))
+      break
+    }
     case 'add': {
+      // An invite (link, fragment or bare code) first, through the app's own parser;
+      // a raw key only as the explicit two-argument form.
+      const inv = args[0] ? inviteFromPaste(args[0]) : null
+      if (inv) {
+        const name = opt('--name') ?? inv.name
+        const { id, contacts } = await signIn(kv)
+        if (inv.pub === id.pub) die('to Twój własny klucz')
+        const known = (await contacts.list()).find((c) => c.pub === inv.pub)
+        if (known) { console.log(`ten klucz już masz: ${known.name} (${await fingerprint(inv.pub)})`); break }
+        console.log(`kontakt:  ${name}\nodcisk:   ${await fingerprint(inv.pub)}\nPorównaj odcisk z tym, co ta osoba podała Ci innym kanałem (rozmowa, telefon).`)
+        if (!await confirm('Zapisać?')) die('nie zapisano')
+        await contacts.add(name, inv.pub, false)
+        await new Promise((r) => setTimeout(r, 150)) // the book's signature follows the write
+        console.log(`zapisano kontakt ${name}`)
+        // Until they hold our key too, neither side can compute the pair topic.
+        if (!inv.reply) console.log(`Odeślij ${name} swój link (już oznaczony jako odpowiedź):\n${inviteLink(APP_ORIGIN, APP_PATH, { pub: id.pub, name: id.handle, reply: true })}`)
+        if (inv.inbox) console.log('(to zaproszenie przyjmuje też pukanie - z CLI jeszcze go nie wyślesz; odeślij link powyżej)')
+        break
+      }
       const [name, pub] = args
-      if (!name || !pub) die('użycie: add <nazwa> <kluczB64>')
-      if (Uint8Array.from(atob(pub), (c) => c.charCodeAt(0)).length !== 32) die('klucz publiczny ma 32 bajty (base64)')
+      if (!name || !pub) die('użycie: add <link|kod> [--name n]  albo  add <nazwa> <kluczB64>')
+      let raw: Uint8Array
+      try { raw = unb64(pub) } catch { die('to nie jest ani zaproszenie, ani klucz base64') }
+      if (raw!.length !== 32) die('klucz publiczny ma 32 bajty (base64)')
       await (await signIn(kv)).contacts.add(name, pub, false)
-      await new Promise((r) => setTimeout(r, 150)) // the book's signature follows the write
+      await new Promise((r) => setTimeout(r, 150))
       console.log(`zapisano kontakt ${name} (${await fingerprint(pub)})`)
+      break
+    }
+    case 'verify': {
+      const [name, ...said] = args
+      if (!name) die('użycie: verify <nazwa> [--qr] [<numer albo kod onchato-sn1:...>]')
+      const { id, contacts } = await signIn(kv)
+      const c = (await contacts.list()).find((x) => x.name === name)
+      if (!c) die(`nie ma kontaktu ${name}`)
+      const n = await safetyNumber(unb64(id.pub), unb64(c!.pub))
+      const g = safetyGroups(n)
+      console.log(`Numer bezpieczeństwa ${id.handle} - ${name} (u obojga identyczny):\n  ${g.slice(0, 4).join(' ')}\n  ${g.slice(4, 8).join(' ')}\n  ${g.slice(8).join(' ')}`)
+      if (rest.includes('--qr')) console.log('\n' + qrForTerminal(safetyQr(n)))
+      if (said.length) {
+        const text = said.join(' ')
+        const theirs = parseSafetyQr(text) ?? text.replace(/\s+/g, '')
+        if (!/^\d{60}$/.test(theirs)) die('podany numer nie ma 60 cyfr')
+        if (theirs === n) console.log(`\u2713 zgodny - klucz ${name} jest ten sam u was obojga`)
+        else { console.error(`\u2717 NIEZGODNY - to nie jest klucz, który masz dla ${name}. Nie piszcie nic poufnego, dopóki tego nie wyjaśnicie.`); process.exit(4) }
+      }
       break
     }
     case 'chat': {
@@ -143,6 +211,6 @@ try {
       break
     }
     default:
-      console.log('użycie: onchato profile new|list|import|export · whoami · pubkey · contacts · add <nazwa> <klucz> · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
+      console.log('użycie: onchato profile new|list|import|export · whoami · pubkey · contacts · invite [--qr]\n         add <link|kod> | add <nazwa> <klucz> · verify <nazwa> [--qr] [numer] · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
   }
 } catch (e: any) { die(e?.message ?? String(e)) }
