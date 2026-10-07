@@ -18,7 +18,7 @@ import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import { exportProfile, openBundle, applyBundle, conflictsWith, localKV, FILE_EXT, type KV } from '../../lib/migrate.ts'
-import { decodeInvite, inviteLink, type Invite } from '../../lib/invite.ts'
+import { decodeInvite, inviteLink, inviteFromPaste, type Invite } from '../../lib/invite.ts'
 import { pickFirst, orderFrom, nodeKey } from '../../lib/nodepick.ts'
 import jsQR from './vendor/jsqr.cjs'
 import { type Verdict } from '../../lib/bookmac.ts'
@@ -2576,34 +2576,6 @@ const closeImport = () => dropModal('import-modal')
 MODAL_EXIT['import-modal'] = () => { pendingInvite = null }
 $('import-cancel').addEventListener('click', () => { pendingInvite = null; closeImport() })
 
-/**
- * Pull an invite out of whatever was pasted into the key field.
- *
- * Nobody pastes a fragment. They paste a link, usually with the sentence around
- * it that came along from the messenger they copied it out of — so the fragment
- * is looked for inside the text rather than required to be the whole of it.
- *
- * The ORIGIN is ignored on purpose. A link is written by onchato.com and may be
- * pasted into the desktop app, whose origin is something else entirely; without
- * this, invites do not work there at all, and there is no address bar to fall
- * back on. Ignoring it costs nothing, because what makes an invite trustworthy
- * is the fingerprint the next window shows, never where the text came from.
- */
-function inviteFromPaste(text: string): Invite | null {
-  const t = text.trim()
-  const whole = t.startsWith('#') || t.startsWith('i=') ? decodeInvite(t) : null
-  if (whole) return whole
-  const m = t.match(/#(i=[A-Za-z0-9\-_]+)/)
-  if (m) return decodeInvite(m[1])
-  // The bare code: what someone reads out loud, or copies out of a link by
-  // hand, with nothing in front of it. Its SHAPE buys it nothing - the check is
-  // the same `decodeInvite` every other form goes through, which demands
-  // base64url that parses as JSON carrying a 32-byte key and a name with no
-  // invisible characters in it. A public key pasted into the add window cannot
-  // be mistaken for one: 32 bytes of key do not parse as JSON, and this branch
-  // is reached last in any case.
-  return /^[A-Za-z0-9\-_]+$/.test(t) ? decodeInvite('i=' + t) : null
-}
 
 /**
  * Show a received invite. Called after login, so the contact book exists.

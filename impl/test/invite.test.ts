@@ -8,7 +8,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { encodeInvite, decodeInvite, inviteLink, newInboxSecret, inboxSecretBytes, MAX_NAME, INBOX_BYTES } from '../lib/invite.ts'
+import { encodeInvite, decodeInvite, inviteLink, inviteFromPaste, newInboxSecret, inboxSecretBytes, MAX_NAME, INBOX_BYTES } from '../lib/invite.ts'
 
 const PUB = Buffer.alloc(32, 7).toString('base64')      // a well-formed 32-byte key
 const SHORT = Buffer.alloc(16, 7).toString('base64')
@@ -132,4 +132,17 @@ test('reply and inbox are independent fields', () => {
   const got = decodeInvite('#' + encodeInvite({ pub: PUB, name: 'Ala', reply: true, inbox: s }))
   assert.equal(got!.reply, true)
   assert.equal(got!.inbox, s)
+})
+
+test('a pasted invite is read in every shape a person passes it on, and nothing else is', () => {
+  const inv = { pub: 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=', name: 'ala' }
+  const frag = encodeInvite(inv)                       // "i=..."
+  const link = inviteLink('https://app.onchato.com', '/', inv)
+  for (const shape of [link, '  ' + link + '\n', '#' + frag, frag, frag.slice(2),
+    'https://onchato.com/chat#' + frag, 'tauri://localhost/#' + frag]) {
+    assert.equal(inviteFromPaste(shape)?.pub, inv.pub, `read: ${shape.slice(0, 40)}`)
+  }
+  assert.equal(inviteFromPaste(inv.pub), null, 'a bare public key is not an invite')
+  assert.equal(inviteFromPaste('https://example.com/'), null)
+  assert.equal(inviteFromPaste('onchato-sn1:' + '0'.repeat(60)), null, 'a safety-number code is not an invite')
 })

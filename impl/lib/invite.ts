@@ -169,3 +169,32 @@ export function decodeInvite(hash: string): Invite | null {
   if (inbox) out.inbox = inbox
   return out
 }
+
+/**
+ * Pull an invite out of whatever was pasted into the key field.
+ *
+ * Nobody pastes a fragment. They paste a link, usually with the sentence around
+ * it that came along from the messenger they copied it out of — so the fragment
+ * is looked for inside the text rather than required to be the whole of it.
+ *
+ * The ORIGIN is ignored on purpose. A link is written by onchato.com and may be
+ * pasted into the desktop app, whose origin is something else entirely; without
+ * this, invites do not work there at all, and there is no address bar to fall
+ * back on. Ignoring it costs nothing, because what makes an invite trustworthy
+ * is the fingerprint the next window shows, never where the text came from.
+ */
+export function inviteFromPaste(text: string): Invite | null {
+  const t = text.trim()
+  const whole = t.startsWith('#') || t.startsWith('i=') ? decodeInvite(t) : null
+  if (whole) return whole
+  const m = t.match(/#(i=[A-Za-z0-9\-_]+)/)
+  if (m) return decodeInvite(m[1])
+  // The bare code: what someone reads out loud, or copies out of a link by
+  // hand, with nothing in front of it. Its SHAPE buys it nothing - the check is
+  // the same `decodeInvite` every other form goes through, which demands
+  // base64url that parses as JSON carrying a 32-byte key and a name with no
+  // invisible characters in it. A public key pasted into the add window cannot
+  // be mistaken for one: 32 bytes of key do not parse as JSON, and this branch
+  // is reached last in any case.
+  return /^[A-Za-z0-9\-_]+$/.test(t) ? decodeInvite('i=' + t) : null
+}
