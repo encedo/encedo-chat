@@ -55,6 +55,20 @@ exported from the app cannot be used here. Today it is a developer tool.
   `net/cli-client-test.ts`: two clients on emulated terminals over the real
   relays, every assertion read off the screen. Not yet: PgUp scrollback,
   typing indicators, files (stage 5), group windows (stage 6).
+- **Stage 2b - done 2026-10-07: invites that answer themselves** (asked the
+  same day). `onchato invites [new [label] [--expires 24h] [--qr] | qr N |
+  revoke N]` keeps the app's sealed records (`ec-invites-`, `ec-waiting-`,
+  `ec-ignored-<kid>`, via the new `lib/sealedstore.ts`, which the app now
+  uses too), so invites move with the profile. The client listens on every
+  live invite: a knock lands on status, loud, with the fingerprint -
+  `/knocks`, `/accept N` (adds the contact), `/ignore N` (by fingerprint,
+  as the app). `add <invite with an inbox>` really knocks and leaves the
+  waiting record; the client keeps knocking every 90 s until the other side
+  announces, then says so. Input lines now run in order, so a message typed
+  right after `/query` waits for the window. Proved live by
+  `net/cli-invite-test.ts` (CLI to CLI over the real relays).
+- **HEM**: sign-in never creates an identity (`onchato hem new <name>` does),
+  and several identities on one device are offered as a numbered list.
 
 ## Principles
 

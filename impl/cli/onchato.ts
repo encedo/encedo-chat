@@ -8,7 +8,10 @@
  *   onchato profile import <file.ocmig>        the app's "move profile" file
  *   onchato profile export <name> <file>
  *   onchato whoami | pubkey | contacts
- *   onchato invite [--qr]                     my invite link (and the code, drawn in the terminal)
+ *   onchato invite [--qr]                     my identity link (and the code, drawn in the terminal)
+ *   onchato invites [new [label] [--expires 24h] [--qr] | qr <n> | revoke <n>]
+ *                                              invites that answer themselves: whoever opens one knocks,
+ *                                              and the client (onchato chat) shows the knock to accept
  *   onchato add <link|code> [--name n] [--yes] a contact from an invite - fingerprint shown, confirmed
  *   onchato add <name> <pubB64>                a contact by raw key
  *   onchato verify <name> [--qr] [<number>]    the pair's safety number; compare one read out to you
@@ -31,6 +34,10 @@ import { BadPassword } from '../lib/profile.ts'
 import { inviteFromPaste, inviteLink } from '../lib/invite.ts'
 import { safetyNumber, safetyGroups, safetyQr, parseSafetyQr } from '../lib/safety.ts'
 import { qrForTerminal } from './termqr.ts'
+import { fingerprint } from './fp.ts'
+import { InviteStore, publishedLink, parseDuration, expired, type Waiting } from './invites.ts'
+import { startSession } from '../lib/core.ts'
+import { inboxSecretBytes } from '../lib/invite.ts'
 import { createInterface } from 'node:readline/promises'
 
 /** Where invite links point (app.ts CANONICAL_ORIGIN/PATH): the CLI has no address bar either. */
@@ -91,10 +98,6 @@ async function secret(prompt: string, envName = 'ONCHATO_PASSWORD'): Promise<str
   })
 }
 
-async function fingerprint(pubB64: string): Promise<string> {
-  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(atob(pubB64), (c) => c.charCodeAt(0)))).slice(0, 8)
-  return [...h].map((b) => b.toString(16).padStart(2, '0')).join(':').toUpperCase()
-}
 
 /**
  * Several identities on one HEM: a numbered list, the KID's start beside each
@@ -118,14 +121,14 @@ async function chooseIdentity(ids: HemChoice[]): Promise<HemChoice | null> {
 }
 
 /** The identity this command runs as, and its contact book (signed, §4.4). */
-async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactManager; kind: string }> {
+async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactManager; kind: string; store: InviteStore }> {
   const hemUrl = opt('--hem')
   if (hemUrl) {
     const { id, hem, kid } = await hemSignIn(hemUrl, await secret('Hasło HEM: '), opt('--handle'), chooseIdentity)
     const key = await identityKey(id.pub, kid)
     const local = await openLocalBook(key, kv, await cacheBaseOf(id, key, kv))
     if (local.verdict === 'tampered') console.error('onchato: UWAGA - lokalna książka kontaktów nie przeszła weryfikacji podpisu (pokazuję tylko kontakty z HEM)')
-    return { id, kind: 'HEM', contacts: mergedContactBook(hemContactBook(hem, kid), local.verdict === 'tampered' ? emptyBook() : local.book) }
+    return { id, kind: 'HEM', store: new InviteStore(kv, await cacheBaseOf(id, key, kv), key), contacts: mergedContactBook(hemContactBook(hem, kid), local.verdict === 'tampered' ? emptyBook() : local.book) }
   }
   const names = listProfiles(kv)
   const name = opt('--profile') ?? (names.length === 1 ? names[0] : undefined)
@@ -136,7 +139,7 @@ async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactMana
   const key = await identityKey(id!.pub)
   const local = await openLocalBook(key, kv, await cacheBaseOf(id!, key, kv))
   if (local.verdict === 'tampered') die('książka kontaktów nie przeszła weryfikacji podpisu - ktoś zmienił ' + kv.path + ' (nic nie nadpisuję)')
-  return { id: id!, kind: 'software', contacts: localOnlyManager(local.book) }
+  return { id: id!, kind: 'software', store: new InviteStore(kv, await cacheBaseOf(id!, key, kv), key), contacts: localOnlyManager(local.book) }
 }
 const emptyBook = () => ({ list: async () => [], add: async () => { throw new Error('książka zablokowana') }, remove: async () => {}, rename: async () => {} })
 
@@ -197,13 +200,44 @@ try {
       if (rest.includes('--qr')) console.log('\n' + qrForTerminal(link))
       break
     }
+    case 'invites': {
+      const [sub, ...more] = args
+      const { id, store } = await signIn(kv)
+      const list = await store.invites()
+      const pick = (n: string) => list[Number(n) - 1] ?? die(`nie ma zaproszenia nr ${n} (onchato invites)`)
+      const when = (t: number) => new Date(t).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+      if (!sub || sub === 'list') {
+        if (!list.length) { console.log('(brak zaproszeń - onchato invites new <etykieta>)'); break }
+        list.forEach((inv, i) => console.log(`  ${i + 1}) ${inv.label.padEnd(16)} od ${when(inv.created)}  ${inv.expires ? (expired(inv) ? 'WYGASŁO' : 'do ' + when(inv.expires)) : 'bez terminu'}\n     ${publishedLink(APP_ORIGIN, APP_PATH, id, inv)}`))
+        console.log('Pukanie widać w kliencie (onchato chat) - zaproszenie słucha tylko, gdy klient działa.')
+        break
+      }
+      if (sub === 'new') {
+        const ttl = opt('--expires') ? parseDuration(opt('--expires')!) : undefined
+        const inv = await store.create(more.join(' '), ttl)
+        const link = publishedLink(APP_ORIGIN, APP_PATH, id, inv)
+        console.log(`zaproszenie „${inv.label}”${inv.expires ? ' do ' + when(inv.expires) : ' bez terminu'}:\n${link}`)
+        if (rest.includes('--qr')) console.log('\n' + qrForTerminal(link))
+        console.log('Kto je otworzy, zapuka - zobaczysz to w onchato chat (/knocks, /accept N).')
+        break
+      }
+      if (sub === 'qr') { const inv = pick(more[0]); console.log(qrForTerminal(publishedLink(APP_ORIGIN, APP_PATH, id, inv))); break }
+      if (sub === 'revoke') {
+        const inv = pick(more[0])
+        await store.revoke(inv.id)
+        console.log(`wycofano „${inv.label}” - nikt nie jest o tym informowany, nowe pukanie już nie dotrze`)
+        break
+      }
+      die('użycie: invites [list] | new [etykieta] [--expires 24h] [--qr] | qr <nr> | revoke <nr>')
+      break
+    }
     case 'add': {
       // An invite (link, fragment or bare code) first, through the app's own parser;
       // a raw key only as the explicit two-argument form.
       const inv = args[0] ? inviteFromPaste(args[0]) : null
       if (inv) {
         const name = opt('--name') ?? inv.name
-        const { id, contacts } = await signIn(kv)
+        const { id, contacts, store } = await signIn(kv)
         if (inv.pub === id.pub) die('to Twój własny klucz')
         const known = (await contacts.list()).find((c) => c.pub === inv.pub)
         if (known) { console.log(`ten klucz już masz: ${known.name} (${await fingerprint(inv.pub)})`); break }
@@ -213,8 +247,22 @@ try {
         await new Promise((r) => setTimeout(r, 150)) // the book's signature follows the write
         console.log(`zapisano kontakt ${name}`)
         // Until they hold our key too, neither side can compute the pair topic.
-        if (!inv.reply) console.log(`Odeślij ${name} swój link (już oznaczony jako odpowiedź):\n${inviteLink(APP_ORIGIN, APP_PATH, { pub: id.pub, name: id.handle, reply: true })}`)
-        if (inv.inbox) console.log('(to zaproszenie przyjmuje też pukanie - z CLI jeszcze go nie wyślesz; odeślij link powyżej)')
+        if (inv.inbox) {
+          // An invite that answers itself: knock on its inbox with our key. The
+          // app's waiting record keeps the client knocking until they accept.
+          const raw = inboxSecretBytes(inv)!
+          const session = await startSession(id, { relay: relayList(kv)[0], relays: relayList(kv), transport: 'light' })
+          let reach: number | null = null
+          try { reach = await session.knock(raw, inv.pub, { name: id.handle, note: opt('--note') }) } finally { await session.close().catch(() => {}) }
+          const waiting = await store.waiting()
+          waiting.set(inv.pub, { inbox: inv.inbox, name, since: Date.now(), note: opt('--note') } as Waiting)
+          await store.saveWaiting(waiting)
+          console.log(reach === 0
+            ? `zapukano, ale nikt teraz nie słucha tego zaproszenia - onchato chat będzie pukać co 90 s, aż ${name} przyjmie`
+            : `zapukano do ${name} - gdy przyjmie, zobaczysz go/ją online (onchato chat)`)
+        } else if (!inv.reply) {
+          console.log(`Odeślij ${name} swój link (już oznaczony jako odpowiedź):\n${inviteLink(APP_ORIGIN, APP_PATH, { pub: id.pub, name: id.handle, reply: true })}`)
+        }
         break
       }
       const [name, pub] = args
@@ -248,10 +296,10 @@ try {
     }
     case 'chat': {
       if (!process.stdin.isTTY || !process.stdout.isTTY) die('klient interaktywny wymaga terminala')
-      const { id, contacts, kind } = await signIn(kv)
+      const { id, contacts, kind, store } = await signIn(kv)
       const stdin = process.stdin
       await runClient({
-        id, kind, contacts, relays: relayList(kv), openFirst: args[0], debug: rest.includes('--debug'),
+        id, kind, contacts, store, relays: relayList(kv), openFirst: args[0], debug: rest.includes('--debug'),
         transport: rest.includes('--libp2p') ? 'libp2p' : 'light',
         io: {
           out: process.stdout,

@@ -15,6 +15,9 @@ import { inviteLink } from '../lib/invite.ts'
 import { Windows, type Win } from './windows.ts'
 import { decodeKeys, LineEditor } from './keys.ts'
 import { Screen, statusLine, SGR, type Out } from './tui.ts'
+import { fingerprint } from './fp.ts'
+import { expired, type InviteStore, type PubInvite } from './invites.ts'
+import { inboxSecretBytes } from '../lib/invite.ts'
 
 export interface Io {
   out: Out
@@ -33,8 +36,13 @@ export interface ClientOpts {
   /** Open this contact's window at start (onchato chat <name>). */
   openFirst?: string
   debug?: boolean
+  /** Published invites, pending knocks, ignore list (the app's sealed records). */
+  store?: InviteStore
   io: Io
 }
+
+/** Under a minute would be rude to the relay; over a few makes the other side wait (the app's value). */
+const KNOCK_EVERY_MS = 90_000
 
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 const nodeName = (addr: string) => addr.match(/dns4\/([^./]+)/)?.[1] ?? addr.slice(0, 12)
@@ -134,15 +142,67 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
 
   // Presence for every contact; an incoming conversation opens in the background.
   const contactList = await o.contacts.list()
-  await session.watchContacts(contactList.map((c) => ({ pub: c.pub })), {
-    onOnline: (p) => { if (!online.has(p.pub)) { online.add(p.pub); repaintStatus() } },
-    onOffline: (p) => { online.delete(p.pub) },
-    onWantsConversation: (p) => {
+  let waiting = o.store ? await o.store.waiting() : new Map()
+  const presence = {
+    onOnline: (p: { pub: string }) => {
+      // They announce, so they hold our key: a knock of ours was accepted.
+      if (waiting.delete(p.pub)) {
+        void o.store?.saveWaiting(waiting)
+        const c = contactList.find((x) => x.pub === p.pub)
+        print(1, sys(`${SGR.green}${c?.name ?? 'kontakt'} przyjął(a) Twoje pukanie${SGR.reset}${SGR.grey} - /query ${c?.name ?? ''}`), 'msg')
+      }
+      if (!online.has(p.pub)) { online.add(p.pub); repaintStatus() }
+    },
+    onOffline: (p: { pub: string }) => { online.delete(p.pub) },
+    onWantsConversation: (p: { pub: string }) => {
       const c = contactList.find((x) => x.pub === p.pub); if (!c || rooms.has(c.pub)) return
       status(sys(`${c.name} zaczyna rozmowę - okno ${w.open('query', c.pub, c.name).n}`))
       void openRoom(c)
     },
-  })
+  }
+  await session.watchContacts(contactList.map((c) => ({ pub: c.pub })), presence)
+
+  // ---- invites that answer themselves (PROTOCOL.md §5.7-5.8) ----------------
+  interface Knock { n: number; ik: string; name: string; note: string; fp: string; inv: PubInvite }
+  let knocks: Knock[] = []
+  let knockSeq = 0
+  const inboxWatches = new Map<string, { stop(): void }>()
+  const watchInvites = async () => {
+    if (!o.store) return
+    const list = await o.store.invites()
+    for (const [id, wt] of inboxWatches) if (!list.some((i) => i.id === id && !expired(i))) { wt.stop(); inboxWatches.delete(id) }
+    for (const inv of list) {
+      if (inboxWatches.has(inv.id) || expired(inv)) continue
+      const raw = inboxSecretBytes({ pub: '', name: '', inbox: inv.secret }); if (!raw) continue
+      inboxWatches.set(inv.id, session.watchInbox(raw, {
+        onKnock: (k) => void (async () => {
+          const ik = btoa(String.fromCharCode(...k.ik))
+          if (knocks.some((x) => x.ik === ik && x.inv.id === inv.id)) return       // a re-knock while waiting
+          if (contactList.some((c) => c.pub === ik)) return                       // already a contact
+          const fp = await fingerprint(ik)
+          if ((await o.store!.ignored()).some((r) => r.fp === fp)) return
+          if (knocks.some((x) => x.ik === ik && x.inv.id === inv.id)) return       // raced the awaits
+          const kn: Knock = { n: ++knockSeq, ik, name: (k.name || 'bez nazwy').slice(0, 64), note: k.note ?? '', fp, inv }
+          knocks.push(kn)
+          // Loud on purpose: somebody is at the door, and the name is only a claim.
+          print(1, `${t()} ${SGR.magenta}${SGR.bold}-!- ${kn.name} puka${SGR.reset} ${SGR.grey}(zaproszenie „${inv.label}”) · odcisk ${fp}${kn.note ? ' · „' + kn.note + '”' : ''} - /accept ${kn.n} · /ignore ${kn.n}${SGR.reset}`, 'mention')
+        })(),
+      }))
+    }
+  }
+  await watchInvites()
+  if (inboxWatches.size) status(sys(`słucham ${inboxWatches.size} zaproszeń (pukanie pojawi się tutaj)`))
+  const invTimer = setInterval(() => void watchInvites(), 30_000); (invTimer as any).unref?.()
+
+  // Knocks we are still making (onchato add <invite>), until they accept.
+  const knockAll = () => {
+    for (const [pub, wt] of waiting) {
+      const raw = inboxSecretBytes({ pub: '', name: '', inbox: wt.inbox }); if (!raw) continue
+      void session.knock(raw, pub, { name: o.id.handle, note: wt.note }).catch(() => {})
+    }
+  }
+  if (waiting.size) { knockAll(); status(sys(`pukam do: ${[...waiting.values()].map((x) => x.name).join(', ')} (co 90 s, aż przyjmą)`)) }
+  const knockTimer = setInterval(() => { if (waiting.size) knockAll() }, KNOCK_EVERY_MS); (knockTimer as any).unref?.()
 
   /** A contact by its number on /list or by name (case-insensitive). */
   const findContact = (q: string) => {
@@ -204,10 +264,28 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         for (let i = 0; i < 12; i += 4) print(w.active, `        ${SGR.cyan}${g.slice(i, i + 4).join(' ')}${SGR.reset}`)
         break
       }
+      case 'knocks': {
+        if (!knocks.length) { print(w.active, sys('nikt nie puka')); break }
+        for (const k of knocks) print(w.active, sys(`${k.n}) ${k.name} · odcisk ${k.fp} · zaproszenie „${k.inv.label}”${k.note ? ' · „' + k.note + '”' : ''}`))
+        break
+      }
+      case 'accept': case 'ignore': {
+        const k = knocks.find((x) => x.n === Number(arg)); if (!k) { print(w.active, warn(`nie ma pukania nr ${arg} (/knocks)`)); break }
+        knocks = knocks.filter((x) => x !== k)
+        if (cmd === 'ignore') { await o.store?.ignore(k.fp); print(w.active, sys(`zignorowano ${k.name} (${k.fp}) - kolejne pukanie z tego klucza nie pojawi się`)); break }
+        // Accepting IS adding the contact: they hold our key from the invite, now
+        // we hold theirs, and both sides can compute the pair topic (§5.8).
+        await o.contacts.add(k.name, k.ik, o.kind === 'HEM')
+        await new Promise((r) => setTimeout(r, 150)) // the book's signature follows the write
+        contactList.splice(0, contactList.length, ...(await o.contacts.list()))
+        await session.watchContacts([{ pub: k.ik }], presence)
+        print(w.active, sys(`${SGR.green}dodano ${k.name}${SGR.reset}${SGR.grey} - /query ${k.name}`))
+        break
+      }
       case 'invite': print(w.active, sys(`Twój link: ${inviteLink(APP_ORIGIN, '/', { pub: o.id.pub, name: o.id.handle })}`)); break
       case 'clear': w.current().lines.length = 0; sc.drawWindow(w.current()); repaintStatus(); break
       case 'help':
-        for (const h of ['/win N (Alt+N) · /query <kontakt> · /close · /list · /who', '/me <akcja> · /react <emoji> · /verify · /invite · /clear · /quit'])
+        for (const h of ['/win N (Alt+N) · /query <nr|kontakt> · /close · /list · /who', '/me <akcja> · /react <emoji> · /verify · /invite · /clear · /quit', '/knocks · /accept N · /ignore N - pukanie do Twoich zaproszeń (onchato invites new)'])
           print(w.active, sys(h))
         break
       case 'quit': case 'exit': await quit(); break
@@ -222,10 +300,20 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
     status(sys('wylogowuję…'))
     const wd = setTimeout(() => { sc.stop(); o.io.exit(0) }, 2500)
     ;(wd as any).unref?.()
+    for (const wt of inboxWatches.values()) { try { wt.stop() } catch {} }
     try { await Promise.all([...rooms.values()].map((r) => r.conv?.leave())) } catch {}
     try { await session.close() } catch {}
     clearTimeout(wd)
     sc.stop(); o.io.exit(0)
+  }
+
+  let lines: Promise<void> = Promise.resolve()
+  async function submit(text: string) {
+    if (text.startsWith('/')) { await command(text); return }
+    const room = roomOf(w.current())
+    if (!room?.conv) { print(w.active, warn('to okno statusu - otwórz rozmowę: /query <kontakt>')); return }
+    room.conv.sendText(text)
+    print(w.active, `${t()} ${SGR.yellow}${SGR.bold}<${o.id.handle}>${SGR.reset} ${text}`)
   }
 
   o.io.onInput((chunk) => {
@@ -239,11 +327,9 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
       if (line === null) { repaintStatus(); continue }
       const text = line.trim()
       if (!text) { repaintStatus(); continue }
-      if (text.startsWith('/')) { void command(text); continue }
-      const room = roomOf(w.current())
-      if (!room?.conv) { print(w.active, warn('to okno statusu - otwórz rozmowę: /query <kontakt>')); continue }
-      room.conv.sendText(text)
-      print(w.active, `${t()} ${SGR.yellow}${SGR.bold}<${o.id.handle}>${SGR.reset} ${text}`)
+      // Lines run IN ORDER: a message typed (or pasted) right after /query waits
+      // for that window to open instead of landing on status and going nowhere.
+      lines = lines.then(() => submit(text)).catch((e) => print(w.active, warn(String(e?.message ?? e))))
     }
   })
   o.io.onResize?.(() => { sc.start(); sc.drawWindow(w.current()); repaintStatus() })
