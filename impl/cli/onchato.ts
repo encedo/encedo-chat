@@ -4,6 +4,7 @@
  *
  *   onchato profile new <name>                 a software identity, sealed (browser format)
  *   onchato profile list
+ *   onchato hem new <name> --hem <url>          a new onchato identity on a HEM (sign-in never creates one)
  *   onchato profile import <file.ocmig>        the app's "move profile" file
  *   onchato profile export <name> <file>
  *   onchato whoami | pubkey | contacts
@@ -21,7 +22,7 @@
 
 import { fileKV, type FileKV } from './store.ts'
 import { listProfiles, createProfile, openProfile, exportProfileFile, importProfileFile, identityKey } from './profiles.ts'
-import { hemSignIn, type HemChoice } from './identity.ts'
+import { hemSignIn, hemCreate, type HemChoice } from './identity.ts'
 import { runClient } from './client.ts'
 import { readFileSync } from 'node:fs'
 import { openLocalBook, cacheBaseOf } from '../lib/localbook.ts'
@@ -168,6 +169,16 @@ try {
       die('użycie: profile new|list|import|export')
       break
     }
+    case 'hem': {
+      const [sub, name] = args
+      const url = opt('--hem')
+      if (sub !== 'new' || !name || !url) die('użycie: hem new <nazwa> --hem <url>')
+      console.log(`Tworzę na HEM nową tożsamość onchato „${name}” - klucz powstaje w urządzeniu i go nie opuszcza.`)
+      if (!await confirm('Utworzyć?')) die('nie utworzono')
+      const { id } = await hemCreate(url!, await secret('Hasło HEM: '), name)
+      console.log(`utworzono ${id.handle}\nklucz:  ${id.pub}\nodcisk: ${await fingerprint(id.pub)}`)
+      break
+    }
     case 'whoami': {
       const { id, kind } = await signIn(kv)
       console.log(`tożsamość: ${id.handle} (${kind})\nklucz:     ${id.pub}\nodcisk:    ${await fingerprint(id.pub)}`)
@@ -252,6 +263,6 @@ try {
       break
     }
     default:
-      console.log('użycie: onchato profile new|list|import|export · whoami · pubkey · contacts · invite [--qr]\n         add <link|kod> | add <nazwa> <klucz> · verify <nazwa> [--qr] [numer] · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
+      console.log('użycie: onchato profile new|list|import|export · hem new <nazwa> --hem <url> · whoami · pubkey · contacts · invite [--qr]\n         add <link|kod> | add <nazwa> <klucz> · verify <nazwa> [--qr] [numer] · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
   }
 } catch (e: any) { die(e?.message ?? String(e)) }

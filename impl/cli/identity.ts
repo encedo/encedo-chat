@@ -46,23 +46,18 @@ export async function hemSignIn(
   const keys: any[] = await hem.searchKeys(listTok, SELF_PREFIX)
   const ids: HemChoice[] = keys.map((k) => ({ kid: String(k.kid), handle: parseSelfDescr(k.description)?.handle || '(?)' }))
   const chosen = await selectIdentity(ids, handleHint, choose)
-  let kid: string, handle: string
-  if (chosen) {
-    kid = chosen.kid; handle = chosen.handle
-  } else {
-    handle = handleHint ?? 'me'
-    const gen = await hem.authorizePassword(password, 'keymgmt:gen')
-    const descrB64 = Buffer.from(buildSelfDescr(handle), 'utf8').toString('base64')
-    kid = (await hem.createKeyPair(gen, selfLabel(handle), 'CURVE25519', descrB64)).kid
-  }
+  // Signing in never creates: a typo in a command must not mint an identity in
+  // somebody's hardware. That is `onchato hem new <name>` (hemCreate), on purpose.
+  if (!chosen) throw new Error('this HEM holds no onchato identity - create one with: onchato hem new <name> --hem <url>')
+  const { kid, handle } = chosen
   const useTok = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
   const { pubkey } = await hem.getPubKey(useTok, kid)
   return { id: hemIdentityFrom(hem, kid, handle, pubkey), hem, kid }
 }
 
 /**
- * Which HEM identity to sign in as (see hemSignIn). Null means "none here":
- * the caller then creates one. Throws rather than guessing.
+ * Which HEM identity to sign in as (see hemSignIn). Null means "none here"
+ * (sign-in then refuses; creating is hemCreate). Throws rather than guessing.
  */
 export async function selectIdentity(
   raw: HemChoice[], handleHint?: string, choose?: (ids: HemChoice[]) => Promise<HemChoice | null>,
@@ -81,6 +76,19 @@ export async function selectIdentity(
   if (ids.length === 1) return ids[0]
   if (ids.length > 1) return pick(ids, `this HEM holds ${ids.length} identities`)
   return null
+}
+
+/** Create a new onchato identity on a HEM, whatever it already holds (a device may hold several, §4.2). */
+export async function hemCreate(url: string, password: string, handle: string): Promise<{ id: Identity; hem: any; kid: string }> {
+  if (!handle.trim()) throw new Error('an identity needs a name')
+  const hem = new HEM(url)
+  await hem.hemCheckin()
+  const gen = await hem.authorizePassword(password, 'keymgmt:gen')
+  const descrB64 = Buffer.from(buildSelfDescr(handle), 'utf8').toString('base64')
+  const kid = (await hem.createKeyPair(gen, selfLabel(handle), 'CURVE25519', descrB64)).kid
+  const useTok = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
+  const { pubkey } = await hem.getPubKey(useTok, kid)
+  return { id: hemIdentityFrom(hem, kid, handle, pubkey), hem, kid }
 }
 
 /** Software identity (dev/test). Creates the keystore if missing. */
