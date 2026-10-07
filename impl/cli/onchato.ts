@@ -21,7 +21,7 @@
 
 import { fileKV, type FileKV } from './store.ts'
 import { listProfiles, createProfile, openProfile, exportProfileFile, importProfileFile, identityKey } from './profiles.ts'
-import { hemSignIn } from './identity.ts'
+import { hemSignIn, type HemChoice } from './identity.ts'
 import { runClient } from './client.ts'
 import { readFileSync } from 'node:fs'
 import { openLocalBook, cacheBaseOf } from '../lib/localbook.ts'
@@ -95,11 +95,32 @@ async function fingerprint(pubB64: string): Promise<string> {
   return [...h].map((b) => b.toString(16).padStart(2, '0')).join(':').toUpperCase()
 }
 
+/**
+ * Several identities on one HEM: a numbered list, the KID's start beside each
+ * name (handles may repeat), and a number to type. Without a terminal there is
+ * nobody to ask, so the caller's error (with the list) stands.
+ */
+async function chooseIdentity(ids: HemChoice[]): Promise<HemChoice | null> {
+  if (!process.stdin.isTTY) return null
+  console.log('Ten HEM ma kilka tożsamości:')
+  ids.forEach((i, n) => console.log(`  ${n + 1}) ${i.handle.padEnd(16)} KID ${i.kid.slice(0, 8)}…`))
+  const rl = createInterface({ input: process.stdin, output: process.stdout })
+  try {
+    for (;;) {
+      const a = (await rl.question(`Która? [1-${ids.length}] `)).trim()
+      const n = Number(a)
+      if (Number.isInteger(n) && n >= 1 && n <= ids.length) return ids[n - 1]
+      if (!a) return null
+      console.log('  podaj numer z listy (Enter przerywa)')
+    }
+  } finally { rl.close() }
+}
+
 /** The identity this command runs as, and its contact book (signed, §4.4). */
 async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactManager; kind: string }> {
   const hemUrl = opt('--hem')
   if (hemUrl) {
-    const { id, hem, kid } = await hemSignIn(hemUrl, await secret('Hasło HEM: '), opt('--handle', 'me'))
+    const { id, hem, kid } = await hemSignIn(hemUrl, await secret('Hasło HEM: '), opt('--handle'), chooseIdentity)
     const key = await identityKey(id.pub, kid)
     const local = await openLocalBook(key, kv, await cacheBaseOf(id, key, kv))
     if (local.verdict === 'tampered') console.error('onchato: UWAGA - lokalna książka kontaktów nie przeszła weryfikacji podpisu (pokazuję tylko kontakty z HEM)')
