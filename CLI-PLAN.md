@@ -77,6 +77,62 @@ $ systemctl --user status onchato                # the daemon, its own profile
 The rendered mockup of all four views was shown to the user on 2026-10-07 and
 accepted.
 
+## The bot / notifier (decided 2026-10-07)
+
+The CLI also runs as a **notifier**: a system event becomes a message to an
+admin or a group. The motivating case is a login alert:
+
+```
+# /etc/pam.d/sshd
+session optional pam_exec.so /usr/local/bin/onchato-login-notify
+
+# /usr/local/bin/onchato-login-notify
+onchato send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
+```
+
+The same hook fits cron, `systemd OnFailure=`, a monitoring alarm, or a
+`journalctl -f` filter. What it takes beyond plain `send`:
+
+1. **`send` goes through the daemon.** A stand-alone `send` would dial the
+   relay and run EH-2 with the recipient every time — 1–3 s, more with a HEM.
+   The daemon holds the sessions; `send` hands it the message over a local
+   socket (`$XDG_RUNTIME_DIR/onchato.sock`, `0600`) and returns at once.
+2. **A queue that waits for the recipient to be online** — the core of the
+   feature. The network stores nothing (PROTOCOL.md), so a notification for an
+   absent admin waits **on the bot's side**:
+   - an outbox **sealed to a file** (§10 cache key), so a daemon restart or a
+     reboot does not lose it;
+   - delivered the moment the recipient's presence lights and the 1:1 is up
+     (the same trigger the app uses for parked messages and owed group
+     invitations), confirmed by the ordinary `ack`;
+   - **oldest first**, each with a **time-to-live** (default 24 h, per message
+     `--ttl`): a login alert from yesterday is noise, not news, and is dropped
+     with a line in the bot's own log;
+   - a size cap per recipient, so an absent admin cannot make the bot grow
+     without bound;
+   - `onchato queue` lists what waits and for whom; `send` returns exit `3`
+     ("queued") when the recipient is not online right now, `0` when delivered.
+3. **Coalescing.** A brute-force run is hundreds of failed logins a minute.
+   Messages with the same `--key` inside a window merge into one ("12 failed
+   logins from 1.2.3.4 in 5 min"), and a queued message is updated in place
+   rather than appended.
+4. **A group as a channel.** The bot posts to a group ("ops") and every admin
+   gets it; the group rules hold — the bot and all members are mutual contacts.
+5. **The bot's identity.** Its own profile. Unlocked at start with
+   `systemd-creds` or a `0600` key file; a HEM is safer and needs the device.
+   The bot is an ordinary contact: added by invite, verified by safety number.
+
+**What it cannot do, said plainly:** a notification arrives when the recipient
+is online, or comes online within the TTL while the bot runs. There is no push
+to a sleeping phone (no Google/Apple servers). Android keeps the app alive with
+a foreground service, so in practice it usually arrives; an iPhone with the
+screen off does not receive it until the app is opened again — a product fact.
+
+**Commands TO the bot** (`/status` from an admin) are possible and dangerous: a
+command from a chat run on a server is a remote shell. If ever built: an
+allow-list of named commands, only from verified contacts. Separate stage,
+optional, not scheduled.
+
 ## Stages
 
 Working days for one person who knows the code; a judgement, not a measurement.
@@ -87,14 +143,15 @@ Working days for one person who knows the code; a judgement, not a measurement.
 | 2 | **Contacts and invites** | `/invite` (link + terminal QR), `add <link>` (`#i=`), `/verify` (safety number) | 2 |
 | 3 | **irssi-style client** | one transport, many rooms; windows, Alt+N, status line with activity; `/list` with presence; the node list (`nodes.json` / CID) with failover | 4–5 |
 | 4 | **Scripting and daemon** | `send`, `listen --json`, exit codes, `--daemon` + a systemd unit; parked messages leave when the recipient returns | 2–3 |
+| 4b | **Bot / notifier** | `send` through the daemon socket; the sealed outbox that waits for the recipient (TTL, cap, oldest first, `queue`); coalescing by `--key`; a group as a channel; the PAM login example | 3–4 |
 | 5 | **Files** | `/send`, `/get` through the same encrypted store as the app; voice notes download only | 2 |
 | 6 | **Groups** | create, list, join, group windows; owed invitations and group state sealed to a file (§10) | 3–4 |
 | 7 | **Packaging and tests** | npm publish, a Docker image for servers, README / `--help`, a CLI ↔ browser scenario in the harness | 2–3 |
 
-**Total ≈ 17–22 days.** Stages 3 and 6 carry the spread.
+**Total ≈ 20–26 days.** Stages 3, 4b and 6 carry the spread.
 
 Stages 1–2 are the best value: a usable client for one geek and one contact.
-Stage 4 is the admin argument — monitoring and bots as their own identity.
+Stages 4 and 4b are the admin argument — monitoring and bots as their own identity, with notifications that wait for the admin.
 
 ## Order and dependencies
 
@@ -105,7 +162,7 @@ an installed CLI stays on its version far longer than an app that updates
 itself, and a silent incompatibility looks like an outage.
 
 After 0.7.0: compatibility rule → `chat-core` → CLI stages 1–2 → Open Mercato
-PR → CLI stages 3–7.
+PR → CLI stages 3–7 (4b right after 4).
 
 ## Deliberately out
 
