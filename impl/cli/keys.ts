@@ -9,7 +9,7 @@
 
 export type Key =
   | { t: 'text'; s: string }
-  | { t: 'enter' } | { t: 'backspace' } | { t: 'delete' }
+  | { t: 'enter' } | { t: 'backspace' } | { t: 'delete' } | { t: 'tab' }
   | { t: 'left' } | { t: 'right' } | { t: 'home' } | { t: 'end' }
   | { t: 'up' } | { t: 'down' } | { t: 'pgup' } | { t: 'pgdn' }
   | { t: 'alt-digit'; n: number }
@@ -45,6 +45,7 @@ export function decodeKeys(chunk: string): Key[] {
     }
     if (ch === '\r' || ch === '\n') { flush(); out.push({ t: 'enter' }); continue }
     if (ch === '\x7f' || ch === '\b') { flush(); out.push({ t: 'backspace' }); continue }
+    if (ch === '\t') { flush(); out.push({ t: 'tab' }); continue }
     if (CTRL[ch]) { flush(); out.push(CTRL[ch]); continue }
     if (ch < ' ') continue // other control bytes are not text
     text += ch
@@ -99,5 +100,6 @@ export class LineEditor {
     return null
   }
 
-  private set(s: string) { this.chars = [...s]; this.cursor = this.chars.length }
+  /** Replace the whole line (tab completion). */
+  set(s: string) { this.chars = [...s]; this.cursor = this.chars.length }
 }

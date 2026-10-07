@@ -144,7 +144,27 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
     },
   })
 
-  const findContact = (name: string) => contactList.find((c) => c.name.toLowerCase() === name.toLowerCase())
+  /** A contact by its number on /list or by name (case-insensitive). */
+  const findContact = (q: string) => {
+    const n = Number(q)
+    if (Number.isInteger(n) && n >= 1 && n <= contactList.length && String(n) === q.trim()) return contactList[n - 1]
+    return contactList.find((c) => c.name.toLowerCase() === q.toLowerCase())
+  }
+  const showList = () => {
+    if (!contactList.length) { print(w.active, sys('brak kontaktów - onchato add <link>')); return }
+    print(w.active, sys('kontakty (/query <nr> albo <nazwa>, Tab dopełnia):'))
+    contactList.forEach((c, i) => {
+      const r = rooms.get(c.pub)
+      print(w.active, `  ${String(i + 1).padStart(2)}) ${online.has(c.pub) ? SGR.green + '●' : SGR.grey + '○'}${SGR.reset} ${c.name.padEnd(16)} ${SGR.grey}${r ? 'okno ' + r.win.n : ''}${SGR.reset}`)
+    })
+  }
+  /** Tab after /query: complete a contact's name; several matches are listed. */
+  const complete = () => {
+    const m = ed.text.match(/^(\/q(?:uery)? )(.*)$/); if (!m) return
+    const hits = contactList.filter((c) => c.name.toLowerCase().startsWith(m[2].toLowerCase()))
+    if (hits.length === 1) ed.set(m[1] + hits[0].name)
+    else if (hits.length > 1) print(w.active, sys(hits.map((c) => c.name).join('  ')))
+  }
 
   async function command(line: string) {
     const [cmd, ...args] = line.slice(1).split(' ')
@@ -163,14 +183,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         void room.conv?.leave()
         const n = room.win.n; w.close(n); switchTo(1); status(sys(`zamknięto okno ${n} (${room.contact.name})`)); break
       }
-      case 'list': {
-        for (const c of contactList) {
-          const r = rooms.get(c.pub)
-          print(w.active, `     ${online.has(c.pub) ? SGR.green + '●' : SGR.grey + '○'}${SGR.reset} ${c.name.padEnd(16)} ${SGR.grey}${r ? 'okno ' + r.win.n : '/query ' + c.name}${SGR.reset}`)
-        }
-        if (!contactList.length) print(w.active, sys('brak kontaktów - onchato add <link>'))
-        break
-      }
+      case 'list': showList(); break
       case 'who': {
         if (!room?.conv) { print(w.active, sys('/who działa w oknie rozmowy')); break }
         print(w.active, sys(room.conv.who().length ? `${room.contact.name} jest w pokoju` : `${room.contact.name} nie ma w pokoju`)); break
@@ -220,6 +233,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
       if (k.t === 'alt-digit') { switchTo(k.n === 0 ? 10 : k.n); continue }
       if (k.t === 'ctrl' && (k.c === 'c' || k.c === 'd')) { void quit(); return }
       if (k.t === 'ctrl' && k.c === 'l') { sc.drawWindow(w.current()); repaintStatus(); continue }
+      if (k.t === 'tab') { complete(); repaintStatus(); continue }
       const line = ed.apply(k)
       if (k.t === 'text') roomOf(w.current())?.conv?.noteActivity()
       if (line === null) { repaintStatus(); continue }
@@ -236,6 +250,11 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   const clock = setInterval(repaintStatus, 30_000); (clock as any).unref?.()
 
   if (o.openFirst) await command('/query ' + o.openFirst)
+  else {
+    // The contact list comes up by itself, once presence has had a few seconds
+    // to light the dots - nobody should have to know a name to start.
+    const t0 = setTimeout(() => { if (!quitting && w.active === 1) showList() }, 3000); (t0 as any).unref?.()
+  }
   repaintStatus()
   return { session, quit, windows: w }
 }

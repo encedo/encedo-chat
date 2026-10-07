@@ -52,9 +52,11 @@ try {
   step('the status line shows the link up from the start')
 
   // Only ala opens the conversation; bob types nothing and must still get it.
-  A.type('/query bob\r')
+  await until('the numbered contact list shown by itself on start', () => / 1\) . bob/.test(A.screen()), 10_000)
+  step('the contact list comes up by itself, numbered')
+  A.type('/query b\t\r')                         // Tab completes the name
   await until('window 2 on ala', () => A.status().includes('2:bob'))
-  step('/query opens window 2')
+  step('/query + Tab completes the name and opens window 2')
   const msg = 'czesc z CLI ' + Date.now().toString(36)
   A.type(msg + '\r')
   await until('bob told on status that ala starts a conversation', () => B.screen().includes('ala zaczyna rozmowę - okno 2'), 60_000)

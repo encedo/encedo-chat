@@ -46,6 +46,7 @@ test('keys: text, Alt+digit, arrows, control keys and a paste come apart correct
   assert.deepEqual(decodeKeys('zażółć 👍'), [{ t: 'text', s: 'zażółć 👍' }], 'UTF-8 and emoji stay text')
   assert.deepEqual(decodeKeys('\x1b[1;5C'), [], 'an unknown sequence is swallowed, not typed')
   assert.deepEqual(decodeKeys('\x07'), [], 'a stray control byte is not text')
+  assert.deepEqual(decodeKeys('/q b\t'), [{ t: 'text', s: '/q b' }, { t: 'tab' }])
 })
 
 test('line editor: editing, words, history, and Enter returns the line', () => {
