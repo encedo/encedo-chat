@@ -167,6 +167,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   let knocks: Knock[] = []
   let knockSeq = 0
   const inboxWatches = new Map<string, { stop(): void }>()
+  const knownKnocks = new Set<string>()
   const watchInvites = async () => {
     if (!o.store) return
     const list = await o.store.invites()
@@ -178,7 +179,15 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         onKnock: (k) => void (async () => {
           const ik = btoa(String.fromCharCode(...k.ik))
           if (knocks.some((x) => x.ik === ik && x.inv.id === inv.id)) return       // a re-knock while waiting
-          if (contactList.some((c) => c.pub === ik)) return                       // already a contact
+          const known = contactList.find((c) => c.pub === ik)
+          if (known) {
+            if (knownKnocks.has(ik + inv.id)) return   // the app re-knocks every 90 s; say it once
+            knownKnocks.add(ik + inv.id)
+            // Said, not swallowed: silence here made a working invite look broken
+            // (2026-10-07 - the phone already held this key).
+            print(1, sys(`${known.name} zapukał(a) do zaproszenia „${inv.label}”, ale jest już w Twoich kontaktach - /query ${known.name}`), 'msg')
+            return
+          }
           const fp = await fingerprint(ik)
           if ((await o.store!.ignored()).some((r) => r.fp === fp)) return
           if (knocks.some((x) => x.ik === ik && x.inv.id === inv.id)) return       // raced the awaits
