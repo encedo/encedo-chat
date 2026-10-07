@@ -66,3 +66,52 @@ test('line editor: editing, words, history, and Enter returns the line', () => {
   assert.deepEqual(type('   \r'), ['   '], 'a blank line is returned (the caller ignores it) but not kept in history')
   e.apply({ t: 'up' }); assert.equal(e.text, 'ą')
 })
+
+import { Screen, statusLine, wrap, visible } from '../cli/tui.ts'
+import { VT } from './vt.ts'
+
+test('screen: lines scroll inside the region and never touch the status or the input', () => {
+  const vt = new VT(8, 30)
+  const sc = new Screen(vt)
+  sc.start()
+  sc.status('[status line]')
+  sc.input('[vostro1] ', 'draft', 5)
+  for (let i = 1; i <= 9; i++) sc.appendLine('line ' + i)
+  const s = vt.screen()
+  assert.deepEqual(s.slice(0, 6), ['line 4', 'line 5', 'line 6', 'line 7', 'line 8', 'line 9'], 'the newest six fill the region, oldest scrolled off')
+  assert.equal(s[6], '[status line]', 'the status row survives scrolling')
+  assert.equal(s[7], '[vostro1] draft', 'and so does the input row')
+})
+
+test('screen: a window redraw shows its newest lines, wrapped, bottom-aligned', () => {
+  const vt = new VT(6, 10)
+  const sc = new Screen(vt)
+  const w = new Windows()
+  w.print(1, 'one'); w.print(1, 'two'); w.print(1, 'abcdefghijKLM')
+  sc.start(); sc.drawWindow(w.current())
+  assert.deepEqual(vt.screen().slice(0, 4), ['one', 'two', 'abcdefghij', 'KLM'])
+})
+
+test('screen: the input scrolls sideways to keep the cursor visible', () => {
+  const vt = new VT(5, 20)
+  const sc = new Screen(vt)
+  sc.input('> ', 'x'.repeat(30) + 'END', 33)
+  assert.ok(vt.line(5).endsWith('END'), vt.line(5))
+  assert.equal(vt.c, 20, 'the cursor sits after the last visible character')
+})
+
+test('status line: identity, node and link, the window, a lock when secured, and activity', () => {
+  const w = new Windows()
+  const a = w.open('query', 'p', 'vostro1'); w.open('group', 'g', 'grp1')
+  w.switchTo(a.n); w.print(3, '@ala', 'mention')
+  const plain = (x: string) => x.replace(/\x1b\[[0-9;]*m/g, '')
+  const st = { clock: '22:42', me: 'ala', kind: 'HEM', node: 'bs1', online: true, secure: true }
+  assert.equal(plain(statusLine(st, w)), '[22:42] [ala·HEM] [bs1 ●] [2:vostro1 🔐] [Act: 3]')
+  assert.equal(plain(statusLine({ ...st, secure: false }, w)), '[22:42] [ala·HEM] [bs1 ●] [2:vostro1] [Act: 3]', 'no lock before EH-2')
+  assert.ok(statusLine(st, w).includes('\x1b[35m'), 'a mention is drawn in magenta')
+})
+
+test('wrap and visible ignore colour codes', () => {
+  assert.equal(visible('\x1b[33mabc\x1b[0m'), 3)
+  assert.deepEqual(wrap('\x1b[33mabcdef', 4).map((l) => l.replace(/\x1b\[[0-9;]*m/g, '')), ['abcd', 'ef'])
+})
