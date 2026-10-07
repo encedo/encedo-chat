@@ -1812,7 +1812,7 @@ function renderContacts() {
     // tooltip, and in the toast that pressing the badge shows.
     const wait = waiting.get(c.pub)
     const mark = wait
-      ? `<span class="c-new waiting" title="${escapeHtml(tr('Zapukaliśmy i czekamy na przyjęcie. Nie ma potwierdzenia, że doręczono — ponawiamy, dopóki aplikacja jest otwarta.'))}">${tr('CZEKAM')}</span>`
+      ? `<span class="c-new waiting" title="${escapeHtml(tr('Zapukaliśmy i czekamy na przyjęcie. Nie ma potwierdzenia, że doręczono — ponawiamy, dopóki aplikacja jest otwarta. Kliknij, żeby zapukać teraz.'))}">${tr('CZEKAM')}</span>`
       : unseen ? '' // an unread message is louder than either of these
       : state === 'new' ? `<span class="c-new" title="${escapeHtml(tr('Jeszcze się nie odezwał — jeśli nie ma Twojego klucza, wyślij mu swój kod (kliknij)'))}">${tr('NOWY')}</span>`
       : state === 'cold' ? `<span class="c-new cold" title="${escapeHtml(tr('Ani razu się nie odezwał. Albo go nie było, albo nie ma Twojego klucza — kliknij, żeby wysłać kod ponownie'))}">?</span>`
@@ -1828,9 +1828,21 @@ function renderContacts() {
       + `🔑 ${escapeHtml(fpCache.get(c.pub) ?? '…')}${c.kid ? ' · KID ' + escapeHtml(shortKid(c.kid)) : ''}</div></div>`
       + mark + pill + `<button class="c-edit" title="${tr('Zmień nazwę')}">✎</button><span class="c-x" title="${tr('Usuń')}">×</span>`
     b.addEventListener('click', async (e: any) => {
-      // Pressing the badge sends them your code instead of opening a room —
-      // which is the thing to do about a contact that has never answered, and
-      // the reason the badge is worth having at all.
+      // CZEKAM (we knocked on their invite): pressing it knocks again NOW rather
+      // than in up to 90 s - the user's call, 2026-10-07; showing our own data
+      // there was something available elsewhere anyway. At most one per 5 s.
+      if (e.target.classList.contains('c-new') && e.target.classList.contains('waiting')) {
+        e.stopPropagation()
+        const w = waiting.get(c.pub)
+        if (w && nowMs() - (manualKnockAt.get(c.pub) ?? 0) > 5_000) {
+          manualKnockAt.set(c.pub, nowMs())
+          void knockOnce(c.pub, w)
+          toast(tr('Zapukano ponownie do {name} — nie ma potwierdzenia doręczenia; ponawiamy też samoczynnie', { name: c.name }), 3000)
+        }
+        return
+      }
+      // NOWY / ?: there is no inbox to knock on (an ordinary identity link), so
+      // the badge sends them your code instead - the one thing that can help.
       if (e.target.classList.contains('c-new')) { e.stopPropagation(); void openShare(); return }
       if (e.target.classList.contains('c-edit')) {
         e.stopPropagation()
@@ -4200,6 +4212,8 @@ interface Waiting { inbox: string; name: string; since: number; note?: string }
 const waitingKey = () => 'ec-waiting-' + (session?.idKey ?? '')
 let waiting = new Map<string, Waiting>()
 let knockTimer: any = null
+/** When each contact was last knocked by hand (the CZEKAM badge), to throttle presses. */
+const manualKnockAt = new Map<string, number>()
 /** Under a minute would be rude to the relay; over a few makes a Source wait. */
 const KNOCK_EVERY_MS = 90_000
 
