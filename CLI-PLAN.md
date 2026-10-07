@@ -76,8 +76,18 @@ exported from the app cannot be used here. Today it is a developer tool.
   `--password-file` or systemd `LoadCredential`. Proved live by
   `net/cli-daemon-test.ts`: delivered through the socket, a listen stream,
   `onchato send` as a process via the daemon and without one, and a send to an
-  offline recipient that reaches him by itself when he is back. The queue is
-  in memory until 4b.
+  offline recipient that reaches him by itself when he is back.
+- **Stage 4b - done 2026-10-08: the notification queue.** `cli/outbox.ts` (the
+  rules, pure: oldest first, TTL - expired entries dropped and reported, never
+  late - merging by `--key` with "(+N wcześniejszych)", one message per key per
+  60 s window while online, 100 per recipient, oldest out) and `cli/queue.ts`
+  (sealed to `ec-outbox-<kid>`, flushed when presence lights and every 30 s;
+  a message handed to a room but not yet confirmed is tracked by its id, not
+  sent twice; an entry only waiting for its key's window does not hold up
+  others). `send --ttl --key`, `onchato queue`. Proved live by
+  `net/cli-queue-test.ts`: merging while offline, a TTL expiry, the queue
+  surviving a daemon restart, delivery by itself when bob comes online
+  (merged, in order), the per-key window while online.
 - **HEM**: sign-in never creates an identity (`onchato hem new <name>` does),
   and several identities on one device are offered as a numbered list.
 

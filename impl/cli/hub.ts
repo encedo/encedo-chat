@@ -15,7 +15,7 @@ import { startSession, type ClientSession, type Conversation, type ContactManage
 export type HubEvent =
   | { t: 'msg'; from: string; pub: string; text: string; ts: number; id: string }
   | { t: 'presence'; from: string; pub: string; state: 'online' | 'offline' }
-  | { t: 'delivered'; to: string; id: string; ms: number }
+  | { t: 'delivered'; to: string; pub: string; id: string; ms: number }
   | { t: 'link'; state: 'online' | 'reconnecting' | 'offline' }
 
 export interface SendResult { status: 'delivered' | 'queued'; id: string; ms?: number; to: string }
@@ -68,7 +68,7 @@ export class Hub {
     if (!r) {
       r = this.session.open({ pub: c.pub }, {
         onMessage: (_from, m) => this.emit({ t: 'msg', from: c.name, pub: c.pub, text: m.body, ts: m.ts, id: m.id }),
-        onDelivered: (id, ms) => { this.waiters.get(id)?.(ms); this.waiters.delete(id); this.emit({ t: 'delivered', to: c.name, id, ms }) },
+        onDelivered: (id, ms) => { this.waiters.get(id)?.(ms); this.waiters.delete(id); this.emit({ t: 'delivered', to: c.name, pub: c.pub, id, ms }) },
       })
       this.rooms.set(c.pub, r)
     }

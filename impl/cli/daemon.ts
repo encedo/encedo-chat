@@ -6,10 +6,12 @@
  *   authentication, so it must never be group- or world-writable.
  *
  * The protocol is one JSON object per line, both ways:
- *   -> {"op":"send","to":"ewa","text":"...","wait":20000}
- *   <- {"ok":true,"status":"delivered","id":"...","ms":412,"to":"ewa"}   (or "queued")
+ *   -> {"op":"send","to":"ewa","text":"...","wait":20000,"ttl":86400000,"key":"ssh"}
+ *   <- {"ok":true,"status":"delivered","id":"...","ms":412,"to":"ewa"}   (or "queued" / "merged")
  *   -> {"op":"listen"}
  *   <- {"ok":true} then one event per line until the client hangs up
+ *   -> {"op":"queue"}
+ *   <- {"ok":true,"entries":[{"to":"ewa","age_s":40,"expires_in_s":86360,"key":"ssh","merged":2,"text":"..."}]}
  *   -> {"op":"status"}
  *   <- {"ok":true,"me":"ala","link":"online","online":["ewa"],"contacts":3}
  */
@@ -19,6 +21,7 @@ import { existsSync, unlinkSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { onchatoHome } from './store.ts'
 import type { Hub, HubEvent } from './hub.ts'
+import type { Queue } from './queue.ts'
 
 export function socketPath(): string {
   if (process.env.ONCHATO_SOCKET) return process.env.ONCHATO_SOCKET
@@ -42,12 +45,12 @@ export function lineReader(onObj: (o: any) => void, onBad?: (line: string) => vo
   }
 }
 
-export function serve(hub: Hub, path = socketPath(), log: (m: string) => void = () => {}): Promise<Server> {
+export function serve(hub: Hub, path = socketPath(), log: (m: string) => void = () => {}, queue?: Queue): Promise<Server> {
   // A stale socket from a crashed run would make listen() fail; one that a LIVE
   // daemon holds must not be stolen - probe it first.
   return new Promise((resolve, reject) => {
     const start = () => {
-      const srv = createServer((sock) => handle(hub, sock, log))
+      const srv = createServer((sock) => handle(hub, sock, log, queue))
       srv.on('error', reject)
       srv.listen(path, () => { chmodSync(path, 0o600); resolve(srv) })
     }
@@ -58,7 +61,7 @@ export function serve(hub: Hub, path = socketPath(), log: (m: string) => void = 
   })
 }
 
-function handle(hub: Hub, sock: Socket, log: (m: string) => void) {
+function handle(hub: Hub, sock: Socket, log: (m: string) => void, queue?: Queue) {
   const reply = (o: unknown) => { try { sock.write(JSON.stringify(o) + '\n') } catch {} }
   let unlisten: (() => void) | null = null
   sock.on('close', () => unlisten?.())
@@ -69,12 +72,18 @@ function handle(hub: Hub, sock: Socket, log: (m: string) => void) {
     try {
       if (req.op === 'send') {
         if (typeof req.to !== 'string' || typeof req.text !== 'string' || !req.text) throw new Error('send potrzebuje "to" i "text"')
-        const r = await hub.send(req.to, req.text, typeof req.wait === 'number' ? req.wait : 20_000)
+        const waitMs = typeof req.wait === 'number' ? req.wait : 20_000
+        // With a queue (the daemon): offline -> waits on disk, keys coalesce.
+        const r = queue
+          ? await queue.submit(req.to, req.text, { waitMs, ttlMs: typeof req.ttl === 'number' ? req.ttl : undefined, key: typeof req.key === 'string' ? req.key : undefined })
+          : { ok: true, ...(await hub.send(req.to, req.text, waitMs)) }
         log(`send -> ${r.to}: ${r.status}`)
-        reply({ ok: true, ...r })
+        reply(r)
       } else if (req.op === 'listen') {
         reply({ ok: true })
         unlisten = hub.on((e: HubEvent) => reply(e))
+      } else if (req.op === 'queue') {
+        reply({ ok: true, entries: queue?.list() ?? [] })
       } else if (req.op === 'status') {
         const ns = hub.session.netStatus()
         reply({ ok: true, me: hub.id.handle, link: ns.link, relay: ns.relay, contacts: hub.contactList.length, online: [...hub.online].map((p) => hub.nameOf(p)) })

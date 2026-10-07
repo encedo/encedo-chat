@@ -296,7 +296,7 @@ Co dalej z wiadomością, zależy od tego, czy działa demon:
 |---|---|---|
 | jak | `send` oddaje wiadomość demonowi przez gniazdo i od razu wraca | `send` otwiera własną krótką sesję |
 | odbiorca online | doręczona w ok. sekundę | doręczona po zestawieniu sesji (kilka sekund) |
-| odbiorca offline | **czeka w demonie** i wychodzi sama, gdy odbiorca wróci | **przepada** (komunikat o tym na stderr) |
+| odbiorca offline | **czeka w kolejce demona** (na dysku, przeżywa restart) i wychodzi sama, gdy odbiorca wróci | **przepada** (komunikat o tym na stderr) |
 
 Wynik `--json`: `{"ok":true,"status":"delivered","id":"…","ms":412,"to":"ewa","via":"daemon"}`
 (`status` = `delivered` albo `queued`, `via` = `daemon` albo `direct`).
@@ -369,9 +369,30 @@ session optional pam_exec.so /usr/local/bin/onchato-login-notify
 ONCHATO_SOCKET=/run/user/1000/onchato.sock /home/bot/.local/bin/onchato send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
 ```
 
-Kolejka w demonie żyje w pamięci: restart demona gubi to, co czekało. Trwała kolejka
-z czasem ważności i łączeniem powtarzalnych zdarzeń to następny etap
-([CLI-PLAN.md](CLI-PLAN.md), 4b).
+### Kolejka powiadomień
+
+Sieć niczego nie przechowuje, więc powiadomienie dla kogoś, kto jest offline, czeka
+**u bota** — w kolejce demona, zaszyfrowanej na dysku (przeżywa restart demona
+i serwera). Wychodzi samo, gdy odbiorca pojawi się online.
+
+```sh
+onchato send admin "login: $PAM_USER z $PAM_RHOST" --key ssh --ttl 24h
+onchato queue                        # co czeka i na kogo (--json do skryptów)
+```
+
+| zasada | jak działa |
+|---|---|
+| **kolejność** | najstarsze najpierw, osobno dla każdego odbiorcy |
+| **czas ważności** `--ttl` | domyślnie 24 h (`30m`, `24h`, `7d`); przeterminowane powiadomienie **nie jest wysyłane z opóźnieniem** — wypada, a demon zapisuje to w dzienniku |
+| **łączenie** `--key` | czekające powiadomienie z tym samym kluczem zostaje zastąpione najnowszym, z dopiskiem „(+N wcześniejszych)” |
+| **okno klucza** | gdy odbiorca jest online, z jednym kluczem wychodzi najwyżej jedno powiadomienie na minutę; kolejne czekają i łączą się w następne — atak na SSH nie zamieni się w 500 powiadomień |
+| **limit** | do 100 czekających na odbiorcę; po przekroczeniu wypada najstarsze (z wpisem w dzienniku) |
+
+`send` przez demona zwraca `status`: `delivered` (doręczone, kod 0), `queued`
+(czeka w kolejce, kod 3) albo `merged` (połączone z czekającym, kod 3). Powiadomienie
+z kluczem w trakcie jego okna też ma status `queued`, nawet gdy odbiorca jest online.
+
+Bez demona nie ma kolejki: `--key` i `--ttl` nic wtedy nie zmieniają.
 
 ---
 
@@ -393,7 +414,8 @@ z czasem ważności i łączeniem powtarzalnych zdarzeń to następny etap
 | `onchato invites` · `invites new [etykieta] [--expires 24h] [--qr]` · `invites qr <nr>` · `invites revoke <nr>` | zaproszenia ze skrzynką |
 | `onchato verify <nazwa> [--qr] [numer]` | numer bezpieczeństwa; porównanie z podanym |
 | `onchato chat [<nazwa>] [--debug]` | klient rozmów |
-| `onchato send <kontakt> <tekst \| -> [--wait s] [--json]` | jedna wiadomość (rozdział 8) |
+| `onchato send <kontakt> <tekst \| -> [--wait s] [--ttl 24h] [--key k] [--json]` | jedna wiadomość (rozdział 8) |
+| `onchato queue [--json]` | co czeka w kolejce demona |
 | `onchato listen [--json]` | strumień przychodzących wiadomości |
 | `onchato daemon` | demon z gniazdem lokalnym |
 
@@ -403,7 +425,7 @@ z czasem ważności i łączeniem powtarzalnych zdarzeń to następny etap
 |---|---|
 | `0` | w porządku |
 | `1` | błąd (komunikat na stderr: złe hasło, brak kontaktu, brak terminala…) |
-| `3` | `send`: odbiorca nie potwierdził w czasie (czeka w demonie albo przepadła — zob. rozdział 8) |
+| `3` | `send`: nie doręczono w czasie — czeka w kolejce demona (albo połączone z czekającym); bez demona przepadła (rozdział 8) |
 | `4` | `verify`: numery się **nie** zgadzają |
 | `130` | przerwane Ctrl+C przy pytaniu o hasło |
 
@@ -420,6 +442,7 @@ z czasem ważności i łączeniem powtarzalnych zdarzeń to następny etap
 | `--password-file <plik>` | hasło z pierwszej linii pliku (`0600`); pod systemd zamiast tego `LoadCredential=onchato-password:…` |
 | `--yes` | bez pytania t/N (skrypty) |
 | `--wait <s>`, `--json` | `send`: jak długo czekać na potwierdzenie; wynik jako JSON |
+| `--ttl <czas>`, `--key <klucz>` | `send` przez demona: czas ważności w kolejce; klucz łączenia powtarzalnych zdarzeń |
 | `ONCHATO_SOCKET` | gniazdo demona (domyślnie `$XDG_RUNTIME_DIR/onchato.sock`) |
 | `--debug` | w kliencie: dziennik silnika w oknie statusu |
 | `--libp2p` | w kliencie: pełny transport GossipSub zamiast lekkiego (diagnostyka) |
@@ -457,7 +480,7 @@ Na serwerze lepszy jest HEM: klucz nie opuszcza urządzenia, a kradzież pliku n
 - **Zaproszenie słucha tylko, gdy klient działa.** Bez uruchomionego `onchato chat`
   pukanie nie ma dokąd dojść.
 - **Jeszcze nie ma**: pobierania i wysyłania plików, grup, przewijania historii okna
-  (PgUp), wskaźnika pisania, trwałej kolejki powiadomień. Kolejność w [CLI-PLAN.md](CLI-PLAN.md).
+  (PgUp), wskaźnika pisania. Kolejność w [CLI-PLAN.md](CLI-PLAN.md).
 
 ---
 

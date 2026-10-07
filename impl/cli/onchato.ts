@@ -16,9 +16,10 @@
  *   onchato add <name> <pubB64>                a contact by raw key
  *   onchato verify <name> [--qr] [<number>]    the pair's safety number; compare one read out to you
  *   onchato chat [<name>] [--debug]           the irssi-style client (windows, Alt+N, /help)
- *   onchato send <name> <text|-> [--wait s] [--json]   one message; exit 0 delivered, 3 queued/offline
+ *   onchato send <name> <text|-> [--wait s] [--ttl 24h] [--key k] [--json]   exit 0 delivered, 3 queued
  *   onchato listen [--json]                    incoming messages as lines (JSON lines with --json)
  *   onchato daemon                             keep the session up; send/listen go through its socket
+ *   onchato queue                              what waits in the daemon for whom
  *
  * Which identity: --profile <name> (a software profile here), or --hem <url>
  * [--handle h] (a HEM). With neither, the only profile there is.
@@ -32,6 +33,7 @@ import { hemSignIn, hemCreate, type HemChoice } from './identity.ts'
 import { runClient } from './client.ts'
 import { Hub, type HubEvent } from './hub.ts'
 import { serve, connectDaemon, ask, lineReader, socketPath } from './daemon.ts'
+import { Queue } from './queue.ts'
 import { existsSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
@@ -132,14 +134,15 @@ async function chooseIdentity(ids: HemChoice[]): Promise<HemChoice | null> {
 }
 
 /** The identity this command runs as, and its contact book (signed, §4.4). */
-async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactManager; kind: string; store: InviteStore }> {
+async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactManager; kind: string; store: InviteStore; key: string; base: Uint8Array | null }> {
   const hemUrl = opt('--hem')
   if (hemUrl) {
     const { id, hem, kid } = await hemSignIn(hemUrl, await secret('Hasło HEM: '), opt('--handle'), chooseIdentity)
     const key = await identityKey(id.pub, kid)
     const local = await openLocalBook(key, kv, await cacheBaseOf(id, key, kv))
     if (local.verdict === 'tampered') console.error('onchato: UWAGA - lokalna książka kontaktów nie przeszła weryfikacji podpisu (pokazuję tylko kontakty z HEM)')
-    return { id, kind: 'HEM', store: new InviteStore(kv, await cacheBaseOf(id, key, kv), key), contacts: mergedContactBook(hemContactBook(hem, kid), local.verdict === 'tampered' ? emptyBook() : local.book) }
+    const base = await cacheBaseOf(id, key, kv)
+    return { id, kind: 'HEM', key, base, store: new InviteStore(kv, base, key), contacts: mergedContactBook(hemContactBook(hem, kid), local.verdict === 'tampered' ? emptyBook() : local.book) }
   }
   const names = listProfiles(kv)
   const name = opt('--profile') ?? (names.length === 1 ? names[0] : undefined)
@@ -150,7 +153,8 @@ async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactMana
   const key = await identityKey(id!.pub)
   const local = await openLocalBook(key, kv, await cacheBaseOf(id!, key, kv))
   if (local.verdict === 'tampered') die('książka kontaktów nie przeszła weryfikacji podpisu - ktoś zmienił ' + kv.path + ' (nic nie nadpisuję)')
-  return { id: id!, kind: 'software', store: new InviteStore(kv, await cacheBaseOf(id!, key, kv), key), contacts: localOnlyManager(local.book) }
+  const base = await cacheBaseOf(id!, key, kv)
+  return { id: id!, kind: 'software', key, base, store: new InviteStore(kv, base, key), contacts: localOnlyManager(local.book) }
 }
 const emptyBook = () => ({ list: async () => [], add: async () => { throw new Error('książka zablokowana') }, remove: async () => {}, rename: async () => {} })
 
@@ -332,14 +336,16 @@ try {
       const out = (r: any) => {
         if (rest.includes('--json')) console.log(JSON.stringify(r))
         else if (r.status === 'delivered') console.log(`doręczono do ${r.to} (${r.ms} ms)`)
+        else if (r.status === 'merged') console.error(`połączono z czekającą wiadomością do ${r.to} o tym samym kluczu - wyjdzie jedna`)
         else console.error(r.via === 'daemon'
-          ? `${r.to} nie potwierdził(a) w ${waitMs / 1000} s - wiadomość czeka w demonie i wyjdzie, gdy będzie online`
+          ? `${r.to} nie potwierdził(a) w ${waitMs / 1000} s - wiadomość czeka w demonie (na dysku) i wyjdzie, gdy będzie online`
           : `${r.to} nie potwierdził(a) w ${waitMs / 1000} s - bez demona wiadomość NIE czeka (onchato daemon)`)
         process.exit(r.status === 'delivered' ? 0 : 3)
       }
       const sock = await connectDaemon()
       if (sock) {
-        const r = await ask(sock, { op: 'send', to, text, wait: waitMs })
+        const ttl = opt('--ttl') ? parseDuration(opt('--ttl')!) : undefined
+        const r = await ask(sock, { op: 'send', to, text, wait: waitMs, ttl, key: opt('--key') })
         sock.end()
         if (!r.ok) die(r.error)
         out({ ...r, via: 'daemon' })
@@ -373,16 +379,27 @@ try {
       await new Promise(() => {})
       break
     }
+    case 'queue': {
+      const sock = await connectDaemon()
+      if (!sock) die('demon nie działa - kolejka istnieje tylko w demonie (onchato daemon)')
+      const r = await ask(sock!, { op: 'queue' }); sock!.end()
+      if (rest.includes('--json')) { console.log(JSON.stringify(r.entries)); break }
+      if (!r.entries.length) { console.log('(kolejka pusta)'); break }
+      for (const e of r.entries) console.log(`  do ${String(e.to).padEnd(12)} od ${e.age_s}s, ważne jeszcze ${Math.round(e.expires_in_s / 60)} min${e.key ? ' · klucz ' + e.key : ''}${e.merged ? ` · +${e.merged} połączonych` : ''}\n     ${e.text.slice(0, 100)}`)
+      break
+    }
     case 'daemon': {
-      const { id, contacts, kind } = await signIn(kv)
+      const { id, contacts, kind, key, base } = await signIn(kv)
       const say = (m: string) => console.log(`[onchato] ${m}`)
       const hub = new Hub({ id, contacts, relays: relayList(kv), log: rest.includes('--debug') ? say : undefined })
       hub.on((e) => { if (e.t === 'link') say(`łącze: ${e.state}`); if (e.t === 'presence') say(`${e.from}: ${e.state}`) })
       await hub.start()
+      const queue = new Queue({ hub, kv, base, kid: key, log: say })
+      await queue.load()
       const path = socketPath()
-      const srv = await serve(hub, path, say)
+      const srv = await serve(hub, path, say, queue)
       say(`${id.handle} (${kind}) · ${hub.contactList.length} kontaktów · gniazdo ${path}`)
-      const stop = async () => { say('zatrzymuję'); srv.close(); try { unlinkSync(path) } catch {} ; await hub.close(); process.exit(0) }
+      const stop = async () => { say('zatrzymuję'); queue.stop(); await queue.save(); srv.close(); try { unlinkSync(path) } catch {} ; await hub.close(); process.exit(0) }
       process.on('SIGINT', stop); process.on('SIGTERM', stop)
       await new Promise(() => {})
       break
