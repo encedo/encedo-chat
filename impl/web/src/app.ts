@@ -17,11 +17,12 @@
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
-import { exportProfile, openBundle, applyBundle, conflictsWith, localKV, FILE_EXT } from '../../lib/migrate.ts'
+import { exportProfile, openBundle, applyBundle, conflictsWith, localKV, FILE_EXT, type KV } from '../../lib/migrate.ts'
 import { decodeInvite, inviteLink, type Invite } from '../../lib/invite.ts'
 import { pickFirst, orderFrom, nodeKey } from '../../lib/nodepick.ts'
 import jsQR from './vendor/jsqr.cjs'
-import { checkBook, signBook, pack, type Verdict } from '../../lib/bookmac.ts'
+import { type Verdict } from '../../lib/bookmac.ts'
+import { openLocalBook, cacheBaseOf } from '../../lib/localbook.ts'
 import type { GkBackend } from '../../lib/group.ts'
 // `t` is taken: this file uses it for text, topics, timers and DOM nodes, and a
 // local shadowing the translator fails at runtime with "t is not a function" —
@@ -70,7 +71,7 @@ import type { FileEnv, AlbumRef } from '../../lib/envelope.ts'
 import { dotFor } from '../../lib/dotstate.ts'
 import { nowMs, localHHMM, localHHMMSS, utcISO } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
-import { generateX25519, x25519FromPriv } from '../../lib/x25519.ts'
+import { x25519FromPriv } from '../../lib/x25519.ts'
 import { unb64, b64, randomBytes } from '../../lib/wc.ts'
 import {
   kidOf, SELF_PREFIX, buildSelfDescr, parseSelfDescr, selfLabel, byteLen, sliceBytes, unhex,
@@ -1343,38 +1344,12 @@ $('nodes-toggle').addEventListener('click', () => {
  *               would destroy both the evidence and the contacts.
  */
 async function makeLocalBook(idKey: string, storage: Storage, id: Identity): Promise<{ book: ContactBook; verdict: Verdict }> {
-  const lsKey = 'ec-local-contacts-' + idKey
-  const readRaw = () => { try { return JSON.parse(storage.getItem(lsKey) || '[]') } catch { return [] } }
-
-  // The §10 secret, which the group cache will want later anyway — computing it
-  // here means one ECDH per session, not two (on a HEM that is a device round
-  // trip, so it is worth the small refactor).
-  const base = await cacheBaseFor(id, idKey)
-  if (!base) {
-    // The identity will not do ECDH (an HSM that refuses, a platform without
-    // it). Signing is impossible, so the book works as it always did rather
-    // than the app becoming unusable — said out loud in the log, not silently.
-    ecLog('contact book: no ECDH base, running unsigned', 'debug')
-    return { book: localContactBook(readRaw, (l) => storage.setItem(lsKey, JSON.stringify(l))), verdict: 'unsigned' }
-  }
-
-  const { verdict, body } = await checkBook(base, idKey, storage.getItem(lsKey))
-  let list: Array<{ name: string; pub: string }> = []
-  if (verdict !== 'tampered') { try { list = JSON.parse(body) } catch { list = [] } }
-
-  const save = (l: Array<{ name: string; pub: string }>) => {
-    if (verdict === 'tampered') throw new Error('contact book failed its signature — refusing to write over it')
-    list = l
-    const text = JSON.stringify(l)
-    // Fire-and-forget is deliberate: `localContactBook`'s save is synchronous,
-    // and the in-memory list is already correct. A failure to SIGN must not lose
-    // the write, so the text goes down first and the signature follows.
-    storage.setItem(lsKey, text)
-    void signBook(base, idKey, text)
-      .then((mac) => storage.setItem(lsKey, pack(text, mac)))
-      .catch((e) => ecLog('contact book: signing failed — ' + (e?.message ?? e), 'debug'))
-  }
-  return { book: localContactBook(() => list, save), verdict }
+  // The book itself lives in lib/localbook.ts, shared with the CLI, so a profile
+  // carried between the two opens with the same contacts and the same verdict.
+  // The §10 secret is computed here once per session (cacheBaseFor caches it):
+  // on a HEM one ECDH is a device round trip.
+  const kv: KV = { keys: () => Object.keys(storage), get: (k) => storage.getItem(k), set: (k, v) => storage.setItem(k, v) }
+  return openLocalBook(idKey, kv, await cacheBaseFor(id, idKey), (m) => ecLog(m, 'debug'))
 }
 
 /**
@@ -8931,10 +8906,7 @@ async function ensureCacheBase(): Promise<Uint8Array | null> {
  */
 async function cacheBaseFor(id: Identity, idKey: string): Promise<Uint8Array | null> {
   if (cacheBase) return cacheBase
-  const key = 'ec-gcache-emp-' + idKey
-  let empPub = localStorage.getItem(key)
-  if (!empPub) { empPub = b64((await generateX25519()).pub); localStorage.setItem(key, empPub) }
-  try { cacheBase = await id.ecdh(empPub) } catch (e: any) { ecLog('cache base: ecdh failed — ' + (e?.message ?? e), 'debug'); return null }
+  cacheBase = await cacheBaseOf(id, idKey, localKV(), (m) => ecLog(m, 'debug'))
   return cacheBase
 }
 
