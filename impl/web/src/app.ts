@@ -81,7 +81,7 @@ import { enableProtoLog } from '../../lib/protolog.ts'
 import { cachePubKeys, traceHem } from '../../lib/hemwrap.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import { sealPins, openPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../../lib/pincache.ts'
-import { sealLocal, openLocal } from '../../lib/localstore.ts'
+import { readSealedKV, writeSealedKV } from '../../lib/sealedstore.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
 // The published relay list, compiled in — see DEFAULT_NODES below for why.
@@ -4216,22 +4216,15 @@ const WAITING_SALT = 'encedo-chat-waiting-v1'
  * formats tell themselves apart without a version byte or a second key.
  */
 async function readSealed<T>(key: string, salt: string, isMine: (v: any) => boolean): Promise<T | null> {
-  const raw = localStorage.getItem(key)
-  if (!raw) return null
-  try { const v = JSON.parse(raw); if (isMine(v)) return v as T } catch {}
-  const base = await ensureCacheBase()
-  if (!base) { ecLog(`${key}: no cache base — cannot open the sealed store`, 'debug'); return null }
-  return openLocal<T>(base, salt, session?.idKey ?? '', raw)
+  // lib/sealedstore.ts, shared with the CLI: a profile carried between the two
+  // keeps listening on the same invites.
+  if (!localStorage.getItem(key)) return null
+  return readSealedKV<T>(localKV(), await ensureCacheBase(), session?.idKey ?? '', key, salt, isMine, (m) => ecLog(m, 'debug'))
 }
 
 async function writeSealed(key: string, salt: string, value: unknown): Promise<void> {
-  const base = await ensureCacheBase()
-  // No base, no write. Falling back to plaintext would quietly undo the whole
-  // point of sealing these, so the record stays in memory for this session and
-  // the log says why.
-  if (!base) { ecLog(`${key}: no cache base — NOT persisted`, 'debug'); return }
-  try { localStorage.setItem(key, await sealLocal(base, salt, session?.idKey ?? '', value)) }
-  catch (e: any) { ecLog(`${key}: seal failed — ${e?.message ?? e}`, 'debug') }
+  // No base, no write (inside): the record stays in memory and the log says why.
+  await writeSealedKV(localKV(), await ensureCacheBase(), session?.idKey ?? '', key, salt, value, (m) => ecLog(m, 'debug'))
 }
 
 async function loadWaiting() {
