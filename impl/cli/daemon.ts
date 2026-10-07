@@ -10,6 +10,8 @@
  *   <- {"ok":true,"status":"delivered","id":"...","ms":412,"to":"ewa"}   (or "queued" / "merged")
  *   -> {"op":"listen"}
  *   <- {"ok":true} then one event per line until the client hangs up
+ *   -> {"op":"sendfile","to":"ewa","path":"/abs/raport.pdf"}   <- like send, plus "name"
+ *   -> {"op":"get","id":"<message id or prefix>","dir":"/abs"} <- {"ok":true,"path":"/abs/raport.pdf"}
  *   -> {"op":"queue"}
  *   <- {"ok":true,"entries":[{"to":"ewa","age_s":40,"expires_in_s":86360,"key":"ssh","merged":2,"text":"..."}]}
  *   -> {"op":"status"}
@@ -82,6 +84,14 @@ function handle(hub: Hub, sock: Socket, log: (m: string) => void, queue?: Queue)
       } else if (req.op === 'listen') {
         reply({ ok: true })
         unlisten = hub.on((e: HubEvent) => reply(e))
+      } else if (req.op === 'sendfile') {
+        if (typeof req.to !== 'string' || typeof req.path !== 'string') throw new Error('sendfile potrzebuje "to" i "path"')
+        const r = await hub.sendFile(req.to, req.path, typeof req.wait === 'number' ? req.wait : 20_000)
+        log(`plik ${r.name} -> ${r.to}: ${r.status}`)
+        reply({ ok: true, ...r })
+      } else if (req.op === 'get') {
+        if (typeof req.id !== 'string') throw new Error('get potrzebuje "id"')
+        reply({ ok: true, path: await hub.getFile(req.id, typeof req.dir === 'string' ? req.dir : undefined) })
       } else if (req.op === 'queue') {
         reply({ ok: true, entries: queue?.list() ?? [] })
       } else if (req.op === 'status') {

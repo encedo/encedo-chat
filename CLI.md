@@ -264,6 +264,8 @@ Pasek stanu:
 | `/react <emoji>` | reakcja na ostatnią wiadomość rozmówcy |
 | `/verify` | numer bezpieczeństwa tej rozmowy |
 | `/invite` | Twój link tożsamości |
+| `/send <ścieżka>` | wyślij plik (rozdział 8, „Pliki”) |
+| `/get [id]` | zapisz otrzymany plik (bez id — ostatni w tym oknie) |
 | `/knocks` · `/accept N` · `/ignore N` | pukanie do Twoich zaproszeń (rozdział 5) |
 | `/clear` | wyczyść bieżące okno |
 | `/help` | ściągawka |
@@ -369,6 +371,39 @@ session optional pam_exec.so /usr/local/bin/onchato-login-notify
 ONCHATO_SOCKET=/run/user/1000/onchato.sock /home/bot/.local/bin/onchato send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
 ```
 
+### Pliki
+
+Plik jest szyfrowany na Twoim komputerze nowym kluczem (AES-GCM, porcjami),
+zaszyfrowana treść trafia do magazynu, a klucz, nazwa i typ idą tylko w rozmowie.
+Magazyn widzi wyłącznie zaszyfrowane bajty i ich rozmiar — i trzyma je **ok. 5 minut**.
+Limit wielkości to 128 MB.
+
+W kliencie:
+
+```
+/send ~/raporty/q3.pdf
+22:41 <ewa> 📎 logi.tar.gz (2.4 MB) - /get rMS5
+/get rMS5            # albo samo /get: ostatni plik w tym oknie
+22:41 -!- zapisano /home/ala/Pobrane/logi.tar.gz
+```
+
+W skryptach:
+
+```sh
+onchato send-file ewa ./backup.log           # 0 = doręczono, 3 = nie potwierdzono w czasie
+onchato listen --json --save-files ~/przyjete   # każdy przychodzący plik zapisywany od razu
+onchato get rMS5 --dir ~/przyjete            # zapis pliku, który odebrał demon
+```
+
+- Pliki zapisują się w `$ONCHATO_DOWNLOADS`, a bez niej w `~/Pobrane` albo `~/Downloads`.
+- Zapis jest bezpieczny: z nazwy usuwane są katalogi i znaki sterujące (nic nie trafi
+  poza katalog docelowy), istniejący plik **nigdy nie jest nadpisywany** (powstaje
+  `nazwa (2).ext`), a nowy ma prawa `0600`.
+- Pliki **nie czekają w kolejce** demona — magazyn i tak usuwa je po ok. 5 minutach.
+  Do kogoś offline `send-file` kończy się kodem `3`.
+- Zdarzenie `file` w `listen --json` nie zawiera klucza — klucz zna tylko proces,
+  który plik odebrał (demon albo sam `listen`).
+
 ### Kolejka powiadomień
 
 Sieć niczego nie przechowuje, więc powiadomienie dla kogoś, kto jest offline, czeka
@@ -416,7 +451,9 @@ Bez demona nie ma kolejki: `--key` i `--ttl` nic wtedy nie zmieniają.
 | `onchato chat [<nazwa>] [--debug]` | klient rozmów |
 | `onchato send <kontakt> <tekst \| -> [--wait s] [--ttl 24h] [--key k] [--json]` | jedna wiadomość (rozdział 8) |
 | `onchato queue [--json]` | co czeka w kolejce demona |
-| `onchato listen [--json]` | strumień przychodzących wiadomości |
+| `onchato send-file <kontakt> <plik> [--wait s] [--json]` | plik (magazyn trzyma go ok. 5 min) |
+| `onchato listen [--json] [--save-files <katalog>]` | z `--save-files` zapisuje przychodzące pliki od razu |
+| `onchato get <id> [--dir <katalog>]` | zapis pliku odebranego przez demona |
 | `onchato daemon` | demon z gniazdem lokalnym |
 
 ### Kody wyjścia
@@ -444,6 +481,7 @@ Bez demona nie ma kolejki: `--key` i `--ttl` nic wtedy nie zmieniają.
 | `--wait <s>`, `--json` | `send`: jak długo czekać na potwierdzenie; wynik jako JSON |
 | `--ttl <czas>`, `--key <klucz>` | `send` przez demona: czas ważności w kolejce; klucz łączenia powtarzalnych zdarzeń |
 | `ONCHATO_SOCKET` | gniazdo demona (domyślnie `$XDG_RUNTIME_DIR/onchato.sock`) |
+| `ONCHATO_DOWNLOADS` | gdzie zapisywać pliki (domyślnie `~/Pobrane` albo `~/Downloads`) |
 | `--debug` | w kliencie: dziennik silnika w oknie statusu |
 | `--libp2p` | w kliencie: pełny transport GossipSub zamiast lekkiego (diagnostyka) |
 | `ONCHATO_HOME` | katalog danych (domyślnie `$XDG_CONFIG_HOME/onchato`, czyli `~/.config/onchato`) |
@@ -479,8 +517,10 @@ Na serwerze lepszy jest HEM: klucz nie opuszcza urządzenia, a kradzież pliku n
   użyj dwóch różnych tożsamości.
 - **Zaproszenie słucha tylko, gdy klient działa.** Bez uruchomionego `onchato chat`
   pukanie nie ma dokąd dojść.
-- **Jeszcze nie ma**: pobierania i wysyłania plików, grup, przewijania historii okna
-  (PgUp), wskaźnika pisania. Kolejność w [CLI-PLAN.md](CLI-PLAN.md).
+- **Pliki żyją ok. 5 minut** w magazynie — kto ich nie pobierze w tym czasie, prosi
+  o ponowne wysłanie.
+- **Jeszcze nie ma**: grup, przewijania historii okna (PgUp), wskaźnika pisania,
+  połączenia bezpośredniego (WebRTC) — w terminalu wszystko idzie przez węzły. Kolejność w [CLI-PLAN.md](CLI-PLAN.md).
 
 ---
 

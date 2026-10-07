@@ -11,9 +11,12 @@
  */
 
 import { startSession, type ClientSession, type Conversation, type ContactManager, type Contact, type Identity } from '../lib/core.ts'
+import { prepareFile, saveFile, downloadDir } from './files.ts'
+import type { FileMeta } from '../lib/envelope.ts'
 
 export type HubEvent =
   | { t: 'msg'; from: string; pub: string; text: string; ts: number; id: string }
+  | { t: 'file'; from: string; pub: string; name: string; size: number; mime: string; ts: number; id: string }
   | { t: 'presence'; from: string; pub: string; state: 'online' | 'offline' }
   | { t: 'delivered'; to: string; pub: string; id: string; ms: number }
   | { t: 'link'; state: 'online' | 'reconnecting' | 'offline' }
@@ -32,6 +35,8 @@ export class Hub {
   private rooms = new Map<string, Promise<Conversation>>()
   private waiters = new Map<string, (ms: number) => void>()
   private listeners = new Set<(e: HubEvent) => void>()
+  /** Received files by message id - the key stays in memory, never in an event. */
+  files = new Map<string, FileMeta>()
 
   constructor(o: { id: Identity; contacts: ContactManager; relays: string[]; transport?: 'light' | 'libp2p'; log?: (m: string) => void }) {
     this.id = o.id; this.contacts = o.contacts; this.relays = o.relays
@@ -68,6 +73,10 @@ export class Hub {
     if (!r) {
       r = this.session.open({ pub: c.pub }, {
         onMessage: (_from, m) => this.emit({ t: 'msg', from: c.name, pub: c.pub, text: m.body, ts: m.ts, id: m.id }),
+        onFile: (_from, f) => {
+          this.files.set(f.id, f as unknown as FileMeta)
+          this.emit({ t: 'file', from: c.name, pub: c.pub, name: f.name, size: f.size, mime: f.mime, ts: f.ts, id: f.id })
+        },
         onDelivered: (id, ms) => { this.waiters.get(id)?.(ms); this.waiters.delete(id); this.emit({ t: 'delivered', to: c.name, pub: c.pub, id, ms }) },
       })
       this.rooms.set(c.pub, r)
@@ -81,11 +90,33 @@ export class Hub {
     if (!c) throw new Error(`nie ma kontaktu „${who}”`)
     const conv = await this.room(c)
     const id = conv.sendText(text)
-    const ms = await new Promise<number | null>((resolve) => {
+    const ms = await this.waitFor(id, waitMs)
+    return ms === null ? { status: 'queued', id, to: c.name } : { status: 'delivered', id, ms, to: c.name }
+  }
+
+  /** Encrypt, upload and send a file; wait for the recipient's ack like `send`. */
+  async sendFile(who: string, path: string, waitMs = 20_000): Promise<SendResult & { name: string }> {
+    const c = this.find(who)
+    if (!c) throw new Error(`nie ma kontaktu „${who}”`)
+    const meta = await prepareFile(path)
+    const conv = await this.room(c)
+    const id = conv.sendFile(meta)
+    const ms = await this.waitFor(id, waitMs)
+    return ms === null ? { status: 'queued', id, to: c.name, name: meta.name } : { status: 'delivered', id, ms, to: c.name, name: meta.name }
+  }
+
+  /** Save a received file (by message id, or a unique prefix of one). */
+  async getFile(id: string, dir = downloadDir()): Promise<string> {
+    const hits = [...this.files.keys()].filter((k) => k.startsWith(id))
+    if (hits.length !== 1) throw new Error(hits.length ? `id ${id} pasuje do ${hits.length} plików` : `nie ma pliku ${id}`)
+    return saveFile(this.files.get(hits[0])!, dir)
+  }
+
+  private waitFor(id: string, waitMs: number): Promise<number | null> {
+    return new Promise<number | null>((resolve) => {
       this.waiters.set(id, resolve)
       const t = setTimeout(() => { this.waiters.delete(id); resolve(null) }, waitMs); (t as any).unref?.()
     })
-    return ms === null ? { status: 'queued', id, to: c.name } : { status: 'delivered', id, ms, to: c.name }
   }
 
   async close(): Promise<void> {

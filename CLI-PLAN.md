@@ -88,6 +88,16 @@ exported from the app cannot be used here. Today it is a developer tool.
   `net/cli-queue-test.ts`: merging while offline, a TTL expiry, the queue
   surviving a daemon restart, delivery by itself when bob comes online
   (merged, in order), the per-key window while online.
+- **Stage 5 - done 2026-10-08: files.** `cli/files.ts` over the app's own
+  pieces (lib/filecrypto.ts, lib/fileenvelope.ts, net/ipfs.ts with the store
+  at onchato.com): a fresh key per file, chunked AES-GCM, the ciphertext to the
+  store, CID and key only inside the conversation; saving never leaves the
+  download directory, never overwrites, writes 0600, refuses an expired file
+  before fetching and says so for a wrong key. Client `/send`, `/get [id]`;
+  scripts `send-file`, `listen --save-files`, `get` (daemon). Files do not
+  queue (the store sweeps in ~5 min). Proved live by `net/cli-files-test.ts`
+  (client to client, through the daemon, and listen --save-files - all byte
+  for byte; the event carries no key).
 - **HEM**: sign-in never creates an identity (`onchato hem new <name>` does),
   and several identities on one device are offered as a numbered list.
 

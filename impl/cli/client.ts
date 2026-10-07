@@ -18,6 +18,8 @@ import { Screen, statusLine, SGR, type Out } from './tui.ts'
 import { fingerprint } from './fp.ts'
 import { expired, type InviteStore, type PubInvite } from './invites.ts'
 import { inboxSecretBytes } from '../lib/invite.ts'
+import { prepareFile, saveFile, humanSize, downloadDir } from './files.ts'
+import type { FileMeta } from '../lib/envelope.ts'
 
 export interface Io {
   out: Out
@@ -48,7 +50,7 @@ const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 const nodeName = (addr: string) => addr.match(/dns4\/([^./]+)/)?.[1] ?? addr.slice(0, 12)
 const APP_ORIGIN = 'https://app.onchato.com'
 
-interface Room { contact: Contact; conv: Conversation | null; win: Win; secure: boolean; lastRecvId: string | null }
+interface Room { contact: Contact; conv: Conversation | null; win: Win; secure: boolean; lastRecvId: string | null; lastFile: string | null }
 
 export async function runClient(o: ClientOpts): Promise<{ session: ClientSession; quit: () => Promise<void>; windows: Windows }> {
   const w = new Windows()
@@ -107,7 +109,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   async function openRoom(c: Contact): Promise<Room> {
     const have = rooms.get(c.pub); if (have) return have
     const win = w.open('query', c.pub, c.name)
-    const room: Room = { contact: c, conv: null, win, secure: false, lastRecvId: null }
+    const room: Room = { contact: c, conv: null, win, secure: false, lastRecvId: null, lastFile: null }
     rooms.set(c.pub, room)
     print(win.n, sys(`rozmowa z ${c.name} · czekam, aż będzie w pokoju…`))
     room.conv = await session.open({ pub: c.pub }, {
@@ -126,7 +128,12 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         print(win.n, line, 'msg')
       },
       onReaction: (_from, r) => print(win.n, `${t(r.ts)} ${SGR.cyan}* ${c.name} reaguje ${r.emoji}${SGR.reset}`, 'msg'),
-      onFile: (_from, f) => print(win.n, sys(`plik od ${c.name}: ${f.name} (${Math.round((f.size ?? 0) / 1024)} kB) - pobieranie w CLI w kolejnym etapie`), 'msg'),
+      onFile: (_from, f) => {
+        // Kept by a short id; the key stays in memory, never on screen.
+        const fid = f.id.slice(0, 4)
+        files.set(fid, f as unknown as FileMeta); room.lastFile = fid
+        print(win.n, `${t(f.ts)} ${SGR.cyan}${SGR.bold}<${c.name}>${SGR.reset} 📎 ${f.name} (${humanSize(f.size)})${f.body ? ' - ' + f.body : ''} ${SGR.grey}- /get ${fid}${SGR.reset}`, 'msg')
+      },
       onPresence: (_peer, ev) => {
         if (ev === 'join') print(win.n, sys(`${c.name} w pokoju`))
         if (ev === 'leave') { print(win.n, sys(`${c.name} wyszedł/wyszła`)); room.secure = false; repaintStatus() }
@@ -214,6 +221,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   const knockTimer = setInterval(() => { if (waiting.size) knockAll() }, KNOCK_EVERY_MS); (knockTimer as any).unref?.()
 
   /** A contact by its number on /list or by name (case-insensitive). */
+  const files = new Map<string, FileMeta>()   // short id -> meta (with its key: memory only)
   const findContact = (q: string) => {
     const n = Number(q)
     if (Number.isInteger(n) && n >= 1 && n <= contactList.length && String(n) === q.trim()) return contactList[n - 1]
@@ -291,10 +299,30 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         print(w.active, sys(`${SGR.green}dodano ${k.name}${SGR.reset}${SGR.grey} - /query ${k.name}`))
         break
       }
+      case 'send': {
+        if (!room?.conv) { print(w.active, warn('/send działa w oknie rozmowy')); break }
+        const path = arg.replace(/^~(?=\/)/, process.env.HOME ?? '~')
+        if (!path) { print(w.active, warn('użycie: /send <ścieżka do pliku>')); break }
+        try {
+          const meta = await prepareFile(path, (st) => print(w.active, sys(`${st}…`)))
+          room.conv.sendFile(meta)
+          print(w.active, `${t()} ${SGR.yellow}${SGR.bold}<${o.id.handle}>${SGR.reset} 📎 ${meta.name} (${humanSize(meta.size)}) ${SGR.grey}- odbiorca ma ok. 5 min na pobranie${SGR.reset}`)
+        } catch (e: any) { print(w.active, warn(`nie wysłano: ${e?.message ?? e}`)) }
+        break
+      }
+      case 'get': {
+        const fid = arg || room?.lastFile || ''
+        const meta = files.get(fid)
+        if (!meta) { print(w.active, warn(fid ? `nie ma pliku ${fid}` : 'nie ma pliku do pobrania (/get <id>)')); break }
+        print(w.active, sys(`pobieram ${meta.name}…`))
+        try { print(w.active, sys(`${SGR.green}zapisano${SGR.reset}${SGR.grey} ${await saveFile(meta, downloadDir())}`)) }
+        catch (e: any) { print(w.active, warn(e?.message ?? String(e))) }
+        break
+      }
       case 'invite': print(w.active, sys(`Twój link: ${inviteLink(APP_ORIGIN, '/', { pub: o.id.pub, name: o.id.handle })}`)); break
       case 'clear': w.current().lines.length = 0; sc.drawWindow(w.current()); repaintStatus(); break
       case 'help':
-        for (const h of ['/win N (Alt+N) · /query <nr|kontakt> · /close · /list · /who', '/me <akcja> · /react <emoji> · /verify · /invite · /clear · /quit', '/knocks · /accept N · /ignore N - pukanie do Twoich zaproszeń (onchato invites new)'])
+        for (const h of ['/win N (Alt+N) · /query <nr|kontakt> · /close · /list · /who', '/me <akcja> · /react <emoji> · /verify · /invite · /clear · /quit', '/send <plik> · /get [id] - pliki (odbiorca ma ok. 5 min na pobranie)', '/knocks · /accept N · /ignore N - pukanie do Twoich zaproszeń (onchato invites new)'])
           print(w.active, sys(h))
         break
       case 'quit': case 'exit': await quit(); break

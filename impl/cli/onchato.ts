@@ -17,7 +17,9 @@
  *   onchato verify <name> [--qr] [<number>]    the pair's safety number; compare one read out to you
  *   onchato chat [<name>] [--debug]           the irssi-style client (windows, Alt+N, /help)
  *   onchato send <name> <text|-> [--wait s] [--ttl 24h] [--key k] [--json]   exit 0 delivered, 3 queued
- *   onchato listen [--json]                    incoming messages as lines (JSON lines with --json)
+ *   onchato send-file <name> <path> [--wait s] [--json]   a file (the store keeps it ~5 min)
+ *   onchato listen [--json] [--save-files <dir>]   incoming messages and files as lines
+ *   onchato get <id> [--dir <dir>]             save a received file (through the daemon)
  *   onchato daemon                             keep the session up; send/listen go through its socket
  *   onchato queue                              what waits in the daemon for whom
  *
@@ -35,7 +37,8 @@ import { Hub, type HubEvent } from './hub.ts'
 import { serve, connectDaemon, ask, lineReader, socketPath } from './daemon.ts'
 import { Queue } from './queue.ts'
 import { existsSync, unlinkSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { humanSize } from './files.ts'
 import { readFileSync } from 'node:fs'
 import { openLocalBook, cacheBaseOf } from '../lib/localbook.ts'
 import { hemContactBook, mergedContactBook, localOnlyManager, type ContactManager, type Identity } from '../lib/core.ts'
@@ -356,16 +359,59 @@ try {
       try { out({ ...(await hub.send(to, text, waitMs)), via: 'direct' }) } finally { await hub.close() }
       break
     }
+    case 'send-file': {
+      const [to, file] = args
+      if (!to || !file) die('użycie: send-file <kontakt> <plik> [--wait sekundy] [--json]')
+      const path = resolve(file)
+      if (!existsSync(path)) die(`nie ma pliku ${file}`)
+      const waitMs = Number(opt('--wait', '20')) * 1000
+      const out = (r: any) => {
+        if (rest.includes('--json')) console.log(JSON.stringify(r))
+        else if (r.status === 'delivered') console.log(`plik ${r.name} doręczony do ${r.to} (${r.ms} ms) - ma ok. 5 min na pobranie`)
+        else console.error(`${r.to} nie potwierdził(a) w ${waitMs / 1000} s - plik leży w magazynie ok. 5 min; pliki nie czekają w kolejce`)
+        process.exit(r.status === 'delivered' ? 0 : 3)
+      }
+      const sock = await connectDaemon()
+      if (sock) { const r = await ask(sock, { op: 'sendfile', to, path, wait: waitMs }); sock.end(); if (!r.ok) die(r.error); out({ ...r, via: 'daemon' }) }
+      const { id, contacts } = await signIn(kv)
+      const hub = new Hub({ id, contacts, relays: relayList(kv) })
+      await hub.start()
+      try { out({ ...(await hub.sendFile(to, path, waitMs)), via: 'direct' }) } finally { await hub.close() }
+      break
+    }
+    case 'get': {
+      const [fid] = args
+      if (!fid) die('użycie: get <id> [--dir <katalog>]  (id z onchato listen)')
+      const sock = await connectDaemon()
+      if (!sock) die('get działa przez demona (pliki zna ten, kto je odebrał) - bez demona użyj listen --save-files')
+      const r = await ask(sock!, { op: 'get', id: fid, dir: opt('--dir') ? resolve(opt('--dir')!) : undefined }); sock!.end()
+      if (!r.ok) die(r.error)
+      console.log(`zapisano ${r.path}`)
+      break
+    }
     case 'listen': {
       const json = rest.includes('--json')
       const show = (e: HubEvent) => {
         if (json) { console.log(JSON.stringify(e)); return }
         if (e.t === 'msg') console.log(`${new Date(e.ts).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })} <${e.from}> ${e.text}`)
         if (e.t === 'presence') console.log(`-!- ${e.from} ${e.state === 'online' ? 'online' : 'offline'}`)
+        if (e.t === 'file') console.log(`${new Date(e.ts).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })} <${e.from}> plik ${e.name} (${humanSize(e.size)}) - onchato get ${e.id.slice(0, 8)}`)
       }
+      // --save-files: every incoming file is fetched at once (the store keeps it ~5 min).
+      const saveDir = opt('--save-files') ? resolve(opt('--save-files')!) : null
+      const saved = (name: string, path: string) => json ? console.log(JSON.stringify({ t: 'saved', name, path })) : console.log(`-!- zapisano ${path}`)
+      const failed = (name: string, err: string) => json ? console.log(JSON.stringify({ t: 'save-failed', name, error: err })) : console.error(`-!- nie zapisano ${name}: ${err}`)
       const sock = await connectDaemon()
       if (sock) {
-        sock.on('data', lineReader((o) => { if (o.t) show(o as HubEvent) }))
+        sock.on('data', lineReader(async (o) => {
+          if (!o.t) return
+          show(o as HubEvent)
+          if (o.t === 'file' && saveDir) {
+            const s2 = await connectDaemon(); if (!s2) return
+            const r = await ask(s2, { op: 'get', id: o.id, dir: saveDir }); s2.destroy()
+            r.ok ? saved(o.name, r.path) : failed(o.name, r.error)
+          }
+        }))
         sock.on('close', () => process.exit(0))
         sock.write(JSON.stringify({ op: 'listen' }) + '\n')
         await new Promise(() => {})
@@ -373,6 +419,7 @@ try {
       const { id, contacts } = await signIn(kv)
       const hub = new Hub({ id, contacts, relays: relayList(kv) })
       hub.on(show)
+      if (saveDir) hub.on((e) => { if (e.t === 'file') hub.getFile(e.id, saveDir).then((p) => saved(e.name, p), (err) => failed(e.name, err?.message ?? String(err))) })
       await hub.start()
       const stop = async () => { await hub.close(); process.exit(0) }
       process.on('SIGINT', stop); process.on('SIGTERM', stop)
@@ -405,6 +452,6 @@ try {
       break
     }
     default:
-      console.log('użycie: onchato profile new|list|import|export · hem new <nazwa> --hem <url> · send · listen · daemon · whoami · pubkey · contacts · invite [--qr]\n         add <link|kod> | add <nazwa> <klucz> · verify <nazwa> [--qr] [numer] · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
+      console.log('użycie: onchato profile new|list|import|export · hem new <nazwa> --hem <url> · send · send-file · listen · get · daemon · queue · whoami · pubkey · contacts · invite [--qr]\n         add <link|kod> | add <nazwa> <klucz> · verify <nazwa> [--qr] [numer] · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
   }
 } catch (e: any) { die(e?.message ?? String(e)) }
