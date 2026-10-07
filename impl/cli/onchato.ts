@@ -314,10 +314,10 @@ try {
     }
     case 'chat': {
       if (!process.stdin.isTTY || !process.stdout.isTTY) die('klient interaktywny wymaga terminala')
-      const { id, contacts, kind, store } = await signIn(kv)
+      const { id, contacts, kind, store, key, base } = await signIn(kv)
       const stdin = process.stdin
       await runClient({
-        id, kind, contacts, store, relays: relayList(kv), openFirst: args[0], debug: rest.includes('--debug'),
+        id, kind, contacts, store, vault: { kv, base, kid: key }, relays: relayList(kv), openFirst: args[0], debug: rest.includes('--debug'),
         transport: rest.includes('--libp2p') ? 'libp2p' : 'light',
         io: {
           out: process.stdout,

@@ -15,11 +15,14 @@ import { inviteLink } from '../lib/invite.ts'
 import { Windows, type Win } from './windows.ts'
 import { decodeKeys, LineEditor } from './keys.ts'
 import { Screen, statusLine, SGR, type Out } from './tui.ts'
-import { fingerprint } from './fp.ts'
 import { expired, type InviteStore, type PubInvite } from './invites.ts'
 import { inboxSecretBytes } from '../lib/invite.ts'
 import { prepareFile, saveFile, humanSize, downloadDir } from './files.ts'
 import type { FileMeta } from '../lib/envelope.ts'
+import { Groups, type GroupInfo } from './groups.ts'
+import { mentionsPub, splitByMentions, resolveMention } from '../lib/mentions.ts'
+import { fingerprint } from './fp.ts'
+import type { KV } from '../lib/migrate.ts'
 
 export interface Io {
   out: Out
@@ -40,6 +43,8 @@ export interface ClientOpts {
   debug?: boolean
   /** Published invites, pending knocks, ignore list (the app's sealed records). */
   store?: InviteStore
+  /** Where group state is sealed (the store, its §10 key, the identity's KID). */
+  vault?: { kv: KV; base: Uint8Array | null; kid: string }
   io: Io
 }
 
@@ -50,7 +55,9 @@ const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 const nodeName = (addr: string) => addr.match(/dns4\/([^./]+)/)?.[1] ?? addr.slice(0, 12)
 const APP_ORIGIN = 'https://app.onchato.com'
 
-interface Room { contact: Contact; conv: Conversation | null; win: Win; secure: boolean; lastRecvId: string | null; lastFile: string | null }
+/** `win` is null for a 1:1 opened only to carry group keys: it gets a window when
+ *  there is something to show, not for every member of every group. */
+interface Room { contact: Contact; conv: Conversation | null; win: Win | null; secure: boolean; lastRecvId: string | null; lastFile: string | null }
 
 export async function runClient(o: ClientOpts): Promise<{ session: ClientSession; quit: () => Promise<void>; windows: Windows }> {
   const w = new Windows()
@@ -60,6 +67,10 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   const online = new Set<string>()
   let link: boolean | null = null
   let node = nodeName(o.relays[0])
+  // Declared before the session: its callbacks (a group invitation, a file) can
+  // fire before the code that fills these runs.
+  let groups: Groups | null = null
+  const files = new Map<string, FileMeta>()   // short id -> meta (with its key: memory only)
 
   const t = (ts = Date.now()) => SGR.grey + localHHMM(ts) + SGR.reset
   const sys = (s: string) => `${t()} ${SGR.grey}-!- ${s}${SGR.reset}`
@@ -68,7 +79,8 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   const roomOf = (win: Win) => [...rooms.values()].find((r) => r.win === win)
   const repaintStatus = () => {
     const r = roomOf(w.current())
-    sc.status(statusLine({ clock: localHHMM(Date.now()), me: o.id.handle, kind: o.kind, node, online: link, secure: !!r?.secure }, w))
+    const secure = w.current().kind === 'group' ? true : !!r?.secure
+    sc.status(statusLine({ clock: localHHMM(Date.now()), me: o.id.handle, kind: o.kind, node, online: link, secure }, w))
     sc.input(`[${w.current().title}] `, ed.text, ed.cursor)
   }
   /** Print into window `n`; draw it now if it is on screen. */
@@ -95,6 +107,8 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
       status(state === 'online' ? sys(`połączono z ${node}`) : state === 'reconnecting' ? warn('wznawiam połączenie z węzłem…') : warn('brak połączenia z węzłem'))
     },
     onRelay: (addr) => { node = nodeName(addr); status(sys(`węzeł: ${node}`)) },
+    onGroupSkd: (from, skd) => { void groups?.onInvite(from, skd) },      // an invitation over a 1:1
+    onGroupSkdReq: (from, req) => { void groups?.onSkdReq(from, req) },   // a member asking for our key
   })
   // onLink reports CHANGES; the state the session starts in is read once here,
   // or the status line would say "connecting" over a working link.
@@ -106,18 +120,23 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   }
 
   /** Open (or return) the room for a contact, in its own window. */
-  async function openRoom(c: Contact): Promise<Room> {
-    const have = rooms.get(c.pub); if (have) return have
-    const win = w.open('query', c.pub, c.name)
-    const room: Room = { contact: c, conv: null, win, secure: false, lastRecvId: null, lastFile: null }
+  async function openRoom(c: Contact, show = true): Promise<Room> {
+    const have = rooms.get(c.pub)
+    if (have) { if (show && !have.win) have.win = w.open('query', c.pub, c.name); return have }
+    const room: Room = { contact: c, conv: null, win: show ? w.open('query', c.pub, c.name) : null, secure: false, lastRecvId: null, lastFile: null }
     rooms.set(c.pub, room)
-    print(win.n, sys(`rozmowa z ${c.name} · czekam, aż będzie w pokoju…`))
+    /** Into this room's window; `make` opens one if it has none yet. */
+    const out = (line: string, level: 'sys' | 'msg' | 'mention' = 'sys', make = false) => {
+      if (!room.win && make) { room.win = w.open('query', c.pub, c.name); status(sys(`${c.name} pisze - okno ${room.win.n}`)) }
+      if (room.win) print(room.win.n, line, level)
+    }
+    out(sys(`rozmowa z ${c.name} · czekam, aż będzie w pokoju…`))
     room.conv = await session.open({ pub: c.pub }, {
       onSecurity: (_peer, state) => {
         const was = room.secure
         room.secure = state === 'established' || (room.secure && state !== 'failed')
-        if (room.secure && !was) print(win.n, sys(`${SGR.green}sesja zabezpieczona (EH-2)${SGR.reset}${SGR.grey}`))
-        if (state === 'failed') print(win.n, warn('uzgadnianie klucza nie doszło do skutku - ponowi się samo'))
+        if (room.secure && !was) out(sys(`${SGR.green}sesja zabezpieczona (EH-2)${SGR.reset}${SGR.grey}`))
+        if (state === 'failed') out(warn('uzgadnianie klucza nie doszło do skutku - ponowi się samo'))
         repaintStatus()
       },
       onMessage: (_from, m) => {
@@ -125,20 +144,20 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         const line = m.body.startsWith('ACTION ')
           ? `${t(m.ts)} ${SGR.cyan}* ${c.name} ${m.body.slice(7)}${SGR.reset}`
           : `${t(m.ts)} ${SGR.cyan}${SGR.bold}<${c.name}>${SGR.reset} ${m.body}`
-        print(win.n, line, 'msg')
+        out(line, 'msg', true)
       },
-      onReaction: (_from, r) => print(win.n, `${t(r.ts)} ${SGR.cyan}* ${c.name} reaguje ${r.emoji}${SGR.reset}`, 'msg'),
+      onReaction: (_from, r) => out(`${t(r.ts)} ${SGR.cyan}* ${c.name} reaguje ${r.emoji}${SGR.reset}`, 'msg', true),
       onFile: (_from, f) => {
         // Kept by a short id; the key stays in memory, never on screen.
         const fid = f.id.slice(0, 4)
         files.set(fid, f as unknown as FileMeta); room.lastFile = fid
-        print(win.n, `${t(f.ts)} ${SGR.cyan}${SGR.bold}<${c.name}>${SGR.reset} 📎 ${f.name} (${humanSize(f.size)})${f.body ? ' - ' + f.body : ''} ${SGR.grey}- /get ${fid}${SGR.reset}`, 'msg')
+        out(`${t(f.ts)} ${SGR.cyan}${SGR.bold}<${c.name}>${SGR.reset} 📎 ${f.name} (${humanSize(f.size)})${f.body ? ' - ' + f.body : ''} ${SGR.grey}- /get ${fid}${SGR.reset}`, 'msg', true)
       },
       onPresence: (_peer, ev) => {
-        if (ev === 'join') print(win.n, sys(`${c.name} w pokoju`))
-        if (ev === 'leave') { print(win.n, sys(`${c.name} wyszedł/wyszła`)); room.secure = false; repaintStatus() }
+        if (ev === 'join') out(sys(`${c.name} w pokoju`))
+        if (ev === 'leave') { out(sys(`${c.name} wyszedł/wyszła`)); room.secure = false; repaintStatus() }
       },
-      onUndelivered: (mid) => print(win.n, warn(`nie doręczono wiadomości ${mid.slice(0, 6)}… - ${c.name} nie potwierdził(a)`)),
+      onUndelivered: (mid) => out(warn(`nie doręczono wiadomości ${mid.slice(0, 6)}… - ${c.name} nie potwierdził(a)`), 'sys', true),
       onSessionTakenOver: () => {
         status(warn('ta tożsamość otworzyła się w drugim miejscu - obie sesje się zamykają (§9.1)'))
         setTimeout(() => void quit(), 1500)
@@ -158,7 +177,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         const c = contactList.find((x) => x.pub === p.pub)
         print(1, sys(`${SGR.green}${c?.name ?? 'kontakt'} przyjął(a) Twoje pukanie${SGR.reset}${SGR.grey} - /query ${c?.name ?? ''}`), 'msg')
       }
-      if (!online.has(p.pub)) { online.add(p.pub); repaintStatus() }
+      if (!online.has(p.pub)) { online.add(p.pub); repaintStatus(); groups?.onOnline(p.pub) }
     },
     onOffline: (p: { pub: string }) => { online.delete(p.pub) },
     onWantsConversation: (p: { pub: string }) => {
@@ -168,6 +187,53 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
     },
   }
   await session.watchContacts(contactList.map((c) => ({ pub: c.pub })), presence)
+
+  // ---- groups (PROTOCOL.md §8; cli/groups.ts) ----------------------------------
+  const fps = new Map<string, string>()
+  const memberName = (pub: string) => pub === o.id.pub ? o.id.handle
+    : contactList.find((c) => c.pub === pub)?.name ?? (fps.get(pub) ? fps.get(pub)!.slice(0, 11) + '…' : pub.slice(0, 8))
+  const isContact = (pub: string) => contactList.some((c) => c.pub === pub)
+  const groupWin = (g: GroupInfo) => w.open('group', g.gid, g.name)
+  /** A group message as text: mentions shown by MY name for that key. */
+  const showMentions = (text: string, g: GroupInfo) => splitByMentions(text).map((part) => {
+    if (!part.mention) return part.text
+    const pub = resolveMention(part.mention.hint, g.members)
+    return pub ? `${SGR.magenta}@${memberName(pub)}${SGR.reset}` : part.text
+  }).join('')
+  const noteForeign = async (g: GroupInfo) => {
+    const foreign = g.members.filter((p) => p !== o.id.pub && !isContact(p))
+    for (const p of foreign) if (!fps.has(p)) fps.set(p, await fingerprint(p))
+    if (foreign.length) print(groupWin(g).n, warn(`spoza Twoich kontaktów: ${foreign.map(memberName).join(', ')} - dopóki nie dodacie się nawzajem, nie zobaczycie swoich wiadomości w tej grupie`))
+  }
+  if (o.vault) {
+    groups = new Groups({
+      session, me: o.id.pub, ...o.vault, contacts: () => contactList,
+      conv: async (pub) => { const c = contactList.find((x) => x.pub === pub); return c ? (await openRoom(c, false)).conv : null },
+      handlers: {
+        joined: (g, how) => {
+          const win = groupWin(g)
+          const line = how === 'invite' ? `dołączono do grupy „${g.name}” (${g.members.length} osób) - okno ${win.n}`
+            : how === 'create' ? `utworzono grupę „${g.name}” - zaproszenia idą do członków (gdy są online)` : ''
+          if (line) { status(sys(line)); print(win.n, sys(line)) }
+          void noteForeign(g)
+        },
+        updated: (g, what) => { print(groupWin(g).n, sys(`grupa „${g.name}”: zmiana (${what}) - ${g.members.length} osób`)); void noteForeign(g) },
+        message: (g, from, m) => {
+          const me = mentionsPub(m.body, o.id.pub)
+          print(groupWin(g).n, `${t(m.ts)} ${SGR.cyan}${SGR.bold}<${memberName(from)}>${SGR.reset} ${showMentions(m.body, g)}`, me ? 'mention' : 'msg')
+        },
+        file: (g, from, f) => {
+          const fid = f.id.slice(0, 4); files.set(fid, f as unknown as FileMeta)
+          print(groupWin(g).n, `${t(f.ts)} ${SGR.cyan}${SGR.bold}<${memberName(from)}>${SGR.reset} 📎 ${f.name} (${humanSize(f.size)}) ${SGR.grey}- /get ${fid}${SGR.reset}`, 'msg')
+        },
+        reaction: (g, from, r) => print(groupWin(g).n, `${t(r.ts)} ${SGR.cyan}* ${memberName(from)} reaguje ${r.emoji}${SGR.reset}`, 'msg'),
+        log: (m) => { if (o.debug) status(`${SGR.grey}${m}${SGR.reset}`) },
+      },
+    })
+    await groups.restore()
+    if (groups.list().length) status(sys(`grupy: ${groups.list().map((g) => `„${g.name}” (okno ${groupWin(g).n})`).join(', ')}`))
+  }
+  const groupOf = (win: Win) => win.kind === 'group' ? groups?.get(win.key) ?? null : null
 
   // ---- invites that answer themselves (PROTOCOL.md §5.7-5.8) ----------------
   interface Knock { n: number; ik: string; name: string; note: string; fp: string; inv: PubInvite }
@@ -221,7 +287,6 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   const knockTimer = setInterval(() => { if (waiting.size) knockAll() }, KNOCK_EVERY_MS); (knockTimer as any).unref?.()
 
   /** A contact by its number on /list or by name (case-insensitive). */
-  const files = new Map<string, FileMeta>()   // short id -> meta (with its key: memory only)
   const findContact = (q: string) => {
     const n = Number(q)
     if (Number.isInteger(n) && n >= 1 && n <= contactList.length && String(n) === q.trim()) return contactList[n - 1]
@@ -232,7 +297,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
     print(w.active, sys('kontakty (/query <nr> albo <nazwa>, Tab dopełnia):'))
     contactList.forEach((c, i) => {
       const r = rooms.get(c.pub)
-      print(w.active, `  ${String(i + 1).padStart(2)}) ${online.has(c.pub) ? SGR.green + '●' : SGR.grey + '○'}${SGR.reset} ${c.name.padEnd(16)} ${SGR.grey}${r ? 'okno ' + r.win.n : ''}${SGR.reset}`)
+      print(w.active, `  ${String(i + 1).padStart(2)}) ${online.has(c.pub) ? SGR.green + '●' : SGR.grey + '○'}${SGR.reset} ${c.name.padEnd(16)} ${SGR.grey}${r?.win ? 'okno ' + r.win.n : ''}${SGR.reset}`)
     })
   }
   /** Tab after /query: complete a contact's name; several matches are listed. */
@@ -250,19 +315,32 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
     switch (cmd) {
       case 'win': case 'w': { const n = Number(arg); if (n) switchTo(n); break }
       case 'query': case 'q': {
-        const c = findContact(arg); if (!c) { print(w.active, warn(`nie ma kontaktu „${arg}” (/list)`)); break }
-        const r = rooms.get(c.pub) ?? await openRoom(c)
-        switchTo(r.win.n); break
+        const gq = groups?.list().find((g) => g.name.toLowerCase() === arg.toLowerCase())
+        if (gq) { switchTo(groupWin(gq).n); break }
+        const c = findContact(arg); if (!c) { print(w.active, warn(`nie ma kontaktu ani grupy „${arg}” (/list, /groups)`)); break }
+        const r = await openRoom(c)   // a window too, if it was only carrying group keys
+        switchTo(r.win!.n); break
       }
       case 'close': {
+        if (w.current().kind === 'group') { const n = w.active; w.close(n); switchTo(1); status(sys(`zamknięto okno ${n} - nadal jesteś w grupie (/groups)`)); break }
         if (!room) { print(w.active, warn('okna statusu nie zamkniesz')); break }
         rooms.delete(room.contact.pub)
         void room.conv?.leave()
-        const n = room.win.n; w.close(n); switchTo(1); status(sys(`zamknięto okno ${n} (${room.contact.name})`)); break
+        const n = room.win!.n; w.close(n); switchTo(1); status(sys(`zamknięto okno ${n} (${room.contact.name})`)); break
       }
       case 'list': showList(); break
       case 'who': {
-        if (!room?.conv) { print(w.active, sys('/who działa w oknie rozmowy')); break }
+        const gw = groupOf(w.current())
+        if (gw && groups) {
+          print(w.active, sys(`„${gw.name}” - ${gw.members.length} osób:`))
+          for (const p of gw.members) {
+            const tags = [p === gw.members[0] ? 'admin' : '', p !== o.id.pub && !isContact(p) ? `${SGR.yellow}spoza kontaktów${SGR.reset}${SGR.grey}` : '',
+              groups.isAdmin(gw) && groups.owed.isOwed(gw.gid, p) ? 'zaproszenie czeka' : ''].filter(Boolean).join(' · ')
+            print(w.active, `     ${p === o.id.pub || online.has(p) ? SGR.green + '●' : SGR.grey + '○'}${SGR.reset} ${memberName(p).padEnd(16)} ${SGR.grey}${tags}${SGR.reset}`)
+          }
+          break
+        }
+        if (!room?.conv) { print(w.active, sys('/who działa w oknie rozmowy albo grupy')); break }
         print(w.active, sys(room.conv.who().length ? `${room.contact.name} jest w pokoju` : `${room.contact.name} nie ma w pokoju`)); break
       }
       case 'me': {
@@ -279,6 +357,23 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         const g = safetyGroups(await safetyNumber(unb64(o.id.pub), unb64(room.contact.pub)))
         print(w.active, sys('numer bezpieczeństwa (u obojga identyczny):'))
         for (let i = 0; i < 12; i += 4) print(w.active, `        ${SGR.cyan}${g.slice(i, i + 4).join(' ')}${SGR.reset}`)
+        break
+      }
+      case 'groups': {
+        const gl = groups?.list() ?? []
+        if (!gl.length) { print(w.active, sys('nie należysz do żadnej grupy (/group new <nazwa> <kontakty…>)')); break }
+        for (const g of gl) print(w.active, sys(`„${g.name}” · ${g.members.length} osób · okno ${groupWin(g).n}${groups!.isAdmin(g) ? ' · jesteś adminem' : ''}`))
+        break
+      }
+      case 'group': {
+        const [sub, gname, ...who] = args
+        if (sub !== 'new' || !gname || !who.length || !groups) { print(w.active, warn('użycie: /group new <nazwa> <kontakt|nr> [<kontakt|nr>…]')); break }
+        const picked = who.map((x) => findContact(x))
+        const missing = who.filter((_, i) => !picked[i])
+        if (missing.length) { print(w.active, warn(`nie ma kontaktów: ${missing.join(', ')} (/list)`)); break }
+        print(w.active, sys('Każdy członek musi mieć pozostałych w kontaktach - inaczej nie będą widzieć swoich wiadomości.'))
+        const g = await groups.create(gname, picked.map((c) => c!.pub))
+        switchTo(groupWin(g).n)
         break
       }
       case 'knocks': {
@@ -300,12 +395,13 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         break
       }
       case 'send': {
-        if (!room?.conv) { print(w.active, warn('/send działa w oknie rozmowy')); break }
+        const gs = groupOf(w.current())
+        if (!room?.conv && !gs?.room) { print(w.active, warn('/send działa w oknie rozmowy albo grupy')); break }
         const path = arg.replace(/^~(?=\/)/, process.env.HOME ?? '~')
         if (!path) { print(w.active, warn('użycie: /send <ścieżka do pliku>')); break }
         try {
           const meta = await prepareFile(path, (st) => print(w.active, sys(`${st}…`)))
-          room.conv.sendFile(meta)
+          if (gs?.room) await gs.room.sendFile(meta); else room!.conv!.sendFile(meta)
           print(w.active, `${t()} ${SGR.yellow}${SGR.bold}<${o.id.handle}>${SGR.reset} 📎 ${meta.name} (${humanSize(meta.size)}) ${SGR.grey}- odbiorca ma ok. 5 min na pobranie${SGR.reset}`)
         } catch (e: any) { print(w.active, warn(`nie wysłano: ${e?.message ?? e}`)) }
         break
@@ -322,7 +418,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
       case 'invite': print(w.active, sys(`Twój link: ${inviteLink(APP_ORIGIN, '/', { pub: o.id.pub, name: o.id.handle })}`)); break
       case 'clear': w.current().lines.length = 0; sc.drawWindow(w.current()); repaintStatus(); break
       case 'help':
-        for (const h of ['/win N (Alt+N) · /query <nr|kontakt> · /close · /list · /who', '/me <akcja> · /react <emoji> · /verify · /invite · /clear · /quit', '/send <plik> · /get [id] - pliki (odbiorca ma ok. 5 min na pobranie)', '/knocks · /accept N · /ignore N - pukanie do Twoich zaproszeń (onchato invites new)'])
+        for (const h of ['/win N (Alt+N) · /query <nr|kontakt|grupa> · /close · /list · /who', '/groups · /group new <nazwa> <kontakt|nr>… - grupy; w oknie grupy piszesz do wszystkich, @Imię wzmiankuje', '/me <akcja> · /react <emoji> · /verify · /invite · /clear · /quit', '/send <plik> · /get [id] - pliki (odbiorca ma ok. 5 min na pobranie)', '/knocks · /accept N · /ignore N - pukanie do Twoich zaproszeń (onchato invites new)'])
           print(w.active, sys(h))
         break
       case 'quit': case 'exit': await quit(); break
@@ -347,6 +443,12 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   let lines: Promise<void> = Promise.resolve()
   async function submit(text: string) {
     if (text.startsWith('/')) { await command(text); return }
+    const g = groupOf(w.current())
+    if (g && groups) {
+      await groups.send(g, text, memberName)
+      print(w.active, `${t()} ${SGR.yellow}${SGR.bold}<${o.id.handle}>${SGR.reset} ${showMentions(text, g)}`)
+      return
+    }
     const room = roomOf(w.current())
     if (!room?.conv) { print(w.active, warn('to okno statusu - otwórz rozmowę: /query <kontakt>')); return }
     room.conv.sendText(text)

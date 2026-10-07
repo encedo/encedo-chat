@@ -98,6 +98,21 @@ exported from the app cannot be used here. Today it is a developer tool.
   queue (the store sweeps in ~5 min). Proved live by `net/cli-files-test.ts`
   (client to client, through the daemon, and listen --save-files - all byte
   for byte; the event carries no key).
+- **Stage 6 - done 2026-10-08: groups.** `cli/groups.ts` is app.ts's group
+  orchestration for a terminal, over lib/group.ts: an invitation joins and we
+  hand our key to every member once (the admin's receipt), a newer epoch
+  reopens and redistributes, the name changes only from roster[0], key
+  requests are answered only for roster members, unreadable frames ask the
+  sender, an admin's invitations are owed (groupview.ts OwedInvites) and
+  re-sent when the member is online; sealed in the app's format
+  (`ec-gcache-<kid>-<gid>`, {snap, name, owed}). Client: group windows,
+  `/group new`, `/groups`, `/who` (admin, outside contacts, owed), `/send` to a
+  group, `@Name` mentions (closeMentions out, mentionsPub/resolveMention in -
+  a mention lights the status line louder). A 1:1 opened only to carry group
+  keys gets a window when there is something to show, not before. Proved live
+  by `net/cli-group-test.ts` (three CLI clients: create, join by themselves,
+  messages from each member, a mention, /who, a restart restoring the group).
+  Not yet: add/remove members, rename, sending to a group from scripts.
 - **HEM**: sign-in never creates an identity (`onchato hem new <name>` does),
   and several identities on one device are offered as a numbered list.
 

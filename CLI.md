@@ -256,7 +256,7 @@ Pasek stanu:
 | polecenie | działanie |
 |---|---|
 | `/list` | kontakty z obecnością (● online, ○ offline), ponumerowane |
-| `/query <nr>` · `/query <nazwa>` · `/q …` | otwórz rozmowę (w nowym albo istniejącym oknie) |
+| `/query <nr>` · `/query <nazwa>` · `/q …` | otwórz rozmowę albo okno grupy |
 | `/win <nr>` · `/w <nr>` | przełącz okno |
 | `/close` | zamknij bieżącą rozmowę |
 | `/who` | czy rozmówca jest teraz w pokoju |
@@ -267,12 +267,37 @@ Pasek stanu:
 | `/send <ścieżka>` | wyślij plik (rozdział 8, „Pliki”) |
 | `/get [id]` | zapisz otrzymany plik (bez id — ostatni w tym oknie) |
 | `/knocks` · `/accept N` · `/ignore N` | pukanie do Twoich zaproszeń (rozdział 5) |
+| `/groups` · `/group new <nazwa> <kontakt\|nr>…` | grupy (zob. „Grupy” niżej) |
 | `/clear` | wyczyść bieżące okno |
 | `/help` | ściągawka |
 | `/quit` · `/exit` | wyjdź (rozmówcy dostają informację o wyjściu) |
 
 Linie wykonują się po kolei — wiadomość wpisana albo wklejona zaraz po `/query`
 poczeka, aż okno się otworzy.
+
+### Grupy
+
+```
+/group new zespol ewa 3          # grupa z kontaktami ewa i nr 3 z /list; Ty jesteś adminem
+/groups                          # Twoje grupy i ich okna
+/query zespol                    # okno grupy (albo /win N)
+@ewa sprawdzisz deploy?          # w oknie grupy piszesz do wszystkich; @Imię to wzmianka
+/who                             # członkowie: obecność, admin, spoza kontaktów, czekające zaproszenia
+/send raport.pdf                 # plik do całej grupy
+```
+
+- Zaproszenie do grupy przychodzi samo: w statusie pojawia się „dołączono do grupy …”
+  i grupa dostaje swoje okno. Twój klucz do grupy trafia wtedy do pozostałych członków.
+- **Wzmianka** (`@Imię`) jest widoczna u adresata jako wzmianka — na pasku stanu na
+  fioletowo, mocniej niż zwykła aktywność. Każdy widzi przy tym nazwę, jaką sam nadał
+  tej osobie.
+- **Wszyscy członkowie muszą mieć się nawzajem w kontaktach.** Klucze grupy krążą
+  rozmowami 1:1, więc z kimś spoza kontaktów nie zobaczycie nawzajem swoich wiadomości —
+  klient mówi to w oknie grupy i w `/who`.
+- Zaproszenie dla kogoś offline czeka i wychodzi, gdy się pojawi, także po restarcie.
+- Grupy są zapisane zaszyfrowane, w tym samym formacie co w aplikacji — przenoszą się
+  razem z profilem.
+- `/close` w oknie grupy zamyka tylko okno; dalej jesteś w grupie.
 
 ---
 
@@ -519,8 +544,11 @@ Na serwerze lepszy jest HEM: klucz nie opuszcza urządzenia, a kradzież pliku n
   pukanie nie ma dokąd dojść.
 - **Pliki żyją ok. 5 minut** w magazynie — kto ich nie pobierze w tym czasie, prosi
   o ponowne wysłanie.
-- **Jeszcze nie ma**: grup, przewijania historii okna (PgUp), wskaźnika pisania,
-  połączenia bezpośredniego (WebRTC) — w terminalu wszystko idzie przez węzły. Kolejność w [CLI-PLAN.md](CLI-PLAN.md).
+- **Grupy w terminalu** mają na razie: tworzenie, dołączanie, wiadomości, wzmianki, pliki,
+  `/who`. Jeszcze nie ma dodawania i usuwania członków, zmiany nazwy ani wysyłania do grupy
+  ze skryptów (`send`).
+- **Jeszcze nie ma**: przewijania historii okna (PgUp), wskaźnika pisania, połączenia
+  bezpośredniego (WebRTC) — w terminalu wszystko idzie przez węzły. Kolejność w [CLI-PLAN.md](CLI-PLAN.md).
 
 ---
 
