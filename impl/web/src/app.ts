@@ -2244,7 +2244,7 @@ function dropModal(id: string) {
   else $('scrim').classList.remove('open')
 }
 
-const paintScanButton = () => { $('btn-scan').hidden = !scanSupported() }
+const paintScanButton = () => { $('btn-scan').hidden = $('paste-scan').hidden = !scanSupported() }
 // Focus only where a keyboard is already on the desk: on a phone, focusing
 // the field pops the software keyboard OVER the modal before the person can
 // reach the scan button — and scan is the primary door there.
@@ -3237,6 +3237,7 @@ function handleScanned(text: string) {
   })
 }
 $('btn-scan').addEventListener('click', () => void openScan())
+$('paste-scan').addEventListener('click', () => void openScan())
 $('scan-cancel').addEventListener('click', closeScan)
 
 // ---- software profiles on this device (Settings) ---------------------------
@@ -4697,6 +4698,7 @@ $('btn-have-invite')?.addEventListener('click', () => {
   ;($('paste-input') as HTMLTextAreaElement).value = ''
   clr('paste-msg')
   pushModal('paste-modal')
+  paintScanButton()
   // Same rule as the add window: a phone pops its keyboard over the modal.
   if (matchMedia('(pointer:fine)').matches) $('paste-input').focus()
 })

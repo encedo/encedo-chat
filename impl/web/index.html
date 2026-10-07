@@ -1783,6 +1783,9 @@
   <div class="modal" id="paste-modal">
     <h2 data-i18n="Mam zaproszenie">Mam zaproszenie</h2>
     <div class="msub" data-i18n="Wklej to, co dostałeś — cały adres albo sam kod.">Wklej to, co dostałeś — cały adres albo sam kod.</div>
+    <!-- The add window's scanner, the same button and the same flow: an invite QR
+         read by the system camera opens the BROWSER, not this app. -->
+    <button class="btn" id="paste-scan" hidden style="margin:2px 0 10px;background:var(--accent-soft);color:var(--accent)" data-i18n="📷 Zeskanuj kod QR">📷 Zeskanuj kod QR</button>
     <label data-i18n="Link albo kod zaproszenia">Link albo kod zaproszenia</label>
     <textarea id="paste-input" placeholder="https://app.onchato.com/#i=… albo sam kod" data-i18n-placeholder="https://app.onchato.com/#i=… albo sam kod"></textarea>
     <div class="msg" id="paste-msg"></div>
