@@ -47,6 +47,7 @@ import {
 import { qrSvg } from '../../lib/qr.ts'
 import { safetyNumber, safetyGroups, safetyQr, parseSafetyQr } from '../../lib/safety.ts'
 import { invQrView } from './invqr.ts'
+import { foreignMembers, OwedInvites } from './groupview.ts'
 import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
 import { iceServersFor } from '../../lib/ice.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
@@ -1636,6 +1637,12 @@ async function syncPresence() {
       if (waiting.has(p.pub)) { stopKnocking(p.pub); renderContacts() }
       if (onlinePubs.has(p.pub)) return
       onlinePubs.add(p.pub); renderContacts()
+      // An invitation queued on a 1:1 that had already gone quiet can be lost
+      // with nobody to hear it; the owed list asks again when they come back -
+      // on the transition, not on every heartbeat.
+      for (const gid of owedInvites.groupsOwing(p.pub)) {
+        const gu = groupsUI.get(gid); if (gu) void distributeGroup(gid, gu.name, p.pub)
+      }
       diag.note(`peer ${p.pub.slice(0, 12)} lit`)
     },
     onOffline: (p) => {
@@ -4112,6 +4119,15 @@ $('members-pop').addEventListener('click', (e: any) => {
     void changeMembers(gu.gid, gu.members.filter((m) => m.pub !== pub), tr('{name} usunięty z grupy', { name: memberName(pub) })); return }
   const tog = (e.target as HTMLElement).closest('[data-addmember]') as HTMLElement | null
   if (tog) { e.stopPropagation(); const list = $('members-pop').querySelector('.m-add-list') as HTMLElement | null; if (list) list.hidden = !list.hidden; return }
+  const addc = (e.target as HTMLElement).closest('[data-addc]') as HTMLElement | null
+  if (addc) { e.stopPropagation(); const pub = addc.getAttribute('data-addc')!
+    $('members-pop').hidden = true
+    openModal()
+    // The key is filled in; the name is the user's to give and the fingerprint
+    // theirs to check out of band, exactly as for any other contact.
+    ;($('add-pub') as HTMLInputElement).value = pub
+    $('add-name').focus()
+    return }
   const add = (e.target as HTMLElement).closest('[data-add-pub]') as HTMLElement | null
   if (add) { e.stopPropagation(); const pub = add.getAttribute('data-add-pub')!
     void changeMembers(gu.gid, [...gu.members, { pub }], `${memberName(pub)} dodany do grupy`); return }
@@ -8537,8 +8553,41 @@ interface GroupUI { gid: string; name: string; epoch: number; members: { pub: st
   called?: boolean }
 const groupsUI = new Map<string, GroupUI>()
 
-const memberName = (pub: string): string =>
-  session && pub === session.pub ? 'Ty' : (contactsCache.find((c) => c.pub === pub)?.name ?? (fpCache.get(pub) ?? pub.slice(0, 8)))
+/** A member who is not my contact is named by the start of their fingerprint -
+ *  the same "29:7A:..." form a contact's key carries everywhere else - never by
+ *  raw key bytes ("wv7z1yc+", reported 2026-10-06). The fingerprint is computed
+ *  asynchronously (primeMemberFps); until it lands the key prefix stands in. */
+const memberName = (pub: string): string => {
+  if (session && pub === session.pub) return 'Ty'
+  const c = contactsCache.find((x) => x.pub === pub)
+  if (c) return c.name
+  const fp = fpCache.get(pub)
+  return fp ? fp.slice(0, 11) + '…' : pub.slice(0, 8)
+}
+const contactPubs = () => new Set(contactsCache.map((c) => c.pub))
+const owedInvites = new OwedInvites()
+/** Fingerprints for roster members outside the contact book, then a repaint. */
+async function primeMemberFps(gu: GroupUI) {
+  let added = false
+  for (const p of foreignMembers(gu.members, session?.pub, contactPubs())) {
+    if (!fpCache.has(p)) { fpCache.set(p, await fingerprint(p)); added = true }
+  }
+  if (!added) return
+  renderGroups()
+  if (!$('members-pop').hidden && (popMembersGid ?? activeGid) === gu.gid) renderMembersPop(gu)
+}
+/**
+ * Say once, in the group itself, who in it cannot hear me and whom I cannot
+ * hear: a member who is not my contact never gets a 1:1 with me, and sender
+ * keys travel only over a 1:1 (§8.3). Once per group and epoch per page.
+ */
+const foreignNoted = new Map<string, number>()
+function noteForeignMembers(gu: GroupUI) {
+  const foreign = foreignMembers(gu.members, session?.pub, contactPubs())
+  if (!foreign.length || foreignNoted.get(gu.gid) === gu.epoch) return
+  foreignNoted.set(gu.gid, gu.epoch)
+  recordGroup(gu, { t: 'sys', text: tr('Spoza Twoich kontaktów: {list}. Dopóki nie dodacie się nawzajem do kontaktów, nie zobaczycie swoich wiadomości w tej grupie.', { list: foreign.map(memberName).join(', ') }) })
+}
 const groupDisplay = (gu: GroupUI): string =>
   gu.name || gu.members.filter((m) => m.pub !== session?.pub).map((m) => memberName(m.pub)).join(', ') || 'Grupa'
 
@@ -8559,11 +8608,17 @@ const isGroupAdmin = (gu: GroupUI): boolean => !!session && gu.members[0]?.pub =
 // (roster[0]) also gets a remove "x" per other member and an add-member picker.
 function renderMembersPop(gu: GroupUI) {
   const admin = isGroupAdmin(gu)
+  const contacts = contactPubs()
   const rows = gu.members.map((m) => {
     const you = m.pub === session?.pub, online = you || onlinePubs.has(m.pub) // you are, by definition, here
     const nm = memberName(m.pub)
-    return `<div class="member-row"><div class="gavatar">${escapeHtml(initials(nm))}</div>`
-      + `<span class="m-name">${escapeHtml(nm)}</span>`
+    const foreign = !you && !contacts.has(m.pub)
+    const owed = admin && owedInvites.isOwed(gu.gid, m.pub)
+    const note = foreign ? `<span class="m-note warn">${escapeHtml(tr('spoza Twoich kontaktów — nie widzicie nawzajem swoich wiadomości'))}</span>`
+      + `<button class="m-addc" data-addc="${escapeHtml(m.pub)}">${escapeHtml(tr('Dodaj do kontaktów'))}</button>`
+      : owed ? `<span class="m-note">${escapeHtml(tr('zaproszenie czeka — dojdzie, gdy będzie online'))}</span>` : ''
+    return `<div class="member-row${foreign ? ' foreign' : ''}"><div class="gavatar">${escapeHtml(initials(nm))}</div>`
+      + `<span class="m-name">${escapeHtml(nm)}${note ? `<span class="m-sub">${note}</span>` : ''}</span>`
       + `<span class="dot ${online ? 'ok' : ''}" title="${online ? 'online' : 'offline / nieznany'}"></span>`
       + (admin && !you ? `<button class="m-rm" data-rm="${escapeHtml(m.pub)}" title="${tr('Usuń z grupy')}">×</button>` : '')
       + `</div>`
@@ -8574,8 +8629,10 @@ function renderMembersPop(gu: GroupUI) {
     const opts = eligible.length
       ? eligible.map((c) => `<button class="m-add-pub" data-add-pub="${escapeHtml(c.pub)}">${escapeHtml(initials(c.name))} ${escapeHtml(c.name)}</button>`).join('')
       : `<div class="m-add-empty">${tr('wszystkie kontakty już w grupie')}</div>`
+    // The admin cannot see the others' contact books (there is no directory, on
+    // purpose), so the rule is said where the choice is made.
     addUI = `<div class="m-add-wrap"><button class="m-add-toggle" data-addmember="1">${tr('+ Dodaj członka')}</button>`
-      + `<div class="m-add-list" hidden>${opts}</div></div>`
+      + `<div class="m-add-list" hidden><div class="m-add-warn">${escapeHtml(tr('Każdy członek musi mieć tę osobę w kontaktach — inaczej nie będą widzieć swoich wiadomości.'))}</div>${opts}</div></div>`
   }
   $('members-pop').innerHTML = `<div class="m-head">${escapeHtml(tr('{n} członków', { n: gu.members.length }))}</div>` + rows + addUI
 }
@@ -8596,8 +8653,11 @@ async function changeMembers(gid: string, newMembers: { pub: string }[], note: s
     gu.room?.stop()
     gu.members = newMembers
     gu.epoch++
+    owedInvites.invite(gid, gu.epoch, newMembers.map((m) => m.pub).filter((p) => p !== session?.pub))
     gu.room = await client.openGroup(gid, groupHandlers(gid))
     recordGroup(gu, { t: 'sys', text: note })
+    noteForeignMembers(gu)
+    void primeMemberFps(gu)
     await distributeGroup(gid, gu.name) // new roster only → removed member is locked out
     // The HEM marker's roster blob is now stale, and a stale one reconstructs
     // the OLD member set on a recovering device. One HSM call, best effort —
@@ -8885,7 +8945,8 @@ async function persistGroups() {
     const gidHex = client.groups.gidHexOf(unb64(snap.gid))
     const name = groupsUI.get(gidHex)?.name ?? ''
     try {
-      const blob = await sealCache(base, gidHex, genc.encode(JSON.stringify({ snap, name })))
+      const owed = owedInvites.toJSON(gidHex) // sealed with the group, never beside it
+      const blob = await sealCache(base, gidHex, genc.encode(JSON.stringify({ snap, name, owed })))
       localStorage.setItem(gcachePrefix() + gidHex, blob)
     } catch (e: any) { ecLog('group persist failed: ' + (e?.message ?? e), 'debug') }
   }
@@ -9000,7 +9061,17 @@ async function restoreGroups() {
     const pt = await openCache(base, gidHex, blob)
     if (!pt) { ecLog('group cache: decrypt failed for ' + gidHex.slice(0, 8) + '…', 'debug'); continue }
     let parsed: any; try { parsed = JSON.parse(dec.decode(pt)) } catch { continue }
-    if (await addRestoredGroup(parsed.snap, parsed.name)) seen.add(gidHex)
+    if (await addRestoredGroup(parsed.snap, parsed.name)) {
+      seen.add(gidHex)
+      owedInvites.load(gidHex, parsed.owed)
+      const gu = groupsUI.get(gidHex)
+      if (gu) void primeMemberFps(gu)
+    }
+  }
+  // What was owed before the reload goes out again: each send queues on a
+  // background 1:1 and leaves the moment that member is online.
+  for (const gid of seen) for (const pub of owedInvites.owedFor(gid)) {
+    const gu = groupsUI.get(gid); if (gu) void distributeGroup(gid, gu.name, pub)
   }
   await migrateLegacyGroups(seen)
   renderGroups()
@@ -9182,6 +9253,12 @@ async function answerSkdReq(from: string, req: { gid: string; epoch: number }) {
 async function onGroupInvite(from: string, skd: GroupSkdEnv) {
   if (!client) return
   const gid = client.groups.gidHexOf(unb64(skd.gid))
+  // Their key for this group is the receipt for my invitation (groupview.ts).
+  if (owedInvites.receipt(gid, from, skd.epoch)) {
+    schedulePersist()
+    const gu0 = groupsUI.get(gid)
+    if (gu0 && !$('members-pop').hidden && (popMembersGid ?? activeGid) === gid) renderMembersPop(gu0)
+  }
   const members = skd.roster.map((pub) => ({ pub, name: memberName(pub) }))
   let gu = groupsUI.get(gid)
   if (!gu) {
@@ -9189,6 +9266,7 @@ async function onGroupInvite(from: string, skd: GroupSkdEnv) {
     groupsUI.set(gid, gu)
     gu.room = await client.openGroup(gid, groupHandlers(gid))
     toast(tr('Dołączono do grupy „{name}”', { name: groupDisplay(gu) }))
+    noteForeignMembers(gu)
     void distributeGroup(gid, gu.name) // hand my sender key to everyone, once
     // The portable half: GK_pub goes into the device, so this membership survives
     // the browser. Best effort — it fails when a SECOND identity here is already
@@ -9221,6 +9299,8 @@ async function onGroupInvite(from: string, skd: GroupSkdEnv) {
       void distributeGroup(gid, gu.name)
     }
   }
+  noteForeignMembers(gu)
+  void primeMemberFps(gu)
   renderGroups()
   void persistGroups() // key/membership changed — flush now, not on the debounce
 }
@@ -9257,8 +9337,10 @@ $('group-create').addEventListener('click', async () => {
     gu.room = await client.openGroup(gid, groupHandlers(gid))
     endModals() // the group exists; the window that made it has nothing left to offer
     await activateGroup(gid)
+    owedInvites.invite(gid, 0, picked) // owed until each hands back its own key (groupview.ts)
     void distributeGroup(gid, name) // send the invite (keys) to each member over 1:1
     void persistGroups() // the new group must survive a reload immediately
+    void primeMemberFps(gu)
     toast(tr('Grupa „{name}” utworzona — rozsyłam zaproszenia…', { name }))
   } catch (e: any) { setMsg('group-msg', tr('Błąd: ') + (e?.message ?? e), 'err') }
 })

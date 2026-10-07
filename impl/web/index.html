@@ -248,6 +248,15 @@
   .member-row .gavatar{width:28px;height:28px}
   .member-row .m-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:13px}
   .member-row .m-you{font-size:11px;color:var(--muted)}
+  /* A member's second line: who is outside my contacts (and cannot hear me in
+     the group), or whose invitation is still waiting (admin view). */
+  .member-row .m-sub{display:flex;flex-direction:column;align-items:flex-start;gap:3px;margin-top:2px;white-space:normal}
+  .member-row .m-note{font-size:11px;color:var(--muted);line-height:1.35}
+  .member-row .m-note.warn{color:var(--warn)}
+  .member-row .m-addc{padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--accent);font-size:11.5px;font-weight:600;cursor:pointer}
+  .member-row .m-addc:hover,.member-row .m-addc:focus-visible{background:var(--accent-soft);outline:none}
+  .member-row.foreign{align-items:flex-start}
+  .m-add-warn{font-size:11px;color:var(--warn);line-height:1.35;padding:4px 8px 6px}
   .member-row .m-rm{margin-left:2px;flex-shrink:0;width:22px;height:22px;border:none;border-radius:6px;background:transparent;color:var(--muted);font-size:16px;line-height:1;cursor:pointer}
   /* `--danger` and `--danger-soft` are not defined anywhere, so this used to
      fall through to a hardcoded #fde8e8 on #c0392b — a pink chip in a dark UI.

@@ -1100,6 +1100,18 @@ Three things fix it, and the third is the one that is easy to get wrong:
   `conv === null`, so that branch was reached in ordinary use. Failures now queue in
   `pendingSkd` and go out when that contact's room comes up (`room.conv = conv`) or the
   relay comes back.
+  **The admin's invitations also outlive a reload** (2026-10-07): that queue was
+  memory only, so a member offline at creation never learned the group existed if
+  the admin's tab reloaded first (reported from a phone). `OwedInvites`
+  (`web/src/groupview.ts`) keeps who is still owed, per group and epoch, sealed in
+  the group's §10 blob; it is re-sent after restore and whenever that member's dot
+  lights. The **receipt is the member's own `group-skd` for that group** at the
+  owed epoch — every new member hands its key to everyone (§8.3) — so nothing new
+  travels and nothing on the wire changed. The member list shows the admin
+  "invitation waiting". **A member outside my contacts** is named by fingerprint,
+  flagged, and offered "add to contacts": the app opens a 1:1 only with a contact,
+  so that pair cannot read each other in the group (v1's mutual-contacts rule,
+  which the admin cannot check without a directory).
 - **The receiver notices and asks.** `GroupSession.onNeedSenderKey` fires at the one point
   in `receive` where our MAC has verified and no chain exists — *after* verification,
   never before, because the group topic is public and a request emitted on
