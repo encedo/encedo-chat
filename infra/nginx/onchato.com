@@ -124,6 +124,20 @@ server {
         try_files /privacy.html =404;
     }
 
+    # ── /terms — regulamin (po angielsku), budowa jak /privacy ──
+    location = /terms {
+        add_header Cross-Origin-Opener-Policy   "same-origin";
+        add_header Cross-Origin-Embedder-Policy "require-corp";
+        add_header Cache-Control "no-cache";
+        try_files /terms.html =404;
+    }
+    location = /terms.html {
+        add_header Cross-Origin-Opener-Policy   "same-origin";
+        add_header Cross-Origin-Embedder-Policy "require-corp";
+        add_header Cache-Control "no-cache";
+        try_files /terms.html =404;
+    }
+
     # ── NOWE: /chat/ ze slashem musi wrócić na /chat ───────────────────────
     # Bez tego bazą dokumentu staje się "/chat/", więc względne ścieżki bundla
     # celują w /chat/app.<hash>.bundle.js → try_files oddaje index.html jako
@@ -338,6 +352,7 @@ server {
     location = /landing.html { return 301 https://onchato.com/; }
     location ~ ^/how(\.html)?$ { return 301 https://onchato.com/how; }
     location ~ ^/privacy(\.html)?$ { return 301 https://onchato.com/privacy; }
+    location ~ ^/terms(\.html)?$ { return 301 https://onchato.com/terms; }
 
     # Pozostałe pliki builda (ikony itp.); nieznany adres wraca do aplikacji.
     location / {

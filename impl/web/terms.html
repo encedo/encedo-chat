@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>onchato terms of service</title>
+<meta name="description" content="The rules for using onchato's relay nodes and file store, and how to report abuse">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-linecap%3D%22round%22%20stroke-width%3D%2210%22%20style%3D%22color%3A%2335c99e%22%20viewBox%3D%220%200%20100%20100%22%3E%3Cstyle%3E%40media%20(prefers-color-scheme%3Alight)%7B%3Aroot%7Bcolor%3A%230f6b57%7D%7D%3C%2Fstyle%3E%3Cpath%20stroke-width%3D%228%22%20d%3D%22M38.8%2019.6V42m0%2020.8v22.4m22.4-65.6v19.2C50%2043.6%2050%2061.2%2061.2%2066v19.2%22%2F%3E%3C%2Fsvg%3E">
+<style>
+  /* The palette and faces of how.html. System faces only, for the reason given
+     there: a webfont link tells a third party who opened this page. */
+  :root {
+    --paper: #f7f8f7; --card: #ffffff; --ink: #16211e; --muted: #5d6b66;
+    --rule: #d7dedb; --accent: #0f6b57; --accent-soft: #e4f0ec;
+    --serif: Charter, "Bitstream Charter", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0f1513; --card: #16201d; --ink: #e6ece9; --muted: #96a5a0;
+      --rule: #2a3733; --accent: #35c99e; --accent-soft: #14312a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0f1513; --card: #16201d; --ink: #e6ece9; --muted: #96a5a0;
+    --rule: #2a3733; --accent: #35c99e; --accent-soft: #14312a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 17px; line-height: 1.62;
+    padding-inline: 20px; padding-block: 56px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 68ch; margin: 0 auto; display: flex; flex-direction: column; gap: 34px; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 14px; }
+  .langs { font-family: var(--mono); font-size: 13px; display: flex; gap: 14px; }
+  .langs a { color: var(--accent); }
+  h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(2rem, 5vw, 2.6rem);
+    line-height: 1.1; margin: 0 0 12px; text-wrap: balance; }
+  h2 { font-family: var(--serif); font-weight: 600; font-size: 1.3rem; line-height: 1.25;
+    margin: 0 0 8px; text-wrap: balance; }
+  p, ul { margin: 0 0 12px; } p:last-child, ul:last-child { margin-bottom: 0; }
+  ul { padding-left: 1.2em; } li { margin-bottom: 6px; }
+  .lead { font-size: 1.12rem; line-height: 1.5; color: var(--muted); }
+  .date { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+  section { display: flex; flex-direction: column; gap: 26px; }
+  .who { background: var(--card); border: 1px solid var(--rule); border-radius: 4px; padding: 16px 18px; }
+  .who p { margin: 0; }
+  a { color: var(--accent); }
+  .nw { white-space: nowrap; }
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 0; }
+  footer { font-family: var(--mono); font-size: .82rem; color: var(--muted); }
+  @media (max-width: 640px) { body { font-size: 16px; padding-block: 36px 64px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="langs" aria-label="Site"><a href="/">onchato.com</a><a href="/how">How it works</a><a href="/privacy">Privacy</a></nav>
+
+<section>
+  <header>
+    <p class="eyebrow">onchato &middot; terms</p>
+    <h1>Terms of service</h1>
+    <p class="date">Effective from 8 October 2026</p>
+  </header>
+
+  <p class="lead">onchato is free, open-source software. These terms cover the
+    part we run for you: the relay nodes and the file store. They are short
+    because there is little we can see, and nothing we keep about what you say.</p>
+
+  <div>
+    <h2>1. Who we are</h2>
+    <div class="who"><p>The service is operated by <strong>RKV spółka z ograniczoną
+      odpowiedzialnością</strong>, ul. gen. Stefana Grota-Roweckiego 10/12,
+      52-220 Wrocław, Poland, KRS 0001173474, NIP 8993025480, REGON 541756532.<br>
+      Contact: <a href="mailto:office@rkv.pl">office@rkv.pl</a>; e-Delivery address:
+      <span class="nw">AE:PL-69125-65164-TCUCA-19</span>.</p></div>
+  </div>
+
+  <div>
+    <h2>2. What the service is</h2>
+    <p>The app runs on your device. Our <strong>relay nodes</strong> pass encrypted
+      packets between people who hold each other's keys, and our <strong>file
+      store</strong> keeps encrypted files for about 5 minutes so the recipient can
+      fetch them. We cannot read messages or files, we do not monitor them, and
+      there is no account to sign up for. Using the app means accepting these terms;
+      if you do not, do not use our nodes &mdash; the code is yours to run with your
+      own (section 9).</p>
+  </div>
+
+  <div>
+    <h2>3. Your identity is yours</h2>
+    <p>Your identity is a key pair on your device or in a HEM device, protected by
+      your password. We never have it. <strong>We cannot recover a lost key or reset
+      a forgotten password</strong> &mdash; keep the export of your profile somewhere
+      safe. You are responsible for the device and the password that protect it.</p>
+  </div>
+
+  <div>
+    <h2>4. What you must not do</h2>
+    <ul>
+      <li>send or store anything illegal, above all material depicting the sexual
+        abuse of children;</li>
+      <li>use the file store to distribute malware, phishing pages or other files
+        meant to harm people who did not ask for them;</li>
+      <li>threaten, harass or send unsolicited bulk messages;</li>
+      <li>attack, overload or probe the relay nodes or the file store, or work
+        around their rate limits;</li>
+      <li>infringe other people's rights, including copyright.</li>
+    </ul>
+    <p>We may block an address that abuses the infrastructure, to keep it working
+      for everybody else.</p>
+  </div>
+
+  <div>
+    <h2>5. Reporting illegal content and abuse</h2>
+    <p>Write to <a href="mailto:office@rkv.pl">office@rkv.pl</a> with
+      &ldquo;abuse&rdquo; in the subject. Say what you are reporting and why you
+      believe it is illegal, and include whatever identifies it &mdash; for a file,
+      its link or CID. You may report anonymously, but we can only tell you the
+      outcome if you leave an address. We act on reports without undue delay and
+      tell the reporter what we did.</p>
+    <p>Be aware of what we can do: files leave the store on their own after about
+      5 minutes, and we cannot read or remove messages, which never pass through us
+      unencrypted and are not stored. If a report gives us reason to believe a
+      person's life or safety is at risk, we inform the competent authorities.</p>
+  </div>
+
+  <div>
+    <h2>6. Contact point for authorities and users</h2>
+    <p>Our single point of contact under the EU Digital Services Act (Articles 11
+      and 12), for authorities, the European Commission and users, is
+      <a href="mailto:office@rkv.pl">office@rkv.pl</a>. We correspond in Polish and
+      English. Orders and requests for data are answered with what we hold, which
+      is described in the <a href="/privacy">privacy policy</a>: web server logs for
+      14 days and aggregate traffic counters, never message content.</p>
+  </div>
+
+  <div>
+    <h2>7. Availability</h2>
+    <p>The service is provided free of charge and as it is. We work to keep it
+      running but do not promise any particular availability, and we may change
+      the nodes, limits or features, or stop the service, at any time. The app can
+      use other nodes than ours.</p>
+  </div>
+
+  <div>
+    <h2>8. Liability</h2>
+    <p>To the extent the law allows, we give no warranties and are not liable for
+      losses arising from the use of the service or from its unavailability.
+      Nothing here limits liability that cannot be limited by law, including
+      liability for intent or gross negligence, or the rights you have as a
+      consumer.</p>
+  </div>
+
+  <div>
+    <h2>9. Open source</h2>
+    <p>The app and the relay are published under the MIT licence at
+      <a href="https://github.com/encedo/encedo-chat">github.com/encedo/encedo-chat</a>.
+      The licence governs the code; these terms govern only the nodes and the store
+      we operate. You can run your own and point the app at them.</p>
+  </div>
+
+  <div>
+    <h2>10. Age</h2>
+    <p>The service is not intended for anyone under 16.</p>
+  </div>
+
+  <div>
+    <h2>11. Law and disputes</h2>
+    <p>These terms are governed by Polish law. If you are a consumer, you keep the
+      protection of the mandatory law of the country where you live, and you may
+      bring a claim before its courts.</p>
+  </div>
+
+  <div>
+    <h2>12. Changes</h2>
+    <p>Changes to these terms will be announced on this page with a new effective
+      date.</p>
+  </div>
+</section>
+
+<hr>
+<footer>RKV sp. z o.o. &middot; <a href="mailto:office@rkv.pl">office@rkv.pl</a></footer>
+
+</div>
+</body>
+</html>
