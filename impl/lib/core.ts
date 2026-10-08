@@ -1224,7 +1224,13 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
         // metadata change came from the admin, and a PeerId can never match one.
         // Handing two different notions of "who" to two callers is how a group
         // rename silently did nothing.
-        onGroupSkd: async (_from, skd) => { await groups.applySkd(peer.pub, skd); roomOpts.onGroupSkd?.(peer.pub, skd); opts.onGroupSkd?.(peer.pub, skd) },
+        // A refusal (no roster MAC, a member's key that beat the admin's to a new
+        // epoch) is an ordinary outcome, not a crash: in Node an unhandled rejection
+        // ends the process. The refused member's key is asked for again (§8 repair).
+        onGroupSkd: async (_from, skd) => {
+          try { await groups.applySkd(peer.pub, skd) } catch (e: any) { log(`group-skd from ${peer.pub.slice(0, 8)} epoch ${skd.epoch} refused: ${e?.message ?? e}`); return }
+          roomOpts.onGroupSkd?.(peer.pub, skd); opts.onGroupSkd?.(peer.pub, skd)
+        },
         onGroupSkdReq: (_from, req) => { roomOpts.onGroupSkdReq?.(peer.pub, req); opts.onGroupSkdReq?.(peer.pub, req) },
       }, {
         log,
