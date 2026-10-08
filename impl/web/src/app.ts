@@ -8615,6 +8615,7 @@ async function changeMembers(gid: string, newMembers: { pub: string }[], note: s
     noteForeignMembers(gu)
     void primeMemberFps(gu)
     await distributeGroup(gid, gu.name) // new roster only → removed member is locked out
+    chaseOwed(gid)
     // The HEM marker's roster blob is now stale, and a stale one reconstructs
     // the OLD member set on a recovering device. One HSM call, best effort —
     // a marker that failed to update must not undo a membership change that did.
@@ -9124,6 +9125,32 @@ const pendingSkd = new Set<string>()
 
 /** Hand my SKD for `gid` (with the display name) to every other member over 1:1.
  *  `only` narrows it to one member (a retry, or an answer to their request). */
+/**
+ * A `group-skd` has no ack, and one sent on a 1:1 that the distribution itself
+ * just opened can reach the member before the handshake's msg3 - the member has
+ * no session yet and drops it. Waiting for that member to go offline and back
+ * (the `owedInvites` re-send) can take hours, so what is still owed goes again
+ * at 10, 30 and 90 s; the receipt (their own SKD) stops it. Found by the CLI's
+ * live test (net/cli-group-admin-test.ts), a few runs in ten.
+ */
+function chaseOwed(gid: string) {
+  for (const ms of [10_000, 30_000, 90_000]) setTimeout(() => {
+    const gu = groupsUI.get(gid); if (!gu) return
+    for (const p of owedInvites.owedFor(gid)) void distributeGroup(gid, gu.name, p)
+  }, ms)
+}
+
+/**
+ * My own key, handed out on joining or at a new epoch, meets the same race and
+ * has no receipt to stop at, so it goes twice more. A re-sent SKD carries the
+ * chain's current counter, so a late copy breaks nothing.
+ */
+function redistributeOwn(gid: string, epoch: number) {
+  for (const ms of [10_000, 30_000]) setTimeout(() => {
+    const gu = groupsUI.get(gid); if (gu && gu.epoch === epoch) void distributeGroup(gid, gu.name)
+  }, ms)
+}
+
 async function distributeGroup(gid: string, name: string, only?: string) {
   if (!client) return
   for (const m of groupsUI.get(gid)?.members ?? []) {
@@ -9214,13 +9241,19 @@ async function onGroupInvite(from: string, skd: GroupSkdEnv) {
   }
   const members = skd.roster.map((pub) => ({ pub, name: memberName(pub) }))
   let gu = groupsUI.get(gid)
+  // A copy from an OLDER epoch - a removed member re-sending its key (it was
+  // never told), a late duplicate - carries the roster of that epoch. The engine
+  // already ignored it; adopting its roster here put a removed member back on
+  // the list. Only the same or a newer epoch speaks for the membership.
+  if (gu && skd.epoch < gu.epoch) return
   if (!gu) {
     gu = { gid, name: skd.name || tr('Grupa'), epoch: skd.epoch, members, log: [], unseen: 0, room: null }
     groupsUI.set(gid, gu)
     gu.room = await client.openGroup(gid, groupHandlers(gid))
     toast(tr('Dołączono do grupy „{name}”', { name: groupDisplay(gu) }))
     noteForeignMembers(gu)
-    void distributeGroup(gid, gu.name) // hand my sender key to everyone, once
+    void distributeGroup(gid, gu.name) // hand my sender key to everyone
+    redistributeOwn(gid, gu.epoch)
     // The portable half: GK_pub goes into the device, so this membership survives
     // the browser. Best effort — it fails when a SECOND identity here is already
     // in this group (one device holds a key once), and then the group still works
@@ -9250,6 +9283,7 @@ async function onGroupInvite(from: string, skd: GroupSkdEnv) {
       // be readable after an add/remove. Same-epoch SKDs (the others doing the
       // same) hit the else-branch and do not re-trigger, so this converges.
       void distributeGroup(gid, gu.name)
+      redistributeOwn(gid, gu.epoch)
     }
   }
   noteForeignMembers(gu)
@@ -9292,6 +9326,7 @@ $('group-create').addEventListener('click', async () => {
     await activateGroup(gid)
     owedInvites.invite(gid, 0, picked) // owed until each hands back its own key (groupview.ts)
     void distributeGroup(gid, name) // send the invite (keys) to each member over 1:1
+    chaseOwed(gid)
     void persistGroups() // the new group must survive a reload immediately
     void primeMemberFps(gu)
     toast(tr('Grupa „{name}” utworzona — rozsyłam zaproszenia…', { name }))

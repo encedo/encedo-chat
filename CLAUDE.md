@@ -1112,7 +1112,15 @@ Three things fix it, and the third is the one that is easy to get wrong:
   lights. The **receipt is the member's own `group-skd` for that group** at the
   owed epoch — every new member hands its key to everyone (§8.3) — so nothing new
   travels and nothing on the wire changed. The member list shows the admin
-  "invitation waiting". **A member outside my contacts** is named by fingerprint,
+  "invitation waiting". What is still owed also goes again at **10/30/90 s**
+  (`chaseOwed`), and a member's own key twice more after joining or a new epoch
+  (`redistributeOwn`): a `group-skd` has no ack, and one sent on a 1:1 that the
+  distribution itself just opened can reach the member BEFORE msg3, when it has
+  no session to open it with — the CLI's live test caught this a few runs in
+  ten (2026-10-08). The other side of re-sending: a **removed** member is never
+  told and keeps re-sending its old-epoch key, so `onGroupInvite` ignores an SKD
+  from an epoch older than ours — adopting its roster put the removed member back
+  on the list (`browser-test`'s re-add scenario caught it). **A member outside my contacts** is named by fingerprint,
   flagged, and offered "add to contacts": the app opens a 1:1 only with a contact,
   so that pair cannot read each other in the group (v1's mutual-contacts rule,
   which the admin cannot check without a directory).
@@ -1121,6 +1129,10 @@ Three things fix it, and the third is the one that is easy to get wrong:
   never before, because the group topic is public and a request emitted on
   attacker-chosen bytes would let anyone aim a member's 1:1 traffic. `grouproom` rate-limits
   it to one ask per member per 30 s (the condition recurs on every frame that sender sends),
+  and the frame itself is **held** (`GroupSession.held`, 32 per sender, 2 min) and opened
+  when the key lands — the key and the first frames race on separate paths and the frames
+  usually win, so dropping them lost a newcomer's first words. Only MAC-verified frames
+  are held, and each passes `receive` again on release (`heldFor` lets a test see it);
   the app sends `group-skd-req` over the 1:1, and the responder **re-checks the roster** —
   the ratchet proves who is asking, not that they are still a member, and a removed member
   still holds our contact and the old `group_id`.

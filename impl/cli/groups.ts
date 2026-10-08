@@ -147,6 +147,9 @@ export class Groups {
     const gid = this.session.groups.gidHexOf(unb64(skd.gid))
     if (this.owed.receipt(gid, from, skd.epoch)) void this.persist()
     let g = this.infos.get(gid)
+    // An older epoch's copy (a removed member re-sending its key) speaks for
+    // nothing: its roster would put that member back on our list.
+    if (g && skd.epoch < g.epoch) return
     if (!g) {
       g = { gid, name: skd.name || 'Grupa', epoch: skd.epoch, members: skd.roster.slice(), room: null }
       this.infos.set(gid, g)
