@@ -110,7 +110,7 @@ server {
         try_files /how.html =404;
     }
 
-    # ── /privacy — polityka prywatności (PL + EN), ta sama budowa co /how ──
+    # ── /privacy — polityka prywatności (po angielsku, jak landing), budowa jak /how ──
     location = /privacy {
         add_header Cross-Origin-Opener-Policy   "same-origin";
         add_header Cross-Origin-Embedder-Policy "require-corp";
