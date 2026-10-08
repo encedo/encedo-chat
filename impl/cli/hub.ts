@@ -13,15 +13,19 @@
 import { startSession, type ClientSession, type Conversation, type ContactManager, type Contact, type Identity } from '../lib/core.ts'
 import { prepareFile, saveFile, downloadDir } from './files.ts'
 import type { FileMeta } from '../lib/envelope.ts'
+import { Groups } from './groups.ts'
+import type { KV } from '../lib/migrate.ts'
 
 export type HubEvent =
-  | { t: 'msg'; from: string; pub: string; text: string; ts: number; id: string }
-  | { t: 'file'; from: string; pub: string; name: string; size: number; mime: string; ts: number; id: string }
+  | { t: 'msg'; from: string; pub: string; text: string; ts: number; id: string; group?: string }
+  | { t: 'file'; from: string; pub: string; name: string; size: number; mime: string; ts: number; id: string; group?: string }
+  | { t: 'group'; name: string; members: number; how: string }
   | { t: 'presence'; from: string; pub: string; state: 'online' | 'offline' }
   | { t: 'delivered'; to: string; pub: string; id: string; ms: number }
   | { t: 'link'; state: 'online' | 'reconnecting' | 'offline' }
 
-export interface SendResult { status: 'delivered' | 'queued'; id: string; ms?: number; to: string }
+/** 'sent' is a group: a broadcast has no acks to wait for (PROTOCOL.md §8). */
+export interface SendResult { status: 'delivered' | 'queued' | 'sent'; id: string; ms?: number; to: string }
 
 export class Hub {
   readonly id: Identity
@@ -29,6 +33,8 @@ export class Hub {
   private relays: string[]
   private transport: 'light' | 'libp2p'
   private log: (m: string) => void
+  private vault?: { kv: KV; base: Uint8Array | null; kid: string }
+  groups: Groups | null = null
   session!: ClientSession
   contactList: Contact[] = []
   online = new Set<string>()
@@ -38,8 +44,8 @@ export class Hub {
   /** Received files by message id - the key stays in memory, never in an event. */
   files = new Map<string, FileMeta>()
 
-  constructor(o: { id: Identity; contacts: ContactManager; relays: string[]; transport?: 'light' | 'libp2p'; log?: (m: string) => void }) {
-    this.id = o.id; this.contacts = o.contacts; this.relays = o.relays
+  constructor(o: { id: Identity; contacts: ContactManager; relays: string[]; transport?: 'light' | 'libp2p'; log?: (m: string) => void; vault?: { kv: KV; base: Uint8Array | null; kid: string } }) {
+    this.id = o.id; this.contacts = o.contacts; this.relays = o.relays; this.vault = o.vault
     this.transport = o.transport ?? 'light'; this.log = o.log ?? (() => {})
   }
 
@@ -50,14 +56,32 @@ export class Hub {
     this.session = await startSession(this.id, {
       relay: this.relays[0], relays: this.relays, transport: this.transport, onLog: this.log,
       onLink: (state) => this.emit({ t: 'link', state }),
+      onGroupSkd: (from, skd) => { void this.groups?.onInvite(from, skd) },
+      onGroupSkdReq: (from, req) => { void this.groups?.onSkdReq(from, req) },
     })
     this.contactList = await this.contacts.list()
     await this.session.watchContacts(this.contactList.map((c) => ({ pub: c.pub })), {
-      onOnline: (p) => { if (!this.online.has(p.pub)) { this.online.add(p.pub); this.emit({ t: 'presence', from: this.nameOf(p.pub), pub: p.pub, state: 'online' }) } },
+      onOnline: (p) => { if (!this.online.has(p.pub)) { this.online.add(p.pub); this.groups?.onOnline(p.pub); this.emit({ t: 'presence', from: this.nameOf(p.pub), pub: p.pub, state: 'online' }) } },
       onOffline: (p) => { if (this.online.delete(p.pub)) this.emit({ t: 'presence', from: this.nameOf(p.pub), pub: p.pub, state: 'offline' }) },
       // Somebody writes to us: open the room so the handshake completes and the message arrives.
       onWantsConversation: (p) => { const c = this.contactList.find((x) => x.pub === p.pub); if (c) void this.room(c) },
     })
+    if (this.vault) {
+      this.groups = new Groups({
+        session: this.session, me: this.id.pub, ...this.vault, contacts: () => this.contactList,
+        conv: async (pub) => { const c = this.contactList.find((x) => x.pub === pub); return c ? this.room(c) : null },
+        handlers: {
+          joined: (g, how) => this.emit({ t: 'group', name: g.name, members: g.members.length, how }),
+          message: (g, from, m) => this.emit({ t: 'msg', group: g.name, from: this.nameOf(from), pub: from, text: m.body, ts: m.ts, id: m.id }),
+          file: (g, from, f) => {
+            this.files.set(f.id, f as unknown as FileMeta)
+            this.emit({ t: 'file', group: g.name, from: this.nameOf(from), pub: from, name: f.name, size: f.size, mime: f.mime, ts: f.ts, id: f.id })
+          },
+          log: this.log,
+        },
+      })
+      await this.groups.restore()
+    }
   }
 
   nameOf(pub: string) { return this.contactList.find((c) => c.pub === pub)?.name ?? pub.slice(0, 8) }
@@ -86,6 +110,8 @@ export class Hub {
 
   /** Send, then wait up to `waitMs` for the recipient's confirmation. */
   async send(who: string, text: string, waitMs = 20_000): Promise<SendResult> {
+    const g = this.groups?.byName(who)
+    if (g) return { status: 'sent', id: await this.groups!.send(g, text, (p) => this.nameOf(p)), to: g.name }
     const c = this.find(who)
     if (!c) throw new Error(`nie ma kontaktu „${who}”`)
     const conv = await this.room(c)

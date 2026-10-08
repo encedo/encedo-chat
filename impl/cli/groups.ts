@@ -10,7 +10,10 @@
  *   - a member asking for our key gets it only if the roster holds them;
  *   - a frame we cannot open asks its sender for their key over the 1:1;
  *   - an admin's invitations are owed until each member's key comes back
- *     (web/src/groupview.ts OwedInvites), re-sent when that member is online;
+ *     (web/src/groupview.ts OwedInvites), re-sent when that member is online
+ *     and, right after they go out, again at 10, 30 and 90 s: a `group-skd`
+ *     has no ack, and one sent on a 1:1 that the distribution itself just
+ *     opened can beat the handshake's msg3 to the member, who drops it;
  *   - state is sealed in the store under the app's keys and format
  *     (`ec-gcache-<kid>-<gidHex>`, {snap, name, owed} through lib/gcache.ts),
  *     so a profile moved between the app and the terminal keeps its groups.
@@ -69,8 +72,8 @@ export class Groups {
   private async open(g: GroupInfo) {
     g.room?.stop()
     g.room = await this.session.openGroup(g.gid, {
-      onMessage: (from, m) => this.h.message?.(g, from, m),
-      onFile: (from, f) => this.h.file?.(g, from, f),
+      onMessage: (from, m) => { this.h.message?.(g, from, m); this.schedulePersist() },
+      onFile: (from, f) => { this.h.file?.(g, from, f); this.schedulePersist() },
       onReaction: (from, r) => this.h.reaction?.(g, from, r),
       onNeedSenderKey: (memberPub) => void this.askFor(g, memberPub),
     })
@@ -96,6 +99,20 @@ export class Groups {
     }
     // What was owed before a restart goes out again (queued on each 1:1).
     for (const g of this.infos.values()) for (const p of this.owed.owedFor(g.gid)) void this.distribute(g, p)
+  }
+
+  /**
+   * The chains move with every frame, so the state is saved as the app saves it
+   * (app.ts): at once after our own send - a restart that resumed our sending
+   * chain from an older counter would send on counters the members have
+   * already passed, and they would read nothing - and on a short debounce after
+   * a receive.
+   */
+  private persistTimer: ReturnType<typeof setTimeout> | undefined
+  private schedulePersist() {
+    clearTimeout(this.persistTimer)
+    this.persistTimer = setTimeout(() => void this.persist(), 1500)
+    this.persistTimer.unref?.()
   }
 
   async persist() {
@@ -135,13 +152,14 @@ export class Groups {
       this.infos.set(gid, g)
       await this.open(g)
       this.h.joined?.(g, 'invite')
-      void this.distribute(g)                 // my key to everyone, once
+      void this.distribute(g)                 // my key to everyone
+      this.redistribute(g)
       void this.session.groups.writeMemberMarker(gid, g.name).catch(() => false)
     } else {
       const changed: string[] = []
       if (skd.roster.join() !== g.members.join()) { g.members = skd.roster.slice(); changed.push('skład') }
       if (skd.name && skd.name !== g.name && from === skd.roster[0]) { g.name = skd.name; changed.push('nazwa') }
-      if (skd.epoch > g.epoch) { g.epoch = skd.epoch; await this.open(g); void this.distribute(g); changed.push('epoka') }
+      if (skd.epoch > g.epoch) { g.epoch = skd.epoch; await this.open(g); void this.distribute(g); this.redistribute(g); changed.push('epoka') }
       if (changed.length) this.h.updated?.(g, changed.join(', '))
     }
     await this.persist()
@@ -152,6 +170,28 @@ export class Groups {
     const g = this.infos.get(this.session.groups.gidHexOf(unb64(req.gid))); if (!g) return
     if (!g.members.includes(from)) { this.log(`ktoś spoza składu grupy prosił o klucz - zignorowano`); return }
     await this.distribute(g, from)
+  }
+
+  /** Re-send what is still owed for `g` a few times (see the header): cheap, idempotent, stops at the receipt. */
+  private chase(g: GroupInfo) {
+    for (const ms of [10_000, 30_000, 90_000]) {
+      const t = setTimeout(() => { for (const p of this.owed.owedFor(g.gid)) void this.distribute(g, p) }, ms)
+      t.unref?.()
+    }
+  }
+
+  /**
+   * A member's own key, handed out on joining, meets the same race as an
+   * invitation (no ack; a fresh 1:1 can drop it before msg3) and has no receipt
+   * to stop at, so it simply goes twice more. A re-sent SKD carries the chain's
+   * current counter, so a copy that arrives late breaks nothing.
+   */
+  private redistribute(g: GroupInfo) {
+    const epoch = g.epoch
+    for (const ms of [10_000, 30_000]) {
+      const t = setTimeout(() => { if (g.epoch === epoch) void this.distribute(g) }, ms)
+      t.unref?.()
+    }
   }
 
   /** A contact came online: re-send invitations still owed to them. */
@@ -168,14 +208,63 @@ export class Groups {
     this.owed.invite(gid, 0, roster.slice(1))
     this.h.joined?.(g, 'create')
     await this.distribute(g)
+    this.chase(g)
     await this.persist()
     return g
   }
+
+  /**
+   * Admin: change the roster (app.ts changeMembers). A rekey: new epoch, new
+   * group secret and topic, fresh keys handed only to the NEW roster - a
+   * removed member is locked out of everything sent from here on. roster[0]
+   * stays the admin.
+   */
+  async setMembers(g: GroupInfo, members: string[]): Promise<void> {
+    if (!this.isAdmin(g)) throw new Error('tylko admin grupy może zmieniać jej skład')
+    const roster = [this.me, ...members.filter((p) => p !== this.me)]
+    await this.session.groups.rekey(g.gid, roster.map((pub) => ({ pub })))
+    g.members = roster
+    g.epoch++
+    this.owed.invite(g.gid, g.epoch, roster.slice(1))
+    await this.open(g)
+    await this.distribute(g)
+    this.chase(g)
+    // The device's marker carries the roster; a stale one would rebuild the old set.
+    this.session.groups.writeMarker(g.gid, g.name).catch(() => false)
+    await this.persist()
+  }
+  addMember(g: GroupInfo, pub: string) {
+    if (g.members.includes(pub)) throw new Error('już jest w grupie')
+    return this.setMembers(g, [...g.members.slice(1), pub])
+  }
+  removeMember(g: GroupInfo, pub: string) {
+    if (pub === this.me) throw new Error('admin nie usuwa samego siebie')
+    if (!g.members.includes(pub)) throw new Error('nie ma go/jej w grupie')
+    return this.setMembers(g, g.members.slice(1).filter((p) => p !== pub))
+  }
+
+  /** Admin: rename (app.ts renameGroup) - no rekey, the name rides a same-epoch handoff. */
+  async rename(g: GroupInfo, name: string): Promise<void> {
+    if (!this.isAdmin(g)) throw new Error('tylko admin grupy może zmienić jej nazwę')
+    const before = g.name
+    g.name = name
+    try {
+      await this.distribute(g)
+      this.session.groups.writeMarker(g.gid, name).catch(() => false)
+      this.session.groups.writeMemberMarker(g.gid, name).catch(() => false)
+      await this.persist()
+    } catch (e) { g.name = before; throw e }
+  }
+
+  /** Find a group by name (case-insensitive). */
+  byName(name: string): GroupInfo | undefined { return this.list().find((g) => g.name.toLowerCase() === name.toLowerCase()) }
 
   /** Send to a group; "@Name" of a member becomes a mention the app resolves. */
   async send(g: GroupInfo, text: string, names: (pub: string) => string): Promise<string> {
     if (!g.room) throw new Error('grupa nie jest otwarta')
     const roster = g.members.filter((p) => p !== this.me).map((pub) => ({ pub, name: names(pub) }))
-    return g.room.sendText(closeMentions(text, roster))
+    const id = await g.room.sendText(closeMentions(text, roster))
+    await this.persist()
+    return id
   }
 }

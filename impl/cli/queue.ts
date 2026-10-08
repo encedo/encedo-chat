@@ -74,8 +74,10 @@ export class Queue {
     } finally { this.flushing.delete(pub) }
   }
 
-  async submit(who: string, text: string, o: { waitMs: number; ttlMs?: number; key?: string }): Promise<Submitted> {
-    const c = this.hub.find(who); if (!c) throw new Error(`nie ma kontaktu „${who}”`)
+  async submit(who: string, text: string, o: { waitMs: number; ttlMs?: number; key?: string }): Promise<Submitted | any> {
+    // A group has no acks and no presence to wait for: it goes now, never queued.
+    if (this.hub.groups?.byName(who)) return { ok: true, ...(await this.hub.send(who, text, o.waitMs)) }
+    const c = this.hub.find(who); if (!c) throw new Error(`nie ma kontaktu ani grupy „${who}”`)
     const now = Date.now()
     // Goes now when they are online, its key is outside its window, and nothing
     // DUE is waiting for them (it must not overtake those). An entry only

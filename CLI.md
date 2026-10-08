@@ -268,6 +268,7 @@ Pasek stanu:
 | `/get [id]` | zapisz otrzymany plik (bez id — ostatni w tym oknie) |
 | `/knocks` · `/accept N` · `/ignore N` | pukanie do Twoich zaproszeń (rozdział 5) |
 | `/groups` · `/group new <nazwa> <kontakt\|nr>…` | grupy (zob. „Grupy” niżej) |
+| `/add <kontakt\|nr>` · `/kick <kto>` · `/rename <nazwa>` | admin, w oknie grupy: skład i nazwa |
 | `/clear` | wyczyść bieżące okno |
 | `/help` | ściągawka |
 | `/quit` · `/exit` | wyjdź (rozmówcy dostają informację o wyjściu) |
@@ -284,6 +285,11 @@ poczeka, aż okno się otworzy.
 @ewa sprawdzisz deploy?          # w oknie grupy piszesz do wszystkich; @Imię to wzmianka
 /who                             # członkowie: obecność, admin, spoza kontaktów, czekające zaproszenia
 /send raport.pdf                 # plik do całej grupy
+
+# admin, w oknie grupy:
+/add 4                           # dodaj kontakt nr 4 z /list (albo po nazwie)
+/kick ewa                        # usuń członka (kontakt albo nazwa z /who)
+/rename ops                      # zmień nazwę grupy
 ```
 
 - Zaproszenie do grupy przychodzi samo: w statusie pojawia się „dołączono do grupy …”
@@ -298,6 +304,11 @@ poczeka, aż okno się otworzy.
 - Grupy są zapisane zaszyfrowane, w tym samym formacie co w aplikacji — przenoszą się
   razem z profilem.
 - `/close` w oknie grupy zamyka tylko okno; dalej jesteś w grupie.
+- **Zmiana składu to nowa epoka.** `/add` i `/kick` dają grupie nowe klucze i nowy
+  temat, a nowe klucze dostaje tylko nowy skład. Usunięta osoba nie przeczyta niczego,
+  co pada od tej chwili (wcześniejszych wiadomości to nie cofa). `/rename` nie zmienia
+  kluczy. Skład i nazwę zmienia tylko admin, czyli twórca grupy.
+- Do grupy można pisać ze skryptów: `onchato send <grupa> "tekst"` (rozdział 8).
 
 ---
 
@@ -328,6 +339,11 @@ Co dalej z wiadomością, zależy od tego, czy działa demon:
 Wynik `--json`: `{"ok":true,"status":"delivered","id":"…","ms":412,"to":"ewa","via":"daemon"}`
 (`status` = `delivered` albo `queued`, `via` = `daemon` albo `direct`).
 
+**Do grupy** — nazwa grupy zamiast kontaktu: `onchato send zespol "deploy OK"`. Grupa
+nie potwierdza doręczenia, więc wynik to `status: "sent"` i kod `0`, bez kolejki: co
+wysłane, idzie od razu do członków, którzy są w sieci. `--key` i `--ttl` grupy nie
+dotyczą.
+
 ### Odbieranie
 
 ```sh
@@ -339,6 +355,8 @@ Zdarzenia JSON (jedna linia = jedno zdarzenie):
 
 ```json
 {"t":"msg","from":"ewa","pub":"…","text":"restart nginx?","ts":1791400121000,"id":"…"}
+{"t":"msg","group":"zespol","from":"ewa","pub":"…","text":"deploy?","ts":1791400125000,"id":"…"}
+{"t":"group","name":"zespol","members":3,"how":"invite"}
 {"t":"presence","from":"ewa","pub":"…","state":"online"}
 {"t":"delivered","to":"ewa","id":"…","ms":412}
 {"t":"link","state":"reconnecting"}
@@ -474,7 +492,7 @@ Bez demona nie ma kolejki: `--key` i `--ttl` nic wtedy nie zmieniają.
 | `onchato invites` · `invites new [etykieta] [--expires 24h] [--qr]` · `invites qr <nr>` · `invites revoke <nr>` | zaproszenia ze skrzynką |
 | `onchato verify <nazwa> [--qr] [numer]` | numer bezpieczeństwa; porównanie z podanym |
 | `onchato chat [<nazwa>] [--debug]` | klient rozmów |
-| `onchato send <kontakt> <tekst \| -> [--wait s] [--ttl 24h] [--key k] [--json]` | jedna wiadomość (rozdział 8) |
+| `onchato send <kontakt\|grupa> <tekst \| -> [--wait s] [--ttl 24h] [--key k] [--json]` | jedna wiadomość (rozdział 8) |
 | `onchato queue [--json]` | co czeka w kolejce demona |
 | `onchato send-file <kontakt> <plik> [--wait s] [--json]` | plik (magazyn trzyma go ok. 5 min) |
 | `onchato listen [--json] [--save-files <katalog>]` | z `--save-files` zapisuje przychodzące pliki od razu |
@@ -544,9 +562,9 @@ Na serwerze lepszy jest HEM: klucz nie opuszcza urządzenia, a kradzież pliku n
   pukanie nie ma dokąd dojść.
 - **Pliki żyją ok. 5 minut** w magazynie — kto ich nie pobierze w tym czasie, prosi
   o ponowne wysłanie.
-- **Grupy w terminalu** mają na razie: tworzenie, dołączanie, wiadomości, wzmianki, pliki,
-  `/who`. Jeszcze nie ma dodawania i usuwania członków, zmiany nazwy ani wysyłania do grupy
-  ze skryptów (`send`).
+- **Wiadomość wysłana w pierwszych sekundach po dołączeniu** może nie dojść do kogoś,
+  z kim rozmowa 1:1 dopiero się zestawia: ramka wyprzedza klucz, odbiorca ją odrzuca
+  i prosi o klucz. Następne wiadomości już dochodzą. Tak samo jest w aplikacji.
 - **Jeszcze nie ma**: przewijania historii okna (PgUp), wskaźnika pisania, połączenia
   bezpośredniego (WebRTC) — w terminalu wszystko idzie przez węzły. Kolejność w [CLI-PLAN.md](CLI-PLAN.md).
 

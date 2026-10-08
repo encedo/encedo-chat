@@ -193,7 +193,8 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   const memberName = (pub: string) => pub === o.id.pub ? o.id.handle
     : contactList.find((c) => c.pub === pub)?.name ?? (fps.get(pub) ? fps.get(pub)!.slice(0, 11) + '…' : pub.slice(0, 8))
   const isContact = (pub: string) => contactList.some((c) => c.pub === pub)
-  const groupWin = (g: GroupInfo) => w.open('group', g.gid, g.name)
+  /** The group's window; its title follows a rename. */
+  const groupWin = (g: GroupInfo) => { const win = w.open('group', g.gid, g.name); win.title = g.name; return win }
   /** A group message as text: mentions shown by MY name for that key. */
   const showMentions = (text: string, g: GroupInfo) => splitByMentions(text).map((part) => {
     if (!part.mention) return part.text
@@ -217,7 +218,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
           if (line) { status(sys(line)); print(win.n, sys(line)) }
           void noteForeign(g)
         },
-        updated: (g, what) => { print(groupWin(g).n, sys(`grupa „${g.name}”: zmiana (${what}) - ${g.members.length} osób`)); void noteForeign(g) },
+        updated: (g, what) => { print(groupWin(g).n, sys(`grupa „${g.name}”: zmiana (${what}) - ${g.members.length} osób`)); repaintStatus(); void noteForeign(g) },
         message: (g, from, m) => {
           const me = mentionsPub(m.body, o.id.pub)
           print(groupWin(g).n, `${t(m.ts)} ${SGR.cyan}${SGR.bold}<${memberName(from)}>${SGR.reset} ${showMentions(m.body, g)}`, me ? 'mention' : 'msg')
@@ -359,6 +360,30 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         for (let i = 0; i < 12; i += 4) print(w.active, `        ${SGR.cyan}${g.slice(i, i + 4).join(' ')}${SGR.reset}`)
         break
       }
+      case 'add': case 'kick': case 'remove': case 'rename': {
+        const g = groupOf(w.current())
+        if (!g || !groups) { print(w.active, warn(`/${cmd} działa w oknie grupy`)); break }
+        if (!groups.isAdmin(g)) { print(w.active, warn('tylko admin grupy może to zrobić')); break }
+        try {
+          if (cmd === 'rename') {
+            if (!arg) { print(w.active, warn('użycie: /rename <nowa nazwa>')); break }
+            await groups.rename(g, arg); groupWin(g); repaintStatus()
+            print(w.active, sys(`nazwa grupy: „${g.name}”`)); break
+          }
+          // A contact (number or name) for /add; for /kick also a member's name as shown here.
+          const pub = findContact(arg)?.pub ?? (cmd !== 'add' ? g.members.find((p) => memberName(p).toLowerCase() === arg.toLowerCase()) : undefined)
+          if (!pub) { print(w.active, warn(`nie znam „${arg}”${cmd === 'add' ? ' (/list)' : ' (/who)'}`)); break }
+          if (cmd === 'add') {
+            await groups.addMember(g, pub)
+            print(w.active, sys(`dodano ${memberName(pub)} - nowa epoka, nowe klucze dla całego składu (${g.members.length} osób)`))
+          } else {
+            await groups.removeMember(g, pub)
+            print(w.active, sys(`usunięto ${memberName(pub)} - nowa epoka: nie przeczyta niczego, co pada odtąd`))
+          }
+          void noteForeign(g)
+        } catch (e: any) { print(w.active, warn(e?.message ?? String(e))) }
+        break
+      }
       case 'groups': {
         const gl = groups?.list() ?? []
         if (!gl.length) { print(w.active, sys('nie należysz do żadnej grupy (/group new <nazwa> <kontakty…>)')); break }
@@ -401,7 +426,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         if (!path) { print(w.active, warn('użycie: /send <ścieżka do pliku>')); break }
         try {
           const meta = await prepareFile(path, (st) => print(w.active, sys(`${st}…`)))
-          if (gs?.room) await gs.room.sendFile(meta); else room!.conv!.sendFile(meta)
+          if (gs?.room) { await gs.room.sendFile(meta); await groups!.persist() } else room!.conv!.sendFile(meta)
           print(w.active, `${t()} ${SGR.yellow}${SGR.bold}<${o.id.handle}>${SGR.reset} 📎 ${meta.name} (${humanSize(meta.size)}) ${SGR.grey}- odbiorca ma ok. 5 min na pobranie${SGR.reset}`)
         } catch (e: any) { print(w.active, warn(`nie wysłano: ${e?.message ?? e}`)) }
         break
@@ -418,7 +443,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
       case 'invite': print(w.active, sys(`Twój link: ${inviteLink(APP_ORIGIN, '/', { pub: o.id.pub, name: o.id.handle })}`)); break
       case 'clear': w.current().lines.length = 0; sc.drawWindow(w.current()); repaintStatus(); break
       case 'help':
-        for (const h of ['/win N (Alt+N) · /query <nr|kontakt|grupa> · /close · /list · /who', '/groups · /group new <nazwa> <kontakt|nr>… - grupy; w oknie grupy piszesz do wszystkich, @Imię wzmiankuje', '/me <akcja> · /react <emoji> · /verify · /invite · /clear · /quit', '/send <plik> · /get [id] - pliki (odbiorca ma ok. 5 min na pobranie)', '/knocks · /accept N · /ignore N - pukanie do Twoich zaproszeń (onchato invites new)'])
+        for (const h of ['/win N (Alt+N) · /query <nr|kontakt|grupa> · /close · /list · /who', '/groups · /group new <nazwa> <kontakt|nr>… - grupy; w oknie grupy piszesz do wszystkich, @Imię wzmiankuje', 'admin, w oknie grupy: /add <kontakt|nr> · /kick <kto> · /rename <nazwa>', '/me <akcja> · /react <emoji> · /verify · /invite · /clear · /quit', '/send <plik> · /get [id] - pliki (odbiorca ma ok. 5 min na pobranie)', '/knocks · /accept N · /ignore N - pukanie do Twoich zaproszeń (onchato invites new)'])
           print(w.active, sys(h))
         break
       case 'quit': case 'exit': await quit(); break

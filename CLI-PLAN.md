@@ -112,7 +112,24 @@ exported from the app cannot be used here. Today it is a developer tool.
   keys gets a window when there is something to show, not before. Proved live
   by `net/cli-group-test.ts` (three CLI clients: create, join by themselves,
   messages from each member, a mention, /who, a restart restoring the group).
-  Not yet: add/remove members, rename, sending to a group from scripts.
+  Then (2026-10-08) the admin's side and scripts: `/add` `/kick` (a rekey -
+  new epoch, keys only to the new roster) and `/rename` (same-epoch handoff,
+  markers rewritten); the Hub runs the same Groups, so `onchato send <group>`
+  goes through the daemon (status `sent`, a group has no acks, never queued)
+  and `listen` carries `group` on msg/file events. Owed invitations are also
+  re-sent 10/30/90 s after they go out: a `group-skd` has no ack, and one sent
+  on a 1:1 the distribution itself opened can beat msg3 to the member and be
+  dropped there (found by the test, a few runs in ten); a member's own key,
+  handed out on joining, meets the same race and goes twice more (10/30 s).
+  Group state is now saved as the app saves it - at once after our own send,
+  on a 1.5 s debounce after a receive: saved only on roster changes, a
+  restart resumed the sending chain from an older counter and the members
+  read nothing (cli-group-test's restart step). A refused SKD is
+  logged in lib/core.ts instead of rejecting unhandled, which in Node ended
+  the process. Proved live by `net/cli-group-admin-test.ts` (two terminals +
+  a script behind the daemon: add, script send, kick locks bob out, rename).
+  Known, shared with the app: a frame that beats its sender's key is dropped,
+  not held (lib/group.ts asks for the key; the next frame opens).
 - **HEM**: sign-in never creates an identity (`onchato hem new <name>` does),
   and several identities on one device are offered as a numbered list.
 

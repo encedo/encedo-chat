@@ -334,16 +334,17 @@ try {
       // Standard input only when asked for with '-': guessing from a missing
       // argument would hang a script whose stdin never closes.
       if (text === '-') { let b = ''; for await (const c of process.stdin) b += c; text = b.replace(/\n+$/, '') }
-      if (!to || !text) die('użycie: send <kontakt> <tekst | ->  [--wait sekundy] [--json]')
+      if (!to || !text) die('użycie: send <kontakt|grupa> <tekst | ->  [--wait sekundy] [--json]')
       const waitMs = Number(opt('--wait', '20')) * 1000
       const out = (r: any) => {
         if (rest.includes('--json')) console.log(JSON.stringify(r))
         else if (r.status === 'delivered') console.log(`doręczono do ${r.to} (${r.ms} ms)`)
+        else if (r.status === 'sent') console.log(`wysłano do grupy ${r.to} (grupy nie potwierdzają doręczenia)`)
         else if (r.status === 'merged') console.error(`połączono z czekającą wiadomością do ${r.to} o tym samym kluczu - wyjdzie jedna`)
         else console.error(r.via === 'daemon'
           ? `${r.to} nie potwierdził(a) w ${waitMs / 1000} s - wiadomość czeka w demonie (na dysku) i wyjdzie, gdy będzie online`
           : `${r.to} nie potwierdził(a) w ${waitMs / 1000} s - bez demona wiadomość NIE czeka (onchato daemon)`)
-        process.exit(r.status === 'delivered' ? 0 : 3)
+        process.exit(r.status === 'delivered' || r.status === 'sent' ? 0 : 3)
       }
       const sock = await connectDaemon()
       if (sock) {
@@ -353,8 +354,8 @@ try {
         if (!r.ok) die(r.error)
         out({ ...r, via: 'daemon' })
       }
-      const { id, contacts } = await signIn(kv)
-      const hub = new Hub({ id, contacts, relays: relayList(kv) })
+      const { id, contacts, key, base } = await signIn(kv)
+      const hub = new Hub({ id, contacts, relays: relayList(kv), vault: { kv, base, kid: key } })
       await hub.start()
       try { out({ ...(await hub.send(to, text, waitMs)), via: 'direct' }) } finally { await hub.close() }
       break
@@ -373,8 +374,8 @@ try {
       }
       const sock = await connectDaemon()
       if (sock) { const r = await ask(sock, { op: 'sendfile', to, path, wait: waitMs }); sock.end(); if (!r.ok) die(r.error); out({ ...r, via: 'daemon' }) }
-      const { id, contacts } = await signIn(kv)
-      const hub = new Hub({ id, contacts, relays: relayList(kv) })
+      const { id, contacts, key, base } = await signIn(kv)
+      const hub = new Hub({ id, contacts, relays: relayList(kv), vault: { kv, base, kid: key } })
       await hub.start()
       try { out({ ...(await hub.sendFile(to, path, waitMs)), via: 'direct' }) } finally { await hub.close() }
       break
@@ -393,7 +394,8 @@ try {
       const json = rest.includes('--json')
       const show = (e: HubEvent) => {
         if (json) { console.log(JSON.stringify(e)); return }
-        if (e.t === 'msg') console.log(`${new Date(e.ts).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })} <${e.from}> ${e.text}`)
+        if (e.t === 'msg') console.log(`${new Date(e.ts).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })} ${e.group ? `[${e.group}] ` : ''}<${e.from}> ${e.text}`)
+        if (e.t === 'group') console.log(`-!- grupa „${e.name}” (${e.members} osób)${e.how === 'invite' ? ' - dołączono' : ''}`)
         if (e.t === 'presence') console.log(`-!- ${e.from} ${e.state === 'online' ? 'online' : 'offline'}`)
         if (e.t === 'file') console.log(`${new Date(e.ts).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })} <${e.from}> plik ${e.name} (${humanSize(e.size)}) - onchato get ${e.id.slice(0, 8)}`)
       }
@@ -416,8 +418,8 @@ try {
         sock.write(JSON.stringify({ op: 'listen' }) + '\n')
         await new Promise(() => {})
       }
-      const { id, contacts } = await signIn(kv)
-      const hub = new Hub({ id, contacts, relays: relayList(kv) })
+      const { id, contacts, key, base } = await signIn(kv)
+      const hub = new Hub({ id, contacts, relays: relayList(kv), vault: { kv, base, kid: key } })
       hub.on(show)
       if (saveDir) hub.on((e) => { if (e.t === 'file') hub.getFile(e.id, saveDir).then((p) => saved(e.name, p), (err) => failed(e.name, err?.message ?? String(err))) })
       await hub.start()
@@ -438,7 +440,7 @@ try {
     case 'daemon': {
       const { id, contacts, kind, key, base } = await signIn(kv)
       const say = (m: string) => console.log(`[onchato] ${m}`)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), log: rest.includes('--debug') ? say : undefined })
+      const hub = new Hub({ id, contacts, relays: relayList(kv), vault: { kv, base, kid: key }, log: rest.includes('--debug') ? say : undefined })
       hub.on((e) => { if (e.t === 'link') say(`łącze: ${e.state}`); if (e.t === 'presence') say(`${e.from}: ${e.state}`) })
       await hub.start()
       const queue = new Queue({ hub, kv, base, kid: key, log: say })
