@@ -246,3 +246,17 @@ test('a frame sent while a member is not yet on the new topic reaches it once it
   assert.deepEqual(peers[0].recv.map((r) => r.body), ['tuz po zmianie'], 'the copies were dropped as replays where it had arrived')
   for (const p of peers) p.room!.stop()
 })
+
+test('a late copy of an older key does not wind the chain back (a replay stays a replay)', async () => {
+  const { gid, topic, peers } = await makeGroup(3)
+  const early = (await peers[1].mgr.skdFor(gid, peers[2].id.pub))! // ctr 0, as a repeated SKD would carry
+  let frame: Uint8Array | null = null
+  const tap = (evt: any) => { if (evt.detail.topic === topic && evt.detail.data.length > 1) frame ??= evt.detail.data }
+  peers[0].node.services.pubsub.addEventListener('message', tap)
+  await peers[1].room!.sendText('raz')
+  await until('delivered and captured', () => peers[2].recv.length === 1 && frame !== null)
+  await peers[2].mgr.applySkd(peers[1].id.pub, early) // the late copy
+  await peers[0].node.services.pubsub.publish(topic, frame!) // and the frame again
+  await sleep(200) // absence has no condition to wait for
+  assert.deepEqual(peers[2].recv.map((r) => r.body), ['raz'], 'the replayed frame was not opened a second time')
+})

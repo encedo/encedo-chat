@@ -584,6 +584,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    * re-key in lockstep, which would be a metadata signal of its own.
    */
   const establishedAt = new Map<string, number>()
+  const skdRepeats: ReturnType<typeof setTimeout>[] = []
   const lifetimeMs = eh2?.sessionLifetimeMs
     ?? 4 * 3_600_000 + Math.floor(Math.random() * 4 * 3_600_000) // 4–8 h
 
@@ -1258,8 +1259,24 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       trackDelivery(e.id, bytes)
       return e.id
     },
-    /** Hand a group's Sender-Key Distribution to this contact over the ratchet (§8). */
-    sendGroupSkd: (skd: SkdFields) => emitContent(encodeEnvelope(envGroupSkd(seq++, skd))),
+    /**
+     * Hand a group's Sender-Key Distribution to this contact over the ratchet (§8).
+     * It has no ack, and the usual moment for it is a 1:1 the distribution itself
+     * just opened: content the initiator sends right after msg3 can reach the
+     * responder before msg3 does, with no session to open it yet (§6.2's gate),
+     * and is gone. So an SKD sent with no session or within 5 s of one goes again,
+     * the SAME bytes, at +2.5 s and +6 s - the same chain and `ctr`, which is what
+     * matters: a key re-built later sits past the frames it was meant to open.
+     * A copy that lands twice is ignored (`setSenderKey` keeps a chain that is
+     * already further along).
+     */
+    sendGroupSkd: (skd: SkdFields) => {
+      const bytes = encodeEnvelope(envGroupSkd(seq++, skd))
+      const t = nowMs()
+      const fresh = !sessions.size || [...establishedAt.values()].some((at) => t - at < 5_000)
+      void emitContent(bytes)
+      if (fresh) for (const ms of [2_500, 6_000]) skdRepeats.push(setTimeout(() => { void emitContent(bytes) }, ms))
+    },
     /** Ask this contact to hand its sender key for `gid` over again (§8 repair). */
     sendGroupSkdReq: (gid: string, epoch: number) => emitContent(encodeEnvelope(envGroupSkdReq(seq++, gid, epoch))),
     sendFile: (f: FileMeta) => {
@@ -1334,6 +1351,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       handshakes.clear(); queued.length = 0; resendable.clear(); firstSentAt.clear()
       clearInterval(t0); stopHb(); clearInterval(sweep)
       for (const t of earlyBeacons) clearTimeout(t)
+      for (const t of skdRepeats) clearTimeout(t)
       for (const id of [...pending.keys()]) clearPending(id)
       node.services.pubsub.removeEventListener('message', handler)
       try { node.services.pubsub.unsubscribe(topic) } catch {}

@@ -109,6 +109,8 @@ async function rooms(opts: {
   onEditB?: (from: string, e: any) => void
   /** B side: a knock from A. */
   onKnockB?: (from: string) => void
+  /** B side: a group SKD from A. */
+  onGroupSkdB?: (from: string, skd: any) => void
 }) {
   const net = hub(opts.drop, opts.duplicate, opts.delayMs)
   const ss = new Uint8Array(32).fill(0x5e)
@@ -151,6 +153,7 @@ async function rooms(opts: {
     onMessage: (from, m, meta) => { opts.collect.push(m.body); opts.onMessageB?.(from, m, meta) },
     onEdit: opts.onEditB,
     onKnock: opts.onKnockB,
+    onGroupSkd: opts.onGroupSkdB,
   })
   /** A second window for B's identity — same keys, new PeerId (a page reload). */
   const rejoinB = (id: string, collect: string[], logs?: string[]) =>
@@ -784,4 +787,25 @@ test('a second tab on the same identity is recognised, not handshaked with forev
   A.sendText('mimo drugiej zakładki')
   try { await until(() => got.includes('mimo drugiej zakładki'), 8000) }
   catch (e) { console.log('--- A/B room log (ms since start):\n' + logs.join('\n') + '\n--- second tab log:\n' + logs2.join('\n')); throw e }
+})
+
+test('a group SKD sent on a fresh session survives losing its first copy', async (t) => {
+  // The usual moment for an SKD is a 1:1 the distribution itself just opened,
+  // and the first content after msg3 is exactly what gets lost there. An SKD
+  // has no ack, so the room repeats a fresh one - the same bytes, same ctr.
+  let dropNext = false
+  const skds: any[] = []
+  const { A, B } = await rooms({
+    collect: [],
+    drop: (d) => { if (dropNext && d[0] === 0x10) { dropNext = false; return true } return false },
+    onGroupSkdB: (_from, skd) => skds.push(skd),
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().includes('peer-b') && B.secured().includes('peer-a'))
+  dropNext = true
+  const b = (n: number) => btoa(String.fromCharCode(...new Uint8Array(n).fill(7)))
+  A.sendGroupSkd({ gid: b(16), gkPub: b(32), epoch: 0, secret: b(32), chain: b(32), ctr: 0, roster: [b(32)] } as any)
+  await until(() => skds.length > 0, 8_000)
+  assert.equal(dropNext, false, 'the first copy was the one dropped')
+  assert.ok(skds.every((x) => x.ctr === 0 && x.chain === skds[0].chain), 'every copy is the same key at the same ctr')
 })

@@ -1136,6 +1136,10 @@ Three things fix it, and the third is the one that is easy to get wrong:
   and for the first 30 s on a new topic (every epoch is one) `grouproom` publishes each
   frame again at +2 s and +6 s, because a member's subscription reaches the relay late and
   a group has no acks — the copy is a replay where the frame already landed;
+  and the room (`lib/room.ts` `sendGroupSkd`) sends a FRESH SKD (no session, or one under
+  5 s old) twice more, the same bytes — a rebuilt key would sit past the frames held for
+  it — while `setSenderKey` refuses a lower `ctr` than the chain it holds, so a late copy
+  never reopens consumed counters;
   the app sends `group-skd-req` over the 1:1, and the responder **re-checks the roster** —
   the ratchet proves who is asking, not that they are still a member, and a removed member
   still holds our contact and the old `group_id`.

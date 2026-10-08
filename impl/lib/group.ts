@@ -234,6 +234,11 @@ export class GroupSession {
    */
   setSenderKey(memberPub: string, chainKey: Uint8Array, ctr = 0): void {
     if (memberPub === this.id.pub) return
+    // A late or repeated copy of a key we already hold further along (the room
+    // repeats a fresh SKD) must not wind the chain back - that would reopen
+    // counters already consumed. A higher ctr is the repair path and is taken.
+    const cur = this.receivers.get(memberPub)
+    if (cur && ctr < cur.snapshot().n) return
     plog('§8', `sender key seeded for a member: chain=${val(chainKey)} at ctr=${ctr} (gid=${val(this.gid)} epoch=${this.epoch})`)
     this.receivers.set(memberPub, SenderReceiver.from(chainKey, ctr, this.receiverOpts))
     const q = this.held.get(memberPub)
