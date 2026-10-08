@@ -45,7 +45,40 @@ onchato            # bez argumentów: krótka ściągawka
 `~/.local/bin` jest w `PATH` na większości dystrybucji (po ponownym zalogowaniu).
 Dowiązanie wskazuje na repozytorium, więc `git pull` od razu daje nową wersję.
 
-Paczka `npm install -g onchato` i obraz Docker są zaplanowane (etap 7).
+### Docker
+
+Na serwerze bez Node 24 albo gdy demon ma żyć w kontenerze. Obraz zawiera tylko CLI;
+dane (profil, kontakty, kolejka, pobrane pliki) są w wolumenie `/data`, a demon
+słucha na gnieździe `/data/onchato.sock`. W kontenerze działa jako zwykły użytkownik
+(uid 1000), nie jako root.
+
+```sh
+docker build -t onchato .                          # z katalogu głównego repozytorium
+
+# raz: profil w wolumenie (interaktywnie - pyta o hasło)
+docker run --rm -it -v onchato:/data onchato profile new ops-bot
+docker run --rm -it -v onchato:/data onchato add <link zaproszenia albo nazwa klucz>
+
+# demon w tle; hasło z pliku, podmontowanego jako sekret - nie w zmiennej środowiskowej
+install -m 600 /dev/stdin ./ops-bot.pass <<< 'hasło profilu ops-bot'
+docker run -d --name onchato --restart unless-stopped -v onchato:/data \
+  --mount type=bind,src=$PWD/ops-bot.pass,dst=/run/secrets/onchato-password,ro \
+  onchato daemon
+
+# skrypty na hoście rozmawiają z demonem przez docker exec
+docker exec onchato onchato send ewa "backup gotowy"
+docker exec onchato onchato listen --json
+docker logs -f onchato
+```
+
+Plik hasła musi być czytelny dla uid 1000 w kontenerze (właściciel 1000 albo
+`chmod 644` na katalogu, do którego nikt inny nie ma dostępu). W docker compose albo
+Swarm to samo daje `secrets:` o nazwie `onchato-password` — obraz szuka hasła
+w `/run/secrets/onchato-password`.
+
+Klient rozmów też działa w kontenerze, z terminalem: `docker run --rm -it -v onchato:/data
+onchato chat`. Tylko nie równolegle z demonem na tej samej tożsamości — jedna
+tożsamość to jedna sesja (rozdział 12).
 
 ---
 
@@ -412,6 +445,8 @@ session optional pam_exec.so /usr/local/bin/onchato-login-notify
 [ "$PAM_TYPE" = open_session ] || exit 0
 # root nie ma ~/.local/bin w PATH - pełna ścieżka; root łączy się z gniazdem 0600 innego użytkownika
 ONCHATO_SOCKET=/run/user/1000/onchato.sock /home/bot/.local/bin/onchato send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
+# albo, gdy demon jest w kontenerze (rozdział 1, „Docker”):
+# docker exec onchato onchato send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
 ```
 
 ### Pliki

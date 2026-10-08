@@ -132,6 +132,16 @@ exported from the app cannot be used here. Today it is a developer tool.
   now held and opened when the key lands (PROTOCOL.md §8.4), not dropped. And a
   room repeats each frame it sends in its first 30 s (+2/+6 s): a message right
   after /add used to miss a member whose subscription was not at the relay yet.
+- **Stage 7 - in progress: the Docker image** (2026-10-08). `Dockerfile` at the
+  repo root (the context must reach `hem-sdk-js/` and `relay/pick.mjs` +
+  `load.mjs`, which the client shares with the relay), `.dockerignore` as an
+  allow-list. node:24-bookworm-slim, production deps only, the TS sources run
+  as they are; runs as uid 1000; `/data` volume holds the store, the socket and
+  downloads; the password comes from `/run/secrets/onchato-password` through the
+  existing `$CREDENTIALS_DIRECTORY` path. Proved by hand: profile in a volume,
+  daemon with the password only from the secret file, `docker exec ... send` to
+  an identity on the host - delivered in 1.6 s. Next: the CLI <-> browser
+  scenario; publishing the image (registry, CI) is a decision still to take.
 - **HEM**: sign-in never creates an identity (`onchato hem new <name>` does),
   and several identities on one device are offered as a numbered list.
 
@@ -262,7 +272,7 @@ Working days for one person who knows the code; a judgement, not a measurement.
 | 4b | **Bot / notifier** | `send` through the daemon socket; the sealed outbox that waits for the recipient (TTL, cap, oldest first, `queue`); coalescing by `--key`; a group as a channel; the PAM login example | 3–4 |
 | 5 | **Files** | `/send`, `/get` through the same encrypted store as the app; voice notes download only | 2 |
 | 6 | **Groups** | create, list, join, group windows; owed invitations and group state sealed to a file (§10) | 3–4 |
-| 7 | **Packaging and tests** | npm publish, a Docker image for servers, README / `--help`, a CLI ↔ browser scenario in the harness | 2–3 |
+| 7 | **Packaging and tests** | a Docker image (the user's choice over npm, 2026-10-08), README / `--help`, a CLI ↔ browser scenario in the harness | 2–3 |
 | 8 | **Direct connection (WebRTC), opt-in** | `node-datachannel` as an OPTIONAL dependency behind the `makeLink` seam of `net/webrtc-plane.ts` (as the Linux desktop plugs webrtc-rs); `--direct` in the client and the daemon. Off by default, as in the app: the default hides the IP from the other side (the user's call, 2026-10-08 - kept after WebRTC became reliable). Without the library everything goes through the nodes, as today | 2–3 |
 
 **Total ≈ 20–26 days**, plus 2–3 for stage 8. Stages 3, 4b and 6 carry the spread.

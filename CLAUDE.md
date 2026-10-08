@@ -42,6 +42,7 @@ left alone. When a log line changes, the docs that quote it change with it —
 - `impl/` — the app: engine (`lib/`, `eh2/`, `net/`), web UI (`web/`), CLI (`cli/`), Tauri desktop + Android shell (`src-tauri/`), tests (`test/`).
 - `infra/` — `nodes.json` (the compiled-in node list), `deploy-on-tag.sh` + systemd units (tag-driven web deploy), `nginx/onchato.com` (the versioned nginx config of the web host — scp to sites-available), `nginx/relay-node.conf` + `nginx/relay-limits.conf` (the template every relay-only node renders), IPFS TTL sweeper, `feedback/` (the in-app 💬 Feedback sink — zero-dep Node, appends JSONL, its own systemd unit), `stun/` (our own STUN, below).
 - `MVP.md`, `MOBILE-PLAN.md`, `EMBED-PLAN.md`, `GROUPS-DESIGN.md`, `performance.md`, `hem_usage.md` — plans and measured records at root.
+- `Dockerfile` + `.dockerignore` (allow-list) at root — the **CLI** image only (CLI.md ch. 1 "Docker"); the context is the repo root because the CLI imports `hem-sdk-js/` and `relay/pick.mjs`/`load.mjs`.
 - `relay/` — the onchato **bs1 relay** (libp2p GossipSub + circuit-relay-v2),
   self-contained + deployable (pull → `npm ci` → systemd `onchato-relay`).
   Transport-only; v5 + v6 share it. `--pass bs1.onchato.com` seeds the fixed

@@ -1,0 +1,16 @@
+# The CLI image (Dockerfile) needs only these; everything else stays out of the
+# build context - above all node_modules (rebuilt inside) and anything secret.
+*
+!impl/package.json
+!impl/package-lock.json
+!impl/cli/
+!impl/lib/
+!impl/net/
+!impl/eh2/
+!impl/web/src/groupview.ts
+!hem-sdk-js/hem-sdk.js
+!hem-sdk-js/LICENSE
+!infra/nodes.json
+!relay/pick.mjs
+!relay/load.mjs
+!LICENSE
