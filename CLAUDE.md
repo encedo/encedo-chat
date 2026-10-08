@@ -1139,7 +1139,9 @@ Three things fix it, and the third is the one that is easy to get wrong:
   and the room (`lib/room.ts` `sendGroupSkd`) sends a FRESH SKD (no session, or one under
   5 s old) twice more, the same bytes — a rebuilt key would sit past the frames held for
   it — while `setSenderKey` refuses a lower `ctr` than the chain it holds, so a late copy
-  never reopens consumed counters;
+  never reopens consumed counters; such a copy only opens HELD frames, through a throwaway
+  receiver (traced live 2026-10-08: the repair answer, at ctr 1, overtook the original SKD,
+  and the held ctr-0 frame was lost to the rewind guard);
   the app sends `group-skd-req` over the 1:1, and the responder **re-checks the roster** —
   the ratchet proves who is asking, not that they are still a member, and a removed member
   still holds our contact and the old `group_id`.

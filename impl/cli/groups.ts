@@ -76,6 +76,7 @@ export class Groups {
       onFile: (from, f) => { this.h.file?.(g, from, f); this.schedulePersist() },
       onReaction: (from, r) => this.h.reaction?.(g, from, r),
       onNeedSenderKey: (memberPub) => void this.askFor(g, memberPub),
+      onLog: (m) => this.log(`grupa „${g.name}”: ${m}`),
     })
   }
 

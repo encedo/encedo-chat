@@ -19,6 +19,16 @@ import { cacheBaseOf } from '../lib/localbook.ts'
 import { identityKey } from '../cli/profiles.ts'
 import type { KV } from '../lib/migrate.ts'
 import { VT } from '../test/vt.ts'
+import { enableProtoLog } from '../lib/protolog.ts'
+import { appendFileSync } from 'node:fs'
+if (process.env.DEBUG === '2') {
+  const f = process.env.HOME + '/ec-logs/group-wire.log'
+  // In memory, written only on failure: a file write per line shifted the timing
+  // enough that the race stopped reproducing.
+  const trace: string[] = []
+  ;(globalThis as any).__dumpTrace = () => appendFileSync(f, trace.join('\n') + '\n')
+  enableProtoLog({ events: true, wire: true, sink: (l) => { trace.push(`${Date.now() % 1_000_000} ${l}`); if (trace.length > 300_000) trace.splice(0, 50_000) } })
+}
 
 const relays = JSON.parse(readFileSync(new URL('../../infra/nodes.json', import.meta.url), 'utf8')).nodes.map((n: any) => n.addr)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -36,11 +46,12 @@ async function terminal(id: Identity, contacts: Array<{ name: string; pub: strin
   let exited = -1
   let book = contacts.slice()
   const c = await runClient({
-    id, kind: 'software', relays, vault,
+    id, kind: 'software', relays, vault, debug: !!process.env.DEBUG,
     contacts: localOnlyManager(localContactBook(() => book, (l) => { book = l })),
     io: { out: vt, onInput: (cb) => { feed = cb }, exit: (x) => { exited = x } },
   })
-  return { type: (s: string) => feed(s), screen: () => vt.screen().join('\n'), status: () => vt.line(25), exited: () => exited, windows: c.windows }
+  const all = () => c.windows.list().flatMap((wn) => wn.lines.map((l: string) => l.replace(/\x1b\[[0-9;]*m/g, ''))).join('\n')
+  return { type: (s: string) => feed(s), screen: () => (process.env.DEBUG ? all().split('\n').slice(-120).join('\n') : vt.screen().join('\n')), status: () => vt.line(25), exited: () => exited, windows: c.windows }
 }
 
 let failed = false
@@ -103,5 +114,6 @@ try {
   failed = true
   console.error('FAIL - ' + (e?.message ?? e))
   console.error(dump())
+  ;(globalThis as any).__dumpTrace?.()
 }
 process.exit(failed ? 1 : 0)

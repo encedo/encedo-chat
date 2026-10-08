@@ -260,3 +260,28 @@ test('a late copy of an older key does not wind the chain back (a replay stays a
   await sleep(200) // absence has no condition to wait for
   assert.deepEqual(peers[2].recv.map((r) => r.body), ['raz'], 'the replayed frame was not opened a second time')
 })
+
+test('the repair answer overtakes the original key: the original still opens what is held', async () => {
+  // The live trace (cli-group-test): cee's first SKD to bob was lost to the
+  // msg3 race; cee's first group frame (ctr 0) was held; bob's ask was answered
+  // with cee's key at ctr 1, which cannot open ctr 0; the room's repeat of the
+  // ORIGINAL SKD (ctr 0) came after it - and was refused as a rewind.
+  const { gid, topic, peers } = await makeGroup(3, [[1, 2]])
+  const original = (await peers[1].mgr.skdFor(gid, peers[2].id.pub))!
+  let frame: Uint8Array | null = null
+  const tap = (evt: any) => { if (evt.detail.topic === topic && evt.detail.data.length > 1) frame ??= evt.detail.data }
+  peers[0].node.services.pubsub.addEventListener('message', tap)
+  await peers[1].room!.sendText('pierwsza')
+  await until('held on the member without the key', () => peers[2].mgr.session(gid)!.heldFor(peers[1].id.pub) === 1 && frame !== null)
+  await peers[2].mgr.applySkd(peers[1].id.pub, (await peers[1].mgr.skdFor(gid, peers[2].id.pub))!) // the repair, ctr 1
+  await sleep(100)
+  assert.equal(peers[2].recv.length, 0, 'a key at ctr 1 cannot open ctr 0')
+  assert.equal(peers[2].mgr.session(gid)!.heldFor(peers[1].id.pub), 1, 'so the frame stays held')
+  await peers[2].mgr.applySkd(peers[1].id.pub, original) // the late original, ctr 0
+  await until('the held frame to open', () => peers[2].recv.length === 1)
+  await peers[1].room!.sendText('druga') // the live chain is untouched
+  await until('the next frame on the live chain', () => peers[2].recv.length === 2)
+  await peers[0].node.services.pubsub.publish(topic, frame!) // and a replay of the first
+  await sleep(200) // absence has no condition to wait for
+  assert.deepEqual(peers[2].recv.map((r) => r.body), ['pierwsza', 'druga'], 'each once, the replay refused')
+})

@@ -236,20 +236,35 @@ export class GroupSession {
     if (memberPub === this.id.pub) return
     // A late or repeated copy of a key we already hold further along (the room
     // repeats a fresh SKD) must not wind the chain back - that would reopen
-    // counters already consumed. A higher ctr is the repair path and is taken.
+    // counters already consumed. It may still open what is HELD: frames from
+    // below the chain we were given, which that chain never had (the repair
+    // answer can overtake the original SKD, and its key sits past the first
+    // frames). A throwaway receiver opens those and nothing else.
     const cur = this.receivers.get(memberPub)
-    if (cur && ctr < cur.snapshot().n) return
+    if (cur && ctr < cur.snapshot().n) {
+      if (this.held.has(memberPub)) void this.release(memberPub, SenderReceiver.from(chainKey, ctr, this.receiverOpts))
+      return
+    }
     plog('§8', `sender key seeded for a member: chain=${val(chainKey)} at ctr=${ctr} (gid=${val(this.gid)} epoch=${this.epoch})`)
     this.receivers.set(memberPub, SenderReceiver.from(chainKey, ctr, this.receiverOpts))
-    const q = this.held.get(memberPub)
-    if (q) {
-      this.held.delete(memberPub)
-      void (async () => {
-        const t = Date.now()
-        // A frame from before `ctr` stays unreadable (the key was handed over past it): null, dropped.
-        for (const x of q) if (t - x.at < HOLD_MS) { const r = await this.receive(x.frame); if (r) this.onHeldOpened?.(r) }
-      })()
+    if (this.held.has(memberPub)) void this.release(memberPub)
+  }
+
+  /**
+   * Try the frames held for a member, with its chain or with `use`. What still
+   * does not open stays held (to its age limit): a frame from below the key's
+   * counter can be opened by an older copy of that key arriving later.
+   */
+  private async release(memberPub: string, use?: SenderReceiver): Promise<void> {
+    const q = this.held.get(memberPub) ?? []
+    this.held.delete(memberPub)
+    const t = Date.now(), keep: typeof q = []
+    for (const x of q) {
+      if (t - x.at >= HOLD_MS) continue
+      const r = await this.receive(x.frame, use)
+      if (r) this.onHeldOpened?.(r); else keep.push(x)
     }
+    if (keep.length) this.held.set(memberPub, [...keep, ...(this.held.get(memberPub) ?? [])].slice(-HOLD_MAX))
   }
   hasSenderKey(memberPub: string): boolean { return this.receivers.has(memberPub) }
   /** How many frames from this member wait for its key (diagnostics, tests). */
@@ -303,7 +318,7 @@ export class GroupSession {
    * per-recipient MAC before decrypting — an insider holding the sender's chain
    * could re-seal a body but cannot forge that MAC to us.
    */
-  async receive(frame: Uint8Array): Promise<{ from: string; pt: Uint8Array } | null> {
+  async receive(frame: Uint8Array, use?: SenderReceiver): Promise<{ from: string; pt: Uint8Array } | null> {
     if (frame.length < 2 + HDR_LEN + 1 || frame[0] !== T_GMSG || frame[1] !== VERSION) return null
     let o = 2
     const headerBytes = frame.slice(o, o + HDR_LEN); o += HDR_LEN
@@ -321,7 +336,7 @@ export class GroupSession {
     const mine = macs.get(hex(this.mySenderId))
     if (!mine) return null // not addressed to us
     if (!(await verify(await this.macKeyFor(sender.pub), headerBytes, ct, mine))) return null // forged / tampered
-    const recv = this.receivers.get(sender.pub)
+    const recv = use ?? this.receivers.get(sender.pub)
     if (!recv) {
       plog('§8', `group recv: MAC verified for sender_id=${val(h.senderId)} but no sender key held — holding the frame, asking for one`)
       const t = Date.now()
