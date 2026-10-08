@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Polityka prywatności onchato</title>
+<meta name="description" content="Polityka prywatności komunikatora onchato / onchato privacy policy">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20fill%3D%22none%22%20stroke%3D%22currentColor%22%20stroke-linecap%3D%22round%22%20stroke-width%3D%2210%22%20style%3D%22color%3A%2335c99e%22%20viewBox%3D%220%200%20100%20100%22%3E%3Cstyle%3E%40media%20(prefers-color-scheme%3Alight)%7B%3Aroot%7Bcolor%3A%230f6b57%7D%7D%3C%2Fstyle%3E%3Cpath%20stroke-width%3D%228%22%20d%3D%22M38.8%2019.6V42m0%2020.8v22.4m22.4-65.6v19.2C50%2043.6%2050%2061.2%2061.2%2066v19.2%22%2F%3E%3C%2Fsvg%3E">
+<style>
+  /* The palette and faces of how.html. System faces only, for the reason given
+     there: a webfont link tells a third party who opened this page. */
+  :root {
+    --paper: #f7f8f7; --card: #ffffff; --ink: #16211e; --muted: #5d6b66;
+    --rule: #d7dedb; --accent: #0f6b57; --accent-soft: #e4f0ec;
+    --serif: Charter, "Bitstream Charter", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0f1513; --card: #16201d; --ink: #e6ece9; --muted: #96a5a0;
+      --rule: #2a3733; --accent: #35c99e; --accent-soft: #14312a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0f1513; --card: #16201d; --ink: #e6ece9; --muted: #96a5a0;
+    --rule: #2a3733; --accent: #35c99e; --accent-soft: #14312a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 17px; line-height: 1.62;
+    padding-inline: 20px; padding-block: 56px 96px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 68ch; margin: 0 auto; display: flex; flex-direction: column; gap: 34px; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 14px; }
+  .langs { font-family: var(--mono); font-size: 13px; display: flex; gap: 14px; }
+  .langs a { color: var(--accent); }
+  h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(2rem, 5vw, 2.6rem);
+    line-height: 1.1; margin: 0 0 12px; text-wrap: balance; }
+  h2 { font-family: var(--serif); font-weight: 600; font-size: 1.3rem; line-height: 1.25;
+    margin: 0 0 8px; text-wrap: balance; }
+  p, ul { margin: 0 0 12px; } p:last-child, ul:last-child { margin-bottom: 0; }
+  ul { padding-left: 1.2em; } li { margin-bottom: 6px; }
+  .lead { font-size: 1.12rem; line-height: 1.5; color: var(--muted); }
+  .date { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+  section { display: flex; flex-direction: column; gap: 26px; }
+  .who { background: var(--card); border: 1px solid var(--rule); border-radius: 4px; padding: 16px 18px; }
+  .who p { margin: 0; }
+  a { color: var(--accent); }
+  .nw { white-space: nowrap; }
+  hr { border: 0; border-top: 1px solid var(--rule); margin: 0; }
+  footer { font-family: var(--mono); font-size: .82rem; color: var(--muted); }
+  @media (max-width: 640px) { body { font-size: 16px; padding-block: 36px 64px; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="langs" aria-label="Język / Language"><a href="#pl" hreflang="pl">Polski</a><a href="#en" hreflang="en">English</a><a href="/">onchato.com</a></nav>
+
+<section id="pl" lang="pl">
+  <header>
+    <p class="eyebrow">onchato &middot; prywatność</p>
+    <h1>Polityka prywatności</h1>
+    <p class="date">Obowiązuje od 8 października 2026</p>
+  </header>
+
+  <p class="lead">onchato to komunikator bez konta i bez serwera wiadomości. Tu jest
+    opisane wszystko, co o Tobie wiemy, a to niewiele, i skąd to wiemy.</p>
+
+  <div>
+    <h2>1. Kto odpowiada za dane</h2>
+    <div class="who"><p>Administratorem jest <strong>RKV spółka z ograniczoną
+      odpowiedzialnością</strong>, ul. gen. Stefana Grota-Roweckiego 10/12,
+      52-220 Wrocław, wpisana do rejestru przedsiębiorców KRS pod numerem
+      0001173474 (Sąd Rejonowy dla Wrocławia-Fabrycznej we Wrocławiu, VI Wydział
+      Gospodarczy KRS), NIP 8993025480, REGON 541756532.<br>
+      Kontakt w sprawach prywatności: <a href="mailto:office@rkv.pl">office@rkv.pl</a>;
+      adres do e-Doręczeń: <span class="nw">AE:PL-69125-65164-TCUCA-19</span>.</p></div>
+  </div>
+
+  <div>
+    <h2>2. Zasada działania</h2>
+    <p>Twoja tożsamość to para kluczy wygenerowana na Twoim urządzeniu albo
+      w urządzeniu HEM. Wiadomości są szyfrowane end-to-end na Twoim urządzeniu
+      i odszyfrowywane dopiero u odbiorcy. Nie znamy treści Twoich rozmów, nie mamy
+      listy Twoich kontaktów i nie przechowujemy wiadomości. Rozmowa istnieje tylko
+      na ekranach jej uczestników.</p>
+  </div>
+
+  <div>
+    <h2>3. Czego nie zbieramy</h2>
+    <p>Nie prosimy o numer telefonu, e-mail ani imię. Nie używamy analityki,
+      reklam, śledzenia ani powiadomień push przez serwery Google lub Apple. Nie
+      sprzedajemy i nie udostępniamy danych w celach marketingowych.</p>
+  </div>
+
+  <div>
+    <h2>4. Co widzą nasze serwery</h2>
+    <ul>
+      <li><strong>Węzły przekazujące</strong> przekazują zaszyfrowane pakiety między
+        uczestnikami. Widzą adres IP urządzenia, czas połączenia i rozmiar
+        przesyłanych danych, ale nie treść ani to, kto z kim rozmawia. Pokoje
+        rozmów mają nazwy, które znają tylko obie strony.</li>
+      <li><strong>Dzienniki serwera WWW</strong> zapisują przy każdym zapytaniu adres
+        IP, czas, adres żądanej strony i typ przeglądarki. Służą bezpieczeństwu
+        i ochronie przed nadużyciami i są usuwane automatycznie po 14 dniach.</li>
+      <li><strong>Statystyki ruchu</strong> to wyłącznie zbiorcze liczniki (liczba
+        wiadomości, bajtów i połączeń na węzeł w odstępach czasu), bez adresów IP
+        i identyfikatorów. Przechowujemy je do 30 dni.</li>
+      <li><strong>Serwer STUN</strong> (tylko gdy włączysz połączenie bezpośrednie)
+        odpowiada Twojemu urządzeniu, pod jakim publicznym adresem IP je widzi.
+        Nie zapisuje adresów.</li>
+    </ul>
+  </div>
+
+  <div>
+    <h2>5. Pliki</h2>
+    <p>Pliki, zdjęcia i wiadomości głosowe są szyfrowane na Twoim urządzeniu przed
+      wysłaniem. Nasz serwer plików przechowuje tylko zaszyfrowane dane, przez
+      ok. 5 minut, po czym są usuwane. Klucz do odszyfrowania ma wyłącznie odbiorca.</p>
+  </div>
+
+  <div>
+    <h2>6. Połączenie bezpośrednie (opcjonalne)</h2>
+    <p>Domyślnie wiadomości idą przez węzły. Jeśli w Ustawieniach włączysz
+      połączenie bezpośrednie, Twoje urządzenie i urządzenie rozmówcy poznają
+      nawzajem swoje adresy IP.</p>
+  </div>
+
+  <div>
+    <h2>7. Formularz Feedback</h2>
+    <p>Jeśli wyślesz zgłoszenie, otrzymujemy to, co wpiszesz, oraz, jeśli zostawisz
+      zaznaczone pole, dane techniczne: wersję aplikacji i rodzaj przeglądarki lub
+      systemu. Dokładną treść widzisz przed wysłaniem. Adres kontaktowy podajesz
+      tylko, jeśli chcesz odpowiedzi. Zgłoszenie nie zawiera Twoich kluczy,
+      kontaktów, rozmów ani adresu IP; samo wysłanie, jak każde zapytanie do
+      serwera, trafia do dziennika opisanego w punkcie 4 (14 dni). Zgłoszenia
+      przechowujemy do czasu obsłużenia, nie dłużej niż 6 miesięcy.</p>
+  </div>
+
+  <div>
+    <h2>8. Dane na Twoim urządzeniu</h2>
+    <p>Kontakty, ustawienia, przypięte wiadomości i zapieczętowany hasłem profil są
+      zapisane lokalnie na Twoim urządzeniu (przypięte wiadomości i profil
+      w formie zaszyfrowanej). Nie mamy do nich dostępu. Usuniesz je, kasując
+      profil w aplikacji albo odinstalowując aplikację. Jeśli używasz urządzenia
+      HEM, Twoje klucze i kontakty są zapisane w nim.</p>
+  </div>
+
+  <div>
+    <h2>9. Uprawnienia aplikacji</h2>
+    <p>Aparat służy tylko do skanowania kodów QR. Mikrofon służy tylko do nagrywania
+      wiadomości głosowych, i to wyłącznie wtedy, gdy naciśniesz przycisk.
+      Powiadomienia informują o nowych wiadomościach bez pokazywania ich treści.
+      Na Androidzie aplikacja utrzymuje usługę w tle, żeby rozmowy działały przy
+      zablokowanym ekranie, bo nie korzystamy z powiadomień push.</p>
+  </div>
+
+  <div>
+    <h2>10. Komu powierzamy dane</h2>
+    <ul>
+      <li><strong>Hosting:</strong> LumaDock (serwery w Londynie i Frankfurcie) oraz
+        DigitalOcean (Amsterdam).</li>
+      <li><strong>GitHub (USA):</strong> pobieranie aplikacji i sprawdzanie
+        aktualizacji. GitHub widzi wtedy Twój adres IP. Przekazanie odbywa się na
+        podstawie EU–US Data Privacy Framework.</li>
+    </ul>
+  </div>
+
+  <div>
+    <h2>11. Podstawy prawne (RODO)</h2>
+    <ul>
+      <li>Dzienniki serwera i statystyki: prawnie uzasadniony interes, czyli
+        bezpieczeństwo i działanie usługi (art. 6 ust. 1 lit. f).</li>
+      <li>Przekazywanie wiadomości i plików: świadczenie usługi, o którą prosisz
+        (art. 6 ust. 1 lit. b).</li>
+      <li>Formularz Feedback: Twoja zgoda (art. 6 ust. 1 lit. a).</li>
+    </ul>
+  </div>
+
+  <div>
+    <h2>12. Twoje prawa</h2>
+    <p>Masz prawo do dostępu do danych, ich sprostowania, usunięcia, ograniczenia
+      przetwarzania i sprzeciwu, a także prawo do skargi do Prezesa Urzędu Ochrony
+      Danych Osobowych. Poza dziennikami serwera i zgłoszeniami Feedback nie mamy
+      danych, które dałoby się powiązać z Tobą.</p>
+  </div>
+
+  <div>
+    <h2>13. Dzieci</h2>
+    <p>Aplikacja nie jest przeznaczona dla osób poniżej 16 lat.</p>
+  </div>
+
+  <div>
+    <h2>14. Zmiany</h2>
+    <p>O zmianach tej polityki poinformujemy na tej stronie, z nową datą
+      obowiązywania.</p>
+  </div>
+</section>
+
+<hr>
+
+<section id="en" lang="en">
+  <header>
+    <p class="eyebrow">onchato &middot; privacy</p>
+    <h1>Privacy policy</h1>
+    <p class="date">Effective from 8 October 2026</p>
+  </header>
+
+  <p class="lead">onchato is a messenger with no account and no message server.
+    This is everything we know about you, which is not much, and where it comes
+    from.</p>
+
+  <div>
+    <h2>1. Who is responsible for your data</h2>
+    <div class="who"><p>The controller is <strong>RKV spółka z ograniczoną
+      odpowiedzialnością</strong>, ul. gen. Stefana Grota-Roweckiego 10/12,
+      52-220 Wrocław, Poland, entered in the Polish National Court Register (KRS)
+      under no. 0001173474 (District Court for Wrocław-Fabryczna in Wrocław,
+      6th Commercial Division), NIP (tax ID) 8993025480, REGON 541756532.<br>
+      Privacy contact: <a href="mailto:office@rkv.pl">office@rkv.pl</a>;
+      e-Delivery address: <span class="nw">AE:PL-69125-65164-TCUCA-19</span>.</p></div>
+  </div>
+
+  <div>
+    <h2>2. How it works</h2>
+    <p>Your identity is a key pair generated on your device or in a HEM device.
+      Messages are encrypted end-to-end on your device and decrypted only by the
+      recipient. We do not know what you say, we do not have your contact list and
+      we do not store messages. A conversation exists only on its participants'
+      screens.</p>
+  </div>
+
+  <div>
+    <h2>3. What we do not collect</h2>
+    <p>We do not ask for a phone number, an e-mail address or a name. We use no
+      analytics, no advertising, no tracking and no push notifications through
+      Google's or Apple's servers. We do not sell data or share it for marketing.</p>
+  </div>
+
+  <div>
+    <h2>4. What our servers see</h2>
+    <ul>
+      <li><strong>Relay nodes</strong> pass encrypted packets between participants.
+        They see your device's IP address, when it connects and how much data it
+        sends, but not the content, and not who talks to whom. Conversation rooms
+        have names that only the two sides know.</li>
+      <li><strong>Web server logs</strong> record, for each request, the IP address,
+        the time, the page requested and the browser type. They serve security and
+        abuse protection and are deleted automatically after 14 days.</li>
+      <li><strong>Traffic statistics</strong> are aggregate counters only (messages,
+        bytes and connections per node per time interval), with no IP addresses and
+        no identifiers. We keep them for up to 30 days.</li>
+      <li><strong>The STUN server</strong> (only if you turn on direct connections)
+        tells your device which public IP address it sees it from. It does not
+        record addresses.</li>
+    </ul>
+  </div>
+
+  <div>
+    <h2>5. Files</h2>
+    <p>Files, photos and voice messages are encrypted on your device before they
+      are sent. Our file server holds only the encrypted data, for about
+      5 minutes, after which it is deleted. Only the recipient has the key.</p>
+  </div>
+
+  <div>
+    <h2>6. Direct connection (optional)</h2>
+    <p>By default messages travel through the relay nodes. If you turn on direct
+      connections in Settings, your device and your contact's device learn each
+      other's IP addresses.</p>
+  </div>
+
+  <div>
+    <h2>7. The Feedback form</h2>
+    <p>If you send a report, we receive what you write and, if you leave the box
+      ticked, technical data: the app version and the kind of browser or system.
+      You see the exact content before sending. You give a contact address only if
+      you want a reply. A report contains none of your keys, contacts or
+      conversations and no IP address; sending it, like any request to the
+      server, is recorded in the log described in section 4 (14 days). We keep
+      reports until they are handled, for no longer than 6 months.</p>
+  </div>
+
+  <div>
+    <h2>8. Data on your device</h2>
+    <p>Contacts, settings, pinned messages and your password-sealed profile are
+      stored locally on your device (pinned messages and the profile encrypted).
+      We have no access to them. You remove them by deleting the profile in the
+      app or uninstalling it. If you use a HEM device, your keys and contacts are
+      stored in it.</p>
+  </div>
+
+  <div>
+    <h2>9. App permissions</h2>
+    <p>The camera is used only to scan QR codes. The microphone is used only to
+      record voice messages, and only while you press the button. Notifications
+      tell you a message arrived without showing its content. On Android the app
+      keeps a background service so conversations work with the screen locked,
+      because we do not use push notifications.</p>
+  </div>
+
+  <div>
+    <h2>10. Who processes data for us</h2>
+    <ul>
+      <li><strong>Hosting:</strong> LumaDock (servers in London and Frankfurt) and
+        DigitalOcean (Amsterdam).</li>
+      <li><strong>GitHub (USA):</strong> app downloads and update checks. GitHub
+        sees your IP address then. The transfer relies on the EU–US Data Privacy
+        Framework.</li>
+    </ul>
+  </div>
+
+  <div>
+    <h2>11. Legal bases (GDPR)</h2>
+    <ul>
+      <li>Server logs and statistics: legitimate interest, the security and
+        operation of the service (Art. 6(1)(f)).</li>
+      <li>Relaying messages and files: providing the service you ask for
+        (Art. 6(1)(b)).</li>
+      <li>The Feedback form: your consent (Art. 6(1)(a)).</li>
+    </ul>
+  </div>
+
+  <div>
+    <h2>12. Your rights</h2>
+    <p>You have the right of access, rectification, erasure, restriction of
+      processing and objection, and the right to lodge a complaint with the
+      President of the Personal Data Protection Office (PUODO) in Poland or the
+      supervisory authority where you live. Apart from server logs and Feedback
+      reports, we hold no data that could be linked to you.</p>
+  </div>
+
+  <div>
+    <h2>13. Children</h2>
+    <p>The app is not intended for anyone under 16.</p>
+  </div>
+
+  <div>
+    <h2>14. Changes</h2>
+    <p>Changes to this policy will be announced on this page with a new effective
+      date.</p>
+  </div>
+</section>
+
+<hr>
+<footer>RKV sp. z o.o. &middot; <a href="mailto:office@rkv.pl">office@rkv.pl</a> &middot; <a href="/">onchato.com</a> &middot; <a href="/how">How it works</a></footer>
+
+</div>
+</body>
+</html>

@@ -165,6 +165,7 @@ module.exports = (_env, argv) => {
       // the three specifications that go to the cryptographer. It was in the
       // wrong tree, which is why it had no URL for six days.
       new HtmlWebpackPlugin({ template: './how.html', filename: 'how.html', chunks: [], inject: false, minify: false }),
+      new HtmlWebpackPlugin({ template: './privacy.html', filename: 'privacy.html', chunks: [], inject: false, minify: false }),
       // The public landing page, carried through verbatim: no chunks, no
       // injection, no minifier. It has no bundle — the whole point is that a
       // first-time visitor downloads a few KB of HTML rather than 1.2 MiB of
