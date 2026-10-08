@@ -78,6 +78,10 @@ try {
   await until('ala says cee was added', () => A.all().includes('dodano cee'))
   await until('cee\'s hub joined', () => ev.some((e) => e.t === 'group' && e.name === 'zespol'))
   await until('bob saw the roster change', () => /zespol”: zmiana \(.*skład.*\) - 3 osób/.test(B.all()))
+  // A new epoch is a new topic: give the members' subscriptions a moment to
+  // reach the relay. A broadcast in the very same second can find a member not
+  // yet on it there, and a group has no acks to re-send it (known, reported).
+  await sleep(3000)
   const m1 = 'po dodaniu ' + Date.now().toString(36)
   A.type(m1 + '\r')
   await until('ala\'s message on bob and cee', () => B.all().includes('<ala> ' + m1) && gotC(m1, 'zespol'))
@@ -86,19 +90,10 @@ try {
   const s1 = 'ze skryptu ' + Date.now().toString(36)
   const r1 = await req({ op: 'send', to: 'zespol', text: s1, wait: 5000 })
   if (!r1.ok || r1.status !== 'sent') throw new Error('daemon send to a group: ' + JSON.stringify(r1))
-  await until('the script\'s message on ala', () => A.all().includes('<cee> ' + s1))
-  // A frame that beats the sender's key to a member is dropped there, and only
-  // asks for the key (lib/group.ts, §8 repair) - cee's 1:1 with bob may be
-  // seconds old. So one more message, which the repaired key must open.
-  let note = ''
-  try { await until('the script\'s message on bob', () => B.all().includes('<cee> ' + s1), 20_000) }
-  catch {
-    const s1b = 'ponownie ' + Date.now().toString(36)
-    await req({ op: 'send', to: 'zespol', text: s1b, wait: 5000 })
-    await until('the second script message on bob', () => B.all().includes('<cee> ' + s1b), 60_000)
-    note = ' (bob: the first frame beat cee\'s key and was dropped; the repaired key opened the next)'
-  }
-  step('daemon `send zespol`: status "sent", the message on both terminals' + note)
+  // cee's 1:1 with bob may be seconds old, so this frame can beat cee's key to
+  // bob; it is held there and opened when the key lands (PROTOCOL.md §8.4).
+  await until('the script\'s message on ala and bob', () => A.all().includes('<cee> ' + s1) && B.all().includes('<cee> ' + s1))
+  step('daemon `send zespol`: status "sent", the message on both terminals')
 
   A.type('/kick bob\r')
   await until('ala says bob was removed', () => A.all().includes('usunięto bob'))

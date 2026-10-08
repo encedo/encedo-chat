@@ -128,8 +128,8 @@ exported from the app cannot be used here. Today it is a developer tool.
   logged in lib/core.ts instead of rejecting unhandled, which in Node ended
   the process. Proved live by `net/cli-group-admin-test.ts` (two terminals +
   a script behind the daemon: add, script send, kick locks bob out, rename).
-  Known, shared with the app: a frame that beats its sender's key is dropped,
-  not held (lib/group.ts asks for the key; the next frame opens).
+  And in the engine, for both clients: a frame that beats its sender's key is
+  now held and opened when the key lands (PROTOCOL.md §8.4), not dropped.
 - **HEM**: sign-in never creates an identity (`onchato hem new <name>` does),
   and several identities on one device are offered as a numbered list.
 

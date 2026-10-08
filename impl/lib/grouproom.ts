@@ -150,7 +150,11 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
     // null = our own echo, an unknown sender, a forged/tampered MAC, a replay, or
     // no sender key yet — all normal enough not to surface, but a persistent drop
     // is how a distribution gap looks, so trace it under debug.
-    if (!opened) { log(`dropped a ${data.length} B frame (not ours / bad MAC / no sender key)`); return }
+    if (!opened) { log(`dropped a ${data.length} B frame (not ours / bad MAC / no sender key - held)`); return }
+    deliver(opened)
+  }
+  const deliver = (opened: { from: string; pt: Uint8Array }) => {
+    if (stopped) return
     const env = decodeEnvelope(opened.pt)
     if (!env) return
     if (env.t === 'msg') opts.onMessage?.(opened.from, env as MsgEnv)
@@ -163,6 +167,9 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
   // direction and looks perfectly healthy in the other, so nothing else in the
   // system would ever notice. The session raises this only for frames that
   // already proved our MAC, so the peer is a member and the ask is warranted.
+  // A frame that beat its sender's key is held by the session and opened here
+  // once the key arrives.
+  session.onHeldOpened = deliver
   const lastAsk = new Map<string, number>()
   session.onNeedSenderKey = (memberPub: string) => {
     if (stopped) return
@@ -234,6 +241,7 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
       // The session outlives the room (the manager owns it), so hand it back
       // without our handler rather than leaving a stopped room reachable.
       if (session.onNeedSenderKey) session.onNeedSenderKey = undefined
+      if (session.onHeldOpened === deliver) session.onHeldOpened = undefined
       for (const b of pending) clearTimeout(b)
       stopKa()
       clearInterval(rotTimer)

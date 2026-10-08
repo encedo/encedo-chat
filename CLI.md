@@ -562,9 +562,6 @@ Na serwerze lepszy jest HEM: klucz nie opuszcza urządzenia, a kradzież pliku n
   pukanie nie ma dokąd dojść.
 - **Pliki żyją ok. 5 minut** w magazynie — kto ich nie pobierze w tym czasie, prosi
   o ponowne wysłanie.
-- **Wiadomość wysłana w pierwszych sekundach po dołączeniu** może nie dojść do kogoś,
-  z kim rozmowa 1:1 dopiero się zestawia: ramka wyprzedza klucz, odbiorca ją odrzuca
-  i prosi o klucz. Następne wiadomości już dochodzą. Tak samo jest w aplikacji.
 - **Jeszcze nie ma**: przewijania historii okna (PgUp), wskaźnika pisania, połączenia
   bezpośredniego (WebRTC) — w terminalu wszystko idzie przez węzły. Kolejność w [CLI-PLAN.md](CLI-PLAN.md).
 

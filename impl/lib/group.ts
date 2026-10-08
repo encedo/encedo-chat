@@ -55,6 +55,9 @@ export interface Member { pub: string; kid?: string }
 export async function groupIdFromGK(gkPub: Uint8Array): Promise<Uint8Array> { return (await sha256(gkPub)).slice(0, 16) }
 export async function senderIdOf(pubB64: string): Promise<Uint8Array> { return (await sha256(unb64(pubB64))).slice(0, 8) }
 
+/** Frames held per sender while their key is on its way, and for how long. */
+const HOLD_MAX = 32
+const HOLD_MS = 120_000
 const epochBytes = (epoch: number) => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, epoch, false); return b }
 const macInfo = (gid: Uint8Array, epoch: number) => concat(gid, epochBytes(epoch))
 
@@ -136,6 +139,20 @@ export class GroupSession {
    * point our 1:1 traffic wherever they like.
    */
   onNeedSenderKey?: (memberPub: string) => void
+  /**
+   * A frame held for want of its sender's key opened once the key arrived (see
+   * `held`). Set by the room, which dispatches it like any received frame.
+   */
+  onHeldOpened?: (r: { from: string; pt: Uint8Array }) => void
+  /**
+   * Frames that proved our MAC while we held no key for their sender. A key and
+   * the first frames under it travel separately - the key over a 1:1 that may be
+   * seconds old, the frames on the group topic - so the frames routinely win,
+   * and dropping them lost a newcomer's first words for good. Only frames that
+   * already verified are held (a stranger cannot fill this), per sender, bounded
+   * in count and age; the next `setSenderKey` for that sender opens them.
+   */
+  private held = new Map<string, { frame: Uint8Array; at: number }[]>()
   private id: GroupId
   private groupSecret: Uint8Array
   private params: RvParams
@@ -219,8 +236,19 @@ export class GroupSession {
     if (memberPub === this.id.pub) return
     plog('§8', `sender key seeded for a member: chain=${val(chainKey)} at ctr=${ctr} (gid=${val(this.gid)} epoch=${this.epoch})`)
     this.receivers.set(memberPub, SenderReceiver.from(chainKey, ctr, this.receiverOpts))
+    const q = this.held.get(memberPub)
+    if (q) {
+      this.held.delete(memberPub)
+      void (async () => {
+        const t = Date.now()
+        // A frame from before `ctr` stays unreadable (the key was handed over past it): null, dropped.
+        for (const x of q) if (t - x.at < HOLD_MS) { const r = await this.receive(x.frame); if (r) this.onHeldOpened?.(r) }
+      })()
+    }
   }
   hasSenderKey(memberPub: string): boolean { return this.receivers.has(memberPub) }
+  /** How many frames from this member wait for its key (diagnostics, tests). */
+  heldFor(memberPub: string): number { return this.held.get(memberPub)?.length ?? 0 }
 
   /** Full chain state for persistence (§10): my send chain + every receiving
    *  chain. Raw bytes — the manager serializes. Skipped keys are dropped. */
@@ -290,7 +318,11 @@ export class GroupSession {
     if (!(await verify(await this.macKeyFor(sender.pub), headerBytes, ct, mine))) return null // forged / tampered
     const recv = this.receivers.get(sender.pub)
     if (!recv) {
-      plog('§8', `group recv: MAC verified for sender_id=${val(h.senderId)} but no sender key held — asking for one`)
+      plog('§8', `group recv: MAC verified for sender_id=${val(h.senderId)} but no sender key held — holding the frame, asking for one`)
+      const t = Date.now()
+      const q = (this.held.get(sender.pub) ?? []).filter((x) => t - x.at < HOLD_MS).slice(-(HOLD_MAX - 1))
+      q.push({ frame: frame.slice(), at: t })
+      this.held.set(sender.pub, q)
       this.onNeedSenderKey?.(sender.pub); return null // distribution has not reached us — ask
     }
     const pt = await recv.open(h.ctr, headerBytes, ct)

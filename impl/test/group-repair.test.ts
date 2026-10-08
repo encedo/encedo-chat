@@ -16,6 +16,7 @@ import { generateX25519 } from '../lib/x25519.ts'
 import { b64, unb64, randomBytes } from '../lib/wc.ts'
 import { GroupManager, softwareGk, type GroupId, type Member } from '../lib/group.ts'
 import { joinGroup, type GroupRoom } from '../lib/grouproom.ts'
+import { envMsg, encodeEnvelope } from '../lib/envelope.ts'
 
 const P = { networkId: 'grepair', dateUTC: '2026-08-09' }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -193,4 +194,39 @@ test('the request is never provoked by anyone who is not an authenticated member
   await sleep(200) // absence has no condition to wait for
   assert.deepEqual(peers[2].asked, [], 'a frame that fails our MAC asks for nothing')
   assert.equal(peers[2].recv.length, 0)
+})
+
+test('frames that beat their sender key are held, and open when the key arrives', async () => {
+  // The live race (net/cli-group-admin-test): the key rides a 1:1 that may be
+  // seconds old, the frames ride the topic, and the frames win. The key built
+  // BEFORE the sends (ctr 0) is the one in flight in that race.
+  const { gid, peers } = await makeGroup(3, [[1, 2]])
+  const early = (await peers[1].mgr.skdFor(gid, peers[2].id.pub))!
+  await peers[1].room!.sendText('pierwsza')
+  await peers[1].room!.sendText('druga')
+  await until('both asked about and delivered elsewhere', () => peers[2].asked.length > 0 && peers[0].recv.length === 2)
+  assert.equal(peers[2].recv.length, 0, 'nothing readable yet')
+  await peers[2].mgr.applySkd(peers[1].id.pub, early)
+  await until('the held frames to open', () => peers[2].recv.length === 2)
+  assert.deepEqual(peers[2].recv.map((r) => r.body), ['pierwsza', 'druga'], 'both, in the order they came')
+})
+
+test('a frame that fails our MAC is never held - only the genuine one waits and opens', async () => {
+  const { gid, topic, peers } = await makeGroup(3, [[1, 2]])
+  const early = (await peers[1].mgr.skdFor(gid, peers[2].id.pub))!
+  // Sealed straight on peers[1]'s session, so its room sends nothing itself:
+  // one genuine frame, and one whose MAC to peers[2] is corrupted.
+  const enc = (t: string) => encodeEnvelope(envMsg(1, t))
+  const genuine = await peers[1].mgr.session(gid)!.send(enc('prawdziwa'))
+  const forged = (await peers[1].mgr.session(gid)!.send(enc('podrobiona'))).slice()
+  forged[forged.length - 40] ^= 0xff
+  await peers[0].node.services.pubsub.publish(topic, genuine)
+  await peers[0].node.services.pubsub.publish(topic, forged)
+  await until('the genuine frame to ask for the key', () => peers[2].asked.length > 0)
+  await sleep(150) // let the forged copy land too
+  assert.equal(peers[2].mgr.session(gid)!.heldFor(peers[1].id.pub), 1, 'only the genuine frame waits; the forged one was dropped at the MAC')
+  await peers[2].mgr.applySkd(peers[1].id.pub, early)
+  await until('the genuine frame to open', () => peers[2].recv.length > 0)
+  await sleep(200) // and the forged one must not follow: absence has no condition
+  assert.deepEqual(peers[2].recv.map((r) => r.body), ['prawdziwa'], 'the forged frame was never held')
 })
