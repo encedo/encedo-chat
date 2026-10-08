@@ -5112,6 +5112,51 @@ function insertByTime(box: HTMLElement, row: HTMLElement, ts: number) {
   box.insertBefore(row, at)
 }
 
+/**
+ * Consecutive messages from one person read as one block, the way Signal shows
+ * them (the user's call, 2026-10-08): 2 px apart instead of 12, the corners on
+ * the sender's side tightened so the stack is one shape, the tail only on the
+ * last, the time and delivery mark only under the last - unless a message in
+ * the middle is undelivered, which must stay visible (CSS keeps its meta). In a
+ * group the sender's name heads the block only.
+ *
+ * A block is: the same side and the same author, at most GROUP_GAP_MS apart,
+ * the same local day, nothing in between (a system line breaks it). Rows reach
+ * the transcript from a dozen places - messages, files, albums, pins, the
+ * replay of a room, an out-of-order insert - so the classes are not set by any
+ * of them: one observer recomputes them whenever the list changes. A pass is
+ * one walk over the rows; a transcript is hundreds of rows, not millions.
+ */
+const GROUP_GAP_MS = 3 * 60_000
+const GROUP_CLS = ['cont', 'g-first', 'g-mid', 'g-last']
+function regroupTranscript(box: HTMLElement) {
+  const rows = [...box.children] as HTMLElement[]
+  const key = (r: HTMLElement) => r.classList.contains('mrow') && r.dataset.ts
+    ? `${r.classList.contains('out') ? 'out' : 'in'}|${r.dataset.au ?? ''}|${r.querySelector('.b-who')?.textContent ?? ''}` : null
+  const joins = rows.map((r, i) => {
+    if (i === 0) return false
+    const a = rows[i - 1], ka = key(a), kb = key(r)
+    if (!ka || ka !== kb) return false
+    const ta = Number(a.dataset.ts), tb = Number(r.dataset.ts)
+    return Math.abs(tb - ta) <= GROUP_GAP_MS && new Date(ta).toDateString() === new Date(tb).toDateString()
+  })
+  rows.forEach((r, i) => {
+    const prev = joins[i], next = joins[i + 1] ?? false
+    const want = !prev && !next ? null : !prev ? 'g-first' : next ? 'g-mid' : 'g-last'
+    for (const c of GROUP_CLS) if (c !== want && !(c === 'cont' && prev)) r.classList.remove(c)
+    if (want) r.classList.add(want)
+    if (prev) r.classList.add('cont')
+    // The time leaves the first and middle bubbles; it stays one hover away.
+    const bub = r.querySelector(':scope > .bubble') as HTMLElement | null
+    const meta = bub?.querySelector(':scope > .b-meta') as HTMLElement | null
+    if (bub && meta) {
+      if (want === 'g-first' || want === 'g-mid') bub.title = `${meta.textContent?.trim() ?? ''} · ${meta.title}`.replace(/^ · /, '')
+      else if (bub.title) bub.removeAttribute('title')
+    }
+  })
+}
+new MutationObserver(() => regroupTranscript($('messages'))).observe($('messages'), { childList: true })
+
 /** A line the app says to itself in the transcript — not somebody's message. */
 function appendSys(text: string, sid?: string) {
   const box = $('messages')

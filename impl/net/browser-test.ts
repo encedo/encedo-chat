@@ -1652,6 +1652,38 @@ async function main() {
       return !!m && !m.classList.contains('warn') && !m.textContent.includes('wysyłam poprawkę')`, 25_000)
     step('the sender got the acknowledgement for the correction itself')
 
+    scenario('consecutive messages from one person read as one block')
+    // Signal's shape (the user's call, 2026-10-08): 2 px between one person's
+    // messages instead of 12, the time only under the last - unless a bubble has
+    // more to say. The corrected message above is A's too and just as recent, so
+    // it joins this block, and its "edytowano" must survive the hidden meta.
+    const burst = [1, 2, 3].map((i) => `seria${i}-${Date.now().toString(36)}`)
+    for (const t of burst) await send(A, t)
+    await B.waitFor('the burst reached B', seen(burst[2]), 25_000)
+    const blk = await B.eval<any>(`
+      const rows = [...document.querySelectorAll('#messages .mrow')];
+      const find = (t) => rows.find((r) => r.textContent.includes(t));
+      const rs = ${JSON.stringify(burst)}.map(find);
+      if (rs.some((r) => !r)) return { found: false };
+      const box = (r) => r.querySelector('.bubble').getBoundingClientRect();
+      const metaShown = (r) => getComputedStyle(r.querySelector('.bubble > .b-meta')).display !== 'none';
+      const edited = find(${JSON.stringify(fixed)});
+      return { found: true,
+        cls: rs.map((r) => ['g-first', 'g-mid', 'g-last'].filter((c) => r.classList.contains(c)).join('')),
+        gaps: [box(rs[1]).top - box(rs[0]).bottom, box(rs[2]).top - box(rs[1]).bottom],
+        meta: rs.map(metaShown),
+        editedInBlock: !!edited && edited.classList.contains('g-first') || !!edited && edited.classList.contains('g-mid'),
+        editedMeta: !!edited && metaShown(edited),
+        title: rs[1].querySelector('.bubble').title };`)
+    if (!blk.found) throw new Error('the burst was not rendered on B')
+    if (blk.cls[2] !== 'g-last' || !blk.cls[0] || !blk.cls[1]) throw new Error(`the burst is not one block: ${JSON.stringify(blk)}`)
+    if (blk.gaps.some((g: number) => g < 0 || g > 4)) throw new Error(`the bubbles are not 2 px apart: ${JSON.stringify(blk)}`)
+    if (blk.meta[0] || blk.meta[1] || !blk.meta[2]) throw new Error(`the time is not only under the last: ${JSON.stringify(blk)}`)
+    if (!blk.title) throw new Error(`a bubble that lost its time has no tooltip with it: ${JSON.stringify(blk)}`)
+    step(`three messages from A are one block on B: ${blk.gaps.map((g: number) => g.toFixed(0)).join('/')} px apart, the time under the last only`)
+    if (blk.editedInBlock && !blk.editedMeta) throw new Error('the corrected message joined the block and lost its "edytowano"')
+    step(blk.editedInBlock ? 'the corrected message joined the block and still says "edytowano"' : 'the corrected message stands apart (older than the window)')
+
     // ---- notifications ------------------------------------------------------
     // The product is synchronous: a window that is not on screen is a
     // conversation that quietly does not happen. What is asserted here is the
