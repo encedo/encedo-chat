@@ -47,6 +47,18 @@ const KEEPALIVE = new Uint8Array([T_GKEEPALIVE])
  * cost ONE request, not one per frame.
  */
 const ASK_COOLDOWN_MS = 30_000
+/**
+ * A room is new at every epoch - a new topic - and a member's subscription to
+ * it reaches the relay some time after it is made locally (a light client's
+ * pick, a mesh graft). A broadcast in that window finds the member not there
+ * yet and, with no acks in a group, is simply gone (the CLI's live test: a
+ * message right after /add, one run in ten). So for FRESH_MS after joining,
+ * every frame we send goes again at REPEAT_MS. A member who already has it
+ * drops the copy as a replay (its chain is past that counter); one who missed
+ * it opens the copy as the original. Same bytes, nothing new on the wire.
+ */
+const FRESH_MS = 30_000
+const REPEAT_MS = [2_000, 6_000]
 
 export interface GroupRoomOpts {
   onMessage?: (from: string, env: MsgEnv) => void
@@ -200,14 +212,23 @@ export async function joinGroup(node: any, session: GroupSession, opts: GroupRoo
   // again, THIS is the first suspect (drop slowable here before digging).
   const stopKa = alignedTimer(() => { if (!stopped) keepalive() }, RADIO_TICK_MS, { slowable: true })
 
+  const joinedAt = nowMs()
   const broadcast = async (bytes: Uint8Array) => {
     const frame = await session.send(bytes)
+    const wire = wrap(me, frame)
     try {
-      const r = await node.services.pubsub.publish(primary, wrap(me, frame))
+      const r = await node.services.pubsub.publish(primary, wire)
       log(`published ${frame.length} B -> ${primary.slice(0, 8)}... (recipients: ${r?.recipients?.length ?? '?'})`)
     } catch (e: any) {
       log(`publish FAILED on ${primary.slice(0, 8)}...: ${e?.message ?? e}`)
       throw e
+    }
+    if (nowMs() - joinedAt < FRESH_MS) {
+      const topic = primary
+      for (const ms of REPEAT_MS) pending.push(unref(setTimeout(() => {
+        if (stopped) return
+        node.services.pubsub.publish(topic, wire).catch(() => {})
+      }, ms)))
     }
   }
 

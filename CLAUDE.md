@@ -1133,6 +1133,9 @@ Three things fix it, and the third is the one that is easy to get wrong:
   when the key lands — the key and the first frames race on separate paths and the frames
   usually win, so dropping them lost a newcomer's first words. Only MAC-verified frames
   are held, and each passes `receive` again on release (`heldFor` lets a test see it);
+  and for the first 30 s on a new topic (every epoch is one) `grouproom` publishes each
+  frame again at +2 s and +6 s, because a member's subscription reaches the relay late and
+  a group has no acks — the copy is a replay where the frame already landed;
   the app sends `group-skd-req` over the 1:1, and the responder **re-checks the roster** —
   the ratchet proves who is asking, not that they are still a member, and a removed member
   still holds our contact and the old `group_id`.

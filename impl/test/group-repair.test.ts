@@ -53,8 +53,10 @@ function hub() {
   return {
     node(id: string) {
       const listeners: Array<(evt: any) => void> = []
-      nodes.set(id, (topic, data, from) => { for (const h of [...listeners]) h({ detail: { topic, data, from: { toString: () => from } } }) })
+      const st = { deaf: false } // a subscription the relay does not know about yet
+      nodes.set(id, (topic, data, from) => { if (st.deaf) return; for (const h of [...listeners]) h({ detail: { topic, data, from: { toString: () => from } } }) })
       return {
+        st,
         peerId: { toString: () => id },
         services: { pubsub: {
           addEventListener: (_e: string, h: (evt: any) => void) => listeners.push(h),
@@ -229,4 +231,18 @@ test('a frame that fails our MAC is never held - only the genuine one waits and 
   await until('the genuine frame to open', () => peers[2].recv.length > 0)
   await sleep(200) // and the forged one must not follow: absence has no condition
   assert.deepEqual(peers[2].recv.map((r) => r.body), ['prawdziwa'], 'the forged frame was never held')
+})
+
+test('a frame sent while a member is not yet on the new topic reaches it once it is', async () => {
+  // A new epoch is a new topic, and a member's subscription reaches the relay a
+  // moment after it is made - a broadcast in that moment used to be gone.
+  const { peers } = await makeGroup(3)
+  peers[2].node.st.deaf = true
+  setTimeout(() => { peers[2].node.st.deaf = false }, 1_000)
+  await peers[1].room!.sendText('tuz po zmianie')
+  await until('the repeat to reach the late member', () => peers[2].recv.length > 0, 8_000)
+  await sleep(6_500) // every repeat has gone out by now
+  assert.deepEqual(peers[2].recv.map((r) => r.body), ['tuz po zmianie'], 'the late member got it, once')
+  assert.deepEqual(peers[0].recv.map((r) => r.body), ['tuz po zmianie'], 'the copies were dropped as replays where it had arrived')
+  for (const p of peers) p.room!.stop()
 })

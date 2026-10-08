@@ -78,10 +78,9 @@ try {
   await until('ala says cee was added', () => A.all().includes('dodano cee'))
   await until('cee\'s hub joined', () => ev.some((e) => e.t === 'group' && e.name === 'zespol'))
   await until('bob saw the roster change', () => /zespol”: zmiana \(.*skład.*\) - 3 osób/.test(B.all()))
-  // A new epoch is a new topic: give the members' subscriptions a moment to
-  // reach the relay. A broadcast in the very same second can find a member not
-  // yet on it there, and a group has no acks to re-send it (known, reported).
-  await sleep(3000)
+  // Sent at once: a new epoch is a new topic, and the members' subscriptions
+  // may not be at the relay yet - the room repeats what it sends in its first
+  // seconds (lib/grouproom.ts FRESH_MS).
   const m1 = 'po dodaniu ' + Date.now().toString(36)
   A.type(m1 + '\r')
   await until('ala\'s message on bob and cee', () => B.all().includes('<ala> ' + m1) && gotC(m1, 'zespol'))

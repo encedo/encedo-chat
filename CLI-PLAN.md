@@ -129,7 +129,9 @@ exported from the app cannot be used here. Today it is a developer tool.
   the process. Proved live by `net/cli-group-admin-test.ts` (two terminals +
   a script behind the daemon: add, script send, kick locks bob out, rename).
   And in the engine, for both clients: a frame that beats its sender's key is
-  now held and opened when the key lands (PROTOCOL.md §8.4), not dropped.
+  now held and opened when the key lands (PROTOCOL.md §8.4), not dropped. And a
+  room repeats each frame it sends in its first 30 s (+2/+6 s): a message right
+  after /add used to miss a member whose subscription was not at the relay yet.
 - **HEM**: sign-in never creates an identity (`onchato hem new <name>` does),
   and several identities on one device are offered as a numbered list.
 
