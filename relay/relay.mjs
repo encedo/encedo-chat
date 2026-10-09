@@ -58,7 +58,7 @@ import { pushable } from 'it-pushable'
 import { PROTOCOL as PICK_PROTOCOL, T as PICK_T, decodeFrame as decodePickFrame, encodeDeliver, encodeRefused, encodePicked, encodeAck, makePicks } from './pick.mjs'
 import { redisSink } from './redis.mjs'
 import { makeMetrics, metricsHandler, SAMPLE_MS, readCommit } from './metrics.mjs'
-import { createServer as createHttpServer } from 'http'
+import { createServer as createHttpServer, Server as HttpServer } from 'http'
 import { appendFile } from 'fs'
 
 const args = process.argv.slice(2)
@@ -77,6 +77,12 @@ const getPeers = () => {
 
 const PASS  = get('--pass', 'default-relay-pass')
 const PORT  = parseInt(get('--port', '9001'))
+// The address PORT listens on. Only nginx reaches it, over loopback, so that is
+// the default (since 2026-10-09): ufw closing 9001 used to be the only thing
+// between the world and a plain-WS door around every limit nginx enforces, and
+// now it is the second. The inter-relay mesh is NOT on this port (--v6-port).
+// `--bind 0.0.0.0` restores the old listen for a setup without a local proxy.
+const BIND  = get('--bind', '127.0.0.1')
 const HOST  = get('--host', null)   // e.g. onchato.com — used to print the production WSS multiaddr
 const PEERS = getPeers()
 // Which peers are the OTHER RELAYS, and whether their subscriptions count.
@@ -156,14 +162,24 @@ const peerId  = peerIdFromPrivateKey(privKey)
 
 console.log(`\nPass: "${PASS}" -> PeerId: ${peerId.toString()}`)
 
+// it-ws, under @libp2p/websockets, calls server.listen(port) and drops the host
+// of the listen multiaddr, so `/ip4/127.0.0.1/...` alone still listened on every
+// address (found 2026-10-09: the banner said 127.0.0.1, `ss` said *:9001). For
+// the libp2p start only, a listen() given nothing but PORT gets BIND as well;
+// every other call - the metrics server, the IPv6 mesh port - is untouched.
+const plainListen = HttpServer.prototype.listen
+HttpServer.prototype.listen = function (...args) {
+  if (args[0] === PORT && (args.length === 1 || typeof args[1] === 'function')) return plainListen.call(this, PORT, BIND, ...args.slice(1))
+  return plainListen.apply(this, args)
+}
 const relay = await createLibp2p({
   privateKey: privKey,
-  // IPv4 on PORT for the nginx path (0.0.0.0 — unchanged, nginx->127.0.0.1:PORT).
+  // IPv4 on PORT for the nginx path (BIND, loopback by default: nginx->127.0.0.1:PORT).
   // Optionally ALSO listen on IPv6 on a SEPARATE V6PORT for inter-relay peering
   // over a provider's private network — never on PORT itself (`::` + 0.0.0.0 on
   // one port collides when bindv6only=0). nginx is NOT on this path: a peer dials
   // the raw ws port directly (/ip6/<addr>/tcp/<V6PORT>/ws), bypassing nginx/443.
-  addresses: { listen: [`/ip4/0.0.0.0/tcp/${PORT}/ws`, ...(V6PORT ? [`/ip6/${V6HOST}/tcp/${V6PORT}/ws`] : [])] },
+  addresses: { listen: [`/ip4/${BIND}/tcp/${PORT}/ws`, ...(V6PORT ? [`/ip6/${V6HOST}/tcp/${V6PORT}/ws`] : [])] },
   // Keep any ws/wss multiaddr INCLUDING the `/http-path/%2Frelay/` form the
   // production nodes advertise (WSS via nginx). The default `all` filter rejects
   // http-path when DIALING, so `--peers /dns4/bs1.../wss/http-path/...` failed with
@@ -219,6 +235,7 @@ const relay = await createLibp2p({
     })
   }
 })
+HttpServer.prototype.listen = plainListen
 
 // Soft topic cap. MAX_TOPICS bounds CONCURRENT topics (a DoS guard); abandoned
 // topics are EVICTED, so the cap counts LIVE rooms, not every room ever seen.
@@ -480,7 +497,7 @@ if (PEERS.length > 0) {
   }
 }
 
-console.log(`\n[ok] Relay uruchomiony na porcie ${PORT}`)
+console.log(`\n[ok] Relay uruchomiony na porcie ${PORT} (${BIND})`)
 // Print the topic budget: it is the setting that decides whether a room forms
 // at all, and after a deploy it is the one line that proves which build is up.
 console.log(`Tematy: limit ${MAX_TOPICS} równoczesnych, eviction po ${IDLE_TTL / 1000}s ciszy (sweep ${SWEEP_MS / 1000}s)`)

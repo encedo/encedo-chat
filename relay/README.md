@@ -84,7 +84,7 @@ running process's memory. Startup prints exactly four things worth reading:
 
 ```
 Pass: "bs1.onchato.com" -> PeerId: 12D3KooWP6Sp...cDmp   <- unchanged, or every client breaks
-[ok] Relay uruchomiony na porcie 9001
+[ok] Relay uruchomiony na porcie 9001 (127.0.0.1)
 Połączenia: limit 520                                    <- proves --max-connections took
 Tematy: limit 250 równoczesnych, eviction po 120s ciszy (sweep 30s)
 ```
@@ -156,9 +156,10 @@ Order of work, and the order matters — the commands are in [`DEPLOY.md`](DEPLO
 
 ## nginx and the firewall
 
-The relay listens on `0.0.0.0:9001` — plain WS, not bound to loopback — so the
-**firewall is what keeps it private**: only nginx, over loopback (which ufw
-does not filter), may reach it. Since 2026-09-03 every node allows exactly
+The relay listens on `127.0.0.1:9001` — plain WS on loopback, since 2026-10-09
+(`--bind`, default `127.0.0.1`; it was `0.0.0.0` before) — and the **firewall
+keeps it closed as well**: only nginx, over loopback, may reach it. Two locks
+where there used to be one. Since 2026-09-03 every node allows exactly
 22/80/443 in; 9001 had been open to the world on bs1 and bs2 until then
 (nothing was using it, but an open 9001 is a plain-WS door around every limit
 below), and bs3 was born with it closed. The

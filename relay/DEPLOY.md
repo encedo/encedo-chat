@@ -78,9 +78,10 @@ sudo ufw --force enable
 sudo ufw status verbose
 ```
 
-Four ports and nothing else. The relay itself listens on `0.0.0.0:9001`, but
-it is reached only by nginx over loopback, and loopback is not filtered by
-ufw — so **9001 stays closed** and clients notice nothing. 3478/udp is the one
+Four ports and nothing else. The relay itself listens on `127.0.0.1:9001`
+(`--bind`, loopback by default since 2026-10-09) and is reached only by nginx
+over loopback — and ufw keeps **9001 closed** as a second lock, so clients
+notice nothing. 3478/udp is the one
 exception to "everything goes through nginx": nginx speaks TCP and STUN is UDP,
 so that service faces the world directly (§4b). Do not open it: an
 open 9001 is a plain-WS door around every limit nginx enforces. The one
@@ -174,7 +175,7 @@ Pass: "bs4.onchato.com" -> PeerId: 12D3KooWNanm...CGKo   <- MUST equal the PeerI
   [ok] /ip6/2a03:ec41:0:9::cf/tcp/9002/ws/p2p/12D3KooWP6Sp...     <- mesh to bs1 is up
   [ok] /ip6/2a01:7e0:0:164::16c/tcp/9002/ws/p2p/12D3KooWJJJt...   <- mesh to bs2 is up
   [ok] /ip6/2a03:b0c0:2:f0:0:1:ed56:d001/tcp/9002/ws/p2p/...      <- mesh to bs3 is up
-[ok] Relay uruchomiony na porcie 9001
+[ok] Relay uruchomiony na porcie 9001 (127.0.0.1)
 Tematy: limit 1600 równoczesnych, eviction po 120s ciszy (sweep 30s)
 ```
 
