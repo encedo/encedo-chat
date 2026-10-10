@@ -269,9 +269,22 @@ The site is a template in the repo, rendered with the hostname; the per-IP
 limit zones it uses are a second file that belongs in `conf.d` (they are
 http-level and cannot live in a site):
 
+The site also includes the **sanctions geoblock** (`infra/geoip/README.md`):
+its `geo` block, snippet, 451 page and list must be in place BEFORE `nginx -t`,
+because the site includes them.
+
 ```bash
 cd /opt/github/encedo-chat
 sudo cp infra/nginx/relay-limits.conf /etc/nginx/conf.d/relay-limits.conf
+# geoblock: files, the first list, the weekly timer (bs-setup.sh step 7b does the same)
+sudo install -d -m 755 /var/lib/onchato/geoip /var/www/onchato-geo
+sudo install -m 644 infra/geoip/unavailable.html /var/www/onchato-geo/__onchato_unavailable.html
+[ -f /etc/nginx/onchato-geo-blocked.conf ] || echo '# empty until geoip-update runs' | sudo tee /etc/nginx/onchato-geo-blocked.conf >/dev/null
+sudo install -m 644 infra/nginx/onchato-geo.conf /etc/nginx/conf.d/onchato-geo.conf
+sudo install -D -m 644 infra/nginx/onchato-geoblock.conf /etc/nginx/snippets/onchato-geoblock.conf
+sudo install -m 644 infra/geoip/onchato-geoip.service infra/geoip/onchato-geoip.timer /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now onchato-geoip.timer
+sudo node infra/geoip/geoip-update.mjs && sudo systemctl restart onchato-stun
 sed "s/__HOST__/$HOST/g" infra/nginx/relay-node.conf | sudo tee /etc/nginx/sites-available/$HOST >/dev/null
 sudo ln -s /etc/nginx/sites-available/$HOST /etc/nginx/sites-enabled/$HOST
 sudo nginx -t && sudo systemctl reload nginx

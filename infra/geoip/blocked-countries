@@ -1,0 +1,10 @@
+# Countries where onchato is NOT provided (sanctions policy, RKV sp. z o.o., 2026-10-10).
+# ISO 3166-1 alpha-2, one per line. The ONE place this list lives: geoip-update.mjs
+# builds the nginx and STUN lists from it. Change it here, then run geoip-update on
+# every node (or wait for the monthly timer).
+KP  # North Korea
+IR  # Iran
+CU  # Cuba
+RU  # Russia
+BY  # Belarus
+SY  # Syria

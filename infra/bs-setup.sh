@@ -200,6 +200,21 @@ if [ "$MODE" = check ]; then
   [ -z "$(ls /etc/nginx/sites-enabled/ 2>/dev/null | grep -E '\.(bak|orig|old)|~$')" ] && ok "no backup files in sites-enabled" \
     || bad "backup file in sites-enabled -- nginx LOADS it"
 
+  # GeoIP (GEOBLOKADA.md): list present, fresh, wired into nginx and STUN.
+  GL=/var/lib/onchato/geoip/blocked-cidrs.txt
+  if [ -f "$GL" ]; then
+    n=$(grep -vc '^#' "$GL"); age=$(( ( $(date +%s) - $(stat -c %Y "$GL") ) / 86400 ))
+    [ "$n" -gt 1000 ] && ok "geoip list: $n CIDRs" || bad "geoip list has only $n CIDRs"
+    [ "$age" -le 45 ] && ok "geoip list $age day(s) old" || warn "geoip list $age days old -- is onchato-geoip.timer running?"
+  else bad "no geoip list ($GL) -- run infra/geoip/geoip-update.mjs"; fi
+  systemctl is-enabled --quiet onchato-geoip.timer 2>/dev/null && ok "geoip timer enabled" || bad "geoip timer not enabled"
+  [ -f /etc/nginx/conf.d/onchato-geo.conf ] && [ -f /etc/nginx/snippets/onchato-geoblock.conf ] && ok "geoip nginx files installed" || bad "geoip nginx files missing"
+  site=$(grep -l "server_name $HOST;" /etc/nginx/sites-enabled/* 2>/dev/null | head -1)
+  [ -n "$site" ] && grep -q 'onchato-geoblock' "$site" && ok "geoblock included in $site" || bad "the $HOST site does not include snippets/onchato-geoblock.conf"
+  sstart=$(systemctl show onchato-stun -p ActiveEnterTimestamp --value 2>/dev/null)
+  { $SUDO journalctl -u onchato-stun --since "$sstart" --no-pager 2>/dev/null || true; } | grep -q 'GeoIP: [0-9]* ranges' \
+    && ok "STUN loaded the geoip list" || warn "STUN has not reported loading the geoip list"
+
   # The banner is printed once, at start: read from the start of THIS run.
   since=$(systemctl show onchato-relay -p ActiveEnterTimestamp --value 2>/dev/null)
   lim=$({ $SUDO journalctl -u onchato-relay --since "$since" --no-pager 2>/dev/null || true; } | { grep -o 'Tematy: limit [0-9]*' || true; } | tail -1)
@@ -317,6 +332,26 @@ if [ -n "$PUSH_URL" ]; then
 else
   warn "no --push-url: health timer installed but NOT enabled (infra/health/README.md)"
 fi
+
+# -- 7b. GeoIP: the sanctions block list (GEOBLOKADA.md, infra/geoip/) -------------------
+# Before step 8: the node's nginx site includes snippets/onchato-geoblock.conf,
+# and the geo block includes the list file, so both must exist before nginx -t.
+say "== 7b. geoip"
+run "$SUDO install -d -m 755 /var/lib/onchato/geoip /var/www/onchato-geo"
+run "$SUDO install -m 644 $REPO/infra/geoip/unavailable.html /var/www/onchato-geo/__onchato_unavailable.html"
+if [ "$NO_CERT" != 1 ]; then
+  run "[ -f /etc/nginx/onchato-geo-blocked.conf ] || echo '# empty until geoip-update runs' | $SUDO tee /etc/nginx/onchato-geo-blocked.conf >/dev/null"
+  run "$SUDO install -m 644 $REPO/infra/nginx/onchato-geo.conf /etc/nginx/conf.d/onchato-geo.conf"
+  run "$SUDO install -D -m 644 $REPO/infra/nginx/onchato-geoblock.conf /etc/nginx/snippets/onchato-geoblock.conf"
+fi
+run "$SUDO install -m 644 $REPO/infra/geoip/onchato-geoip.service $REPO/infra/geoip/onchato-geoip.timer /etc/systemd/system/"
+run "$SUDO systemctl daemon-reload && $SUDO systemctl enable -q --now onchato-geoip.timer"
+# The first list now, not at the first timer tick: a node must not go live open.
+if [ "$MODE" = dry ]; then printf '  $ %s
+' "$SUDO node $REPO/infra/geoip/geoip-update.mjs"
+elif $SUDO node "$REPO/infra/geoip/geoip-update.mjs"; then ok "block list built"
+else warn "geoip-update FAILED -- nginx blocks nothing and STUN filters nothing until it succeeds (journalctl -u onchato-geoip)"; fi
+run "$SUDO systemctl restart onchato-stun"   # reads the list at start (and on change after)
 
 # -- 8. certificate + this node's own nginx site ------------------------------------
 if [ "$NO_CERT" = 1 ]; then

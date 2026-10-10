@@ -66,6 +66,8 @@ server {
 server {
     listen 443 ssl;
     server_name onchato.com;
+    # Sanctions geoblock (GEOBLOKADA.md): 451 for the listed countries, every location below.
+    include snippets/onchato-geoblock.conf;
 
     ssl_certificate     /etc/letsencrypt/live/onchato.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/onchato.com/privkey.pem;
@@ -324,6 +326,8 @@ server {
 server {
     listen 443 ssl;
     server_name app.onchato.com;
+    # Sanctions geoblock (GEOBLOKADA.md): 451 for the listed countries, every location below.
+    include snippets/onchato-geoblock.conf;
 
     ssl_certificate     /etc/letsencrypt/live/app.onchato.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/app.onchato.com/privkey.pem;
@@ -381,6 +385,8 @@ server {
 server {
     listen 443 ssl;
     server_name chat.encedo.com;
+    # Sanctions geoblock (GEOBLOKADA.md): 451 for the listed countries, every location below.
+    include snippets/onchato-geoblock.conf;
 
     ssl_certificate     /etc/letsencrypt/live/onchato.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/onchato.com/privkey.pem;
@@ -425,6 +431,8 @@ server {
 server {
     listen 443 ssl;
     server_name bs1.onchato.com;
+    # Sanctions geoblock (GEOBLOKADA.md): 451 for the listed countries, every location below.
+    include snippets/onchato-geoblock.conf;
     ssl_certificate /etc/letsencrypt/live/bs1.onchato.com/fullchain.pem; # managed by Certbot
     ssl_certificate_key /etc/letsencrypt/live/bs1.onchato.com/privkey.pem; # managed by Certbot
     include /etc/letsencrypt/options-ssl-nginx.conf;

@@ -101,3 +101,28 @@ test('the bucket table cannot grow without bound', () => {
   gate.sweep()
   assert.equal(gate.size, 0, 'idle buckets are swept')
 })
+
+test('the country block list: listed addresses get nothing, a missing list filters nothing, a new list is picked up', async () => {
+  const { geoGate } = await import('../../infra/stun/stun.mjs')
+  const { mkdtempSync, writeFileSync, rmSync, utimesSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const dir = mkdtempSync(join(tmpdir(), 'geo-'))
+  const path = join(dir, 'blocked-cidrs.txt')
+  const logs: string[] = []
+  let t = 0
+  const gate = geoGate(path, { everyMs: 1000, log: (m: string) => logs.push(m), now: () => t })
+  assert.equal(gate('5.160.0.1'), false, 'no list yet: nothing is filtered')
+  assert.ok(logs.some((l) => l.includes('not filtering')), 'and the log says so')
+  writeFileSync(path, '# DB-IP\n5.160.0.0/15\n2a02:6b8::/32\n')
+  t += 1000
+  assert.equal(gate('5.160.0.1'), true, 'the list appeared and is read')
+  assert.equal(gate('::ffff:5.161.2.3'), true, 'a v4-mapped address from the v6 socket too')
+  assert.equal(gate('2a02:6b8::1'), true)
+  assert.equal(gate('8.8.8.8'), false, 'an address not on the list is answered')
+  writeFileSync(path, '8.8.8.0/24\n'); utimesSync(path, new Date(), new Date(Date.now() + 5000))
+  t += 1000
+  assert.equal(gate('8.8.8.8'), true, 'a changed list replaces the old one')
+  assert.equal(gate('5.160.0.1'), false)
+  rmSync(dir, { recursive: true, force: true })
+})

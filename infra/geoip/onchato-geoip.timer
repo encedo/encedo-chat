@@ -1,0 +1,13 @@
+# DB-IP publishes monthly; weekly picks a new month up within days, and a missed
+# run (machine off) is caught up at boot (Persistent).
+[Unit]
+Description=onchato GeoIP block list update, weekly
+
+[Timer]
+OnCalendar=weekly
+RandomizedDelaySec=6h
+OnBootSec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

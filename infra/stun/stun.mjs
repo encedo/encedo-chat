@@ -39,11 +39,16 @@
 // Zero dependencies, like the relay and the feedback sink.
 
 import { createSocket } from 'node:dgram'
+import { readFileSync, statSync } from 'node:fs'
+import { makeMatcher } from '../geoip/geoip.mjs'
 
 const PORT = Number(process.env.PORT ?? 3478)
 const HOST = process.env.HOST ?? '0.0.0.0'
 const HOST6 = process.env.HOST6 ?? '::'
 const QUIET = process.env.QUIET === '1'
+// The country block list (GEOBLOKADA.md), built by infra/geoip/geoip-update.mjs.
+// Addresses on it get no answer, like anything else we do not answer.
+const GEO_LIST = process.env.GEO_LIST ?? '/var/lib/onchato/geoip/blocked-cidrs.txt'
 
 const COOKIE = 0x2112a442
 const BINDING_REQUEST = 0x0001
@@ -177,17 +182,47 @@ export function limiter({ perSec = 20, burst = 40, max = 50_000, now = () => Dat
   }
 }
 
+/**
+ * The block list, re-read when the file changes (checked every `everyMs`).
+ * No file means no filtering - said once, loudly, in the log - because STUN
+ * must not stop answering everybody when a node is set up before its list.
+ */
+export function geoGate(path, { everyMs = 60_000, log = console.log, now = () => Date.now() } = {}) {
+  let test = () => false, mtime = -1, checked = -Infinity
+  const load = () => {
+    let m
+    try { m = statSync(path).mtimeMs } catch {
+      if (mtime !== 0) log(`[warn] GeoIP: no list at ${path} - not filtering`)
+      mtime = 0; test = () => false; return
+    }
+    if (m === mtime) return
+    try {
+      const t = makeMatcher(readFileSync(path, 'utf8').split('\n'))
+      test = t; mtime = m
+      log(`[ok] GeoIP: ${t.count} ranges from ${path}`)
+    } catch (e) { log(`[warn] GeoIP: could not read ${path}: ${e?.message ?? e} - keeping the previous list`) }
+  }
+  load()
+  return (address) => {
+    const t = now()
+    if (t - checked >= everyMs) { checked = t; load() }
+    return test(address)
+  }
+}
+
 // ---- the server ------------------------------------------------------------
 
 function serve() {
-  const stats = { served: 0, ignored: 0, limited: 0 }
+  const stats = { served: 0, ignored: 0, limited: 0, geo: 0 }
   const gate = limiter()
+  const blocked = geoGate(GEO_LIST)
 
   const bind = (family, host) => {
     const sock = createSocket({ type: family, ipv6Only: family === 'udp6', reuseAddr: true })
     sock.on('message', (msg, rinfo) => {
       const tid = bindingRequestId(msg)
       if (!tid) { stats.ignored++; return }
+      if (blocked(rinfo.address)) { stats.geo++; return }
       if (!gate.allow(rinfo.address)) { stats.limited++; return }
       const out = bindingResponse(tid, rinfo.address, rinfo.port, rinfo.family)
       if (!out) { stats.ignored++; return }
@@ -209,7 +244,7 @@ function serve() {
 
   const t = setInterval(() => {
     gate.sweep()
-    if (!QUIET) console.log(`served ${stats.served} | ignored ${stats.ignored} | rate-limited ${stats.limited} | sources ${gate.size}`)
+    if (!QUIET) console.log(`served ${stats.served} | ignored ${stats.ignored} | rate-limited ${stats.limited} | geo-blocked ${stats.geo} | sources ${gate.size}`)
   }, 300_000)
   t.unref?.()
 }

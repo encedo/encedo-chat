@@ -1,0 +1,12 @@
+# Refresh the country block list (GEOBLOKADA.md): DB-IP Country Lite ->
+# /etc/nginx/onchato-geo-blocked.conf + /var/lib/onchato/geoip/blocked-cidrs.txt,
+# nginx -t, reload. A failure keeps the previous lists and shows up as a failed
+# unit (journalctl -u onchato-geoip).
+[Unit]
+Description=onchato GeoIP block list update
+Wants=network-online.target
+After=network-online.target nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node /opt/github/encedo-chat/infra/geoip/geoip-update.mjs
