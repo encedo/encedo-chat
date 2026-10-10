@@ -23,6 +23,11 @@ import { Groups, type GroupInfo } from './groups.ts'
 import { mentionsPub, splitByMentions, resolveMention } from '../lib/mentions.ts'
 import { fingerprint } from './fp.ts'
 import type { KV } from '../lib/migrate.ts'
+import { regionBlocked } from '../lib/regioncheck.ts'
+import { hostOf } from '../lib/ice.ts'
+
+/** Said when the nodes answer 451 (GEOBLOKADA.md); also the CLI's exit message. */
+export const REGION_MSG = 'onchato nie jest dostępne w Twoim regionie - RKV sp. z o.o. nie świadczy usługi w krajach objętych międzynarodowymi sankcjami. Pomyłka bazy lokalizacji? office@rkv.pl'
 
 export interface Io {
   out: Out
@@ -99,12 +104,24 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   status(sys(`onchato · ${o.id.handle} (${o.kind}) · łączę z ${node}…`))
   status(sys('Alt+1…9 albo /win N przełącza okna · /query <kontakt> · /list · /help'))
 
+  // A refused WebSocket only says "failed": when the link stays down, ask a node
+  // whether this is the sanctions 451 (lib/regioncheck.ts) - once a minute at most.
+  let regionAsked = 0, regionSaid = false
+  const regionCheck = () => {
+    if (regionSaid || Date.now() - regionAsked < 60_000) return
+    regionAsked = Date.now()
+    setTimeout(async () => {
+      if (link === true) return
+      if (await regionBlocked(o.relays.map(hostOf).filter((h): h is string => !!h))) { regionSaid = true; status(warn(REGION_MSG)) }
+    }, 8000).unref?.()
+  }
   const session = await startSession(o.id, {
     relay: o.relays[0], relays: o.relays, transport: o.transport ?? 'light',
     onLog: (m) => { if (o.debug) status(`${SGR.grey}${m}${SGR.reset}`) },
     onLink: (state) => {
       link = state === 'online' ? true : state === 'offline' ? false : null
       status(state === 'online' ? sys(`połączono z ${node}`) : state === 'reconnecting' ? warn('wznawiam połączenie z węzłem…') : warn('brak połączenia z węzłem'))
+      if (state !== 'online') regionCheck()
     },
     onRelay: (addr) => { node = nodeName(addr); status(sys(`węzeł: ${node}`)) },
     onGroupSkd: (from, skd) => { void groups?.onInvite(from, skd) },      // an invitation over a 1:1

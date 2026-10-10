@@ -50,7 +50,8 @@ import { safetyNumber, safetyGroups, safetyQr, parseSafetyQr } from '../../lib/s
 import { invQrView } from './invqr.ts'
 import { foreignMembers, OwedInvites } from './groupview.ts'
 import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
-import { iceServersFor } from '../../lib/ice.ts'
+import { iceServersFor, hostOf } from '../../lib/ice.ts'
+import { regionBlocked } from '../../lib/regioncheck.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
@@ -145,6 +146,37 @@ function chosenRelay(): string { return chosenRelays()[0] || RELAY }
  * demo room on one 1-vCPU node. Weights, when published, aim the draw;
  * unchecking a node is how a person pins themselves to the rest.
  */
+/**
+ * Nodes answer clients from the sanctions list with 451 (GEOBLOKADA.md), and a
+ * refused WebSocket says nothing - so when the relays stay out of reach, ask a
+ * node's /health whether this is a refusal (lib/regioncheck.ts) and, if so,
+ * say that plainly instead of "no connection". At most one check a minute; the
+ * notice stays until the page is reloaded.
+ */
+let regionTimer: ReturnType<typeof setTimeout> | null = null, regionAskedAt = 0, regionShown = false
+function scheduleRegionCheck(delayMs = 8000) {
+  if (regionShown || regionTimer || Date.now() - regionAskedAt < 60_000) return
+  regionTimer = setTimeout(async () => {
+    regionTimer = null
+    if (linkState === 'online' && delayMs) return // it came back on its own
+    regionAskedAt = Date.now()
+    const hosts = chosenRelays().map(hostOf).filter((h): h is string => !!h)
+    if (await regionBlocked(hosts)) showRegionBlocked()
+  }, delayMs)
+}
+function showRegionBlocked() {
+  if (regionShown) return
+  regionShown = true
+  ecLog('nodes answer 451: this region is not served')
+  const box = document.createElement('div')
+  box.id = 'region-blocked'
+  box.setAttribute('role', 'alertdialog')
+  const h = document.createElement('h2'); h.textContent = tr('onchato nie jest dostępne w Twoim regionie')
+  const p = document.createElement('p'); p.textContent = tr('RKV sp. z o.o., operator onchato, nie świadczy usługi w krajach objętych międzynarodowymi sankcjami. Jeśli jesteś poza takim krajem, napisz na office@rkv.pl — baza lokalizacji mogła się pomylić.')
+  box.append(h, p)
+  document.body.appendChild(box)
+}
+
 function chosenRelays(): string[] {
   const on = loadNodes().filter((n) => n.enabled)
   if (!on.length) return [RELAY]
@@ -1441,6 +1473,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
 
     onLog: ecLog,
     onLink: (state) => {
+      if (state !== 'online') scheduleRegionCheck()
       if (state !== linkState) {
         const what = state === 'online' ? tr('Połączenie z węzłem wróciło')
           : state === 'reconnecting' ? tr('Wznawiam połączenie z węzłem') : tr('Twoje połączenie z węzłem przerwane')
@@ -1487,6 +1520,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   clientReady.then((c) => { client = c; void restoreGroups(); void startInboxWatches(); void resumeKnocking() }, (e: any) => {
     ecLog(`session failed to start: ${e?.message ?? e}`)
     toast(tr('Brak połączenia z przekaźnikiem — odśwież stronę'))
+    scheduleRegionCheck(0)
   })
   closeIdentityModal() // the picker, if one was open, goes with the login screen
   $('login').hidden = true; $('app').hidden = false

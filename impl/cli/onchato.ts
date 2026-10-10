@@ -49,6 +49,9 @@ import { qrForTerminal } from './termqr.ts'
 import { fingerprint } from './fp.ts'
 import { InviteStore, publishedLink, parseDuration, expired, type Waiting } from './invites.ts'
 import { startSession } from '../lib/core.ts'
+import { regionBlocked } from '../lib/regioncheck.ts'
+import { hostOf } from '../lib/ice.ts'
+import { REGION_MSG } from './client.ts'
 import { inboxSecretBytes } from '../lib/invite.ts'
 import { createInterface } from 'node:readline/promises'
 
@@ -456,4 +459,9 @@ try {
     default:
       console.log('użycie: onchato profile new|list|import|export · hem new <nazwa> --hem <url> · send · send-file · listen · get · daemon · queue · whoami · pubkey · contacts · invite [--qr]\n         add <link|kod> | add <nazwa> <klucz> · verify <nazwa> [--qr] [numer] · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
   }
-} catch (e: any) { die(e?.message ?? String(e)) }
+} catch (e: any) {
+  // Nodes refuse the sanctioned regions with 451 (GEOBLOKADA.md), and a refused
+  // WebSocket only says "failed": ask a node, so the message says why.
+  if (await regionBlocked(relayList(kv).map(hostOf).filter((h): h is string => !!h)).catch(() => false)) die(REGION_MSG)
+  die(e?.message ?? String(e))
+}

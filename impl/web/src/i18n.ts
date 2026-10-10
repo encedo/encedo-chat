@@ -141,6 +141,9 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'brak połączenia z przekaźnikiem': 'no connection to the relay',
     'Brak dostępu do kamery: ': 'No camera access: ',
     'Brak połączenia z przekaźnikiem — odśwież stronę': 'No connection to the relay — reload the page',
+    'onchato nie jest dostępne w Twoim regionie': 'onchato is not available in your region',
+    'RKV sp. z o.o., operator onchato, nie świadczy usługi w krajach objętych międzynarodowymi sankcjami. Jeśli jesteś poza takim krajem, napisz na office@rkv.pl — baza lokalizacji mogła się pomylić.':
+      'RKV sp. z o.o., which operates onchato, does not provide the service in countries under international sanctions. If you are not in such a country, write to office@rkv.pl — the location database may be wrong.',
     'Brak profili software na tym urządzeniu.': 'No software profiles on this device.',
     'Brak sesji — zaloguj się.': 'No session — sign in.',
     'brak sygnału': 'no signal',
