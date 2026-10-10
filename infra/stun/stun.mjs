@@ -46,9 +46,10 @@ const PORT = Number(process.env.PORT ?? 3478)
 const HOST = process.env.HOST ?? '0.0.0.0'
 const HOST6 = process.env.HOST6 ?? '::'
 const QUIET = process.env.QUIET === '1'
-// The country block list (GEOBLOKADA.md), built by infra/geoip/geoip-update.mjs.
-// Addresses on it get no answer, like anything else we do not answer.
-const GEO_LIST = process.env.GEO_LIST ?? '/var/lib/onchato/geoip/blocked-cidrs.txt'
+// The block lists (GEOBLOKADA.md), built by infra/geoip/geoip-update.mjs: the
+// sanctioned countries and the abuse list. Addresses on either get no answer,
+// like anything else we do not answer. GEO_LIST: comma-separated paths.
+const GEO_LIST = (process.env.GEO_LIST ?? '/var/lib/onchato/geoip/blocked-cidrs.txt,/var/lib/onchato/geoip/abuse-cidrs.txt').split(',').filter(Boolean)
 
 const COOKIE = 0x2112a442
 const BINDING_REQUEST = 0x0001
@@ -183,11 +184,16 @@ export function limiter({ perSec = 20, burst = 40, max = 50_000, now = () => Dat
 }
 
 /**
- * The block list, re-read when the file changes (checked every `everyMs`).
- * No file means no filtering - said once, loudly, in the log - because STUN
- * must not stop answering everybody when a node is set up before its list.
+ * The block lists, each re-read when its file changes (checked every `everyMs`);
+ * an address on any of them is blocked. A missing file means no filtering from
+ * it - said once, loudly, in the log - because STUN must not stop answering
+ * everybody when a node is set up before its lists.
  */
-export function geoGate(path, { everyMs = 60_000, log = console.log, now = () => Date.now() } = {}) {
+export function geoGate(paths, o = {}) {
+  const gates = (Array.isArray(paths) ? paths : [paths]).map((p) => oneGate(p, o))
+  return (address) => gates.some((g) => g(address))
+}
+function oneGate(path, { everyMs = 60_000, log = console.log, now = () => Date.now() } = {}) {
   let test = () => false, mtime = -1, checked = -Infinity
   const load = () => {
     let m

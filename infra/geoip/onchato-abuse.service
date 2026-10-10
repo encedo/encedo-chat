@@ -1,0 +1,10 @@
+# Rebuild the abuse block list (GEOBLOKADA.md, "Nadużycia") from
+# /etc/onchato/abuse.list: entries past their until= date drop out. nginx -t,
+# reload; a line that does not parse keeps the previous list and fails the unit.
+[Unit]
+Description=onchato abuse block list rebuild
+After=nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/node /opt/github/encedo-chat/infra/geoip/geoip-update.mjs --abuse-only

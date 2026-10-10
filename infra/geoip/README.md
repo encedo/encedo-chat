@@ -31,5 +31,32 @@ ranges) leaves the PREVIOUS lists in place and fails the unit
 (`journalctl -u onchato-geoip`). Change the country list: edit
 `blocked-countries`, pull, `sudo node infra/geoip/geoip-update.mjs` on each node.
 
+## The abuse list
+
+Separate from the sanctions: addresses, networks and whole operators that
+abused the service (terms, section 4). nginx drops them with **444** (no page,
+checked BEFORE the 451), STUN does not answer.
+
+- Kept on the operator's machine, NOT in the repo (addresses are personal data):
+  `~/.config/onchato-ops/abuse.list` (`$ONCHATO_ABUSE_LIST`), and on each node
+  as `/etc/onchato/abuse.list` (600).
+- Maintained with `infra/geoip/onchato-block` (link it into `~/.local/bin`):
+  ```
+  onchato-block add 203.0.113.0/24 --days 30 handshake flood on /relay
+  onchato-block add AS64500 scanning /f for a week
+  onchato-block del 203.0.113.0/24
+  onchato-block list | push | status
+  ```
+  Entries: address, CIDR (not shorter than /8 / /16 - a whole operator goes in
+  as ASnnn), or ASnnn (DB-IP ASN Lite, cached per month, fetched only when the
+  list has one); `--days N` / `--until YYYY-MM-DD` make it temporary.
+  Every change is checked (`abuse-check.mjs`) before it is saved, and each node
+  checks again: a line that does not parse keeps the previous list.
+- `onchato-abuse.timer` rebuilds daily (00:10 UTC) so `until=` entries stop.
+- Node files: `/etc/nginx/onchato-abuse-blocked.conf` (`$onchato_abuse`),
+  `/var/lib/onchato/geoip/abuse-cidrs.txt` (STUN reads both lists).
+
 Tests: `node --test infra/geoip/geoip.test.mjs`, `impl/test/stun.test.ts`,
-`impl/test/regioncheck.test.ts`.
+`impl/test/regioncheck.test.ts`. The nginx side was checked in a container:
+abuse -> connection dropped (also when the address is on both lists), sanctions
+only -> 451, neither -> 200.

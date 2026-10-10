@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# onchato-block -- the abuse block list, from the operator's machine (GEOBLOKADA.md,
+# "Naduzycia"; terms of service, section 4).
+#
+#   onchato-block add 203.0.113.0/24 --days 30 handshake flood on /relay
+#   onchato-block add AS64500 scanning /f for a week
+#   onchato-block add 2001:db8:66::/48 --until 2026-11-10
+#   onchato-block del 203.0.113.0/24
+#   onchato-block list        # what is on the list, active / expired
+#   onchato-block push        # send the list to every node and rebuild there
+#   onchato-block status      # what each node is actually enforcing
+#
+# Entries: an address, a CIDR (IPv4/IPv6, not shorter than /8 or /16), or ASnnn -
+# every range that operator announces. --days N / --until YYYY-MM-DD make a block
+# temporary: it stops the day after (nodes rebuild daily). Everything after the
+# entry and its options is the reason, kept as a comment with today's date.
+# add and del push at once unless --no-push.
+#
+# The list lives HERE, not in the repo (addresses are personal data; the list
+# is operational): $ONCHATO_ABUSE_LIST, default ~/.config/onchato-ops/abuse.list.
+# Nodes: $ONCHATO_NODES (space-separated), default bs1-bs3. Every change is
+# checked (abuse-check.mjs) before it is saved, and every node checks again
+# before it builds - a typo never reaches nginx.
+#
+# Code is ASCII (repo rule).
+
+set -euo pipefail
+HERE=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+LIST=${ONCHATO_ABUSE_LIST:-${XDG_CONFIG_HOME:-$HOME/.config}/onchato-ops/abuse.list}
+NODES=${ONCHATO_NODES:-"bs1.onchato.com bs2.onchato.com bs3.onchato.com"}
+NODE_REPO=/opt/github/encedo-chat
+
+die() { printf 'onchato-block: %s\n' "$*" >&2; exit 1; }
+check() { node "$HERE/abuse-check.mjs" "$1"; }
+
+init_list() {
+  [ -f "$LIST" ] && return
+  mkdir -p "$(dirname "$LIST")"; chmod 700 "$(dirname "$LIST")"
+  cat > "$LIST" <<'EOF'
+# onchato abuse block list (GEOBLOKADA.md). One entry per line:
+#   203.0.113.7  |  203.0.113.0/24  |  2001:db8::/48  |  AS64500
+# optional:  until=YYYY-MM-DD  (blocked through that day, UTC)
+# then:      # date and reason
+EOF
+  chmod 600 "$LIST"
+}
+
+push() {
+  check "$LIST" >/dev/null || { check "$LIST"; die "the list does not parse - nothing pushed"; }
+  local h rc=0
+  for h in $NODES; do
+    if scp -q "$LIST" "$h:/tmp/onchato-abuse.list" \
+      && ssh "$h" "install -D -m 600 -o root -g root /tmp/onchato-abuse.list /etc/onchato/abuse.list && rm -f /tmp/onchato-abuse.list && node $NODE_REPO/infra/geoip/geoip-update.mjs --abuse-only 2>&1 | grep -E 'abuse: [0-9]+ active|ERROR|nginx reloaded'" ; then
+      printf '  [ok]   %s\n' "$h"
+    else printf '  [fail] %s\n' "$h"; rc=1; fi
+  done
+  return $rc
+}
+
+cmd=${1:-list}; shift || true
+case "$cmd" in
+  add)
+    [ $# -ge 1 ] || die "usage: onchato-block add <address|cidr|ASnnn> [--days N | --until YYYY-MM-DD] [--no-push] [reason...]"
+    entry=$1; shift; until=""; nopush=0; reason=()
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --days) until=$(date -u -d "+$2 days" +%F); shift ;;
+        --until) until=$2; shift ;;
+        --no-push) nopush=1 ;;
+        *) reason+=("$1") ;;
+      esac
+      shift
+    done
+    init_list
+    grep -qiE "^[[:space:]]*${entry//./\\.}([[:space:]]|$)" "$LIST" && die "$entry is already on the list (onchato-block del first)"
+    line="$entry${until:+  until=$until}  # $(date -u +%F) ${reason[*]:-}"
+    tmp=$(mktemp); cp "$LIST" "$tmp"; printf '%s\n' "$line" >> "$tmp"
+    if ! check "$tmp" >/dev/null; then check "$tmp" | grep INVALID; rm -f "$tmp"; die "not added"; fi
+    mv "$tmp" "$LIST"; chmod 600 "$LIST"
+    printf 'added: %s\n' "$line"
+    [ "$nopush" = 1 ] || push
+    ;;
+  del)
+    [ $# -ge 1 ] || die "usage: onchato-block del <entry> [--no-push]"
+    entry=$1; nopush=0; [ "${2:-}" = --no-push ] && nopush=1
+    [ -f "$LIST" ] || die "no list at $LIST"
+    grep -qiE "^[[:space:]]*${entry//./\\.}([[:space:]]|$)" "$LIST" || die "$entry is not on the list"
+    tmp=$(mktemp); grep -viE "^[[:space:]]*${entry//./\\.}([[:space:]]|$)" "$LIST" > "$tmp" || true
+    mv "$tmp" "$LIST"; chmod 600 "$LIST"
+    printf 'removed: %s\n' "$entry"
+    [ "$nopush" = 1 ] || push
+    ;;
+  list) init_list; printf '%s\n' "$LIST"; check "$LIST" || true ;;
+  push) init_list; push ;;
+  status)
+    for h in $NODES; do
+      printf '== %s\n' "$h"
+      ssh "$h" "node $NODE_REPO/infra/geoip/abuse-check.mjs /etc/onchato/abuse.list | tail -1; printf '  nginx: %s CIDRs   stun: %s CIDRs\n' \"\$(grep -vc '^#' /etc/nginx/onchato-abuse-blocked.conf 2>/dev/null || echo 0)\" \"\$(grep -vc '^#' /var/lib/onchato/geoip/abuse-cidrs.txt 2>/dev/null || echo 0)\"" || printf '  [fail] unreachable\n'
+    done
+    ;;
+  -h|--help|help) sed -n '2,26p' "$0" ;;
+  *) die "unknown command: $cmd (add | del | list | push | status)" ;;
+esac

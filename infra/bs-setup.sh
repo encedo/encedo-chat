@@ -208,6 +208,12 @@ if [ "$MODE" = check ]; then
     [ "$age" -le 45 ] && ok "geoip list $age day(s) old" || warn "geoip list $age days old -- is onchato-geoip.timer running?"
   else bad "no geoip list ($GL) -- run infra/geoip/geoip-update.mjs"; fi
   systemctl is-enabled --quiet onchato-geoip.timer 2>/dev/null && ok "geoip timer enabled" || bad "geoip timer not enabled"
+  systemctl is-enabled --quiet onchato-abuse.timer 2>/dev/null && ok "abuse timer enabled (daily expiry)" || bad "abuse timer not enabled"
+  if [ -f /etc/onchato/abuse.list ]; then
+    ab=$(node "$REPO/infra/geoip/abuse-check.mjs" /etc/onchato/abuse.list 2>/dev/null | tail -1)
+    case "$ab" in *" 0 invalid"*) ok "abuse list: $ab" ;; *) bad "abuse list: ${ab:-unreadable}" ;; esac
+  else bad "no /etc/onchato/abuse.list (onchato-block push from the operator machine)"; fi
+  [ -f /etc/nginx/onchato-abuse-blocked.conf ] && ok "abuse nginx list: $(grep -vc '^#' /etc/nginx/onchato-abuse-blocked.conf) CIDRs" || bad "no /etc/nginx/onchato-abuse-blocked.conf"
   [ -f /etc/nginx/conf.d/onchato-geo.conf ] && [ -f /etc/nginx/snippets/onchato-geoblock.conf ] && ok "geoip nginx files installed" || bad "geoip nginx files missing"
   site=$(grep -l "server_name $HOST;" /etc/nginx/sites-enabled/* 2>/dev/null | head -1)
   [ -n "$site" ] && grep -q 'onchato-geoblock' "$site" && ok "geoblock included in $site" || bad "the $HOST site does not include snippets/onchato-geoblock.conf"
@@ -339,13 +345,18 @@ fi
 say "== 7b. geoip"
 run "$SUDO install -d -m 755 /var/lib/onchato/geoip /var/www/onchato-geo"
 run "$SUDO install -m 644 $REPO/infra/geoip/unavailable.html /var/www/onchato-geo/__onchato_unavailable.html"
+# The abuse list arrives from the operator's machine (onchato-block push); the
+# node starts with an empty one, so the build and nginx have something to read.
+run "$SUDO install -d -m 700 /etc/onchato"
+run "[ -f /etc/onchato/abuse.list ] || echo '# managed by onchato-block from the operator machine (GEOBLOKADA.md)' | $SUDO install -m 600 /dev/stdin /etc/onchato/abuse.list"
 if [ "$NO_CERT" != 1 ]; then
   run "[ -f /etc/nginx/onchato-geo-blocked.conf ] || echo '# empty until geoip-update runs' | $SUDO tee /etc/nginx/onchato-geo-blocked.conf >/dev/null"
+  run "[ -f /etc/nginx/onchato-abuse-blocked.conf ] || echo '# empty until geoip-update runs' | $SUDO tee /etc/nginx/onchato-abuse-blocked.conf >/dev/null"
   run "$SUDO install -m 644 $REPO/infra/nginx/onchato-geo.conf /etc/nginx/conf.d/onchato-geo.conf"
   run "$SUDO install -D -m 644 $REPO/infra/nginx/onchato-geoblock.conf /etc/nginx/snippets/onchato-geoblock.conf"
 fi
-run "$SUDO install -m 644 $REPO/infra/geoip/onchato-geoip.service $REPO/infra/geoip/onchato-geoip.timer /etc/systemd/system/"
-run "$SUDO systemctl daemon-reload && $SUDO systemctl enable -q --now onchato-geoip.timer"
+run "$SUDO install -m 644 $REPO/infra/geoip/onchato-geoip.service $REPO/infra/geoip/onchato-geoip.timer $REPO/infra/geoip/onchato-abuse.service $REPO/infra/geoip/onchato-abuse.timer /etc/systemd/system/"
+run "$SUDO systemctl daemon-reload && $SUDO systemctl enable -q --now onchato-geoip.timer onchato-abuse.timer"
 # The first list now, not at the first timer tick: a node must not go live open.
 if [ "$MODE" = dry ]; then printf '  $ %s
 ' "$SUDO node $REPO/infra/geoip/geoip-update.mjs"

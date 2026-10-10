@@ -92,11 +92,106 @@ export function buildBlockList(csv, countries) {
     ;(a.v === 4 ? v4 : v6).push([a.n, b.n])
     per[cc]++
   }
+  return { cidrs: toCidrStrings(v4, v6), per, rows }
+}
+
+/** [start, end] BigInt ranges per family -> merged, minimal CIDR strings. */
+export function toCidrStrings(v4, v6) {
   const cidrs = []
   for (const [list, v, bits] of [[v4, 4, V4_BITS], [v6, 6, V6_BITS]]) {
     for (const [a, b] of mergeRanges(list)) for (const [n, p] of rangeToCidrs(a, b, bits)) cidrs.push(`${formatIp(v, n)}/${p}`)
   }
-  return { cidrs, per, rows }
+  return cidrs
+}
+
+// ---- the abuse list (GEOBLOKADA.md, "Nadużycia") ---------------------------
+//
+// One entry per line, `#` starts a comment:
+//   203.0.113.7                        a single address
+//   203.0.113.0/24                     a network, IPv4 or IPv6
+//   AS64500                            every range an operator announces (DB-IP ASN Lite)
+//   ... until=2026-11-10               active up to and including that day (UTC), then ignored
+// A line that does not parse is an error, never a skipped line: a typo must not
+// silently leave somebody unblocked, or block somebody else.
+
+/** Parse the abuse list. `today` is 'YYYY-MM-DD' (UTC). */
+export function parseAbuseList(text, today) {
+  const active = [], expired = [], invalid = []
+  text.split('\n').forEach((raw, i) => {
+    const line = raw.replace(/#.*/, '').trim()
+    if (!line) return
+    const comment = (raw.match(/#(.*)/)?.[1] ?? '').trim()
+    const toks = line.split(/\s+/)
+    let until = null
+    const bad = (why) => invalid.push({ line: i + 1, raw: raw.trim(), why })
+    const e = parseAbuseEntry(toks[0])
+    const short = /\/(\d{1,3})$/.exec(toks[0])
+    if (!e && short && parseIp(toks[0].split('/')[0]) && Number(short[1]) < (toks[0].includes(':') ? 16 : 8)) return bad(`"${toks[0]}": a prefix that short is a continent, not an abuser - a whole operator goes in as ASnnn`)
+    if (!e) return bad(`"${toks[0]}" is not an address, a CIDR or ASnnn`)
+    for (const t of toks.slice(1)) {
+      const m = /^until=(\d{4}-\d{2}-\d{2})$/.exec(t)
+      if (!m || isNaN(Date.parse(m[1] + 'T00:00:00Z'))) return bad(`unknown token "${t}" (only until=YYYY-MM-DD)`)
+      until = m[1]
+    }
+    const entry = { ...e, until, comment, line: i + 1 }
+    ;(until && until < today ? expired : active).push(entry)
+  })
+  return { active, expired, invalid }
+}
+
+/** One entry: { kind: 'net', v, start, end, text } or { kind: 'asn', asn, text }, or null. */
+export function parseAbuseEntry(tok) {
+  const as = /^AS(\d{1,10})$/i.exec(tok)
+  if (as) { const asn = Number(as[1]); return asn > 0 && asn < 2 ** 32 ? { kind: 'asn', asn, text: `AS${asn}` } : null }
+  const [ip, pfx, extra] = tok.split('/')
+  if (extra !== undefined) return null
+  const a = parseIp(ip); if (!a) return null
+  const bits = a.v === 4 ? V4_BITS : V6_BITS
+  if (pfx !== undefined && !/^\d{1,3}$/.test(pfx)) return null
+  const p = pfx === undefined ? bits : Number(pfx)
+  if (p < 0 || p > bits) return null
+  // A prefix this short is a mistake, not an abuser: /8 of IPv4 is 16 million
+  // addresses, /16 of IPv6 a continent. Whole operators go in as ASnnn.
+  if (p < (a.v === 4 ? 8 : 16)) return null
+  const span = 1n << BigInt(bits - p)
+  const start = a.n - (a.n % span) // host bits off: 203.0.113.7/24 means 203.0.113.0/24
+  return { kind: 'net', v: a.v, start, end: start + span - 1n, text: `${formatIp(a.v, start)}/${p}` }
+}
+
+/**
+ * The ranges of the given ASNs from DB-IP ASN Lite CSV (`start,end,asn,"org"`),
+ * and how many ranges each ASN contributed - an ASN with none is reported, since
+ * a mistyped number would otherwise block nothing in silence.
+ */
+export function asnRanges(csv, asns) {
+  const want = new Set(asns), per = Object.fromEntries([...want].map((a) => [a, 0]))
+  const v4 = [], v6 = []
+  for (const line of csv.split('\n')) {
+    if (!line) continue
+    const c1 = line.indexOf(','), c2 = line.indexOf(',', c1 + 1), c3 = line.indexOf(',', c2 + 1)
+    if (c3 < 0) continue
+    const asn = Number(line.slice(c2 + 1, c3))
+    if (!want.has(asn)) continue
+    const a = parseIp(line.slice(0, c1)), b = parseIp(line.slice(c1 + 1, c2))
+    if (!a || !b || a.v !== b.v) continue
+    ;(a.v === 4 ? v4 : v6).push([a.n, b.n])
+    per[asn]++
+  }
+  return { v4, v6, per }
+}
+
+/** The abuse list's active entries (+ the ASN ranges) as CIDR strings. */
+export function buildAbuse(parsed, asnCsv) {
+  const v4 = [], v6 = []
+  for (const e of parsed.active) if (e.kind === 'net') (e.v === 4 ? v4 : v6).push([e.start, e.end])
+  const asns = parsed.active.filter((e) => e.kind === 'asn').map((e) => e.asn)
+  let per = {}
+  if (asns.length) {
+    if (asnCsv == null) throw new Error('the list has AS entries but no ASN database was given')
+    const r = asnRanges(asnCsv, asns); per = r.per
+    v4.push(...r.v4); v6.push(...r.v6)
+  }
+  return { cidrs: toCidrStrings(v4, v6), asnPer: per }
 }
 
 /** A matcher over CIDR lines (comments and blanks ignored): addr -> boolean. */

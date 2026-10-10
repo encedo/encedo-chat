@@ -46,3 +46,43 @@ test('the matcher blocks listed addresses and nothing else', () => {
 test('the country file takes comments and either layout', () => {
   assert.deepEqual(parseCountries('KP  # North Korea\nir\n# all of it\nRU BY'), ['KP', 'IR', 'RU', 'BY'])
 })
+
+import { parseAbuseList, parseAbuseEntry, asnRanges, buildAbuse } from './geoip.mjs'
+
+test('the abuse list: entries, until=, comments; a typo is an error, never a skip', () => {
+  const p = parseAbuseList([
+    '# header', '', '203.0.113.7   # one address', '203.0.113.200/24  until=2026-10-10  # host bits: means .0/24',
+    '2001:db8::/48 until=2026-10-09 # expired yesterday', 'as64500  # lower case is fine', '10.0.0.0/4', 'foo', '1.2.3.4 untl=2026-01-01',
+  ].join('\n'), '2026-10-10')
+  assert.deepEqual(p.active.map((e) => e.text), ['203.0.113.7/32', '203.0.113.0/24', 'AS64500'])
+  assert.equal(p.active[1].until, '2026-10-10', 'until is inclusive: still active on that day')
+  assert.deepEqual(p.expired.map((e) => e.text), ['2001:db8::/48'])
+  assert.deepEqual(p.invalid.map((b) => b.line), [7, 8, 9])
+  assert.match(p.invalid[0].why, /continent/, 'a too-short prefix says why, and points at ASnnn')
+  assert.match(p.invalid[2].why, /untl=/)
+})
+
+test('an entry is an address, a CIDR not shorter than /8 or /16, or ASnnn', () => {
+  assert.equal(parseAbuseEntry('8.0.0.0/8').text, '8.0.0.0/8')
+  assert.equal(parseAbuseEntry('7.0.0.0/7'), null)
+  assert.equal(parseAbuseEntry('2001::/16').text, '2001::/16')
+  assert.equal(parseAbuseEntry('2001::/15'), null)
+  assert.equal(parseAbuseEntry('1.2.3.4/33'), null)
+  assert.equal(parseAbuseEntry('AS0'), null)
+  assert.deepEqual(parseAbuseEntry('AS37963'), { kind: 'asn', asn: 37963, text: 'AS37963' })
+})
+
+const ASN_CSV = [
+  '1.0.0.0,1.0.0.255,13335,"Cloudflare, Inc."', '8.128.4.0,8.128.7.255,37963,"Hangzhou Alibaba Advertising Co.,Ltd."',
+  '8.128.8.0,8.128.11.255,37963,"Hangzhou Alibaba Advertising Co.,Ltd."', '2400:3200::,2400:3200:ffff:ffff:ffff:ffff:ffff:ffff,37963,Alibaba',
+].join('\n')
+
+test('ASnnn becomes the ranges that operator announces (quoted names with commas included)', () => {
+  const r = asnRanges(ASN_CSV, [37963, 99999])
+  assert.deepEqual(r.per, { 37963: 3, 99999: 0 }, 'an AS with no ranges is visible - a typo would otherwise block nothing')
+  const { cidrs } = buildAbuse(parseAbuseList('AS37963\n203.0.113.7', '2026-10-10'), ASN_CSV)
+  assert.deepEqual(cidrs, ['8.128.4.0/22', '8.128.8.0/22', '203.0.113.7/32', '2400:3200::/32'], 'adjacent ranges merge (4.0-11.255 is two aligned /22s); nothing of Cloudflare')
+  const m = makeMatcher(cidrs)
+  assert.equal(m('8.128.9.9'), true); assert.equal(m('1.0.0.1'), false)
+  assert.throws(() => buildAbuse(parseAbuseList('AS37963', '2026-10-10')), /ASN database/, 'AS entries without the database fail loudly')
+})

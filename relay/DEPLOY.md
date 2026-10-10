@@ -280,10 +280,13 @@ sudo cp infra/nginx/relay-limits.conf /etc/nginx/conf.d/relay-limits.conf
 sudo install -d -m 755 /var/lib/onchato/geoip /var/www/onchato-geo
 sudo install -m 644 infra/geoip/unavailable.html /var/www/onchato-geo/__onchato_unavailable.html
 [ -f /etc/nginx/onchato-geo-blocked.conf ] || echo '# empty until geoip-update runs' | sudo tee /etc/nginx/onchato-geo-blocked.conf >/dev/null
+[ -f /etc/nginx/onchato-abuse-blocked.conf ] || echo '# empty until geoip-update runs' | sudo tee /etc/nginx/onchato-abuse-blocked.conf >/dev/null
+sudo install -d -m 700 /etc/onchato   # the abuse list arrives from the operator (onchato-block push)
+[ -f /etc/onchato/abuse.list ] || echo '# managed by onchato-block' | sudo install -m 600 /dev/stdin /etc/onchato/abuse.list
 sudo install -m 644 infra/nginx/onchato-geo.conf /etc/nginx/conf.d/onchato-geo.conf
 sudo install -D -m 644 infra/nginx/onchato-geoblock.conf /etc/nginx/snippets/onchato-geoblock.conf
-sudo install -m 644 infra/geoip/onchato-geoip.service infra/geoip/onchato-geoip.timer /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now onchato-geoip.timer
+sudo install -m 644 infra/geoip/onchato-geoip.service infra/geoip/onchato-geoip.timer infra/geoip/onchato-abuse.service infra/geoip/onchato-abuse.timer /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now onchato-geoip.timer onchato-abuse.timer
 sudo node infra/geoip/geoip-update.mjs && sudo systemctl restart onchato-stun
 sed "s/__HOST__/$HOST/g" infra/nginx/relay-node.conf | sudo tee /etc/nginx/sites-available/$HOST >/dev/null
 sudo ln -s /etc/nginx/sites-available/$HOST /etc/nginx/sites-enabled/$HOST

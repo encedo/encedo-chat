@@ -126,3 +126,18 @@ test('the country block list: listed addresses get nothing, a missing list filte
   assert.equal(gate('5.160.0.1'), false)
   rmSync(dir, { recursive: true, force: true })
 })
+
+test('STUN reads both lists - sanctions and abuse - and blocks an address on either', async () => {
+  const { geoGate } = await import('../../infra/stun/stun.mjs')
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const { tmpdir } = await import('node:os')
+  const dir = mkdtempSync(join(tmpdir(), 'geo2-'))
+  writeFileSync(join(dir, 'countries.txt'), '5.160.0.0/15\n')
+  writeFileSync(join(dir, 'abuse.txt'), '203.0.113.0/24\n')
+  const gate = geoGate([join(dir, 'countries.txt'), join(dir, 'abuse.txt'), join(dir, 'missing.txt')], { log: () => {} })
+  assert.equal(gate('5.160.0.1'), true, 'on the country list')
+  assert.equal(gate('203.0.113.9'), true, 'on the abuse list')
+  assert.equal(gate('8.8.8.8'), false, 'on neither; a missing third list filters nothing')
+  rmSync(dir, { recursive: true, force: true })
+})
