@@ -203,7 +203,7 @@ if [ "$MODE" = check ]; then
   # GeoIP (GEOBLOKADA.md): list present, fresh, wired into nginx and STUN.
   GL=/var/lib/onchato/geoip/blocked-cidrs.txt
   if [ -f "$GL" ]; then
-    n=$(grep -vc '^#' "$GL"); age=$(( ( $(date +%s) - $(stat -c %Y "$GL") ) / 86400 ))
+    n=$(grep -cvE '^(#|$)' "$GL" || true); age=$(( ( $(date +%s) - $(stat -c %Y "$GL") ) / 86400 ))
     [ "$n" -gt 1000 ] && ok "geoip list: $n CIDRs" || bad "geoip list has only $n CIDRs"
     [ "$age" -le 45 ] && ok "geoip list $age day(s) old" || warn "geoip list $age days old -- is onchato-geoip.timer running?"
   else bad "no geoip list ($GL) -- run infra/geoip/geoip-update.mjs"; fi
@@ -213,7 +213,7 @@ if [ "$MODE" = check ]; then
     ab=$(node "$REPO/infra/geoip/abuse-check.mjs" /etc/onchato/abuse.list 2>/dev/null | tail -1)
     case "$ab" in *" 0 invalid"*) ok "abuse list: $ab" ;; *) bad "abuse list: ${ab:-unreadable}" ;; esac
   else bad "no /etc/onchato/abuse.list (onchato-block push from the operator machine)"; fi
-  [ -f /etc/nginx/onchato-abuse-blocked.conf ] && ok "abuse nginx list: $(grep -vc '^#' /etc/nginx/onchato-abuse-blocked.conf) CIDRs" || bad "no /etc/nginx/onchato-abuse-blocked.conf"
+  [ -f /etc/nginx/onchato-abuse-blocked.conf ] && ok "abuse nginx list: $(grep -cvE '^(#|$)' /etc/nginx/onchato-abuse-blocked.conf || true) CIDRs" || bad "no /etc/nginx/onchato-abuse-blocked.conf"
   [ -f /etc/nginx/conf.d/onchato-geo.conf ] && [ -f /etc/nginx/snippets/onchato-geoblock.conf ] && ok "geoip nginx files installed" || bad "geoip nginx files missing"
   site=$(grep -l "server_name $HOST;" /etc/nginx/sites-enabled/* 2>/dev/null | head -1)
   [ -n "$site" ] && grep -q 'onchato-geoblock' "$site" && ok "geoblock included in $site" || bad "the $HOST site does not include snippets/onchato-geoblock.conf"

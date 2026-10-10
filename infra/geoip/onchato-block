@@ -95,7 +95,7 @@ case "$cmd" in
   status)
     for h in $NODES; do
       printf '== %s\n' "$h"
-      ssh "$h" "node $NODE_REPO/infra/geoip/abuse-check.mjs /etc/onchato/abuse.list | tail -1; printf '  nginx: %s CIDRs   stun: %s CIDRs\n' \"\$(grep -vc '^#' /etc/nginx/onchato-abuse-blocked.conf 2>/dev/null || echo 0)\" \"\$(grep -vc '^#' /var/lib/onchato/geoip/abuse-cidrs.txt 2>/dev/null || echo 0)\"" || printf '  [fail] unreachable\n'
+      ssh "$h" "node $NODE_REPO/infra/geoip/abuse-check.mjs /etc/onchato/abuse.list | tail -1; printf '  nginx: %s CIDRs   stun: %s CIDRs\n' \"\$(grep -cvE '^(#|\$)' /etc/nginx/onchato-abuse-blocked.conf 2>/dev/null || true)\" \"\$(grep -cvE '^(#|\$)' /var/lib/onchato/geoip/abuse-cidrs.txt 2>/dev/null || true)\"" || printf '  [fail] unreachable\n'
     done
     ;;
   -h|--help|help) sed -n '2,26p' "$0" ;;

@@ -124,6 +124,8 @@ function writeNginx(path, text) {
   }
 }
 
+// No empty line when a list is empty: a stray blank line read as one entry in the counts.
+const body = (lines) => (lines.length ? lines.join('\n') + '\n' : '')
 const header = (source, what) => `# ${source}, built ${new Date().toISOString()} - ${what}. IP Geolocation by DB-IP (https://db-ip.com), CC BY 4.0.\n`
 let wrote = false
 
@@ -145,8 +147,8 @@ async function countries() {
   if (empty.length) return fail(`no ranges for ${empty.join(', ')} - refusing a list that silently stopped blocking`)
   if (DRY) return
   const head = header(source, `sanctions: ${list.join(' ')}`)
-  if (!writeNginx(NGINX_OUT, head + cidrs.map((c) => `${c} 1;`).join('\n') + '\n')) return
-  writeAtomic(STUN_OUT, head + cidrs.join('\n') + '\n') // after nginx: a refused list leaves STUN's old one too
+  if (!writeNginx(NGINX_OUT, head + body(cidrs.map((c) => `${c} 1;`)))) return
+  writeAtomic(STUN_OUT, head + body(cidrs)) // after nginx: a refused list leaves STUN's old one too
   wrote = true
   say(`countries: wrote ${HAVE_NGINX ? `${NGINX_OUT} and ` : ''}${STUN_OUT}`)
 }
@@ -173,8 +175,8 @@ async function abuse() {
   say(`abuse: ${parsed.active.length} active (${nets} address/network, ${asns} AS${asns ? `: ${Object.entries(asnPer).map(([a, n]) => `AS${a} ${n}`).join(', ')} ranges` : ''}), ${parsed.expired.length} expired -> ${cidrs.length} CIDRs`)
   if (DRY) return
   const head = header(asn?.source ?? 'abuse list', `abuse: ${parsed.active.length} entries from ${ABUSE_LIST}`)
-  if (!writeNginx(ABUSE_NGINX, head + cidrs.map((c) => `${c} 1;`).join('\n') + '\n')) return
-  writeAtomic(ABUSE_STUN, head + cidrs.join('\n') + '\n')
+  if (!writeNginx(ABUSE_NGINX, head + body(cidrs.map((c) => `${c} 1;`)))) return
+  writeAtomic(ABUSE_STUN, head + body(cidrs))
   wrote = true
   say(`abuse: wrote ${HAVE_NGINX ? `${ABUSE_NGINX} and ` : ''}${ABUSE_STUN}`)
 }
