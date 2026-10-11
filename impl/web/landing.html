@@ -342,13 +342,14 @@
             <p class="metric">Identity in hardware (HEM) or sealed locally</p>
           </article>
           <article class="claim">
-            <h2>The introduction node never sees your words</h2>
+            <h2>The node in the middle never sees your words</h2>
             <p>
-              Nodes exist to introduce two people and then get out of the way: the
-              conversation upgrades to a direct channel, and what does pass a node is
-              ciphertext on a room name derived from your two keys.
+              A node introduces two people and carries what they say as ciphertext, on a
+              room name derived from their two keys. By default it carries the whole
+              conversation, so your contact never learns your address; a direct WebRTC
+              channel, which leaves the node out entirely, is one switch away in Settings.
             </p>
-            <p class="metric">Direct WebRTC, relay only as fallback</p>
+            <p class="metric">relay by default &middot; direct WebRTC opt-in</p>
           </article>
           <article class="claim">
             <h2>Groups with nobody hosting them</h2>
@@ -372,13 +373,14 @@
             <p class="metric">348 bytes per knock — real or cover, identical</p>
           </article>
           <article class="claim">
-            <h2>A file that never lands anywhere</h2>
+            <h2>A file only its recipient can open</h2>
             <p>
-              When the direct channel is up, a file goes from one browser to the other and
-              touches nothing in between — no upload, no link to expire, nothing an operator
-              could hand over afterwards. The other side is asked before a single byte moves.
+              A file is encrypted on your device before it leaves. By default it crosses our
+              store sealed — the store never has the key — and is swept after about five
+              minutes. With the direct channel on, it goes from one device to the other and
+              touches nothing in between, and the other side is asked before a byte moves.
             </p>
-            <p class="metric">500 MB at 41 MB/s, measured over a LAN</p>
+            <p class="metric">stored sealed, gone in ~5 min &middot; direct: 500 MB at 41 MB/s on a LAN</p>
           </article>
         </div>
         <p class="limits">
@@ -436,6 +438,13 @@
               <span class="note">Android 14+ · not in a store yet</span>
             </div>
           </div>
+          <div class="get-row">
+            <div class="get-os">Terminal</div>
+            <div class="dl">
+              <a href="https://github.com/encedo/encedo-chat/blob/main/CLI.md">onchato CLI — chat, send, listen</a>
+              <span class="note">Node 24+ or Docker · an IRC-style client, and a daemon for scripts and alerts</span>
+            </div>
+          </div>
           <div class="get-foot">
             <span id="get-ver">v<%= version %></span>
             <span>No iOS yet.</span>
@@ -448,16 +457,20 @@
         <p class="sec-label">Your own infrastructure</p>
         <div class="host">
           <div class="host-top">
-            <h2>Three commands. One <span class="accent">$5 VPS</span>. Five minutes.</h2>
+            <h2>Three commands to try it. One <span class="accent">$5 VPS</span> to run it.</h2>
             <p>
               Do not take our word for any of the above — run the network yourself. A node is a
               single Node.js process with no database, no queue and nothing to administer.
+              The three lines below give a node on plain WebSocket, enough to try it; the apps
+              connect over TLS, so a node for real use gets nginx and a certificate in front —
+              <a href="https://github.com/encedo/encedo-chat/blob/main/relay/DEPLOY.md">relay/DEPLOY.md</a>
+              walks through it, firewall included.
             </p>
           </div>
 <pre><span class="c"># any small Linux box, Node 22+</span>
 <span class="p">$</span> git clone https://github.com/encedo/encedo-chat
 <span class="p">$</span> cd encedo-chat/relay &amp;&amp; npm ci
-<span class="p">$</span> node relay.mjs --pass "my-node" --port 9001</pre>
+<span class="p">$</span> node relay.mjs --pass "my-node" --port 9001 --bind 0.0.0.0</pre>
           <div class="host-foot">
             <span><b>63 MB</b> idle</span>
             <span><b>192 MB</b> at 520 live sessions</span>
