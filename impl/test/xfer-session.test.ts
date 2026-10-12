@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createXferSession, type XferEv, type Direct } from '../lib/xfer-session.ts'
-import { CHUNK, MAX_DIRECT, MAX_OFFER_BODY } from '../lib/xfer.ts'
+import { CHUNK, MAX_DIRECT, MAX_OFFER_BODY, encodeOffer, T } from '../lib/xfer.ts'
 
 /**
  * A file that slices like the browser's does, WITHOUT allocating itself: the
@@ -239,4 +239,29 @@ test('an offer nobody answers is withdrawn on the wire, so the other side stops 
     assert.deepEqual(evs.a.at(-1), { t: 'failed', dir: 'out', why: 'timeout' })
     assert.deepEqual(evs.b.at(-1), { t: 'failed', dir: 'in', why: 'cancelled-peer' }, 'the receiver was told')
   } finally { A.stop(); B.stop() }
+})
+
+test('an offer whose geometry does not follow from its size is answered with a refusal, not silence', () => {
+  const sent: Uint8Array[] = []
+  const evs: XferEv[] = []
+  const B = createXferSession({ direct: () => ({ send: (b) => { sent.push(b) }, buffered: () => 0, drain: async () => {} }) }, (e) => evs.push(e))
+  B.onFrame(encodeOffer({ id: 7, name: 'x.bin', size: 100, mime: 'application/octet-stream', chunk: CHUNK, chunks: 5 }))
+  assert.equal(sent.length, 1, 'one frame went back')
+  assert.equal(sent[0][1], T.REJECT)
+  assert.equal(new DataView(sent[0].buffer, sent[0].byteOffset).getUint32(2), 7, 'naming the offer it refuses')
+  assert.equal(B.pending(), null, 'and nothing is pending for the user')
+  assert.deepEqual(evs, [], 'the user is not asked about a transfer that cannot happen')
+})
+
+test('a frame past the offer ceiling is refused on the way in, and refused as a whole on the way out', async () => {
+  const sent: Uint8Array[] = []
+  const B = createXferSession({ direct: () => ({ send: (b) => { sent.push(b) }, buffered: () => 0, drain: async () => {} }) }, () => {})
+  B.onFrame(encodeOffer({ id: 9, name: 'n', size: 10, mime: 'm', chunk: CHUNK, chunks: 1, body: 'x'.repeat(MAX_OFFER_BODY + 10) }))
+  assert.equal(sent[0]?.[1], T.REJECT, 'an oversize offer frame gets a refusal')
+  // The sender: a name of 200 (what the receiver keeps) beside a note just
+  // under the note's own limit no longer fits the offer as a whole.
+  const { A } = pair()
+  const r = A.offer(fakeFile(10, 'n'.repeat(200)), 'x'.repeat(MAX_OFFER_BODY - 100))
+  assert.equal(r, 'offer-too-big')
+  assert.equal(A.busy(), false, 'nothing was offered')
 })

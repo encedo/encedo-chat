@@ -18,7 +18,7 @@
  *   would enjoy debugging, and the UI says "poczekaj" perfectly well.
  */
 import {
-  createSender, createReceiver, decodeOffer, isXfer, CHUNK, MAX_DIRECT,
+  createSender, createReceiver, decodeOffer, encodeOffer, encodeReject, isXfer, CHUNK, MAX_DIRECT,
   MAX_OFFER_BODY, T,
   type Offer, type Sender, type Receiver, type Why,
 } from './xfer.ts'
@@ -71,7 +71,7 @@ export type XferEv =
   | { t: 'received'; id: number; name: string; mime: string; blob: Blob; body?: string }
   | { t: 'failed'; dir: 'in' | 'out'; why: Why }
 
-export type OfferResult = 'ok' | 'busy' | 'no-channel' | 'too-big' | 'empty' | 'note-too-big'
+export type OfferResult = 'ok' | 'busy' | 'no-channel' | 'too-big' | 'empty' | 'note-too-big' | 'offer-too-big'
 
 export interface XferSession {
   /** `body` is the note typed with the file; it travels in the offer frame. */
@@ -153,11 +153,15 @@ export function createXferSession(host: XferHost, onEvent: (e: XferEv) => void):
       // measure `lib/msgsize.ts` uses for a chat body, for the same reason —
       // a newline costs two characters once stringified.
       if (body && new TextEncoder().encode(JSON.stringify(body)).length > MAX_OFFER_BODY) return 'note-too-big'
-      file = f
-      send = createSender({
+      const s = createSender({
         name: f.name, size: f.size, mime: f.type || 'application/octet-stream',
         ...(body ? { body } : {}),
       })
+      // The WHOLE offer must fit the ceiling, not only the note (13.1): a long
+      // name beside a long note is refused as one thing, never trimmed.
+      if (encodeOffer(s.offer).length - 6 > MAX_OFFER_BODY) return 'offer-too-big'
+      file = f
+      send = s
       d.send(send.open(now()))
       return 'ok'
     },
@@ -187,7 +191,11 @@ export function createXferSession(host: XferHost, onEvent: (e: XferEv) => void):
 
       if (b[1] === T.OFFER) {
         const o = decodeOffer(b)
-        if (!o) return                       // not an offer we can read at all
+        // Not an offer we can agree with - a geometry that does not follow from
+        // the size, a frame past the ceiling. Said, not swallowed: the sender
+        // would otherwise watch its prompt for thirty seconds (13.1 "the peer
+        // is told in every case").
+        if (!o) { try { host.direct()?.send(encodeReject(new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(2))) } catch {}; return }
         const say = (why: Why) => {
           // Always ANSWER a refusal: the alternative is the other side watching
           // a progress bar for thirty seconds before its own timer fires.

@@ -148,8 +148,19 @@ export const encodeOffer = (o: Offer) =>
     { name: o.name, size: o.size, mime: o.mime, chunk: o.chunk, chunks: o.chunks,
       ...(o.body ? { body: o.body } : {}) })))
 
+/** The answer to an offer that could not be read or agreed with: a refusal naming its id. */
+export const encodeReject = (id: number) => frame(T.REJECT, id)
+
+/** Name and MIME as the receiver will keep them (13.1): the sender applies the same clamp, so what it measures is what travels. */
+export const clampName = (s: string) => s.slice(0, 200)
+export const clampMime = (s: string) => (s || 'application/octet-stream').slice(0, 100)
+
 export function decodeOffer(b: Uint8Array): Offer | null {
   if (!isXfer(b) || b[1] !== T.OFFER) return null
+  // The whole offer is bounded, not only its note (13.1): a frame past the
+  // ceiling is refused here, so it is refused with a REJECT by the session
+  // rather than trimmed into something the sender did not say.
+  if (b.length - 6 > MAX_OFFER_BODY) return null
   try {
     const j = JSON.parse(dec.decode(b.subarray(6)))
     const o: Offer = {
@@ -205,7 +216,7 @@ export interface Sender {
 export function createSender(file: { name: string; size: number; mime: string; body?: string }, id = newId()): Sender {
   const chunks = Math.max(1, Math.ceil(file.size / CHUNK))
   const offer: Offer = {
-    id, name: file.name, size: file.size, mime: file.mime || 'application/octet-stream',
+    id, name: clampName(file.name), size: file.size, mime: clampMime(file.mime),
     chunk: CHUNK, chunks, ...(file.body ? { body: file.body } : {}),
   }
   let state: Sender['state'] = 'offering'

@@ -246,7 +246,7 @@ test('a note at the ceiling still builds a frame the channel will carry', () => 
   assert.ok(frame.length < DC_MAX_MESSAGE, `offer frame ${frame.length} must stay under ${DC_MAX_MESSAGE}`)
 })
 
-test('a note longer than the ceiling is cut when read, never trusted whole', () => {
+test('an offer frame past the ceiling is refused when read, never trimmed into something the sender did not say', () => {
   const id = newId()
   const size = CHUNK
   const huge = 'z'.repeat(MAX_OFFER_BODY * 3)
@@ -256,7 +256,10 @@ test('a note longer than the ceiling is cut when read, never trusted whole', () 
   frame[0] = CTRL; frame[1] = T.OFFER
   new DataView(frame.buffer).setUint32(2, id)
   frame.set(body, 6)
-  const o = decodeOffer(frame)
-  assert.ok(o)
-  assert.equal(o.body?.length, MAX_OFFER_BODY, 'a peer must not be able to hand us an unbounded note')
+  assert.equal(decodeOffer(frame), null, 'a peer must not be able to hand us an unbounded note - and we do not guess at a shorter one')
+  // The same note, just inside the ceiling, reads whole.
+  const fits = 'z'.repeat(MAX_OFFER_BODY - 200)
+  const ok = new TextEncoder().encode(JSON.stringify({ name: 'a.bin', size, mime: 'application/octet-stream', chunk: CHUNK, chunks: 1, body: fits }))
+  const f2 = new Uint8Array(6 + ok.length); f2[0] = CTRL; f2[1] = T.OFFER; new DataView(f2.buffer).setUint32(2, id); f2.set(ok, 6)
+  assert.equal(decodeOffer(f2)?.body, fits)
 })
