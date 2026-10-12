@@ -54,12 +54,15 @@ export interface KV {
   keys(): string[]
   get(key: string): string | null
   set(key: string, value: string): void
+  /** Optional: a store that cannot delete leaves a migrated key behind, which is tolerated. */
+  remove?(key: string): void
 }
 
 export const localKV = (): KV => ({
   keys: () => Object.keys(localStorage),
   get: (k) => localStorage.getItem(k),
   set: (k, v) => localStorage.setItem(k, v),
+  remove: (k) => localStorage.removeItem(k),
 })
 
 /** Written by a running build about itself; means nothing in another browser. */
