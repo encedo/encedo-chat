@@ -13,7 +13,7 @@ import {
   GroupSession, groupIdFromGK, senderIdOf, msgMacKeyFromSecret,
   type GroupId, type Member,
 } from '../lib/group.ts'
-import { seal, sendChainFrom, tag } from '../lib/senderkey.ts'
+import { seal, sendChainFrom, tag, MAX_SKIP } from '../lib/senderkey.ts'
 
 const enc = new TextEncoder()
 const P = { networkId: 'gtest', dateUTC: '2026-08-01' }
@@ -107,4 +107,19 @@ test('out-of-order across the group: later message opens, earlier one follows', 
   const f1 = await g.sa.send(body('a1'))
   assert.deepEqual((await g.sb.receive(f1))?.pt, body('a1'))
   assert.deepEqual((await g.sb.receive(f0))?.pt, body('a0'))
+})
+
+test('a sender that ran ahead past the skip bound is DROPPED, not thrown out of the listener', async () => {
+  // Section 8.2: "a larger gap is repaired by re-distribution, not by iterating".
+  // The receiver's bound threw, and nothing between it and the pubsub handler
+  // caught it - an unhandled rejection in the topic listener for one hostile
+  // or very stale frame. A frame the chain cannot reach must be an ordinary null.
+  const g = await makeGroup()
+  for (let i = 0; i < MAX_SKIP + 1; i++) await g.sa.send(body('unseen'))
+  const far = await g.sa.send(body('too far'))
+  let out: unknown = 'threw'
+  await assert.doesNotReject(async () => { out = await g.sb.receive(far) }, 'receive must not throw on a skip overrun')
+  assert.equal(out, null, 'and the frame is simply dropped')
+  // B is undamaged: a fresh frame from C still opens.
+  assert.deepEqual((await g.sb.receive(await g.sc.send(body('still here'))))?.pt, body('still here'))
 })

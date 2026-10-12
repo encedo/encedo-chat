@@ -348,7 +348,13 @@ export class GroupSession {
       this.held.set(sender.pub, q)
       this.onNeedSenderKey?.(sender.pub); return null // distribution has not reached us — ask
     }
-    const pt = await recv.open(h.ctr, headerBytes, ct)
+    // A counter the chain cannot reach (over the skip bound, section 8.2) is a
+    // frame to DROP: the receiver's bound throws so that nothing walks 2000
+    // keys, but up here that is one more way a frame fails to open, not a way
+    // out of the topic listener. The gap is repaired by re-distribution (8.4).
+    let pt: Uint8Array | null
+    try { pt = await recv.open(h.ctr, headerBytes, ct) }
+    catch (e: any) { plog('§8', `group recv: frame at ctr=${h.ctr} dropped - ${e?.message ?? e}`); return null }
     return pt ? { from: sender.pub, pt } : null
   }
 }
