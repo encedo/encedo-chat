@@ -9232,23 +9232,26 @@ function redistributeOwn(gid: string, epoch: number) {
 
 async function distributeGroup(gid: string, name: string, only?: string) {
   if (!client) return
-  for (const m of groupsUI.get(gid)?.members ?? []) {
-    if (m.pub === session?.pub) continue
-    if (only && m.pub !== only) continue
+  // The ENGINE's roster - admin-attested (§8.3) - never the UI's copy. The UI
+  // list is a mirror for drawing; the set that receives group_secret and our
+  // chain is decided here, and `skdFor` refuses an outsider on its own as well.
+  for (const pub of client.groups.roster(gid)) {
+    if (pub === session?.pub) continue
+    if (only && pub !== only) continue
     // Per recipient: when I am the admin, skdFor attaches THIS member's roster MAC
     // (rk from ECDH(GK_priv, IK_m)); a member's own redistribution carries none.
     // `continue`, not `return`: one member we cannot build an SKD for must not
     // cost the sender key to everyone standing behind them in the roster.
-    const skd = await client.groups.skdFor(gid, m.pub); if (!skd) continue
-    const contact = contactsCache.find((c) => c.pub === m.pub) ?? { name: memberName(m.pub), pub: m.pub, source: 'local' as const }
+    const skd = await client.groups.skdFor(gid, pub); if (!skd) continue
+    const contact = contactsCache.find((c) => c.pub === pub) ?? { name: memberName(pub), pub, source: 'local' as const }
     await openRoomFor(contact, false) // ensure a background 1:1 room; sendGroupSkd queues until it is up
     // openRoomFor returns immediately when a room already EXISTS, and a room that
     // is still opening has no conv yet — so this is reached with conv === null
     // often enough to matter, and dropping it there is precisely the bug.
-    const conv = rooms.get(m.pub)?.conv
-    if (conv) { conv.sendGroupSkd({ ...skd, name }); pendingSkd.delete(`${gid}|${m.pub}`) }
+    const conv = rooms.get(pub)?.conv
+    if (conv) { conv.sendGroupSkd({ ...skd, name }); pendingSkd.delete(`${gid}|${pub}`) }
     else {
-      pendingSkd.add(`${gid}|${m.pub}`)
+      pendingSkd.add(`${gid}|${pub}`)
       ecLog(`group: 1:1 to ${contact.name} not ready — SKD queued for when it is`)
     }
   }
@@ -9300,7 +9303,9 @@ async function answerSkdReq(from: string, req: { gid: string; epoch: number }) {
   if (!client) return
   const gid = client.groups.gidHexOf(unb64(req.gid))
   const gu = groupsUI.get(gid); if (!gu) return
-  if (!gu.members.some((m) => m.pub === from)) {
+  // The attested roster the engine holds, not the UI's mirror of it: the mirror
+  // is what an SKD from outside the roster used to overwrite (audit 2026-10-11).
+  if (!client.groups.isMember(gid, from)) {
     ecLog(`group: ${from.slice(0, 12)}… asked for a sender key but is not in the roster — ignored`)
     return
   }
@@ -9318,12 +9323,18 @@ async function onGroupInvite(from: string, skd: GroupSkdEnv) {
     const gu0 = groupsUI.get(gid)
     if (gu0 && !$('members-pop').hidden && (popMembersGid ?? activeGid) === gid) renderMembersPop(gu0)
   }
-  const members = skd.roster.map((pub) => ({ pub, name: memberName(pub) }))
+  // The roster is the ENGINE's - the one the admin's MAC attested (§8.3). What
+  // the SKD itself claims is never read here: a same-epoch handoff carries no
+  // MAC, and adopting its roster let anyone with a 1:1 to us write themselves
+  // in and then be answered with group_secret and our chain (audit 2026-10-11).
+  // Core only calls this for an SKD the engine took, so the roster is never
+  // empty here; an empty one means a race with a delete - nothing to show.
+  const roster = client.groups.roster(gid)
+  if (!roster.length) return
+  const members = roster.map((pub) => ({ pub, name: memberName(pub) }))
   let gu = groupsUI.get(gid)
-  // A copy from an OLDER epoch - a removed member re-sending its key (it was
-  // never told), a late duplicate - carries the roster of that epoch. The engine
-  // already ignored it; adopting its roster here put a removed member back on
-  // the list. Only the same or a newer epoch speaks for the membership.
+  // An older epoch's copy never reaches here any more (core drops what the
+  // engine set aside); kept as a belt for a handler called from elsewhere.
   if (gu && skd.epoch < gu.epoch) return
   if (!gu) {
     gu = { gid, name: skd.name || tr('Grupa'), epoch: skd.epoch, members, log: [], unseen: 0, room: null }
@@ -9346,9 +9357,10 @@ async function onGroupInvite(from: string, skd: GroupSkdEnv) {
     // The name is app metadata the roster MAC does NOT cover, and any member may
     // legitimately send a same-epoch SKD (that is the ordinary sender-key
     // handoff) — so without this check any member could rename the group under
-    // everyone else. The admin is roster[0]; who `from` is was authenticated by
-    // the 1:1 ratchet the SKD arrived on.
-    if (skd.name && from === members[0]?.pub) gu.name = skd.name
+    // everyone else. The admin is roster[0] OF THE ATTESTED ROSTER (an SKD's own
+    // roster[0] is whatever its sender wrote); who `from` is was authenticated
+    // by the 1:1 ratchet the SKD arrived on.
+    if (skd.name && from === roster[0]) gu.name = skd.name
     // A newer epoch means a rekey -> a new group_secret -> a new topic, so the room
     // must re-join. A *same-epoch* SKD is just a member handing us its sender key
     // (already applied to the engine): keep the live room — tearing it down here

@@ -128,7 +128,9 @@ export class Groups {
 
   /** Hand my sender key for `g` to every member (or to `only`), over the 1:1. */
   async distribute(g: GroupInfo, only?: string) {
-    for (const m of g.members) {
+    // The engine's attested roster decides who receives group_secret and our
+    // chain - never `g.members`, a mirror for display (audit 2026-10-11).
+    for (const m of this.session.groups.roster(g.gid)) {
       if (m === this.me || (only && m !== only)) continue
       const skd = await this.session.groups.skdFor(g.gid, m); if (!skd) continue
       const conv = await this.conv(m)
@@ -143,16 +145,18 @@ export class Groups {
     if (conv) conv.sendGroupSkdReq(b64((gs as any).gid), g.epoch)
   }
 
-  /** An SKD arrived over a 1:1 (the engine already applied it). */
+  /** An SKD arrived over a 1:1 and the engine TOOK it (core reports no other).
+   *  The roster shown and distributed to is the engine's attested one; what the
+   *  envelope claims is never read here. */
   async onInvite(from: string, skd: any) {
     const gid = this.session.groups.gidHexOf(unb64(skd.gid))
     if (this.owed.receipt(gid, from, skd.epoch)) void this.persist()
+    const roster = this.session.groups.roster(gid)
+    if (!roster.length) return
     let g = this.infos.get(gid)
-    // An older epoch's copy (a removed member re-sending its key) speaks for
-    // nothing: its roster would put that member back on our list.
-    if (g && skd.epoch < g.epoch) return
+    if (g && skd.epoch < g.epoch) return // belt: core already drops a stale copy
     if (!g) {
-      g = { gid, name: skd.name || 'Grupa', epoch: skd.epoch, members: skd.roster.slice(), room: null }
+      g = { gid, name: skd.name || 'Grupa', epoch: skd.epoch, members: roster, room: null }
       this.infos.set(gid, g)
       await this.open(g)
       this.h.joined?.(g, 'invite')
@@ -161,18 +165,18 @@ export class Groups {
       void this.session.groups.writeMemberMarker(gid, g.name).catch(() => false)
     } else {
       const changed: string[] = []
-      if (skd.roster.join() !== g.members.join()) { g.members = skd.roster.slice(); changed.push('skład') }
-      if (skd.name && skd.name !== g.name && from === skd.roster[0]) { g.name = skd.name; changed.push('nazwa') }
+      if (roster.join() !== g.members.join()) { g.members = roster; changed.push('skład') }
+      if (skd.name && skd.name !== g.name && from === roster[0]) { g.name = skd.name; changed.push('nazwa') }
       if (skd.epoch > g.epoch) { g.epoch = skd.epoch; await this.open(g); void this.distribute(g); this.redistribute(g); changed.push('epoka') }
       if (changed.length) this.h.updated?.(g, changed.join(', '))
     }
     await this.persist()
   }
 
-  /** A member asks for our key: only roster members get it. */
+  /** A member asks for our key: only members of the ATTESTED roster get it. */
   async onSkdReq(from: string, req: { gid: string }) {
     const g = this.infos.get(this.session.groups.gidHexOf(unb64(req.gid))); if (!g) return
-    if (!g.members.includes(from)) { this.log(`ktoś spoza składu grupy prosił o klucz - zignorowano`); return }
+    if (!this.session.groups.isMember(g.gid, from)) { this.log(`ktoś spoza składu grupy prosił o klucz - zignorowano`); return }
     await this.distribute(g, from)
   }
 

@@ -733,13 +733,17 @@ export interface SessionOpts {
    */
   forcedRotationSec?: number
   onLog?: ChatOpts['onLog']
-  /** A group Sender-Key Distribution arrived over some 1:1 room (§8). It is already
-   *  applied to `session.groups`; this lets the app react (e.g. surface the group). */
+  /** A group Sender-Key Distribution arrived over some 1:1 room (§8) and the
+   *  engine TOOK it (a join, a rekey, or a member's sender key - a refused or
+   *  stale copy is never reported). This lets the app react (surface the group,
+   *  hand its own key back); the roster to show is `session.groups.roster(gid)`,
+   *  not the envelope's. */
   onGroupSkd?: ChatOpts['onGroupSkd']
   /** A contact cannot open our group frames and asks for our sender key again.
    *  Unlike an SKD there is nothing for core to apply — answering means deciding
-   *  whether they are in that group, which is the app's roster to read. `from` is
-   *  the sender's IK pub, as for `onGroupSkd` and for the same reason. */
+   *  whether they are in that group: `session.groups.isMember(gid, from)`, the
+   *  attested roster, and `skdFor` refuses an outsider on its own as well. `from`
+   *  is the sender's IK pub, as for `onGroupSkd` and for the same reason. */
   onGroupSkdReq?: ChatOpts['onGroupSkdReq']
   /** The pair secret, when the caller already holds it — see `deriveRoom`. */
   ss?: Uint8Array
@@ -1227,8 +1231,15 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
         // A refusal (no roster MAC, a member's key that beat the admin's to a new
         // epoch) is an ordinary outcome, not a crash: in Node an unhandled rejection
         // ends the process. The refused member's key is asked for again (§8 repair).
+        // The app is told only what the engine TOOK (joined / rekeyed / a
+        // member's sender key). A copy it set aside - same epoch from outside
+        // the roster, an older epoch - stops here: the roster the app shows and
+        // distributes to is the engine's (`groups.roster`), never the SKD's, and
+        // a refused SKD must not even wake the handler (audit 2026-10-11).
         onGroupSkd: async (_from, skd) => {
-          try { await groups.applySkd(peer.pub, skd) } catch (e: any) { log(`group-skd from ${peer.pub.slice(0, 8)} epoch ${skd.epoch} refused: ${e?.message ?? e}`); return }
+          let outcome
+          try { outcome = await groups.applySkd(peer.pub, skd) } catch (e: any) { log(`group-skd from ${peer.pub.slice(0, 8)} epoch ${skd.epoch} refused: ${e?.message ?? e}`); return }
+          if (outcome === 'refused' || outcome === 'stale') { log(`group-skd from ${peer.pub.slice(0, 8)} epoch ${skd.epoch} ${outcome} - not a member at this epoch, or an older epoch`); return }
           roomOpts.onGroupSkd?.(peer.pub, skd); opts.onGroupSkd?.(peer.pub, skd)
         },
         onGroupSkdReq: (_from, req) => { roomOpts.onGroupSkdReq?.(peer.pub, req); opts.onGroupSkdReq?.(peer.pub, req) },

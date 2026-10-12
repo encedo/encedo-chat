@@ -48,6 +48,9 @@ export interface GroupId {
 }
 export interface Member { pub: string; kid?: string }
 
+/** What `GroupManager.applySkd` did with a distribution (see there). */
+export type SkdOutcome = 'joined' | 'rekeyed' | 'senderkey' | 'refused' | 'stale'
+
 // ---------------------------------------------------------------------------
 // ids & derivations
 // ---------------------------------------------------------------------------
@@ -687,9 +690,33 @@ export class GroupManager {
     return session
   }
 
-  /** Apply an SKD received from `from` over a 1:1 session: establish/update the
-   *  group, then store `from`'s sending key. */
-  async applySkd(from: string, skd: SkdFields): Promise<void> {
+  /** The roster the engine holds for a group - the admin-attested one (§8.3),
+   *  as public keys, roster[0] the admin. Empty for a group it does not hold.
+   *  THE source for every caller: a front-end must never keep a roster of its
+   *  own from what an SKD claimed (audit 2026-10-11). */
+  roster(gidHex: string): string[] {
+    return (this.recs.get(gidHex)?.roster ?? []).map((m) => m.pub)
+  }
+
+  /** Is `pub` in the attested roster of `gidHex`? The check behind every
+   *  distribution and every answer to a re-request (§8.4). */
+  isMember(gidHex: string, pub: string): boolean {
+    return (this.recs.get(gidHex)?.roster ?? []).some((m) => m.pub === pub)
+  }
+
+  /**
+   * Apply an SKD received from `from` over a 1:1 session: establish/update the
+   * group, then store `from`'s sending key. Says what it did, because the layer
+   * above acts on it (opens the room, shows the roster, hands its own key back)
+   * and must not act on a copy the engine set aside:
+   *   - `joined`    first sight of the group (admin-attested roster)
+   *   - `rekeyed`   a newer epoch under the admin's roster MAC
+   *   - `senderkey` same epoch, a roster member handing over its chain
+   *   - `refused`   same epoch, a sender OUTSIDE the roster - nothing taken
+   *   - `stale`     an older epoch (a removed member re-sending, a late copy)
+   * A malformed or unverifiable advance still throws.
+   */
+  async applySkd(from: string, skd: SkdFields): Promise<SkdOutcome> {
     const gid = unb64(skd.gid), gh = hex(gid)
     const cur = this.recs.get(gh)
     if (!cur || skd.epoch > cur.epoch) {
@@ -710,12 +737,20 @@ export class GroupManager {
         gid, gkPub: unb64(skd.gkPub), epoch: skd.epoch, secret: unb64(skd.secret), roster: skd.roster.map((pub) => ({ pub })),
       })
       session.setSenderKey(from, unb64(skd.chain), skd.ctr ?? 0)
-    } else {
-      // Same-or-older epoch: a member redistributing its own sending key. It does
-      // NOT change the roster (admin authority), and we accept the key only from a
-      // sender already in the admin-attested roster.
-      if (cur.roster.some((m) => m.pub === from)) cur.session.setSenderKey(from, unb64(skd.chain), skd.ctr ?? 0)
+      return cur ? 'rekeyed' : 'joined'
     }
+    // An older epoch speaks for nothing: a removed member keeps re-sending the
+    // key of the epoch it was dropped from (it is never told), and a late copy
+    // of our own epoch's predecessor would put an old chain under a new epoch.
+    if (skd.epoch < cur.epoch) return 'stale'
+    // Same epoch: a member redistributing its own sending key. It does NOT change
+    // the roster (admin authority), and the key is taken only from a sender
+    // already in the admin-attested roster. Anybody else is refused - and said
+    // so, because a silent no-op here is what let the front-ends adopt the
+    // roster such an SKD carried.
+    if (!cur.roster.some((m) => m.pub === from)) return 'refused'
+    cur.session.setSenderKey(from, unb64(skd.chain), skd.ctr ?? 0)
+    return 'senderkey'
   }
 
   /**
@@ -739,6 +774,11 @@ export class GroupManager {
   async skdFor(gidHex: string, forPub?: string): Promise<SkdFields | null> {
     const rec = this.recs.get(gidHex)
     if (!rec) return null
+    // Addressed to somebody the attested roster does not hold: nothing. This is
+    // the engine's own gate (§8.4) - a caller that checked a roster of its own,
+    // or none, cannot hand `group_secret` and our chain to an outsider through
+    // here. A removed member asking for a repair is the ordinary case.
+    if (forPub && !rec.roster.some((m) => m.pub === forPub)) return null
     const skd: SkdFields = {
       gid: b64(rec.session.gid), gkPub: b64(rec.gkPub), epoch: rec.epoch,
       secret: b64(rec.secret), chain: b64(rec.session.mySenderKey()), ctr: rec.session.mySenderCtr(),
