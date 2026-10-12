@@ -52,6 +52,7 @@ import { siblingSet, shouldJoin, evictable, staleSiblings, dupOnlySiblings, over
 import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad, makeLoadCache } from './load.mjs'
 import { makeQuota, DEFAULT_PER_PEER } from './quota.mjs'
 import { leafAnnouncements } from './leaf.mjs'
+import { MAX_FRAME_BYTES, MAX_RPC_BYTES, oversize, frameValidator } from './limits.mjs'
 import { pipe } from 'it-pipe'
 import * as lp from 'it-length-prefixed'
 import { pushable } from 'it-pushable'
@@ -217,7 +218,10 @@ const relay = await createLibp2p({
       emitSelf: false,
       floodPublish: true,
       D: 8, Dlo: 6, Dhi: 12, Dout: 0,
-      maxMessageSize: 65536,  // 64 KB — enough for encrypted text, prevents flood abuse
+      // One inbound RPC (limits.mjs). The per-MESSAGE bound is the topic
+      // validator installed on every subscribe below; `maxMessageSize` was
+      // never an option of this library and enforced nothing.
+      maxInboundDataLength: MAX_RPC_BYTES,
       historyLength: 2,       // keep last 2 windows (~2 min) instead of default 5
       historyGossip: 1,       // advertise only last window in gossip announcements
       // WARNING: Turn OFF the IP-colocation penalty. GossipSub's default punishes
@@ -295,6 +299,14 @@ if (PICK) {
         if (!f) continue
         if (f.type === PICK_T.DROP) { if (picks.drop(peer, f.topic, send)) quota.release(peer, f.topic); continue }
         if (f.type === PICK_T.PUSH) {
+          // The frame bound (limits.mjs), said rather than silently dropped
+          // on the far side: an ACK of 0 is the truth - it reached nobody.
+          if (oversize(f.data)) {
+            console.log(`[!frame] PUSH of ${f.data.length} B by ${peer.slice(0, 12)}... on "${f.topic.slice(0, 16)}..." refused (> ${MAX_FRAME_BYTES})`)
+            stats?.counters.topic('refuse'); metrics?.topic('refuse')
+            send(encodeAck(f.topic, 0))
+            continue
+          }
           // Publish on the client's behalf, bytes untouched (the sender is
           // inside the origin envelope, never read here), then hand the same
           // bytes to this node's own pick-holders of the topic -- our own
@@ -333,8 +345,9 @@ if (PICK) {
         }
         if (!already) {
           relay.services.pubsub.subscribe(f.topic)
+          relay.services.pubsub.topicValidators.set(f.topic, frameValidator)
           stats?.counters.topic('add'); metrics?.topic('add')
-          console.log(`[+topic] "${f.topic}" (pick)`)
+          console.log(`[+topic] "${f.topic.slice(0, 16)}..." (pick)`)
         }
         lastSeen.set(f.topic, Date.now())
         picks.add(peer, f.topic, send)
@@ -382,14 +395,15 @@ relay.services.pubsub.addEventListener('subscription-change', (evt) => {
         // The client gets no error for this — it just never sees anyone in the
         // room. Loud in the log, because it looks like "the app is broken".
         stats?.counters.topic('refuse'); metrics?.topic('refuse')
-        console.log(`[!topic] LIMIT ${MAX_TOPICS} reached — REFUSING "${topic}" (raise --max-topics)`)
+        console.log(`[!topic] LIMIT ${MAX_TOPICS} reached — REFUSING "${topic.slice(0, 16)}..." (raise --max-topics)`)
         dump?.event('topic.refuse', { topic, peer: evt.detail.peerId.toString(), limit: MAX_TOPICS })
         continue
       }
       relay.services.pubsub.subscribe(topic)
+      relay.services.pubsub.topicValidators.set(topic, frameValidator)
       lastSeen.set(topic, Date.now())
       stats?.counters.topic('add'); metrics?.topic('add')
-      console.log(`[+topic] "${topic}"`)
+      console.log(`[+topic] "${topic.slice(0, 16)}..."`)
       dump?.event('topic.add', { topic, peer: evt.detail.peerId.toString() })
     }
   }
@@ -423,9 +437,10 @@ setInterval(() => {
   for (const topic of relay.services.pubsub.getTopics()) {
     if (evictable({ now, lastSeen: lastSeen.get(topic), holders: picks.holders(topic), ttlMs: IDLE_TTL })) {
       relay.services.pubsub.unsubscribe(topic)
+      relay.services.pubsub.topicValidators.delete(topic)
       lastSeen.delete(topic)
       stats?.counters.topic('evict'); metrics?.topic('evict')
-      console.log(`[-topic] evicted "${topic}" (idle > ${IDLE_TTL / 1000}s)`)
+      console.log(`[-topic] evicted "${topic.slice(0, 16)}..." (idle > ${IDLE_TTL / 1000}s)`)
       dump?.event('topic.evict', { topic, idle_s: IDLE_TTL / 1000 })
     }
   }

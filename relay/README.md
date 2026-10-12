@@ -383,8 +383,12 @@ trivial few-hundred-socket DoS into a real bandwidth problem.
 
 ## Tunables (relay.mjs)
 
-- `--max-connections` (default **520**), `maxReservations: 256`,
-  `maxMessageSize: 65536` (64 KB).
+- `--max-connections` (default **520**), `maxReservations: 256`; a **64 KiB
+  per-message bound** (`relay/limits.mjs`: a PUSH past it is answered with
+  ACK 0 and not published, a GossipSub message past it is ignored by the
+  topic validator installed on every topic) and a 1 MiB bound on one inbound
+  RPC (`maxInboundDataLength`). `maxMessageSize` used to be passed here and
+  was never an option of this gossipsub - it enforced nothing.
 - GossipSub mesh `D:8, Dlo:6, Dhi:12, Dout:0` (tuned for ~25 clients/topic),
   `floodPublish: true`, `allowPublishToZeroTopicPeers: true`,
   `historyLength: 2` / `historyGossip: 1` (a smaller message cache than the
