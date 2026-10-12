@@ -142,6 +142,12 @@ exported from the app cannot be used here. Today it is a developer tool.
   daemon with the password only from the secret file, `docker exec ... send` to
   an identity on the host - delivered in 1.6 s. Next: the CLI <-> browser
   scenario; publishing the image (registry, CI) is a decision still to take.
+- **Undelivered in the client** (2026-10-12): a message to a peer who left says
+  "nie doręczono … wyślę sama, gdy wróci", and when the engine sends it on the
+  peer's return the client says "dotarła jednak do X (po N s)" - before, the
+  warning was the last word. Decided with the user: **only the daemon has a
+  persistent queue**; whether messages wait on disk is the admin's choice
+  (running the daemon), never the chat client's. cli-client-test covers both lines.
 - **HEM**: sign-in never creates an identity (`onchato hem new <name>` does),
   and several identities on one device are offered as a numbered list.
 

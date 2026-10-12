@@ -369,6 +369,14 @@ Co dalej z wiadomością, zależy od tego, czy działa demon:
 | odbiorca online | doręczona w ok. sekundę | doręczona po zestawieniu sesji (kilka sekund) |
 | odbiorca offline | **czeka w kolejce demona** (na dysku, przeżywa restart) i wychodzi sama, gdy odbiorca wróci | **przepada** (komunikat o tym na stderr) |
 
+W **kliencie rozmów** (`onchato chat`) wiadomość do kogoś, kto wyszedł, od razu dostaje
+„nie doręczono … wyślę sama, gdy wróci”: klient trzyma ją w pamięci i wysyła, gdy
+rozmówca wróci, a wtedy pisze „wiadomość … dotarła jednak do ewa (po 2 min)”. Ta
+pamięć żyje tylko do zamknięcia klienta. **Trwałą kolejkę ma wyłącznie demon** — to
+świadomy podział: czy wiadomości mają czekać na dysku, decyduje admin, uruchamiając
+demona (wygoda kosztem tego, że treść leży zaszyfrowana u nadawcy), a nie klient
+rozmów za plecami użytkownika.
+
 Wynik `--json`: `{"ok":true,"status":"delivered","id":"…","ms":412,"to":"ewa","via":"daemon"}`
 (`status` = `delivered` albo `queued`, `via` = `daemon` albo `direct`).
 

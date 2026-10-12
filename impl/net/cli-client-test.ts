@@ -89,8 +89,23 @@ try {
     const { writeFileSync } = await import('node:fs')
     writeFileSync(process.env.SHOT_DIR + '/cli-ala.txt', A.screen()); writeFileSync(process.env.SHOT_DIR + '/cli-bob.txt', B.screen())
   }
-  A.type('/quit\r'); B.type('/quit\r')
-  await until('both clients exited', () => A.exited() === 0 && B.exited() === 0, 10_000)
+  // The peer is gone: the client says so at once, the engine keeps the message
+  // and sends it when the peer is back, and the client says THAT too.
+  B.type('/quit\r')
+  await until('bob exited', () => B.exited() === 0, 10_000)
+  await until('ala sees bob leave', () => A.screen().includes('bob wyszedł/wyszła'), 30_000)
+  const later = 'gdy cie nie ma ' + Date.now().toString(36)
+  A.type(later + '\r')
+  await until('ala told it is undelivered, and that it will go when bob is back', () => /nie doręczono wiadomości .* wyślę sama, gdy wróci/.test(A.screen()), 60_000)
+  step('a message to a peer who left: "nie doręczono ... wyślę sama, gdy wróci" at once')
+  const B2 = await terminal(bob, [{ name: 'ala', pub: ala.pub }])
+  const allB2 = () => B2.client.windows.list().flatMap((w: any) => w.lines).join('\n').replace(/\x1b\[[0-9;]*m/g, '')
+  await until('bob, back, gets the message', () => allB2().includes('<ala> ' + later), 120_000)
+  await until('ala told it arrived after all', () => /dotarła jednak do bob \(po \d+ (s|min)\)/.test(A.screen()), 30_000)
+  step('bob back: the message goes by itself, and ala sees "dotarła jednak do bob (po N s)"')
+
+  A.type('/quit\r'); B2.type('/quit\r')
+  await until('both clients exited', () => A.exited() === 0 && B2.exited() === 0, 10_000)
   step('/quit leaves and exits cleanly')
   console.log('PASS - two CLI clients over the real relays')
 } catch (e: any) {

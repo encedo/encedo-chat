@@ -141,6 +141,12 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
     const have = rooms.get(c.pub)
     if (have) { if (show && !have.win) have.win = w.open('query', c.pub, c.name); return have }
     const room: Room = { contact: c, conv: null, win: show ? w.open('query', c.pub, c.name) : null, secure: false, lastRecvId: null, lastFile: null }
+    // Messages this window called undelivered: their delivery, when it comes, is news.
+    const undelivered = new Set<string>()
+    const arrived = (mid: string, ms: number) => {
+      if (!undelivered.delete(mid)) return
+      out(sys(`wiadomość ${mid.slice(0, 6)}… dotarła jednak do ${c.name} (po ${ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`})`), 'sys', true)
+    }
     rooms.set(c.pub, room)
     /** Into this room's window; `make` opens one if it has none yet. */
     const out = (line: string, level: 'sys' | 'msg' | 'mention' = 'sys', make = false) => {
@@ -174,7 +180,15 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         if (ev === 'join') out(sys(`${c.name} w pokoju`))
         if (ev === 'leave') { out(sys(`${c.name} wyszedł/wyszła`)); room.secure = false; repaintStatus() }
       },
-      onUndelivered: (mid) => out(warn(`nie doręczono wiadomości ${mid.slice(0, 6)}… - ${c.name} nie potwierdził(a)`), 'sys', true),
+      onUndelivered: (mid) => { undelivered.add(mid); out(warn(`nie doręczono wiadomości ${mid.slice(0, 6)}… - ${c.name} nie potwierdził(a); wyślę sama, gdy wróci`), 'sys', true) },
+      // The engine keeps an undelivered message and sends it when the peer is back
+      // (while this client runs - only the daemon has a queue that outlives it).
+      // Without this the "nie doręczono" above was the last word even when the
+      // message did arrive; the app turns its mark into a tick at this point. A
+      // parked message comes back as an ordinary delivery, a message whose
+      // retries ran out as a late one - both close the warning.
+      onDelivered: (mid, ms) => arrived(mid, ms),
+      onLateDelivered: (mid, ms) => arrived(mid, ms),
       onSessionTakenOver: () => {
         status(warn('ta tożsamość otworzyła się w drugim miejscu - obie sesje się zamykają (§9.1)'))
         setTimeout(() => void quit(), 1500)
