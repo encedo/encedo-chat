@@ -659,6 +659,23 @@ export class GroupManager {
   /** Whether this manager already holds the group — i.e. it can read its topic. */
   has(gidHex: string): boolean { return this.recs.has(gidHex) }
 
+  /**
+   * Leave: forget the group here, without a rekey and without a word on the
+   * wire (8.3 - a member cannot change the admin's roster). The sealed blob
+   * is the caller's to remove; `snapshot()` stops listing the group, so a
+   * persist after this does not write it back. A same-epoch SKD from another
+   * member is refused afterwards (no record, no roster MAC); the admin's next
+   * rekey, being a fresh distribution with a MAC, joins as any group does -
+   * the app's left-list decides what to do with copies of the epoch left.
+   */
+  dropGroup(gidHex: string): void {
+    const rec = this.recs.get(gidHex)
+    if (!rec) return
+    rec.ssCache.clear()
+    this.recs.delete(gidHex)
+    this.labels.delete(gidHex)
+  }
+
   /** Drop a device entry for a group we could not get back into. Takes the KID
    *  rather than a gid: by definition we hold no record for it. */
   async forgetDeviceGroup(kid: string): Promise<void> {

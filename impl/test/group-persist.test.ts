@@ -71,3 +71,23 @@ test('a restored member does not reuse a spent send counter', async () => {
   // B already consumed counter 0; the restored A must send counter 1, which B opens.
   assert.deepEqual((await mB.session(gid)!.receive(await mA2.session(gid)!.send(body('two'))))?.pt, body('two'))
 })
+
+test('a dropped group is gone from the snapshot, and a same-epoch key from a member does not bring it back', async () => {
+  const A = { id: await softId(), mgr: null as any }, B = { id: await softId(), mgr: null as any }
+  A.mgr = new GroupManager(A.id, P); B.mgr = new GroupManager(B.id, P)
+  const { gk, pub: gkPub } = await softwareGk()
+  const gid = await A.mgr.createGroup(gkPub, [{ pub: A.id.pub }, { pub: B.id.pub }], gk)
+  assert.equal(await B.mgr.applySkd(A.id.pub, (await A.mgr.skdFor(gid, B.id.pub))!), 'joined')
+  assert.equal(B.mgr.snapshot().length, 1)
+  B.mgr.dropGroup(gid)
+  assert.equal(B.mgr.snapshot().length, 0, 'a persist after leaving writes nothing for this group')
+  assert.equal(B.mgr.has(gid), false)
+  assert.equal(await B.mgr.skdFor(gid, A.id.pub), null, 'and hands out no key for it')
+  // A's own key for the same epoch keeps arriving (A was never told): no record,
+  // no roster MAC on a member's handoff -> not a join.
+  const fromA = (await A.mgr.skdFor(gid, B.id.pub))!
+  let outcome: string
+  try { outcome = await B.mgr.applySkd(A.id.pub, { ...fromA, rmac: undefined }) } catch { outcome = 'threw' }
+  assert.notEqual(outcome, 'joined')
+  assert.equal(B.mgr.has(gid), false)
+})

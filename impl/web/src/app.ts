@@ -83,6 +83,7 @@ import { cachePubKeys, traceHem } from '../../lib/hemwrap.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import { sealPins, openPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../../lib/pincache.ts'
 import { readSealedKV, writeSealedKV } from '../../lib/sealedstore.ts'
+import { markLeft, unmarkLeft, leftCovers, isLeftMap, LEFT_SALT, LEFT_PREFIX, type LeftMap } from '../../lib/gleft.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
 // The published relay list, compiled in — see DEFAULT_NODES below for why.
@@ -724,6 +725,7 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   const local = await makeLocalBook(idKey, localStorage, hemId)
   if (local.verdict === 'tampered') warnTampered()
   await loadSeen(idKey, await cacheBaseFor(hemId, idKey)) // per identity, sealed; the base is already cached by the book's MAC check
+  await loadLeft(idKey, await cacheBaseFor(hemId, idKey))
   await enterApp(
     hemId,
     mergedContactBook(hemContactBook(hem, id.kid), local.verdict === 'tampered' ? taintedBook() : local.book),
@@ -1192,6 +1194,7 @@ async function softLogin() {
     const local = await makeLocalBook(idKey2, localStorage, id)
     if (local.verdict === 'tampered') warnTampered()
     await loadSeen(idKey2, await cacheBaseFor(id, idKey2))
+    await loadLeft(idKey2, await cacheBaseFor(id, idKey2))
     await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
@@ -1767,6 +1770,20 @@ async function loadSeen(idKey: string, base: Uint8Array | null) {
 }
 /** No base, no write (lib/sealedstore.ts): the record then lives in RAM for the session. */
 const saveSeen = () => { if (seenKey) void writeSealedKV(localKV(), seenBase, seenIdKey, seenKey, SEEN_SALT, seenMap, (m) => ecLog(m, 'debug')) }
+
+/**
+ * Groups this identity left, with the epoch it left at (lib/gleft.ts): sealed
+ * like `seen`, loaded beside it. Consulted by `onGroupInvite` so that a copy
+ * of the epoch one walked out of - another member's key re-sent ten seconds
+ * later, the admin's own re-send - does not quietly put the group back.
+ */
+let leftMap: LeftMap = {}
+let leftKey = '', leftIdKey = '', leftBase: Uint8Array | null = null
+async function loadLeft(idKey: string, base: Uint8Array | null) {
+  leftKey = LEFT_PREFIX + idKey; leftIdKey = idKey; leftBase = base
+  leftMap = (await readSealedKV<LeftMap>(localKV(), base, idKey, leftKey, LEFT_SALT, isLeftMap, (m) => ecLog(m, 'debug'))) ?? {}
+}
+const saveLeft = () => { if (leftKey) void writeSealedKV(localKV(), leftBase, leftIdKey, leftKey, LEFT_SALT, leftMap, (m) => ecLog(m, 'debug')) }
 
 /** They announced: they are here, and they hold our key. */
 function markSeen(pub: string, at = nowMs()) {
@@ -3492,6 +3509,7 @@ function startTransfer(f: File | null | undefined) {
     toast(r === 'no-channel' ? tr('Kanał bezpośredni nie stoi — wyślij plik przez czat')
       : r === 'busy' ? tr('Jeden transfer naraz — poczekaj, aż ten się skończy')
       : r === 'too-big' ? tr('Plik jest za duży — limit to {mb} MB', { mb: Math.floor(MAX_DIRECT / 1024 / 1024) })
+      : r === 'offer-too-big' ? tr('Nazwa pliku razem z notatką nie mieszczą się w ofercie transferu — skróć notatkę albo wyślij plik przez czat')
       : r === 'note-too-big' ? tr('Notatka przy transferze może mieć najwyżej {n} — skróć ją albo wyślij plik przez czat', { n: kb(MAX_OFFER_BODY) })
       : tr('Pusty plik'))
     return
@@ -8796,6 +8814,15 @@ async function leaveGroup(gid: string) {
   // Before the record goes: a group left behind in the device would come back on
   // the next machine as a group we cannot rejoin.
   await client?.groups.dropMemberMarker(gid).catch(() => {})
+  // The engine's record and the sealed blob go too - until 2026-10-12 neither
+  // did, and `persistGroups` wrote the group straight back from the engine, so
+  // it was there again after a reload, secret and chains included. What is
+  // kept is the departure itself (lib/gleft.ts), so a copy of this epoch's key
+  // from anybody does not re-create it.
+  client?.groups.dropGroup(gid)
+  owedInvites.forget(gid)
+  try { localStorage.removeItem(gcachePrefix() + gid) } catch {}
+  leftMap = markLeft(leftMap, gid, gu.epoch); saveLeft()
   groupsUI.delete(gid)
   // Same reset the 1:1 path uses when the room on screen goes away.
   if (activeGid === gid) { activeGid = null; $('chat-view').hidden = true; $('chat-empty').hidden = false; showChatPane(false) }
@@ -8826,6 +8853,8 @@ async function deleteGroup(gid: string) {
     try { await gu.room?.sendText('🛑 Grupa została usunięta przez administratora.') } catch {}
     await client.groups.deleteGroup(gid)   // rekey to me alone, then destroy the GK
     gu.room?.stop()
+    owedInvites.forget(gid)
+    try { localStorage.removeItem(gcachePrefix() + gid) } catch {} // or a reload restores the pre-dissolution state
     groupsUI.delete(gid)
     if (activeGid === gid) { activeGid = null; $('chat-view').hidden = true; $('chat-empty').hidden = false; showChatPane(false) }
     await persistGroups()
@@ -9327,6 +9356,16 @@ async function onGroupInvite(from: string, skd: GroupSkdEnv) {
   // the SKD itself claims is never read here: a same-epoch handoff carries no
   // MAC, and adopting its roster let anyone with a 1:1 to us write themselves
   // in and then be answered with group_secret and our chain (audit 2026-10-11).
+  // A group this identity walked out of, at the epoch it walked out of (or an
+  // older copy): the engine may have just re-admitted it on the admin's MAC,
+  // so take the record away again. A NEWER epoch is the admin's fresh rekey
+  // and joins as any group does - and ends the departure.
+  if (leftCovers(leftMap, gid, skd.epoch)) {
+    client.groups.dropGroup(gid)
+    ecLog(`group ${gid.slice(0, 8)}... left at epoch ${leftMap[gid]}: ignoring a key for epoch ${skd.epoch}`, 'debug')
+    return
+  }
+  if (gid in leftMap) { leftMap = unmarkLeft(leftMap, gid); saveLeft() }
   // Core only calls this for an SKD the engine took, so the roster is never
   // empty here; an empty one means a race with a delete - nothing to show.
   const roster = client.groups.roster(gid)
