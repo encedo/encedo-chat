@@ -109,6 +109,10 @@ export type Why =
 
 export type Ev =
   | { t: 'accepted' }
+  /** A frame the peer must hear (a CANCEL on an offer nobody answered): the
+   *  caller sends it before acting on what follows. Section 13.1, "the peer is
+   *  told in every case". */
+  | { t: 'tell'; frame: Uint8Array }
   | { t: 'offer'; offer: Offer }
   | { t: 'progress'; done: number; total: number }
   | { t: 'done' }
@@ -218,7 +222,10 @@ export function createSender(file: { name: string; size: number; mime: string; b
     acked() { return Math.min(file.size, (ackedIdx + 1) * CHUNK) },
     cancel() { state = 'failed'; return frame(T.CANCEL, id) },
     tick(now) {
-      if (state === 'offering' && now - last > ACCEPT_MS) return fail('timeout')
+      // An unanswered offer expires on BOTH sides: the receiver's consent prompt
+      // is standing on a question nobody is waiting for any more, and it has no
+      // clock of its own for the offered state - the CANCEL is what closes it.
+      if (state === 'offering' && now - last > ACCEPT_MS) return [{ t: 'tell', frame: frame(T.CANCEL, id) }, ...fail('timeout')]
       if (state === 'sending' && now - last > STALL_MS) return fail('channel')
       return []
     },

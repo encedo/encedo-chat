@@ -90,12 +90,21 @@ test('a single short file still works', () => {
   assert.equal(s.state, 'done')
 })
 
-test('nobody answers: the offer times out and says so once', () => {
+test('nobody answers: the offer times out, says so once, and TELLS the peer', () => {
   const s = createSender(file(1000))
-  s.open(0)
+  const r = createReceiver((openOffer(s.open(0)) as any).offer)
   assert.deepEqual(s.tick(ACCEPT_MS - 1), [])
-  assert.deepEqual(s.tick(ACCEPT_MS + 1), [{ t: 'failed', why: 'timeout' }])
+  const evs = s.tick(ACCEPT_MS + 1)
+  // Section 13.1: "the peer is told in every case". Before this the sender
+  // failed locally and the receiver's consent prompt stood until a human
+  // answered a question nobody was waiting on any more.
+  assert.deepEqual(evs.map((e) => e.t), ['tell', 'failed'])
+  assert.deepEqual(evs[1], { t: 'failed', why: 'timeout' })
   assert.equal(s.state, 'failed')
+  const tell = evs[0] as any
+  assert.deepEqual(r.onFrame(tell.frame, ACCEPT_MS + 2).evs, [{ t: 'failed', why: 'cancelled-peer' }], 'the receiver hears a cancel')
+  assert.equal(r.state, 'failed')
+  assert.deepEqual(s.tick(ACCEPT_MS + 5000), [], 'said once')
 })
 
 test('the receiver says no', () => {

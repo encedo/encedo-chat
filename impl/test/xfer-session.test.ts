@@ -215,3 +215,28 @@ test('a transfer with no note behaves exactly as it did before notes existed', a
   assert.equal(got.body, undefined)
   stop()
 })
+
+test('an offer nobody answers is withdrawn on the wire, so the other side stops asking', async () => {
+  // The library says 'tell'; this pins that the session actually sends it and
+  // that the receiving session reports the withdrawal rather than keeping a
+  // consent prompt up for a transfer that no longer exists.
+  let clock = 0
+  const q: Array<() => void> = []
+  const evs = { a: [] as XferEv[], b: [] as XferEv[] }
+  const chan = (to: () => { onFrame(b: Uint8Array): void }): Direct => ({
+    send: (bytes) => { q.push(() => to().onFrame(bytes)) }, buffered: () => 0, drain: async () => {},
+  })
+  const A = createXferSession({ direct: () => chan(() => B), now: () => clock }, (e) => evs.a.push(e))
+  const B = createXferSession({ direct: () => chan(() => A), now: () => clock }, (e) => evs.b.push(e))
+  const flush = async () => { for (let i = 0; i < 50 && q.length; i++) { q.shift()!(); await new Promise((r) => setTimeout(r, 0)) } }
+  try {
+    assert.equal(A.offer(fakeFile(1234)), 'ok')
+    await flush()
+    assert.equal(evs.b.at(-1)?.t, 'offer')
+    clock = 31_000 // past ACCEPT_MS; the session's own 1 s tick notices on its next beat
+    const deadline = Date.now() + 2_500
+    while (Date.now() < deadline && !evs.b.some((e) => e.t === 'failed')) { await flush(); await new Promise((r) => setTimeout(r, 25)) }
+    assert.deepEqual(evs.a.at(-1), { t: 'failed', dir: 'out', why: 'timeout' })
+    assert.deepEqual(evs.b.at(-1), { t: 'failed', dir: 'in', why: 'cancelled-peer' }, 'the receiver was told')
+  } finally { A.stop(); B.stop() }
+})

@@ -100,7 +100,8 @@ export function createXferSession(host: XferHost, onEvent: (e: XferEv) => void):
 
   const emit = (evs: { t: string; [k: string]: any }[], dir: 'in' | 'out') => {
     for (const e of evs) {
-      if (e.t === 'progress') onEvent({ t: 'progress', dir, done: e.done, total: e.total })
+      if (e.t === 'tell') { try { host.direct()?.send(e.frame) } catch {} }
+      else if (e.t === 'progress') onEvent({ t: 'progress', dir, done: e.done, total: e.total })
       else if (e.t === 'accepted') onEvent({ t: 'accepted' })
       else if (e.t === 'failed') { onEvent({ t: 'failed', dir, why: e.why }); clear() }
       else if (e.t === 'done' && dir === 'out') { onEvent({ t: 'done', dir: 'out', id: send ? send.offer.id : 0 }); clear() }
