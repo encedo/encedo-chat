@@ -13,7 +13,16 @@
  *
  * Plain Ed25519 over the manifest file's exact bytes - not minisign, whose
  * prehash is BLAKE2b, which WebCrypto does not have. Any Ed25519 library can
- * verify this; `@noble/curves` does it here, in the browser and in Node alike.
+ * verify this; `@noble/curves` does it here, in the browser and in Node alike,
+ * and a PKCS#11 token signs it with the EDDSA mechanism (pure Ed25519, no
+ * prehash), which is how the operator's YubiKey produces the signature.
+ *
+ * What the manifest covers is what somebody enforces. The node list is: a
+ * refresh refuses a list the manifest does not name. The web bundle is NOT,
+ * yet: the desktop updater installs on the CI key's signature and reads no
+ * manifest, so naming the bundle here would be a promise nobody checks. The
+ * `web` field is therefore optional, and a manifest is signed when the node
+ * list or a CI key changes, or before it expires - not per release.
  */
 
 import { ed25519 } from '@noble/curves/ed25519'
@@ -26,7 +35,8 @@ export interface Manifest {
   /** When it was signed and until when it may be trusted (epoch ms, UTC). */
   made: number
   expires: number
-  web: { cid: string; bundle: string; sri: string }
+  /** Present only when a release's bundle is being attested; nothing enforces it yet. */
+  web?: { cid: string; bundle: string; sri: string }
   nodes: { cid: string }
   ci: { updater_pubkey: string }
 }
@@ -43,7 +53,7 @@ const b64d = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 export const isManifest = (m: any): m is Manifest =>
   !!m && m.v === 1 && typeof m.version === 'string' && typeof m.commit === 'string'
   && Number.isInteger(m.made) && Number.isInteger(m.expires) && m.expires > m.made
-  && !!m.web && typeof m.web.cid === 'string' && typeof m.web.bundle === 'string' && typeof m.web.sri === 'string'
+  && (m.web === undefined || (!!m.web && typeof m.web.cid === 'string' && typeof m.web.bundle === 'string' && typeof m.web.sri === 'string'))
   && !!m.nodes && typeof m.nodes.cid === 'string'
   && !!m.ci && typeof m.ci.updater_pubkey === 'string'
 

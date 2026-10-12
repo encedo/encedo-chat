@@ -1193,18 +1193,22 @@ sits in any CI runner. Clone lives at **`/opt/github/encedo-chat`**.
 git push && git tag v0.X.Y && git push --tags
 ```
 
-After the tag, at that commit and with a fresh `npm run web:build`, sign the
-release manifest and put it where nginx serves `/release/` on bs1 (outside the
-repo, so the tagged commit stays the tip):
+**The release manifest is NOT a per-release step.** It names the node list's
+CID and the CI updater key with a 120-day expiry, and is re-signed when either
+changes or before it expires. The root key lives in the user's YubiKey (PIV
+slot 9c, Ed25519, firmware >= 5.7), on no machine that builds; `infra/root.pub`
+is compiled into every client. Signing needs `opensc` + `ykcs11` and the token:
 
 ```bash
-node scripts/release-manifest.mjs --sign ~/keys/onchato-root.key --out /tmp/rel
+node scripts/release-manifest.mjs --sign-yubikey --out /tmp/rel      # PIN + touch
+# or, with the token on another machine: --unsigned here, sign manifest.json
+# there (pure Ed25519 over its bytes), then --attach-sig <file> here
 scp /tmp/rel/manifest.json /tmp/rel/manifest.sig bs1.onchato.com:/var/lib/onchato/release/
 node scripts/release-manifest.mjs --verify /tmp/rel
 ```
 
-The root key lives in `~/keys/onchato-root.key` (its README says what losing
-or leaking it costs); `infra/root.pub` is compiled into every client.
+The PKCS#11 path was written against the ykcs11 documentation (EDDSA = pure
+Ed25519, slot 9c = object id 2) and not yet exercised against a token here.
 
 The tag triggers `desktop.yml` (five desktop targets → **draft** release — the
 draft is the updater's publish gate) and `android.yml` (signed APK), and the

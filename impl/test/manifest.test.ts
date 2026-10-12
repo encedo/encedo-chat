@@ -18,6 +18,15 @@ test('a manifest signed by the root key verifies, and comes back parsed', () => 
   assert.ok(v.ok && v.manifest.nodes.cid === 'bafkreib')
 })
 
+test('a manifest without the web field is a manifest: the bundle is attested only when the updater will check it', () => {
+  const { web, ...noWeb } = good
+  const raw = bytes(noWeb)
+  const v = verifyManifest(raw, signManifest(raw, PRIV), PUB, NOW)
+  assert.ok(v.ok && v.manifest.web === undefined && v.manifest.nodes.cid === 'bafkreib')
+  const half = bytes({ ...good, web: { cid: 'x' } })
+  assert.deepEqual(verifyManifest(half, signManifest(half, PRIV), PUB, NOW), { ok: false, why: 'shape' }, 'a web field present is a whole one')
+})
+
 test('a byte changed after signing, or another key, is a signature failure', () => {
   const raw = bytes(good)
   const sig = signManifest(raw, PRIV)
