@@ -75,9 +75,11 @@ export async function rosterMacKeyFromSecret(ss: Uint8Array, gid: Uint8Array, ep
   return hkdfBits(ss, ROSTER_MAC_INFO, macInfo(gid, epoch), 32)
 }
 
-/** Canonical roster bytes for the roster MAC — the member pubs sorted, so the MAC
- *  does not depend on the order the roster happens to be listed in. */
-function rosterBytes(roster: string[]): Uint8Array { return enc.encode([...roster].sort().join('\n')) }
+/** Canonical roster bytes for the roster MAC - the member pubs IN ORDER, newline-
+ *  joined. The order carries meaning (roster[0] is the admin, 8.3), so it is
+ *  covered: a sorted form, which this was until 2026-10-12, let anyone with a
+ *  valid MAC present the same members with a different admin. */
+function rosterBytes(roster: string[]): Uint8Array { return enc.encode(roster.join('\n')) }
 /** HMAC(rk_i, roster) — the admin's per-recipient attestation of the membership. */
 async function rosterMac(rk: Uint8Array, roster: string[]): Promise<Uint8Array> {
   const key = await subtle.importKey('raw', rk, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
@@ -764,6 +766,13 @@ export class GroupManager {
       const ss = await this.id.ecdh(skd.gkPub)
       const rk = await rosterMacKeyFromSecret(ss, gid, skd.epoch)
       if (!(await verifyRosterMac(rk, skd.roster, unb64(skd.rmac)))) throw new Error('group roster MAC does not verify — rejected')
+      // The MAC proves the sender holds GK, and the GK holder is the admin by
+      // definition (8.3): so roster[0] - the position the convention gives the
+      // admin - must be the sender, and must not move between epochs. A valid
+      // MAC over a roster that puts somebody else first is a contradiction, not
+      // a layout choice.
+      if (skd.roster[0] !== from) throw new Error('group SKD: roster[0] is not the sender holding GK — rejected')
+      if (cur && cur.roster[0]?.pub !== skd.roster[0]) throw new Error('group SKD: the admin changed between epochs — rejected')
       const session = await this.admit({
         gid, gkPub: unb64(skd.gkPub), epoch: skd.epoch, secret: unb64(skd.secret), roster: skd.roster.map((pub) => ({ pub })),
       })

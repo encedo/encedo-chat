@@ -66,3 +66,31 @@ test('same-epoch key redistribution needs NO roster MAC', async () => {
   assert.equal(aSame.rmac, undefined)
   await B.mgr.applySkd(A.id.pub, aSame) // same epoch, key-only -> must not throw
 })
+
+test('the roster MAC covers the ORDER: the same members with another admin first are rejected', async () => {
+  const { A, B, gid } = await setup()
+  const skd = (await A.mgr.skdFor(gid, B.id.pub))!
+  const swapped = { ...skd, roster: [...skd.roster].reverse() }
+  await assert.rejects(B.mgr.applySkd(A.id.pub, swapped), /roster MAC does not verify|roster\[0\]/)
+  assert.equal(B.mgr.has(gid), false)
+})
+
+test('a valid MAC over a roster that does not put the GK holder first is rejected', async () => {
+  // The admin's own layout mistake, or a forgery by somebody who got the admin
+  // to MAC a roster with a stranger in position 0: either way the convention
+  // of 8.3 (roster[0] = admin) would be asserted by a MAC that does not mean it.
+  const A = await peer(), B = await peer()
+  const { gk, pub: gkPub } = await softwareGk()
+  const gid = await A.mgr.createGroup(gkPub, [{ pub: B.id.pub }, { pub: A.id.pub }], gk)
+  const skd = (await A.mgr.skdFor(gid, B.id.pub))!
+  await assert.rejects(B.mgr.applySkd(A.id.pub, skd), /roster\[0\] is not the sender/)
+  assert.equal(B.mgr.has(gid), false)
+})
+
+test('a rekey that moves the admin is rejected even with a valid MAC', async () => {
+  const { A, B, gid } = await setup()
+  await B.mgr.applySkd(A.id.pub, (await A.mgr.skdFor(gid, B.id.pub))!)
+  // A rekeys with itself no longer first: the MAC is A's and valid, roster[0] is not.
+  await A.mgr.rekey(gid, [{ pub: B.id.pub }, { pub: A.id.pub }])
+  await assert.rejects(B.mgr.applySkd(A.id.pub, (await A.mgr.skdFor(gid, B.id.pub))!), /roster\[0\] is not the sender|admin changed/)
+})
