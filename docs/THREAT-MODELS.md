@@ -147,11 +147,11 @@ mints a trusted certificate and becomes C1.
 **C3. Rendezvous flooding.** An attacker who knows a topic id can publish noise
 into it. Knowing one requires being a member of that pair — or being the node,
 which sees them all. Bounded by per-IP connection and request limits at the
-edge, and by the node's topic ceilings (per node and per peer, with idle
-eviction — the production numbers are in `ARCHITECTURE.md`). The 64 KB frame
-bound is the **client's own**: the node does not enforce a per-message size
-today, only the GossipSub library's per-RPC inbound length at its default
-(`PROTOCOL.md` §5.6; a node-side bound is an open item).
+edge, by the node's topic ceilings (per node and per peer, with idle
+eviction — the production numbers are in `ARCHITECTURE.md`), and by the 64 KiB
+frame bound, enforced by the client and by the node alike — a PUSH past it is
+refused, a GossipSub message past it ignored, one inbound RPC bounded at 1 MiB
+(`PROTOCOL.md` §5.6).
 
 **C4. A global passive observer** correlating traffic across links defeats
 network-level privacy. Out of scope, and stated rather than hand-waved.
@@ -326,7 +326,7 @@ worth not confusing one for the other.
 
 **Key posture change: the operator is *outside* the trust boundary.** The deployment must not depend on our infrastructure, our node list, or our goodwill.
 
-**Config preset**: fully independent network — own nodes (`relay/README.md`; Docker image is roadmap), own build carrying its own network id and node list (today the id is a source constant, `ARCHITECTURE.md` Open items 11); HEM mandatory for all identities (**never** software profiles); installed app only; deployment inside a controlled network perimeter where applicable. Three P3 prerequisites are **open items, named**: an enforced node-only transport (the setting ships, the lock does not — limit 2), an ephemeral-enforced cache policy (no switch exists today — pins and the group cache are always available), and reproducible builds.
+**Config preset**: fully independent network — own nodes (`relay/README.md`; Docker image is roadmap), own build carrying its own network id and node list (`EC_NETWORK` at build time; `--network` on the terminal client); HEM mandatory for all identities (**never** software profiles); installed app only; deployment inside a controlled network perimeter where applicable. Three P3 prerequisites are **open items, named**: an enforced node-only transport (the setting ships, the lock does not — limit 2), an ephemeral-enforced cache policy (no switch exists today — pins and the group cache are always available), and reproducible builds.
 
 **What this defeats**: compelled-operator scenarios — an independent deployment carries nothing the operator can be compelled to hand over or sabotage.
 
