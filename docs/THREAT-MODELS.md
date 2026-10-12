@@ -1,8 +1,8 @@
 # v6 — Threat models
 
-Status: **deployment-layer threat model for the shipping product** (onchato 0.5.x). Where a posture is designed but not built, the row says so — an auditor must be able to tell a control from an intention.
+Status: **deployment-layer threat model for the shipping product** (onchato 0.7.x). Where a posture is designed but not built, the row says so — an auditor must be able to tell a control from an intention.
 
-Layering: `PROTOCOL.md` owns the **crypto-layer threat model** — adversaries in §2.2, weaknesses S1–S13 in §11.3, PQ phasing in §15. This document is the **deployment layer on top**: profiles P1–P3 as configuration presets, not separate builds. Users/deployments pick the profile matching their adversary. The enterprise channel (Encedo Chat: EPA, OIDC) and the open channel (onchato) are both expressed through these presets.
+Layering: `PROTOCOL.md` owns the **crypto-layer threat model** — adversaries in §2.2, weaknesses S1–S14 in §11.3, PQ phasing in §15. This document is the **deployment layer on top**: profiles P1–P3 as configuration presets, not separate builds. Users/deployments pick the profile matching their adversary. The enterprise channel (Encedo Chat: EPA, OIDC) and the open channel (onchato) are both expressed through these presets.
 
 ## Assets
 
@@ -25,11 +25,11 @@ Layering: `PROTOCOL.md` owns the **crypto-layer threat model** — adversaries i
 - **Single active session** (`PROTOCOL.md` §9): a stolen device without the user's HSM cannot start new sessions, compute future topics, or post valid announces; an **already-open session survives at most until the next forced re-handshake (4–8 h)**, which requires the HSM. A detected duplicate makes **both** honest copies stand down (the user re-enters one deliberately); against a malicious client the lifetime timer is the guaranteed bound (§9.3). ⚠️ For a **software profile** the hardware bound does not exist — the re-handshake needs only the on-disk key; the seal password is the boundary (S12).
 - Ephemeral client PeerIds; rotating room IDs (24 h, at a per-pair secret instant) bound discovery-layer linkage.
 - Releases verifiable (per-artifact signing above); the node list pinned by content addressing.
-- Anyone can audit (public code) and anyone can exit to a self-hosted network (`--network`, `relay/README.md`) — the operator is replaceable, which is itself a security property: **the product must remain safe even from its maker.**
+- Anyone can audit (public code) and anyone can exit to a self-hosted network (own nodes per `relay/README.md`, and a build carrying its own network id and node list — `ARCHITECTURE.md`, Third-party networks) — the operator is replaceable, which is itself a security property: **the product must remain safe even from its maker.**
 
 ## Known limits (all profiles — honest boundaries)
 
-1. Discovery node sees client IPs and rendezvous metadata (ephemeral PeerId ↔ roomID ↔ IP, timing). Rotation limits linkage over time; it does not hide the IP. (One accidental narrowing: behind the reverse proxy the libp2p layer itself sees every client as loopback — the real IP exists only in nginx's logs.)
+1. Discovery node sees client IPs and rendezvous metadata (ephemeral PeerId ↔ roomID ↔ IP, timing). Rotation limits linkage over time; it does not hide the IP. (One accidental narrowing: behind the reverse proxy the libp2p layer itself sees every client as loopback — the real IP exists in nginx's logs and in the `X-Real-IP` header nginx forwards to the relay, which reads it only in its debugging dump mode.)
 2. **The direct plane reveals your IP to your conversation peer** (WebRTC ICE), and every direct attempt consults a STUN server that sees the client's IP and negotiation timing — **the operator's own since 2026-09-03** (`PROTOCOL.md` §13), where it used to be Google's; the address is one the operator necessarily has, since the client is holding a connection to the same host. **Since 2026-09-03 it is off by default**: content goes through the node unless the user selects direct in Settings, so neither exposure is paid by anyone who does not ask for it. What that buys is IP privacy from the PEER — the node still sees the client's address, as it must to carry a connection, and the relay-blind plane that would narrow *that* is parked (`ARCHITECTURE.md` Transport). On the Linux desktop the channel is opened by the Tauri host rather than the webview (`PROTOCOL.md` §3.2) — same exposure, same switch.
 3. A global passive observer capable of traffic correlation across links defeats network-level privacy (no mixnet). Out of scope — stated, not hand-waved.
 4. Compromised endpoint (malware, physical access) defeats everything; HEM confines *key theft* but not live-session abuse — which is in turn time-boxed by the forced re-handshake (4–8 h, §9.3). The hardened shell tier that would narrow webview compromise is roadmap (`PROTOCOL.md` §3.2) — today ratchet state lives in the webview on every platform.
@@ -37,7 +37,7 @@ Layering: `PROTOCOL.md` owns the **crypto-layer threat model** — adversaries i
 6. **The file store sees file metadata** (`PROTOCOL.md` S11): blob size, timing, fetch pattern and IPs for ~5 minutes per file, on an unauthenticated public gateway. Text has no such surface.
 7. **Authentication is classical until Phase 3** (`PROTOCOL.md` S9): confidentiality is PQ-hybrid now, but a future CRQC-equipped adversary could impersonate users in *new* handshakes. Mitigated by the in-band migration path (target 2030 — before CRQC estimates of 2035+). Past traffic is never at risk.
 8. **The MQTT fall-back transport trades metadata for reach**: any connected client can observe every room's activity/timing/size (a static broker ACL cannot scope reads to runtime-secret rooms — README). Content stays E2E. Do not enable it where cross-room metadata to a connected observer is unacceptable; GossipSub does not have this surface.
-9. **The operator's network is not provided everywhere — a sanctions geoblock (since 0.7.4).** Every node of the main network answers HTTP 451 on every onchato path, and its STUN responder stays silent, for addresses geolocated (DB-IP Country Lite, refreshed weekly) in **KP, IR, CU, RU, BY, SY**; the app and the CLI probe a node's `/health` and say "not available in your region" rather than failing silently (`ARCHITECTURE.md`, `infra/geoip/`). Alongside it an operator-kept **abuse list** (addresses, networks, whole ASNs, each with an expiry) is dropped at the edge (444); it lives on the operator's machine, never in the repo. **Why — the regulatory reasoning, recorded so the threat model is honest about who is excluded and by whose decision:** the operator (RKV sp. z o.o., an EU company) is bound by the EU's restrictive measures, and its distribution channels (GitHub, Google Play, the App Store) are US-governed and bound by OFAC's. North Korea is the one case where the block follows almost directly from law (UN, EU and US regimes together). For the other five the block is **the operator's risk policy, not a legal obligation**: EU measures are mostly *targeted* (asset freezes and a prohibition on making resources available to listed persons — hence the terms-of-service clause that listed persons and entities may not use the service), the Russia/Belarus service bans (art. 5n of Regulation 833/2014) are aimed at companies and the state rather than private messaging, Syria's economic sanctions were lifted in May 2025 with targeted ones remaining, and for Iran OFAC's General License D-2 (2022) explicitly permits personal-communication software — which is why some messengers still serve it. What tips the decision is enforcement practice on the US side: where a prohibition does apply, regulators have penalised the *absence* of IP-based blocking (the Kraken settlement, 2022), and a GeoIP block is what counts as "reasonable measures" — it is accepted that a VPN walks around it, and no more than that is expected. Open-source cryptographic software is itself outside dual-use export control (Regulation 2021/821). **Cost, stated plainly:** the list excludes people for whom an encrypted messenger matters most, and GeoIP is coarse (the occupied regions of Ukraine cannot be told apart from UA/RU ranges). **Scope:** this is a property of the *operator's* network, enforced at its reverse proxy — not of the protocol, not of the code, and a self-hosted network (`--network`, `relay/README.md`) carries none of it; the P3 posture is self-hosted precisely so that no operator policy stands between a deployment and its users. The country list lives in one file (`infra/geoip/blocked-countries`) and the reasoning in the operator's legal notes; neither is legal advice and both are to be reviewed with counsel.
+9. **The operator's network is not provided everywhere — a sanctions geoblock (since 0.7.4).** Every node of the main network answers HTTP 451 on every onchato path, and its STUN responder stays silent, for addresses geolocated (DB-IP Country Lite, refreshed weekly) in **KP, IR, CU, RU, BY, SY**; the app and the CLI probe a node's `/health` and say "not available in your region" rather than failing silently (`ARCHITECTURE.md`, `infra/geoip/`). Alongside it an operator-kept **abuse list** (addresses, networks, whole ASNs, each with an expiry) is dropped at the edge (444); it lives on the operator's machine, never in the repo. **Why — the regulatory reasoning, recorded so the threat model is honest about who is excluded and by whose decision:** the operator (RKV sp. z o.o., an EU company) is bound by the EU's restrictive measures, and its distribution channels (GitHub, Google Play, the App Store) are US-governed and bound by OFAC's. North Korea is the one case where the block follows almost directly from law (UN, EU and US regimes together). For the other five the block is **the operator's risk policy, not a legal obligation**: EU measures are mostly *targeted* (asset freezes and a prohibition on making resources available to listed persons — hence the terms-of-service clause that listed persons and entities may not use the service), the Russia/Belarus service bans (art. 5n of Regulation 833/2014) are aimed at companies and the state rather than private messaging, Syria's economic sanctions were lifted in May 2025 with targeted ones remaining, and for Iran OFAC's General License D-2 (2022) explicitly permits personal-communication software — which is why some messengers still serve it. What tips the decision is enforcement practice on the US side: where a prohibition does apply, regulators have penalised the *absence* of IP-based blocking (the Kraken settlement, 2022), and a GeoIP block is what counts as "reasonable measures" — it is accepted that a VPN walks around it, and no more than that is expected. Open-source cryptographic software is itself outside dual-use export control (Regulation 2021/821). **Cost, stated plainly:** the list excludes people for whom an encrypted messenger matters most, and GeoIP is coarse (the occupied regions of Ukraine cannot be told apart from UA/RU ranges). **Scope:** this is a property of the *operator's* network, enforced at its reverse proxy — not of the protocol, not of the code, and a self-hosted network (own nodes and an own build, `relay/README.md`, `ARCHITECTURE.md`) carries none of it; the P3 posture is self-hosted precisely so that no operator policy stands between a deployment and its users. The country list lives in one file (`infra/geoip/blocked-countries`) and the reasoning in the operator's legal notes; neither is legal advice and both are to be reviewed with counsel.
 
 ---
 
@@ -66,6 +66,17 @@ authentic". The packaged builds are signed (updater minisign, Android
 keystore), the web bundle is not — which is the whole argument for
 recommending the packaged app where it matters, and the known price of the web
 convenience tier.
+
+**A1b. The development switches in the bundle.** The build under audit answers
+two URL parameters (`PROTOCOL.md` §12): `?debug=1` narrates the protocol to
+the browser console with values elided, and `?keys=1` prints the secret
+material itself — chain keys, the pair secrets from the device. Both reach
+only the console of a page the user opened with that address, so they add
+nothing to A1 (code that runs in the page already has it all); what they add
+is a *paste* surface — a console copied into a bug report carries whatever
+the switch printed. A release build is made with `EC_ALLOW_KEYS=0`, which
+compiles the second switch out so that no address can bring it back; the
+first stays, and prints no secrets.
 
 **A2. A malicious browser extension.** Same authority as A1 with none of the
 work: no host to compromise, no certificate to forge. Entirely outside this
@@ -136,8 +147,12 @@ mints a trusted certificate and becomes C1.
 
 **C3. Rendezvous flooding.** An attacker who knows a topic id can publish noise
 into it. Knowing one requires being a member of that pair — or being the node,
-which sees them all. Bounded by a 64 KB frame cap, a 250-topic ceiling with idle
-eviction, and per-IP limits at the edge.
+which sees them all. Bounded by per-IP connection and request limits at the
+edge, and by the node's topic ceilings (per node and per peer, with idle
+eviction — the production numbers are in `ARCHITECTURE.md`). The 64 KB frame
+bound is the **client's own**: the node does not enforce a per-message size
+today, only the GossipSub library's per-RPC inbound length at its default
+(`PROTOCOL.md` §5.6; a node-side bound is an open item).
 
 **C4. A global passive observer** correlating traffic across links defeats
 network-level privacy. Out of scope, and stated rather than hand-waved.
@@ -211,8 +226,11 @@ There is no duress mode, no panic wipe and no decoy profile. Listed because
 somebody will otherwise assume deniability covers it.
 
 **F7. A contact who floods you.** A 128 MB file every minute: bounded by the
-upload rate limit, the file size cap, and the fact that nothing is fetched
-automatically unless the recipient turned that on.
+file size cap, by the per-IP upload limits (twenty uploads a minute, four at
+once — a file a minute sits well inside them, so they bound a flood, not this),
+and above all by the fact that nothing is fetched unless the recipient asks —
+auto-fetch is off by default and, when turned on, stops at 2 MiB and at 1:1
+peers (`PROTOCOL.md` §7.5).
 
 **F8. An attacker who records everything today and waits for the pair secret to
 leak.** Nothing follows. The pair secret is rendezvous-only and **disjoint from
@@ -239,8 +257,8 @@ identity — on a HEM profile, unsealing it needs the device) and the settings.
 | **Web bundle replaced / malicious extension** (A1, A2) | full use of the identity: impersonation toward any contact, the contact book, new groups | while the window is open; with a stolen authorisation pair, until the password changes | past traffic (ephemeral, and forward-secret), the identity key itself (never leaves the HEM), any other device |
 | **Packaged app backdoored via the update channel** (B2) | the same, on every machine that auto-updated | until a clean build is installed | the identity key; past traffic. But this is the widest-reaching event in the system, which is why the offline root key is an open item |
 | **Laptop stolen, session open** | the live session: read and write as the user | until the window closes, bounded by the forced re-handshake at **4–8 h per peer** (needs the device) | everything after that, absent the HEM and the password; no remote wipe exists, so this bound is the control |
-| **Laptop stolen, session closed — HEM profile** | nothing usable | — | the identity (in the device), the group cache (sealed under a device-derived key), future sessions |
-| **Laptop stolen, session closed — software profile** | the sealed identity blob, open to offline guessing at 1M PBKDF2 rounds | until the password is guessed; forever if it is weak | nothing else, and this row is precisely the tier difference the product asks users to choose with open eyes |
+| **Laptop stolen, session closed — HEM profile** | nothing usable — except, on the packaged desktop, the plain connection diary: which contacts (by 12 characters of key) were seen when (`PROTOCOL.md` §10) | — | the identity (in the device), the group cache (sealed under a device-derived key), future sessions |
+| **Laptop stolen, session closed — software profile** | the sealed identity blob, open to offline guessing at 1M PBKDF2 rounds; the same plain diary on the desktop | until the password is guessed; forever if it is weak | nothing else, and this row is precisely the tier difference the product asks users to choose with open eyes |
 | **HEM stolen on its own** | nothing | — | everything: it is locked, and unlocking needs the password — with authenticator-based authorisation, the phone too |
 | **Password stolen on its own (HEM profile)** | nothing by itself | — | everything, until the attacker also reaches the device. This is the property the second factor exists to keep |
 | **Authorisation key pair exfiltrated** (A3) | the ability to authorise device operations from anywhere with network reach to the HEM | **until the password changes** — the salt is stable, so this outlives every token | content already sent; the key itself |
@@ -297,9 +315,9 @@ worth not confusing one for the other.
 
 **Adversary**: national censor or hostile local network operator; targeted network surveillance of the *user*; active blocking of known endpoints. The operator (us) is still trusted.
 
-**Config preset**: **relay-only mode — not yet built** (limit 2); until it ships, the honest P2 posture is: Tor/VPN underneath (the TCP/WSS path is Tor-compatible; WebRTC/UDP is not, so disabling direct dials matters and needs the mode), **installed app only** (web channel is takedown-able and injectable), node list carried by the installed build rather than fetched from the primary domain.
+**Config preset**: node-only transport — shipped as the **default user setting** (Settings → transport: no `rtc` envelopes are sent, no STUN is consulted, limit 2), but **not yet as an enforced preset** a user cannot flip, nor as a build that pins it; Tor/VPN underneath (the TCP/WSS path is Tor-compatible; WebRTC/UDP is not, which is why direct must stay off), **installed app only** (web channel is takedown-able and injectable), node list carried by the installed build rather than fetched from the primary domain.
 
-**What this defeats (as shipped)**: domain seizure (app already installed with its node list), endpoint blocking (nodes behind nginx on 443/WSS blend with ordinary TLS; the list can rotate via a new build). **What needs the mode**: guaranteed peer-side IP privacy.
+**What this defeats (as shipped)**: domain seizure (app already installed with its node list), endpoint blocking (nodes behind nginx on 443/WSS blend with ordinary TLS; the list can rotate via a new build), peer-side IP exposure as long as the setting is left at its default. **What needs the enforced preset**: peer-side IP privacy that does not depend on a preference.
 
 **Residual risk**: discovery-node metadata (mitigated by Tor: node sees exit IP); rendezvous jamming/DoS by the censor; traffic correlation if the adversary observes both the user's uplink and the node.
 
@@ -309,7 +327,7 @@ worth not confusing one for the other.
 
 **Key posture change: the operator is *outside* the trust boundary.** The deployment must not depend on our infrastructure, our node list, or our goodwill.
 
-**Config preset**: fully independent network — own nodes (`relay/README.md`; Docker image is roadmap), own `--network` id, own build carrying its own node list; HEM mandatory for all identities (**never** software profiles); installed app only; deployment inside a controlled network perimeter where applicable. Three P3 prerequisites are **open items, named**: the relay-only mode (limit 2), an ephemeral-enforced cache policy (no switch exists today — pins and the group cache are always available), and reproducible builds.
+**Config preset**: fully independent network — own nodes (`relay/README.md`; Docker image is roadmap), own build carrying its own network id and node list (today the id is a source constant, `ARCHITECTURE.md` Open items 11); HEM mandatory for all identities (**never** software profiles); installed app only; deployment inside a controlled network perimeter where applicable. Three P3 prerequisites are **open items, named**: an enforced node-only transport (the setting ships, the lock does not — limit 2), an ephemeral-enforced cache policy (no switch exists today — pins and the group cache are always available), and reproducible builds.
 
 **What this defeats**: compelled-operator scenarios — an independent deployment carries nothing the operator can be compelled to hand over or sabotage.
 
@@ -321,7 +339,7 @@ worth not confusing one for the other.
 
 | Setting | P1 | P2 | P3 |
 |---|---|---|---|
-| Transport | direct + relay fallback (shipped) | relay-only **(mode not built — Tor under WSS today)** | relay-only **(same gap)** |
+| Transport | node-only by default, direct opt-in (shipped) | node-only as the user's setting (shipped); **enforced preset not built — Tor under WSS today** | node-only **(same gap)** |
 | Network | operator (applies the sanctions geoblock, limit 9) | operator (same) | self-hosted (no operator policy) |
 | App channel | web or installed | installed only | installed only, reproducible build **(roadmap)** |
 | Tor/VPN | optional | recommended | per deployment policy |
@@ -333,6 +351,6 @@ worth not confusing one for the other.
 
 1. Rendezvous DoS resistance (P2/P3): can a censor who learns nothing from roomIDs still jam rendezvous wholesale? (Blocking nodes ≈ blocking HTTPS; per-IP limits at nginx are the deployed flood control — `relay/README.md`.)
 2. Reproducible builds — required for P3 credibility; toolchain implications TBD.
-3. Node logging — **answered by the running config and now written down** (`PROTOCOL.md` §12): per-message journal lines are metadata-only (truncated topic, sender prefix, byte count), aggregate counters are kept 30 days, metrics stay on loopback, the real address exists in nginx's access log only; payloads never. A formal no-log statement for third-party operators remains to be written.
+3. Node logging — **answered by the running config and now written down** (`PROTOCOL.md` §12): the per-message journal line is a flag the production nodes leave off; topics joined and evicted are logged with the full topic id, connections with a truncated PeerId; aggregate counters are kept 30 days; the JSON metrics endpoint stays on loopback; the real address exists in nginx's access log and in a header the relay reads only in its debugging dump mode; payloads never. A formal no-log statement for third-party operators remains to be written.
 4. ~~E2E scheme properties per profile~~ — **resolved**: defined in `PROTOCOL.md` (§6.4, §11.2–11.3, §15), uniform across profiles.
 5. ~~Identity backend for the open channel~~ — **resolved: the software profile ships** (`PROTOCOL.md` §4.5), with its assurance difference recorded as S12 and in the Assets table.
