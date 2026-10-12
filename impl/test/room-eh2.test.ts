@@ -857,3 +857,23 @@ test('a msg3 lost during a re-key does not leave the two sides on different ratc
   await until(() => got.includes('od A po re-keyu') && back.includes('od B po re-keyu'), 8000)
 })
 
+test('moving the room to the next day mid-handshake restarts the attempt under that day\'s key (§6.1)', async (t) => {
+  // The initiator_tag is keyed by the day. An attempt caught by the rollover
+  // used to go on re-sending its old-day frame onto the new topic, where the
+  // contact read it as "not the contact" and ignored it for five minutes.
+  const got: string[] = []
+  // Every msg1 is lost until the move, so the attempt that is in flight at
+  // the move still has its re-sends ahead of it - and those land on the new
+  // topic carrying the old day's tag.
+  let moved = false
+  const { A, B, logs } = await rooms({ collect: got, drop: (d) => d[0] === 0x01 && !moved })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => logs.some((l) => l.includes('attempt ->')), 3000)
+  const key2 = await announceMacKey(new Uint8Array(32).fill(0x5e), { networkId: 'test', dateUTC: '2026-07-30' })
+  assert.ok(A.retarget('test-topic-2', key2)); assert.ok(B.retarget('test-topic-2', key2))
+  moved = true
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+  assert.ok(!logs.some((l) => l.includes('identifies as someone else')), 'nobody called the real contact foreign')
+  A.sendText('po przeprowadzce')
+  await until(() => got.includes('po przeprowadzce'), 8000)
+})

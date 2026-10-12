@@ -807,10 +807,13 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    * No amount of retrying changes that, so stop — and say so, because the only
    * person who can act on it is the user (usually by closing a second window).
    */
-  const declaredForeign = new Set<string>()
+  // When each PeerId was last declared foreign: the declaration is repeated,
+  // with a fresh 5 minutes, once the previous one has run out — a Set here
+  // meant the second window was ignored once and then merely backed off.
+  const declaredForeign = new Map<string, number>()
   const notOurContact = (peer: string) => {
-    if (declaredForeign.has(peer)) return
-    declaredForeign.add(peer)
+    if (nowMs() - (declaredForeign.get(peer) ?? -Infinity) < NOT_OURS_MS) return
+    declaredForeign.set(peer, nowMs())
     backoffUntil.set(peer, nowMs() + NOT_OURS_MS)
     clearAttempt(peer)
     lastSeen.delete(peer)
@@ -1367,10 +1370,17 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
       const old = topic
       topic = newTopic
       keys = { ...keys, macKey }
+      // An attempt in flight carries an initiator_tag under the OLD day's key
+      // (6.1) and would go on re-sending it onto the new topic, where the peer
+      // checks under the new key and reads it as "not the contact" - a 5 min
+      // ignore of the real contact at every rollover that caught a handshake
+      // mid-air (audit 2026-10-12). Start over under the key of the topic.
+      for (const p of [...handshakes.keys()]) clearAttempt(p)
       try { node.services.pubsub.subscribe(topic) } catch {}
       try { node.services.pubsub.unsubscribe(old) } catch {}
       log(`moved from ${old.slice(0, 12)}... to the current topic ${topic.slice(0, 12)}...`)
       void announce()
+      for (const p of [...lastSeen.keys()]) maybeHandshake(p)
       return true
     },
     stop: () => {
