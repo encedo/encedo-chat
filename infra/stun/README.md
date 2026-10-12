@@ -31,8 +31,8 @@ families. A token bucket per source address.
 **It is not coturn, deliberately.** coturn is a TURN server that can also do
 STUN, and TURN relays media for whoever asks — one misread config line from
 being an open relay for somebody else's traffic. There is no such line here
-because there is no relaying code. The same reasoning as the hand-written MQTT
-client: the subset is the point, and the parts we do not implement are the ones
+because there is no relaying code. The same reasoning as the password meter's
+floor: the subset is the point, and the parts we do not implement are the ones
 that would have to be kept turned off.
 
 Also absent on purpose: TLS/DTLS (the response says what everyone on the path

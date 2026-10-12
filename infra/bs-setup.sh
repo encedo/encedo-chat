@@ -26,7 +26,7 @@
 #   - touch the OTHER nodes: all-to-all mesh means each of them must add this
 #     one to --peers/--siblings and ufw -- the script prints those lines;
 #   - touch any nginx site but its own (bs2 serves foreign domains);
-#   - the web, IPFS store, MQTT and feedback roles (bs1 only; infra/README.md).
+#   - the web, IPFS store and feedback roles (bs1 only; infra/README.md).
 #
 # Code is ASCII (repo rule): no glyphs in output.
 

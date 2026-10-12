@@ -19,7 +19,7 @@
 //
 // ## Why hand-written and not coturn
 //
-// The same argument as the MQTT client and the password meter: the SUBSET is
+// The same argument as the password meter: the SUBSET is
 // the point. coturn is a TURN server that can also do STUN, and TURN relays
 // media for whoever asks — one misread config line away from an open relay
 // somebody else's traffic rides for free. There is no such line here, because

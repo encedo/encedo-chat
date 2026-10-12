@@ -1,7 +1,7 @@
 /**
  * light.ts — the light transport: no GossipSub in the client, one relay, the
  * `/onchato/pick/1` stream instead. Wears the shape the engine already knows
- * (`net/mqtt-node.ts` set the precedent): subscribe / unsubscribe / publish, a
+ * (the libp2p node's, which every test double mocks): subscribe / unsubscribe / publish, a
  * `message` event, `getSubscribers`, `peerId`, `getConnections`, `stop`, and
  * `dial` -- so `room.ts`, `core.ts`, presence, groups, EH-2 and every test
  * stay untouched, and choosing it is one line in `startSession`.

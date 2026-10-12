@@ -1,5 +1,3 @@
-limit_conn_zone $binary_remote_addr zone=mqtt_conn:10m;
-limit_req_zone  $binary_remote_addr zone=mqtt_req:10m rate=30r/s;
 
 # Relay: TE limity są jedyną ochroną przeciwzalewową. GossipSub ma scoring po IP
 # wyłączony (IPColocationFactorWeight: 0 w relay/relay.mjs — za proxy każdy klient
@@ -455,18 +453,6 @@ server {
         limit_req  zone=relay_req burst=50 nodelay;
     }
 
-location /mqtt {
-    proxy_pass http://127.0.0.1:9101;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_read_timeout 300s;   # klient pinguje co 15 s
-    proxy_send_timeout 300s;
-    limit_conn mqtt_conn 20;   # per realne IP
-    limit_req  zone=mqtt_req burst=50 nodelay;
-}
 
     # health check — opcjonalnie
     location /health {
@@ -476,7 +462,7 @@ location /mqtt {
 
     # Reszta to aplikacja. Bez tego bs1.onchato.com w przegladarce pokazywal
     # strone powitalna nginx — gorzej niz 404, bo reklamuje serwer i wyglada
-    # jak maszyna, ktorej nikt nie skonfigurowal. /relay, /mqtt i /health sa
+    # jak maszyna, ktorej nikt nie skonfigurowal. /relay i /health sa
     # osobnymi lokalizacjami i wygrywaja z ta. Ten sam ksztalt co catchall w
     # infra/nginx/relay-node.conf, ktory renderuja bs2 i bs3.
     location / { return 301 https://onchato.com$request_uri; }

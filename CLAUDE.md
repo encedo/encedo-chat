@@ -439,45 +439,6 @@ the floor; `test/passmeter.test.ts` pins exactly that, because otherwise
 tightening the estimator turns every scenario into "the profile was not
 created" with nothing naming the cause.
 
-### MQTT — the fall-back transport (`net/mqtt.ts`, `net/mqtt-node.ts`)
-
-libp2p stays the main transport; MQTT is a second, fully working one, chosen per
-session (`startSession({transport:'mqtt', broker})`, web `?mqtt=1`, CLI
-`--mqtt`). README.md has the trade-offs and the broker setup; what matters here:
-
-- **No dependency.** `net/mqtt.ts` is a hand-written MQTT 3.1.1 client — CONNECT,
-  SUBSCRIBE, UNSUBSCRIBE, PUBLISH QoS 0, PING, DISCONNECT, over a WebSocket in
-  the browser or TCP in Node. The subset is the point: QoS>0, retained messages
-  and persistent sessions are the features that make a broker **store** traffic,
-  and not implementing them is the cheapest guarantee that we never turn them on.
-- **It wears the libp2p node's shape** (`net/mqtt-node.ts`) rather than
-  introducing an abstraction. That surface — subscribe/unsubscribe/publish, a
-  `message` event, `getSubscribers`, `peerId`, `getConnections`, `stop` — is
-  already the project's de-facto transport interface, because every test double
-  mocks exactly it. So room, core, WebRTC plane, EH-2 and all tests are
-  untouched.
-- **Sender identity moves into the topic**: publish `ec/<topic>/<client-id>`,
-  subscribe `ec/<topic>/+`. MQTT does not identify publishers, and putting the
-  sender in the payload would be a wire change the crypto layer would see.
-- **`publish` reports `recipients: null`** — a broker does not say who is
-  listening. The room's isolation check only fires on a real zero, so it simply
-  does not fire here; liveness comes from the MQTT keep-alive instead.
-- `npm run mqtt-meet` is the proof: two peers discover each other, complete EH-2
-  and exchange ratcheted messages over a broker, with the engine unchanged
-  (~130 ms discovery, ~200 ms handshake — verified live against bs1.onchato.com
-  2026-07-31, an order faster than the mesh).
-- **Metadata leak — inherent, not fixable in config.** Testing the live broker
-  found that a client subscribing to `#` receives **every room's** traffic (the
-  ACL blocks `$SYS` but must grant read on `ec/+/+`, which is network-wide —
-  rooms are runtime secrets a static ACL cannot scope to). Content stays E2E
-  encrypted; the exposure is which rooms are active + timing/size. GossipSub does
-  not have this (no wildcard, unguessable topics). The ACL now scopes **publish**
-  to the client's own id (`pattern write ec/+/%c` — our client already publishes
-  `ec/<topic>/<clientId>` with `clientId` = the connect id, so it still fits) but
-  read cannot be narrowed. Documented as a fallback trade-off in README; true
-  isolation needs a broker capability plugin. **The earlier claim that the ACL
-  stops enumeration was wrong** — corrected 2026-07-31.
-
 ### Test harnesses — what each one actually covers
 
 | command | what it exercises |
@@ -488,7 +449,6 @@ session (`startSession({transport:'mqtt', broker})`, web `?mqtt=1`, CLI
 | `npm run eh2-test` / `meet` / `presence-test` / `group-test` / `hem-gk-test` / `ipfs-test` | live against the **real onchato relay** (and, for the last two, a real HEM / the IPFS store) |
 | `npm run browser-test` | two headless **Chromium**, the real bundle, the real relay, driven through the DOM — 37 scenarios |
 | `npm run browser-test:ff` | the same scenarios with **Chromium + Firefox** |
-| `npm run mqtt-meet` | the whole engine over an MQTT broker instead of libp2p |
 | `npm run phone-shot` | screenshots at real device metrics (layout truth — computed-style asserts miss clipping) |
 | `npm run crypto-bench` | the engine-cost numbers `performance.md` cites, reproducibly (EH-2 + ratchet, offline) |
 | `npm run relay-load` / `-saturate` / `-flood` / `-hsrate` / `-chatload` | the load/DoS toolkit (`performance.md`, `relay/README.md`) |
@@ -1279,7 +1239,7 @@ load-bearing, because the app runs under COEP `require-corp`). Old invite links
 together with the 0.7.0 tester reset on purpose; never move it again casually.
 
 nginx config is versioned at `infra/nginx/onchato.com` — edit locally, `scp` to
-`sites-enabled`, `nginx -t`, reload. It carries the `/relay` and `/mqtt` per-IP
+`sites-enabled`, `nginx -t`, reload. It carries the `/relay` per-IP
 limits (the DDoS protection — libp2p's own is off), the CORS on both `/f`
 blocks that the packaged apps need, and the `/feedback` block.
 

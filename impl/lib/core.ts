@@ -18,7 +18,6 @@ import type { SkdFields, FileMeta } from './envelope.ts'
 import type { QuoteRef } from './quote.ts'
 import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
-import { createMqttPeer } from '../net/mqtt-node.ts'
 import { createLightPeer } from '../net/light.ts'
 import { protoWireOn, wlog } from './protolog.ts'
 import { loginChoice, rebalanceChoice, nodeKey, HOT, LOAD_STALE_MS, type LoadReading } from './nodepick.ts'
@@ -470,9 +469,8 @@ export interface OpenOpts extends ChatOpts {
   relay: string
   /** See `SessionOpts.relays` — ordered relay candidates for failover (libp2p). */
   relays?: string[]
-  /** See `SessionOpts` — the fall-back transport, chosen per session. */
-  transport?: 'libp2p' | 'mqtt' | 'light'
-  broker?: string
+  /** See `SessionOpts` — which libp2p surface the session runs on. */
+  transport?: 'libp2p' | 'light'
   params?: RoomParams
   webrtc?: boolean // enable the WebRTC direct data plane (browser only)
   /** STUN servers for the direct attempt. Derived from the node list by the
@@ -522,8 +520,8 @@ export type LinkState = 'online' | 'reconnecting' | 'offline'
 
 /** A read-only snapshot of the transport, for the Network tab. */
 export interface NetStatus {
-  transport: 'libp2p' | 'mqtt' | 'light'
-  relay: string      // relay multiaddr (libp2p) or broker url (mqtt)
+  transport: 'libp2p' | 'light'
+  relay: string      // relay multiaddr
   self: string       // our ephemeral PeerId
   link: LinkState
   connected: boolean // at least one live connection
@@ -682,7 +680,7 @@ export interface ClientSession {
 }
 
 export interface SessionOpts {
-  /** libp2p relay multiaddr — ignored when `transport` is `'mqtt'`. */
+  /** libp2p relay multiaddr. */
   relay: string
   /**
    * Ordered relay candidates for failover (libp2p only). When set, every dial —
@@ -702,13 +700,11 @@ export interface SessionOpts {
    */
   gkBackend?: GkBackend
   /**
-   * Which transport carries rendezvous, presence and signalling.
-   *
-   * `libp2p` (default) is the main one. `mqtt` is the **fall-back**: same
-   * engine, same crypto, a broker instead of a GossipSub mesh — see the MQTT
-   * section in README.md for what that costs and what it buys.
+   * Which libp2p surface carries rendezvous, presence and signalling: the
+   * light pick/push stream (`net/light.ts`, the default in the app) or a full
+   * GossipSub peer. Same relays either way.
    */
-  transport?: 'libp2p' | 'mqtt' | 'light'
+  transport?: 'libp2p' | 'light'
   /**
    * The relay refused a topic (light transport only -- the first refusal in the
    * system that is said rather than silent). GossipSub never reports this.
@@ -722,8 +718,6 @@ export interface SessionOpts {
   presenceHints?: boolean
   /** Test seam: how often a room pinned to an old rendezvous day is checked (default 60 s). */
   realignEveryMs?: number
-  /** Broker URL for `transport: 'mqtt'` (`wss://host/mqtt`, or `mqtt://host:1883` in Node). */
-  broker?: string
   params?: RoomParams
   /**
    * Force every pair to rotate its topic at this second-of-day (UTC) instead of
@@ -807,8 +801,6 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // Group Sender Keys (§8). Incoming SKDs on any 1:1 room feed this; `openGroup`
   // joins a group's topic. The manager is identity-scoped, like the self-topic watch.
   const groups = new GroupManager(id, params, opts.gkBackend)
-  const viaMqtt = opts.transport === 'mqtt'
-  if (viaMqtt && !opts.broker) throw new Error('transport "mqtt" needs a broker url')
   const dialT0 = Date.now()
   // Relay candidates for failover (libp2p only). `relays` first, else the single
   // `relay`. `activeRelay` tracks whichever we last connected through — netStatus
@@ -816,13 +808,11 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // `let`, not `const`: the node editor can replace this on a live session
   // (`setRelays`). Every dial reads it fresh, so a change lands on the next sweep.
   let candidates = (opts.relays?.length ? opts.relays : [opts.relay]).filter(Boolean)
-  if (!viaMqtt && candidates.length === 0) throw new Error('startSession: no relay to dial')
+  if (candidates.length === 0) throw new Error('startSession: no relay to dial')
   let activeRelay = candidates[0]
   // 'light' dials the same relays and fails over the same way; only the
   // pubsub surface is pick/push instead of GossipSub (net/light.ts).
-  const node: any = viaMqtt
-    ? await createMqttPeer({ url: opts.broker!, onLog: opts.onLog })
-    : opts.transport === 'light'
+  const node: any = opts.transport === 'light'
       ? await createLightPeer({
         onLog: opts.onLog, onRefused: opts.onRefused,
         // A stream that ended on a live connection: re-open it, a moment later
@@ -839,12 +829,11 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       : await createPeer()
   opts.onTransport?.(node)
   /**
-   * Dial, or re-dial. MQTT reconnects its one broker; libp2p sweeps the relay
+   * Dial, or re-dial: sweep the relay
    * candidates (first that connects wins) and remembers which one, so a dead or
    * hung primary fails over to the next and a recovered primary is preferred again.
    */
   const redial = async () => {
-    if (viaMqtt) return node.reconnect()
     const connectedTo = await failoverDial(candidates, (addr, signal) => dial(node, addr, { signal }))
     if (connectedTo !== activeRelay) {
       log(`failover: connecting via ${connectedTo.slice(0, 46)}...`)
@@ -857,7 +846,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // drops the opening connection, and a single attempt turned that into a hard
   // "login failed, refresh". Retry with backoff (~15 s budget), then surface the
   // error so a genuinely unreachable relay still fails rather than hanging.
-  if (!viaMqtt) {
+  {
     const FIRST_DIAL_BACKOFF = [500, 1_000, 2_000, 4_000, 8_000]
     for (let i = 0; ; i++) {
       try { await redial(); break } catch (e: any) {
@@ -885,7 +874,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       return publish(topic, data)
     }
   }
-  log(`session up over ${viaMqtt ? 'MQTT' : opts.transport === 'light' ? 'libp2p light (pick/push)' : 'libp2p'} in ${Date.now() - dialT0} ms as ${self.slice(0, 12)}...`)
+  log(`session up over ${opts.transport === 'light' ? 'libp2p light (pick/push)' : 'libp2p'} in ${Date.now() - dialT0} ms as ${self.slice(0, 12)}...`)
 
   /** Every room open on this transport — refreshed, flushed and stopped together. */
   interface OpenRoom { refresh(): void; flushPending(): void; stop(): void; sendPresence(s: any): void }
@@ -956,7 +945,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // taken within a second, before rooms have much to lose; after that only a
   // sustained overload moves anybody, and only a fraction at a time.
   let lbTimer: any = null
-  if (!viaMqtt && opts.loadBalance) {
+  if (opts.loadBalance) {
     const keyOf = opts.nodeKeyOf ?? nodeKey
     const loads = new Map<string, LoadReading>()
     const weights = new Map(Object.entries(opts.nodeWeights ?? {}))
@@ -1270,7 +1259,6 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     },
     unwatch(pub: string) { stopWatch(pub) },
     setRelays(list: string[]) {
-      if (viaMqtt) return
       const next = list.filter(Boolean)
       if (!next.length) return // an empty list would leave nothing to dial
       candidates = next
@@ -1288,7 +1276,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       try { topics = [...(node.services?.pubsub?.getTopics?.() ?? [])] } catch {}
       let peers = 0
       try { peers = node.getConnections().length } catch {}
-      return { transport: viaMqtt ? 'mqtt' : opts.transport === 'light' ? 'light' : 'libp2p', relay: viaMqtt ? (opts.broker ?? '') : activeRelay, self, link, connected: connected(), peers, topics }
+      return { transport: opts.transport === 'light' ? 'light' : 'libp2p', relay: activeRelay, self, link, connected: connected(), peers, topics }
     },
     async knock(inboxSecret, toPub, body) {
       return sendKnock(node, inboxSecret, unb64(toPub), params, {
@@ -1499,7 +1487,6 @@ export async function openConversation(id: Identity, peer: Peer, opts: OpenOpts)
     relay: opts.relay,
     relays: opts.relays,
     transport: opts.transport,
-    broker: opts.broker,
     params: opts.params,
     onLog: opts.onLog,
     onLink: opts.onLink,

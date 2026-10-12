@@ -16,8 +16,6 @@ const time = (ts: number) => `${C.sys}${utcHHMM(ts)}${C.reset}`
 export async function runChatSession(
   id: Identity, peerPub: string, meName: string, peerName: string, relay: string,
   params?: RoomParams,
-  /** Broker URL to use the MQTT fall-back transport instead of the libp2p relay. */
-  mqtt: string | null = null,
 ) {
   console.log(`${C.sys}— connecting via relay...${C.reset}`)
 
@@ -60,8 +58,6 @@ export async function runChatSession(
   try {
     conv = await openConversation(id, { pub: peerPub }, {
       relay,
-      transport: mqtt ? 'mqtt' : 'libp2p',
-      broker: mqtt ?? undefined,
       params,
       onSecurity: (peer, state) => ui.print(
         state === 'established'

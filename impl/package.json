@@ -10,7 +10,6 @@
   "scripts": {
     "test": "node --test test/*.test.ts",
     "meet": "node net/meet.ts",
-    "mqtt-meet": "node net/mqtt-meet.ts",
     "eh2-test": "node net/eh2-chat-test.ts",
     "presence-test": "node net/presence-test.ts",
     "group-test": "node net/group-test.ts",

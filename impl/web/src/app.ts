@@ -182,29 +182,16 @@ function chosenRelays(): string[] {
   if (!on.length) return [RELAY]
   return drawFirst(on).map((n) => n.addr)
 }
-/**
- * Transport. libp2p is the default; `?mqtt=1` switches to the broker (fall-back
- * transport — README has the trade-offs), `?mqtt=wss://host/mqtt` points it
- * somewhere else. Everything above the transport is identical either way.
- */
-const MQTT_PARAM = new URLSearchParams(location.search).get('mqtt')
-const USE_MQTT = MQTT_PARAM !== null && MQTT_PARAM !== '0'
 // The light transport (net/light.ts) is the DEFAULT since 0.6.24 (the user's
 // call, 2026-09-24): same relays, no GossipSub in the client, pick/push over one
 // stream -- no mesh upkeep, no per-frame signatures, a refused topic said out
 // loud. `?light=0` brings back the full GossipSub peer, for comparison and as
 // the escape hatch if a node without `--pick` is ever in the list.
 const LIGHT_PARAM = new URLSearchParams(location.search).get('light')
-const USE_LIGHT = !USE_MQTT && LIGHT_PARAM !== '0'
+const USE_LIGHT = LIGHT_PARAM !== '0'
 // Load-aware node choice (lib/nodepick.ts, wired in core): on by default,
 // `?lb=0` turns it off -- e.g. to stay on a node picked by hand for a test.
-const USE_LB = !USE_MQTT && new URLSearchParams(location.search).get('lb') !== '0'
-// The broker lives on the SAME host as the relay (bs1.onchato.com), not on the
-// site the app is served from — deriving it from `location.hostname` pointed it
-// at onchato.com, where there is no broker. Take the host straight from RELAY so
-// the two can never drift.
-const RELAY_HOST = RELAY.match(/\/dns4\/([^/]+)/)?.[1] ?? location.hostname
-const BROKER = MQTT_PARAM && MQTT_PARAM.startsWith('ws') ? MQTT_PARAM : `wss://${RELAY_HOST}/mqtt`
+const USE_LB = new URLSearchParams(location.search).get('lb') !== '0'
 // `?rot=<hour>` forces every pair's topic rotation to that UTC time-of-day, so
 // two test tabs can share a known rollover instant instead of waiting for each
 // pair's real offset (§5.4). Absent or `0` = the real per-pair offset algorithm
@@ -1459,8 +1446,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     relay: chosenRelay(),
     relays: chosenRelays(),   // 3b: fall through the enabled node list if one is down
     gkBackend,                // §8 bucket A: a HEM identity mints GK in the HSM
-    transport: USE_MQTT ? 'mqtt' : USE_LIGHT ? 'light' : 'libp2p',
-    broker: BROKER,
+    transport: USE_LIGHT ? 'light' : 'libp2p',
     loadBalance: USE_LB,
     // Capacity weights from the published list, by the name a node announces.
     nodeWeights: Object.fromEntries(loadNodes().filter((n) => typeof n.w === 'number').map((n) => [nodeKey(n.addr), n.w as number])),
@@ -5368,9 +5354,9 @@ startDiag()
 // bar), so this costs the packaged app nothing.
 if (DEBUG) (globalThis as any).__diag = diag
 
-ecLog(`app start — debug=${DEBUG} transport=${USE_MQTT ? `mqtt (${BROKER})` : USE_LIGHT ? 'libp2p-light (pick/push)' : 'libp2p'}`
+ecLog(`app start — debug=${DEBUG} transport=${USE_LIGHT ? 'libp2p-light (pick/push)' : 'libp2p'}`
   + ` rotation=${FORCED_ROTATION_SEC == null ? 'per-pair offset' : `forced ${String(Math.floor(FORCED_ROTATION_SEC / 3600)).padStart(2, '0')}:${String(Math.floor((FORCED_ROTATION_SEC % 3600) / 60)).padStart(2, '0')} UTC`};`
-  + ' add ?debug=1 for the full trace, ?mqtt=1 for the broker transport, ?rot=<hour> to force the rollover time')
+  + ' add ?debug=1 for the full trace, ?rot=<hour> to force the rollover time')
 // Printed because the app-shell test is a guess about somebody else's software:
 // Tauri picks the origin, and if a future version changes it, invite links
 // quietly go back to naming an address only this device understands. This line
