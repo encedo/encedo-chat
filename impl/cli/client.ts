@@ -24,6 +24,7 @@ import { mentionsPub, splitByMentions, resolveMention } from '../lib/mentions.ts
 import { fingerprint } from './fp.ts'
 import type { KV } from '../lib/migrate.ts'
 import { regionBlocked } from '../lib/regioncheck.ts'
+import { anchorClock } from '../lib/clock.ts'
 import { hostOf } from '../lib/ice.ts'
 
 /** Said when the nodes answer 451 (GEOBLOKADA.md); also the CLI's exit message. */
@@ -133,6 +134,9 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
     onGroupSkd: (from, skd) => { void groups?.onInvite(from, skd) },      // an invitation over a 1:1
     onGroupSkdReq: (from, req) => { void groups?.onSkdReq(from, req) },   // a member asking for our key
   })
+  // The clock anchor (5.4): from the node, now and hourly; a miss keeps the last one.
+  const anchor = () => { void anchorClock(o.relays.map(hostOf).filter((h): h is string => !!h), { log: (m) => { if (o.debug) status(`${SGR.grey}${m}${SGR.reset}`) } }) }
+  anchor(); setInterval(anchor, 3_600_000).unref?.()
   // onLink reports CHANGES; the state the session starts in is read once here,
   // or the status line would say "connecting" over a working link.
   {

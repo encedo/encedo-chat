@@ -7,6 +7,7 @@
  */
 
 import { subtle, randomBytes, b64, unb64 } from './wc.ts'
+import { nowMs } from './time.ts'
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
@@ -17,20 +18,20 @@ const macMessage = (v: number, peer: string, nonce: string, ts: number) => enc.e
 export async function buildAnnounce(peerId: string, macKey: CryptoKey): Promise<Uint8Array> {
   const v = 1
   const nonce = b64(randomBytes(16))
-  const ts = Date.now()
+  const ts = nowMs()
   const sig = new Uint8Array(await subtle.sign('HMAC', macKey, macMessage(v, peerId, nonce, ts)))
   return enc.encode(JSON.stringify({ v, peer: peerId, nonce, ts, mac: b64(sig) }))
 }
 
 export interface VerifyResult { ok: boolean; peer?: string; nonce?: string; reason?: string }
 
-export async function verifyAnnounce(data: Uint8Array, macKey: CryptoKey, nowMs = Date.now()): Promise<VerifyResult> {
+export async function verifyAnnounce(data: Uint8Array, macKey: CryptoKey, now = nowMs()): Promise<VerifyResult> {
   let m: any
   try { m = JSON.parse(dec.decode(data)) } catch { return { ok: false, reason: 'parse' } }
   if (m?.v !== 1) return { ok: false, reason: 'version' }
   if (typeof m.peer !== 'string' || typeof m.nonce !== 'string' || typeof m.ts !== 'number' || typeof m.mac !== 'string')
     return { ok: false, reason: 'shape' }
-  if (Math.abs(nowMs - m.ts) > REPLAY_WINDOW_MS) return { ok: false, reason: 'timestamp' }
+  if (Math.abs(now - m.ts) > REPLAY_WINDOW_MS) return { ok: false, reason: 'timestamp' }
   let ok = false
   try { ok = await subtle.verify('HMAC', macKey, unb64(m.mac), macMessage(m.v, m.peer, m.nonce, m.ts)) } catch { ok = false }
   if (!ok) return { ok: false, reason: 'mac' }
@@ -53,7 +54,7 @@ export function nonceCache(windowMs = 2 * REPLAY_WINDOW_MS) {
   return {
     has: (n: string) => seen.has(n),
     add: (n: string) => {
-      const now = Date.now()
+      const now = nowMs()
       seen.set(n, now)
       if (seen.size <= 256) return
       for (const [k, t] of seen) {

@@ -15,6 +15,8 @@ import { prepareFile, saveFile, downloadDir } from './files.ts'
 import type { FileMeta } from '../lib/envelope.ts'
 import { Groups } from './groups.ts'
 import type { KV } from '../lib/migrate.ts'
+import { anchorClock } from '../lib/clock.ts'
+import { hostOf } from '../lib/ice.ts'
 
 export type HubEvent =
   | { t: 'msg'; from: string; pub: string; text: string; ts: number; id: string; group?: string }
@@ -60,6 +62,9 @@ export class Hub {
       onGroupSkd: (from, skd) => { void this.groups?.onInvite(from, skd) },
       onGroupSkdReq: (from, req) => { void this.groups?.onSkdReq(from, req) },
     })
+    // The clock anchor (5.4): from the node, now and hourly; a miss keeps the last one.
+    const anchor = () => { void anchorClock(this.relays.map(hostOf).filter((h): h is string => !!h), { log: this.log }) }
+    anchor(); setInterval(anchor, 3_600_000).unref?.()
     this.contactList = await this.contacts.list()
     await this.session.watchContacts(this.contactList.map((c) => ({ pub: c.pub })), {
       onOnline: (p) => { if (!this.online.has(p.pub)) { this.online.add(p.pub); this.groups?.onOnline(p.pub); this.emit({ t: 'presence', from: this.nameOf(p.pub), pub: p.pub, state: 'online' }) } },

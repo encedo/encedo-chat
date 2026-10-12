@@ -52,6 +52,7 @@ import { foreignMembers, OwedInvites } from './groupview.ts'
 import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
 import { iceServersFor, hostOf } from '../../lib/ice.ts'
 import { regionBlocked } from '../../lib/regioncheck.ts'
+import { anchorClock } from '../../lib/clock.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
@@ -1511,6 +1512,10 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
       $('peer-status').textContent = tr('sesja zamknięta (duplikat)')
     },
   })
+  // The clock anchor (5.4): once the node is reached, and then hourly. A
+  // probe that fails leaves the previous anchor in place.
+  const anchor = () => { void anchorClock(chosenRelays().map(hostOf).filter((h): h is string => !!h), { log: (m) => ecLog(m, 'debug') }) }
+  clientReady.then(() => { anchor(); setInterval(anchor, 3_600_000) }, () => {})
   clientReady.then((c) => { client = c; void restoreGroups(); void startInboxWatches(); void resumeKnocking() }, (e: any) => {
     ecLog(`session failed to start: ${e?.message ?? e}`)
     toast(tr('Brak połączenia z przekaźnikiem — odśwież stronę'))

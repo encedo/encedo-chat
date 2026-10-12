@@ -13,6 +13,7 @@
  */
 
 import { topicFromSecret, announceMacKey, todayUTC, rotationOffsetSec, type RvParams } from './rendezvous.ts'
+import { nowMs } from './time.ts'
 import { joinChat, type RoomKeys, type ChatOpts, type Eh2Options } from './room.ts'
 import type { SkdFields, FileMeta } from './envelope.ts'
 import type { QuoteRef } from './quote.ts'
@@ -1035,7 +1036,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   const realign = async (pub: string, why: string, dateUTC?: string) => {
     const o = openConvs.get(pub); if (!o || closed) return
     const off = await offsetSecFor(o.peer)
-    const day = dateUTC ?? rendezvousDay(Date.now(), off * 1000)
+    const day = dateUTC ?? rendezvousDay(nowMs(), off * 1000)
     const { topic, macKey } = await presenceFromSecret(await pairSecret(o.peer), { ...params, dateUTC: day })
     const old = o.conv.topic
     if (topic === old || openConvs.get(pub) !== o) return
@@ -1203,7 +1204,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       const offsetSec = await offsetSecFor(peer) // §5.4 per-pair rotation offset (or forced)
       const dateUTC = pending && Date.now() - pending.at < UPGRADE_DATE_TTL
         ? pending.date
-        : rendezvousDay(Date.now(), offsetSec * 1000)
+        : rendezvousDay(nowMs(), offsetSec * 1000)
       const liveParams = { ...params, dateUTC }
       // Upgrade: the full room does presence too, so retire the light watch while
       // the conversation is open — but HAND OFF the topic (keep the subscription

@@ -9,6 +9,7 @@
  */
 
 import { subtle, hkdfBits } from './wc.ts'
+import { nowMs } from './time.ts'
 import { plog, val } from './protolog.ts'
 
 const enc = new TextEncoder()
@@ -55,7 +56,7 @@ export async function announceMacKey(ss: Uint8Array, p: RvParams): Promise<Crypt
 }
 
 export function todayUTC(): string {
-  return new Date().toISOString().slice(0, 10)
+  return new Date(nowMs()).toISOString().slice(0, 10)
 }
 
 /** Group rendezvous topic (§5.3 Proposal): same construction as the pair topic

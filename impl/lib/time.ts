@@ -22,7 +22,15 @@
  * midnight) and `?debug=1` protocol logs.
  */
 
-export const nowMs = (): number => Date.now() // Unix epoch ms (UTC)
+/**
+ * The protocol's clock: the device clock plus the anchor offset (lib/clock.ts,
+ * 5.4). Everything that goes on the wire or derives a day reads this; a
+ * timer or a duration reads Date.now(), because the offset may move.
+ */
+let offsetMs = 0
+export const nowMs = (): number => Date.now() + offsetMs // Unix epoch ms (UTC), anchored
+export const setClockOffset = (ms: number): void => { offsetMs = Number.isFinite(ms) ? ms : 0 }
+export const clockOffsetMs = (): number => offsetMs
 
 const p2 = (n: number): string => String(n).padStart(2, '0')
 

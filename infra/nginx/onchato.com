@@ -458,6 +458,10 @@ server {
     location /health {
         return 200 "bs1 ok\n";
         add_header Content-Type text/plain;
+        # Kotwica zegara (PROTOCOL.md 5.4): aplikacja czyta Date z tej odpowiedzi
+        # z innego originu, wiec naglowek musi byc wystawiony.
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Expose-Headers "Date" always;
     }
 
     # Reszta to aplikacja. Bez tego bs1.onchato.com w przegladarce pokazywal
