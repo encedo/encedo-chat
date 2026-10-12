@@ -2730,6 +2730,17 @@ async function main() {
     if (pinShape.readable) throw new Error('the pin blob is readable JSON — not encrypted at rest')
     step('the pin store on disk is encrypted and keyed by the identity')
 
+    // §10 (audit 2026-10-11, 1.3): who was last heard and when is metadata, and
+    // it sat on disk as plain JSON. B announced to A long ago in this run, so
+    // the record exists; it must not read as JSON.
+    const seenShape = await A.eval<{ enc: boolean; readable: boolean }>(`
+      const k = Object.keys(localStorage).find((k) => k.startsWith('ec-seen-${idA}'));
+      return { enc: !!k, readable: k ? localStorage.getItem(k).trim().startsWith('{') : false };
+    `)
+    if (!seenShape.enc) throw new Error('no ec-seen record although a contact announced')
+    if (seenShape.readable) throw new Error('the last-seen record is readable JSON — not sealed at rest')
+    step('the last-seen record on disk is sealed and keyed by the identity')
+
     await A.reload(A_URL)
     await login(A, 'sim-a')
     await A.waitFor('A restored the group after the pin reload',

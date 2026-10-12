@@ -734,9 +734,9 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   const renameOnHem = hemRenameIdentity(hem, id.kid)
   renameIdentity = async (next: string) => { await renameOnHem(next); return true }
   const idKey = await identityKey(pubkey, id.kid)
-  loadSeen(idKey) // per identity, like every other local record
   const local = await makeLocalBook(idKey, localStorage, hemId)
   if (local.verdict === 'tampered') warnTampered()
+  await loadSeen(idKey, await cacheBaseFor(hemId, idKey)) // per identity, sealed; the base is already cached by the book's MAC check
   await enterApp(
     hemId,
     mergedContactBook(hemContactBook(hem, id.kid), local.verdict === 'tampered' ? taintedBook() : local.book),
@@ -1202,9 +1202,9 @@ async function softLogin() {
     rememberMethod('soft')
     localStorage.setItem(LAST_PROFILE, name)
     const idKey2 = await identityKey(id.pub)
-    loadSeen(idKey2)
     const local = await makeLocalBook(idKey2, localStorage, id)
     if (local.verdict === 'tampered') warnTampered()
+    await loadSeen(idKey2, await cacheBaseFor(id, idKey2))
     await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
@@ -1759,14 +1759,28 @@ document.addEventListener('click', (e) => {
  * off" and "holding the wrong key".
  */
 const SEEN_PREFIX = 'ec-seen-'
+/** Sealed on the §10 schedule like the invite stores (lib/localstore.ts):
+ *  who you talk to and when you last heard them is metadata this product
+ *  exists to keep off a disk, and it used to sit here as plain JSON
+ *  (audit 2026-10-11, 1.3). */
+const SEEN_SALT = 'encedo-chat-seen-v1'
 let seenMap: Record<string, Seen> = {}
 let seenKey = ''
+let seenIdKey = ''
+let seenBase: Uint8Array | null = null
 
-function loadSeen(idKey: string) {
-  seenKey = SEEN_PREFIX + idKey
-  try { seenMap = JSON.parse(localStorage.getItem(seenKey) || '{}') } catch { seenMap = {} }
+/** Read the record for this identity; a pre-seal plain record is accepted
+ *  once and re-sealed on the spot, exactly as the invite stores migrate. */
+async function loadSeen(idKey: string, base: Uint8Array | null) {
+  seenKey = SEEN_PREFIX + idKey; seenIdKey = idKey; seenBase = base
+  const raw = localStorage.getItem(seenKey)
+  const v = await readSealedKV<Record<string, Seen>>(localKV(), base, idKey, seenKey, SEEN_SALT,
+    (x) => !!x && typeof x === 'object' && !Array.isArray(x), (m) => ecLog(m, 'debug'))
+  seenMap = v ?? {}
+  if (v && raw && raw.trimStart().startsWith('{')) saveSeen() // plain JSON from an older build: seal it now
 }
-const saveSeen = () => { if (seenKey) try { localStorage.setItem(seenKey, JSON.stringify(seenMap)) } catch {} }
+/** No base, no write (lib/sealedstore.ts): the record then lives in RAM for the session. */
+const saveSeen = () => { if (seenKey) void writeSealedKV(localKV(), seenBase, seenIdKey, seenKey, SEEN_SALT, seenMap, (m) => ecLog(m, 'debug')) }
 
 /** They announced: they are here, and they hold our key. */
 function markSeen(pub: string, at = nowMs()) {
