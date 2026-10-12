@@ -8,6 +8,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { bodyBytes, fitsOnWire, overBy, MAX_BODY, WIRE_MAX, WARN_AT, kb } from '../lib/msgsize.ts'
+import { HDR_MAX } from '../eh2/ratchet.ts'
 
 test('an ordinary message is nowhere near the limit', () => {
   assert.ok(fitsOnWire('Do zobaczenia jutro o dziesiątej.'))
@@ -38,7 +39,10 @@ test('newlines and quotes nearly double on the way out', () => {
 test('the budget leaves room for the envelope and the seal', () => {
   // A body exactly at the limit plus the fixed cost must still be under the
   // relay's ceiling, or the check would pass and the publish would be dropped.
-  assert.ok(MAX_BODY + 1_024 <= WIRE_MAX)
+  assert.ok(MAX_BODY + 3_072 <= WIRE_MAX)
+  // The headroom holds the largest ratchet header (a hybrid step carrying both
+  // ML-KEM fields), the envelope's own fields and the origin wrapper.
+  assert.ok(HDR_MAX + 160 + 64 <= WIRE_MAX - MAX_BODY, `headroom ${WIRE_MAX - MAX_BODY} must cover a ${HDR_MAX}-byte header`)
   assert.equal(fitsOnWire('a'.repeat(MAX_BODY - 2)), true, 'a body that exactly fits must be allowed')
   assert.equal(fitsOnWire('a'.repeat(MAX_BODY)), false, 'the quotes count too')
 })

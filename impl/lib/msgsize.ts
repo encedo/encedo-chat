@@ -30,7 +30,7 @@
 export const WIRE_MAX = 65_536
 
 /** Envelope + seal, with room to spare over the ~146 bytes measured. */
-export const OVERHEAD = 1_024
+export const OVERHEAD = 3_072
 
 /** What is left for the text itself, once encoded. */
 export const MAX_BODY = WIRE_MAX - OVERHEAD

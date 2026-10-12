@@ -16,7 +16,7 @@ Status: **design of record for a shipping product** (onchato 0.7.x: web at `app.
 |---|---|---|
 | HSM-anchored identity | the IK never leaves the HEM; every new session, topic and Announce needs a device call; a stolen unlocked client lives at most one lifetime (4–8 h) | HKDF inside the HSM (closes S13); enrollment by attestation |
 | PQ confidentiality | EH-2 is X25519 + ML-KEM-768; TLS to the HEM is X25519MLKEM768; recorded traffic needs both broken | — |
-| PQ post-compromise security | none inside a session: the ratchet is X25519, the window is one lifetime (S10) | hybrid ratchet (ML-KEM in the DH step) |
+| PQ post-compromise security | the hybrid ratchet: every fourth DH step, or every 30 minutes, mixes an ML-KEM-768 secret into the root (`PROTOCOL.md` §7.2) | — |
 | Hardened tier | none: keys and ratchet state live in the webview on every platform (S1, S5) | Rust core, WASM first, then native |
 | Relay-blind plane | none: the node sees every client's address; direct is peer-to-peer and opt-in | circuit-relay-v2 streams, blocked on libp2p v3 |
 | Offline root key | none: three CI-held keys and a content-addressed node list | signed release manifest under an offline key |
@@ -150,7 +150,7 @@ The session layer (EH-2, ratchet) is transport-agnostic; everything the node car
 
 - **EH-2 handshake** (`PROTOCOL.md` §6): interactive Noise-XX-style, 1.5 RTT, three X25519 DHs + ephemeral **ML-KEM-768** encapsulation combined in HKDF → post-quantum **hybrid confidentiality from day 1** ("harvest now, decrypt later" defeated). MAC-based mutual auth → **deniability** (no signatures anywhere in the 1:1 path). KCI-resistant, replay-protected.
 - **No prekeys, no prekey server** — the instant-only/synchronous model eliminates them (prekeys exist to reach *offline* recipients). This was the decisive argument for EH-2 over the earlier X3DH direction; the X3DH design is shelved as the blueprint for a hypothetical future offline-delivery extension (`PROTOCOL.md` §19).
-- **Double Ratchet** (`PROTOCOL.md` §7) client-side, with **bounded session lifetime** (forced re-handshake every 4–8 h → hard upper bound on classical-PCS exposure, weakness S10).
+- **Double Ratchet** (`PROTOCOL.md` §7) client-side, **hybrid** — every fourth DH step, or every 30 minutes, mixes an ML-KEM-768 secret into the root, so post-compromise security is post-quantum inside a session too — with a **bounded session lifetime** (forced re-handshake every 4–8 h, the hard stop of a stolen unlocked device).
 - **Groups** (`PROTOCOL.md` §8): Sender Keys with pairwise distribution over EH-2 sessions; **per-recipient ECDH-HMACs** give insider-unforgeability with deniability intact — no signature anywhere in the protocol.
 - **PQ roadmap** (`PROTOCOL.md` §15): Phase 1 hybrid confidentiality now → Phase 2 PQ identity distributed in-band over the classically-authenticated channel → Phase 3 full PQ handshake by 2030 (recommended construction: long-term ML-KEM in HSM — de-risked by the confirmed fact that HEM already has ML-KEM in firmware). External positioning stays honest: "PQ confidentiality now, PQ authentication by 2030", never "fully post-quantum from day 1".
 

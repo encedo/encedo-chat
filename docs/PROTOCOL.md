@@ -1,6 +1,6 @@
 # v6 — PROTOCOL.md
 
-Status: **normative protocol reference — describes the shipped implementation** (`impl/`, deployed as onchato 0.7.x). **`spec_version` 1.1**; on the wire `ver = 1` everywhere (EH-2 frames, the ratchet header, the group frame, the envelope). Before 1.0 the two move together: a wire change bumps `ver` and this number, every client updates with it, and no earlier frame is accepted — so one `ver` names exactly one spec version, and the known-answer vectors of `docs/kat/` (§17.5) belong to it. Kept 1:1 with the code: a wire behaviour the client has and this document omits, or the reverse, is a defect in one of them. Earlier drafts and the Proposal history are in git.
+Status: **normative protocol reference — describes the shipped implementation** (`impl/`, deployed as onchato 0.7.x). **`spec_version` 2.0**; on the wire `ver = 2` on the EH-2 frames and the ratchet header (the hybrid step, §7.2), `version = 1` on the group frame and `v = 1` on the envelope, both unchanged. Before 1.0 the wire and this number move together: a wire change bumps the `ver` of the frames it touches and this number, every client updates with it, and no earlier frame is accepted — so one `ver` names exactly one spec version, and the known-answer vectors of `docs/kat/` (§17.5) belong to it. Kept 1:1 with the code: a wire behaviour the client has and this document omits, or the reverse, is a defect in one of them. Earlier drafts and the Proposal history are in git.
 
 This is the single source of truth for the chat protocol: identity, rendezvous, handshake, ratchet, groups, files, session management, transport, cryptographic analysis, PQ roadmap, and the implementation map. It stands alongside `ARCHITECTURE.md` (product & infrastructure — why and where this runs) and `THREAT-MODELS.md` (deployment profiles — against whom).
 
@@ -406,7 +406,7 @@ msg2 = 0x02 ‖ ver(1) ‖ ek_r_pub(32) ‖ u16be(|pq_ct|)  ‖ pq_ct(1088)  ‖
 msg3 = 0x03 ‖ ver(1) ‖ mac_i(32)
 ```
 
-`ver = 1`; trailing bytes are rejected (a frame parses exactly or not at all). The type bytes are the discriminators of §6's "told apart by their type byte" — `0x01–0x03` handshake, `0x10` ratchet content (§7.2), `0x20`/`0x21` group (§8.2). In `h2_partial` (§6.2), `ts_r` enters as the same `u64be`.
+`ver = 2`; trailing bytes are rejected (a frame parses exactly or not at all). The type bytes are the discriminators of §6's "told apart by their type byte" — `0x01–0x03` handshake, `0x10` ratchet content (§7.2), `0x20`/`0x21` group (§8.2). In `h2_partial` (§6.2), `ts_r` enters as the same `u64be`.
 
 **`initiator_tag` — who sent msg1, readable only by the pair** (since 2026-10-12):
 
@@ -417,7 +417,7 @@ initiator_tag = HMAC-SHA256(k_tag, IK_i_pub)                          // full 32
 
 `announce_key` is the pair's Announce MAC key of the day (§5.5) — the key of the topic the frame is published on — so `k_tag` exists only for the two identities of the pair and changes with every rotation; the label cannot collide with an Announce, whose MAC input starts with a digit (`v|peer|nonce|ts`). R checks the tag **before any DH**: equal to the tag over the contact's IK → proceed; equal to the tag over **its own** IK → a second window of its own identity; anything else → not the contact. Either mismatch is the 5-minute rule of §6. A room that moves to another day's topic (§5.4) drops any attempt in flight and starts over under that topic's key: the tag was computed under the old one, and re-sent onto the new topic it would read as a stranger.
 
-It replaced `initiator_id = SHA-256(IK_i_pub)[0:8]`, which did the same job and was a **stable identifier in the clear** — the same 8 bytes in every msg1 an identity sent, in every pair and on every day, so a node could link one identity across rooms however the topics rotated. The tag is neither linkable across pairs nor across days. It is not an authenticator — anyone in the pair can compute it, and the MACs of §6.2 still decide. msg1 is 1260 B. `ver` stays 1: before 1.0 every client updates together and no legacy frame is accepted.
+It replaced `initiator_id = SHA-256(IK_i_pub)[0:8]`, which did the same job and was a **stable identifier in the clear** — the same 8 bytes in every msg1 an identity sent, in every pair and on every day, so a node could link one identity across rooms however the topics rotated. The tag is neither linkable across pairs nor across days. It is not an authenticator — anyone in the pair can compute it, and the MACs of §6.2 still decide. msg1 is 1260 B. `ver` is 2 since the hybrid ratchet (§7.2): before 1.0 every client updates together and no legacy frame is accepted.
 
 ### 6.2 Key schedule
 
@@ -469,7 +469,9 @@ Signal-style; `RK_0 = SK`.
 
 ```
 DR_State { RK, CK_send, CK_recv, DH_self_priv, DH_self_pub, DH_peer_pub,
-           N_send, N_recv, PN, skipped_keys: map<(DH_pub, N), MK> }
+           N_send, N_recv, PN, skipped_keys: map<(DH_pub, N), MK>,
+           pq_key (own ML-KEM keypair, outstanding), pending_ss ‖ pending_ct (the peer's key answered, for the next step),
+           ct_in_flight, steps_since_pq, last_pq_at }
 ```
 
 ### 7.2 Steps
@@ -477,12 +479,19 @@ DR_State { RK, CK_send, CK_recv, DH_self_priv, DH_self_pub, DH_peer_pub,
 ```
 DH step:        RK', CK = HKDF-SHA256(ikm = X25519(DH_self, DH_peer), salt = RK,
                                       info = "encedo-ratchet-dh-v1", L = 64)
+Hybrid step:    RK', CK = HKDF-SHA256(ikm = X25519(DH_self, DH_peer) ‖ ss, salt = RK,
+                                      info = "encedo-ratchet-hybrid-v1", L = 64)     // ss = ML-KEM-768 shared secret
 Message key:    MK       = HKDF-SHA256(CK, salt = ∅, info = "encedo-msg-key",   L = 32)
 Chain advance:  CK'      = HKDF-SHA256(CK, salt = ∅, info = "encedo-chain-key", L = 32)
 Nonce:          12 B     = HKDF-SHA256(MK, salt = ∅, info = "encedo-aead-nonce" || u32be(N), L = 12)
 AEAD:           AES-256-GCM(MK, nonce, plaintext, aad = header)
-Header (wire):  0x10 ‖ ver(1) ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be)      — 42 bytes, and ALL 42 are the AAD
+Header (wire):  0x10 ‖ ver(1) ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be)                        — 42 bytes
+                0x11 ‖ ver(1) ‖ dh_pub(32) ‖ pn ‖ n ‖ flags(1) ‖ [u16be len ‖ pq_ct] ‖ [u16be len ‖ pq_pub]
+                flags: 0x01 pq_ct present, 0x02 pq_pub present (ct first when both); `ver = 2`
+                — the WHOLE header, whichever form, is the AAD
 ```
+
+**The hybrid step — ML-KEM inside the ratchet (PQ post-compromise security, closes S10).** A sender that has made **K = 4** classical DH steps since the last ML-KEM contribution, or whose last contribution is older than **T = 30 min**, generates an ML-KEM-768 keypair at its next step and puts `pq_pub` (1184 B) in the header of **every frame it sends until the key is answered** — a frame can be lost, and the peer must learn the key from whichever one arrives. The peer, on opening any frame that carries a key it has not yet answered, encapsulates (`ct`, `ss`) and holds both; at its **next DH step** it mixes `ss` into the root under the hybrid label and puts `pq_ct` (1088 B) in the header of every frame of that chain, until the sender's next key shows it has stepped past it. The sender, on a step frame carrying `pq_ct`, decapsulates with the outstanding key and runs the same hybrid step; the key is then spent. One key at a time per side; keys cannot cross, because a side steps only on receiving the chain that carries the other's key. A `pq_ct` under no outstanding key, or any header altered in flight, opens nothing and moves nothing — the header is the AEAD's associated data, so an adversary on the path can delay a contribution by dropping frames, never strip it. Skipped-key handling is unchanged by the hybrid step. Frames stay well under the 65 536-byte bound: the largest header is 2 319 bytes, which is why §7.4's headroom is 3 072.
 
 Where the chain labels appear without a salt, the label is the **info** and the salt is empty — mixing that up derives different keys (the topic/announce/group-auth derivations of §5 and §8.1 use the label as the *salt*; the two families differ and both are normative as written).
 
@@ -502,7 +511,7 @@ Nonce via HKDF (not a bare counter) for defensive robustness against implementat
 ### 7.4 Application payload (plaintext inside the seal)
 
 What §7.2 seals is a versioned application envelope, not a bare string:
-`{ v, t, id, ts, seq, …payload }`. **`v = 1`** (any other value is refused), `t` discriminates the payload type, `id` is a short per-message identifier (**6 random bytes as 8 characters of base64**; a received `re.id` is accepted at 1–64 characters, while `ack.ref`, `reaction.to` and `edit.to` are only required to be strings — a reference that matches nothing is a no-op), `ts` the sender's UTC clock in ms, `seq` a per-sender counter used for de-duplication and display order — **UX only, not a security counter**; replay is prevented by the ratchet, not by `seq`. An unknown `t` decodes as an opaque envelope and is ignored, which is what makes payload additions backward-compatible. **Size:** a published frame is at most **65 536 bytes** (the bound the client applies to everything it publishes — §5.6 says who enforces it — and the DataChannel ceiling of §13.1 is the same number), so a text `body` is capped at **64 512 bytes of its JSON encoding** — 1 024 bytes of headroom for the envelope, the header and the origin wrapper; the composer refuses beyond it rather than letting the node drop the frame silently. Types in use — exactly these eleven: `msg` (`{ body, format: 'plain', re? }` — text, never markup; a terminal client's `/me` action is an ordinary `msg` whose body begins with `ACTION ` followed by the text — a display convention between clients that know it, nothing below the envelope sees it), `typing` (`state: start|stop` — sent on input, `stop` after ~4 s idle; `away` follows after ~60 s as a `presence` state), `presence` (`active|away|leave`), `reaction` (`{ to, emoji }` — the id being reacted to and one string; there is no removal, a reaction is a message), `edit`, `knock`, `file` (§7.5 — the blob's CID, content key, and metadata `{ name, size, mime, chunk, chunks, alg, exp }`, plus an optional caption in `body`, an optional `re` and an optional `album`), `ack` (`{ ref, rts }` — the id being confirmed and the receiver's clock, feeding the §7.3 delivery contract), `rtc` (the direct-plane signalling of §13), and the group distribution messages of §8 (`group-skd`, `group-skd-req`). It is encoded as JSON; the encoding is an efficiency question, not a security one (§7.3, P3).
+`{ v, t, id, ts, seq, …payload }`. **`v = 1`** (any other value is refused), `t` discriminates the payload type, `id` is a short per-message identifier (**6 random bytes as 8 characters of base64**; a received `re.id` is accepted at 1–64 characters, while `ack.ref`, `reaction.to` and `edit.to` are only required to be strings — a reference that matches nothing is a no-op), `ts` the sender's UTC clock in ms, `seq` a per-sender counter used for de-duplication and display order — **UX only, not a security counter**; replay is prevented by the ratchet, not by `seq`. An unknown `t` decodes as an opaque envelope and is ignored, which is what makes payload additions backward-compatible. **Size:** a published frame is at most **65 536 bytes** (the bound the client applies to everything it publishes — §5.6 says who enforces it — and the DataChannel ceiling of §13.1 is the same number), so a text `body` is capped at **62 464 bytes of its JSON encoding** — 3 072 bytes of headroom for the envelope, the ratchet header (up to 2 319 bytes on a hybrid step, §7.2) and the origin wrapper; the composer refuses beyond it rather than letting the node drop the frame silently. Types in use — exactly these eleven: `msg` (`{ body, format: 'plain', re? }` — text, never markup; a terminal client's `/me` action is an ordinary `msg` whose body begins with `ACTION ` followed by the text — a display convention between clients that know it, nothing below the envelope sees it), `typing` (`state: start|stop` — sent on input, `stop` after ~4 s idle; `away` follows after ~60 s as a `presence` state), `presence` (`active|away|leave`), `reaction` (`{ to, emoji }` — the id being reacted to and one string; there is no removal, a reaction is a message), `edit`, `knock`, `file` (§7.5 — the blob's CID, content key, and metadata `{ name, size, mime, chunk, chunks, alg, exp }`, plus an optional caption in `body`, an optional `re` and an optional `album`), `ack` (`{ ref, rts }` — the id being confirmed and the receiver's clock, feeding the §7.3 delivery contract), `rtc` (the direct-plane signalling of §13), and the group distribution messages of §8 (`group-skd`, `group-skd-req`). It is encoded as JSON; the encoding is an efficiency question, not a security one (§7.3, P3).
 
 Three payload conventions name a person or another message, and therefore belong in this document rather than only in the implementation:
 
@@ -757,7 +766,7 @@ The **terminal client** keeps the same records under the same keys in `~/.config
 - **S7 — nonce via HKDF.** *(open; review item)* Non-standard vs a GCM counter; auditor should confirm no collision edge case (impossible across distinct MKs, but review).
 - **S8 — ±5 min replay window.** *(open; narrowed by the clock anchor of §5.4)* Needs NTP; skew can DoS legitimate messages or widen replay. A UX↔security compromise.
 - **S9 — classical authentication in Phase 1 (the PQ gap).** *(open; Phase 3, §15)* Confidentiality is PQ-safe; authentication is classical X25519. "Harvest now, decrypt later" is fully covered (ML-KEM protects `ss`, a required SK component even if all DHs break). "Future active MITM" (CRQC, est. 2035–2040) is realistic only for state-level adversaries vs high-value targets. "Retrospective impersonation proof" is impossible even with a broken IK (no long-term signatures; deniability holds). Mitigation: Phase 3 in-band migration (§15) — done **before** CRQC exists (target 2030 vs 2035+). Why not now: PQ signatures (ML-DSA, standardized Aug 2024) are far less audited than classical curves; an identity certificate adds classical attack surface (parser, chain validation, revocation) — a real CVE risk today against a decade-away threat; the Phase 3 construction should be chosen at a mature standardization state.
-- **S10 — in-session PCS is classical, bounded by session lifetime.** *(open; the hybrid ratchet is the next protocol change)* The hybrid PQ protects SK derivation, but ratchet DH steps (§7.2) use X25519 only. An adversary with both a ratchet snapshot **and** a CRQC could track subsequent steps within one continuous session. The window is narrow here because the product forces frequent full re-key (no store-and-forward, non-portable ratchet, single-session stand-down, and above all the lifetime timer — every such re-key is a fresh EH-2 with ML-KEM). **Phase 1 mitigation:** the bounded session lifetime (§7.3) turns this from emergent into guaranteed. **Optional Phase 2.5:** a hybrid ratchet injecting periodic ML-KEM into DH steps — simple here (reliable ordered stream, PQ key fits one header; no SPQR-style chunking/FEC needed).
+- **S10 — in-session PCS was classical, bounded by session lifetime.** *(closed by the hybrid ratchet of §7.2: every K-th DH step, or every 30 min, mixes an ML-KEM-768 secret into the root, so a CRQC holding a ratchet snapshot is cut off at the next hybrid step rather than at the lifetime timer; what remains below is the history)* The hybrid PQ protects SK derivation, but ratchet DH steps (§7.2) use X25519 only. An adversary with both a ratchet snapshot **and** a CRQC could track subsequent steps within one continuous session. The window is narrow here because the product forces frequent full re-key (no store-and-forward, non-portable ratchet, single-session stand-down, and above all the lifetime timer — every such re-key is a fresh EH-2 with ML-KEM). **Phase 1 mitigation:** the bounded session lifetime (§7.3) turns this from emergent into guaranteed. **Optional Phase 2.5:** a hybrid ratchet injecting periodic ML-KEM into DH steps — simple here (reliable ordered stream, PQ key fits one header; no SPQR-style chunking/FEC needed).
 - **S11 — the file store sees file metadata (§7.5).** *(open; accepted)* The operator's IPFS node and its public gateway observe blob size, timing, uploader/downloader IPs and the fetch pattern of a CID for the blob's ~5-minute life. Content is covered by the AEAD; this is a metadata concession the text path does not make, taken for the product value of files. Mitigation: TTL, ciphertext-only storage, verifiability (`file-decrypt`).
 - **S12 — software-identity assurance (§4.5).** *(open; accepted — the software profile is the onboarding tier, not the product's)* The IK of a software profile is a password-sealed blob on disk: offline-guessable after theft, no hardware bound on the §9.3 timer, and the §10 export file carries the whole identity under the same password. Accepted as the explicit trade of the zero-hardware onboarding path; the HEM path is the assurance tier.
 - **S13 — the pair secret transits client RAM on current firmware (§4.3).** *(open; closes with HKDF-in-HSM firmware)* Rendezvous-only material; exposure is pair-linkability metadata, not content. Closes when HKDF-in-HSM firmware ships.
@@ -867,7 +876,8 @@ node → client   0x11 DELIVER  u8 len ‖ from ‖ u8 len ‖ topic ‖ data
 | Constant | Value |
 |---|---|
 | HKDF labels (pair/self/announce/rotation) | `encedo-chat-rendezvous-v1`, `encedo-chat-announce-mac-v1`, `encedo-chat-rotation-v1` |
-| HKDF labels (handshake/ratchet) | `encedo-handshake-v2`, `encedo-ratchet-dh-v1`, `encedo-msg-key`, `encedo-chain-key`, `encedo-aead-nonce` |
+| HKDF labels (handshake/ratchet) | `encedo-handshake-v2`, `encedo-ratchet-dh-v1`, `encedo-ratchet-hybrid-v1`, `encedo-msg-key`, `encedo-chain-key`, `encedo-aead-nonce` |
+| Hybrid ratchet cadence (§7.2) | a key every K = 4 own DH steps or T = 30 min; `pq_pub` 1184 B on every frame until answered; `pq_ct` 1088 B on every frame of the answering chain |
 | EH-2 initiator tag (§6.1) | label `encedo-eh2-initiator-tag-v1` (HMAC under the day's Announce key → `k_tag`); `initiator_tag` = HMAC-SHA256(`k_tag`, IK_i_pub), 32 B; msg1 1260 B |
 | HKDF labels (groups) | `encedo-chat-group-rendezvous-v1`, `encedo-group-msg`, `encedo-group-chain`, `encedo-group-msg-mac`, `encedo-chat-group-roster-mac` |
 | HKDF labels (published invites, §5.7-5.9) | `encedo-chat-invite-knock-v1`, `encedo-chat-invite-decoy-v1`, `encedo-chat-invite-decoy-slot-v1` |
@@ -877,10 +887,10 @@ node → client   0x11 DELIVER  u8 len ‖ from ‖ u8 len ‖ topic ‖ data
 | Safety number (§4.4.1) | label `encedo-chat-safety-v1`, 5200 SHA-512 iterations per half, 60 digits; QR `onchato-sn1:` |
 | Fingerprint (§4.2) | `SHA-256(pub)[0:8]`, 16 hex digits — identification only |
 | Topic alphabet | base32 RFC 4648, lowercase, no padding |
-| Frame / text size | published frame ≤ 65 536 B (the client's own bound — not enforced by the node today, §5.6; the DataChannel ceiling); `msg.body` ≤ 64 512 B of JSON |
+| Frame / text size | published frame ≤ 65 536 B (bounded by the client and by the node, §5.6; the DataChannel ceiling); `msg.body` ≤ 62 464 B of JSON |
 | Envelope (§7.4) | `v = 1`; `id` = 6 random bytes as 8 base64 chars |
-| Frame type bytes | `0x01`–`0x03` EH-2 msg1–3 · `0x10` 1:1 ratchet content · `0x20` group message · `0x21` group keepalive · `0xE1` origin envelope (§13, outermost on pair/self/group topics; never on inbox topics) · on the pick stream only: `0x01`–`0x03`, `0x11`–`0x14` (§13.2) |
-| Ratchet content header (§7.2) | 42 B = `0x10` ‖ ver ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be); all 42 B are the AAD |
+| Frame type bytes | `0x01`–`0x03` EH-2 msg1–3 · `0x10` 1:1 ratchet content · `0x11` ratchet content with ML-KEM fields · `0x20` group message · `0x21` group keepalive · `0xE1` origin envelope (§13, outermost on pair/self/group topics; never on inbox topics) · on the pick stream only: `0x01`–`0x03`, `0x11`–`0x14` (§13.2) |
+| Ratchet content header (§7.2) | 42 B = `0x10` ‖ ver ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be); or `0x11` with flags and `pq_ct`/`pq_pub` (≤ 2 319 B); the whole header is the AAD; `ver = 2` |
 | Topic | base32, 52 chars |
 | Clock tolerance / replay window | ±5 min |
 | Rotation | one rule (§5.4): the instant derives from the topic's own key — pairs from the pair `ss`, groups from `group_secret`, self from the self-DH; all: ±30 min guard, double-subscribe, 60 s re-check |
@@ -919,7 +929,7 @@ Two distinct problems on different horizons: **PQ confidentiality** (needed *now
 
 - **Phase 1 (2026, now).** Hybrid KEM (X25519 + ML-KEM-768) in the handshake; bounded session lifetime forcing regular PQ re-key; TLS 1.3 to HEM in X25519MLKEM768. ✅ confidentiality PQ-safe, FS, classical mutual auth, deniability. ⚠️ authentication not PQ-safe (S9).
 - **Phase 2 (2027–2028).** PQ-identity infrastructure without breaking changes: identity-binding certificate spec, in-band cert distribution over rendezvous, CRL, dual-stack (v1+v2 with version negotiation). An HSM PQ identity key (ML-DSA-65 or long-term ML-KEM-768) is bound to the existing IK and distributed over the still-classically-authenticated channel — no repeat out-of-band verification.
-- **Phase 2.5 (conditional, 2028–2029).** Optional hybrid ratchet (periodic ML-KEM into DH steps) for PQ-PCS inside one long session. Not a prerequisite — Phase 1's bounded lifetime already delivers the base guarantee.
+- **Phase 2.5 — done (§7.2).** The hybrid ratchet mixes periodic ML-KEM into the DH steps, so PQ post-compromise security holds inside one session, not only across lifetimes.
 - **Phase 3 (target 2030, aligned with the EU PQC roadmap — critical use-cases by 2030).** Full PQ handshake. **Recommended: long-term ML-KEM in HSM** — the handshake gains a fourth input `decap(IK_kem_priv, ct)` alongside the three DHs; authentication works by the *same* mechanism as today (only the private-key holder derives the right SK), so **no new protocol artifacts, deniability naturally preserved**. Alternative: an ML-DSA identity certificate (well-understood PKI, but adds parser/revocation surface). Decision deferred to ~2028. Version negotiation with a documented v1 deprecation window.
 - **Accelerated path.** In-band migration + dual-stack + a version field let Phase 2/3 activate in months if a quantum breakthrough or regulatory mandate demands it.
 
@@ -1103,8 +1113,8 @@ flowchart TD
         K0 --> SK["SK = RK_0"]
     end
 
-    subgraph ROOT ["Root chain (advances on each DH ratchet step)"]
-        SK --> K1["HKDF (info = encedo-ratchet-dh-v1)"]
+    subgraph ROOT ["Root chain (advances on each DH ratchet step; every K-th step, or every 30 min, is hybrid)"]
+        SK --> K1["HKDF (info = encedo-ratchet-dh-v1, or encedo-ratchet-hybrid-v1 with ML-KEM ss in the ikm)"]
         DHa["X25519(DH_self, DH_peer)"] --> K1
         K1 --> RK1["RK_1"]
         K1 --> CKs["CK_send"]

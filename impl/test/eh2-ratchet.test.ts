@@ -13,7 +13,9 @@ import assert from 'node:assert/strict'
 import { ratchetFrom, RatchetError, type Ratchet } from '../eh2/ratchet.ts'
 import { initiate, initiatorComplete, respond, responderComplete } from '../eh2/handshake.ts'
 import { generateX25519 } from '../lib/x25519.ts'
-import { mlkem768 } from '../eh2/mlkem.ts'
+import { mlkem768, mlkem768Seeded, MLKEM768_SEED } from '../eh2/mlkem.ts'
+import { x25519FromPriv } from '../lib/x25519.ts'
+import { readFileSync } from 'node:fs'
 /** k_tag stand-in (§6.1): the room derives it from the pair's Announce key; these tests hand it in. */
 const TAG_KEY = new Uint8Array(32).fill(0x7a)
 
@@ -21,14 +23,14 @@ const NOW = 1_784_000_000_000
 const te = new TextEncoder()
 const td = new TextDecoder()
 
-/** A real handshake, then both ratchets. */
-async function pair(opts: Parameters<typeof ratchetFrom>[1] = {}): Promise<{ I: Ratchet; R: Ratchet }> {
+/** A real handshake, then both ratchets (`optsR` lets the two sides differ, e.g. in their hybrid cadence). */
+async function pair(opts: Parameters<typeof ratchetFrom>[1] = {}, optsR = opts): Promise<{ I: Ratchet; R: Ratchet }> {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
   const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem: mlkem768, now: NOW })
   const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem: mlkem768, now: NOW })
   const i2 = await initiatorComplete(i1.state, r1.msg2, { now: NOW })
   const rr = await responderComplete(r1.state, i2.msg3)
-  return { I: await ratchetFrom(i2.result, opts), R: await ratchetFrom(rr, opts) }
+  return { I: await ratchetFrom(i2.result, opts), R: await ratchetFrom(rr, optsR) }
 }
 
 const say = async (from: Ratchet, to: Ratchet, text: string) => {
@@ -197,4 +199,116 @@ test('receives fired in the same tick do not collide either', async () => {
 
   const opened = await Promise.all(frames.map((f) => R.decrypt(f)))
   assert.deepEqual(opened.map((p) => (p ? td.decode(p) : null)), bodies)
+})
+
+// ---------------------------------------------------------------------------
+// the hybrid step (7.2): ML-KEM into the DH ratchet
+// ---------------------------------------------------------------------------
+
+const hex = (u: Uint8Array) => [...u].map((b) => b.toString(16).padStart(2, '0')).join('')
+const isPq = (f: Uint8Array) => f[0] === 0x11
+const flagsOf = (f: Uint8Array) => f[42]
+
+test('hybrid: every K-th step issues a key, the peer answers with a ciphertext, and both roots take the secret', async () => {
+  const { I, R } = await pair({ pqEverySteps: 2 })
+  const frames: Uint8Array[] = []
+  const turn = async (from: Ratchet, to: Ratchet, text: string) => {
+    const f = await from.encrypt(te.encode(text)); frames.push(f)
+    assert.equal(td.decode((await to.decrypt(f))!), text)
+  }
+  // Each turn is a DH step on the sender; after two steps a key goes out, the
+  // peer's next step carries the ciphertext, and both count one hybrid step.
+  for (let i = 0; i < 8; i++) await turn(i % 2 ? R : I, i % 2 ? I : R, `t${i}`)
+  assert.ok(frames.some((f) => isPq(f) && (flagsOf(f) & 0x02)), 'a frame carried an encapsulation key')
+  assert.ok(frames.some((f) => isPq(f) && (flagsOf(f) & 0x01)), 'a frame carried the ciphertext back')
+  assert.ok(I.stats().pqSteps >= 1 && R.stats().pqSteps >= 1, `both sides mixed ML-KEM in: I=${I.stats().pqSteps} R=${R.stats().pqSteps}`)
+  assert.equal(I.stats().pqSteps, R.stats().pqSteps, 'the same number of hybrid steps on both sides')
+  // ...and the conversation goes on, both ways, across it.
+  await turn(I, R, 'after'); await turn(R, I, 'and back')
+})
+
+test('hybrid: the time cadence issues a key on the next step once T has passed', async () => {
+  let t = NOW
+  const { I, R } = await pair({ pqEverySteps: 1000, pqEveryMs: 60_000, now: () => t })
+  await say(I, R, 'a'); await say(R, I, 'b')
+  assert.equal(I.stats().pqOutstanding, false, 'nothing yet: neither K nor T reached')
+  t += 61_000
+  await say(I, R, 'c')
+  assert.equal(I.stats().pqOutstanding, true, 'T passed: the next step carried a key')
+  await say(R, I, 'd')
+  assert.equal(I.stats().pqOutstanding, false, 'answered on the peer\'s next step')
+  assert.equal(I.stats().pqSteps, 1); assert.equal(R.stats().pqSteps, 1)
+})
+
+test('hybrid: the key rides every frame until answered, so a lost step frame does not cost the contribution', async () => {
+  // Only I issues keys here, so that I's step is classical and carries one.
+  const { I, R } = await pair({ pqEverySteps: 1 }, { pqEverySteps: 1000 })
+  await say(I, R, 'a'); await say(R, I, 'b')        // I's next send is a step, and K = 1: it issues a key
+  const lost = await I.encrypt(te.encode('lost'))    // the step frame, with the key - never delivered
+  assert.ok(isPq(lost) && (flagsOf(lost) & 0x02))
+  const next = await I.encrypt(te.encode('next'))    // same chain: still carries the key
+  assert.ok(isPq(next) && (flagsOf(next) & 0x02), 'the key is on the following frame too')
+  assert.equal(td.decode((await R.decrypt(next))!), 'next')
+  await say(R, I, 'c')                               // R's next step answers with the ciphertext
+  assert.equal(I.stats().pqOutstanding, false)
+  assert.equal(I.stats().pqSteps, 1); assert.equal(R.stats().pqSteps, 1)
+  await say(I, R, 'd'); await say(R, I, 'e')
+})
+
+test('hybrid: the ciphertext rides every frame of the answering chain, so its lost step frame costs nothing either', async () => {
+  const { I, R } = await pair({ pqEverySteps: 1 }, { pqEverySteps: 1000 })
+  await say(I, R, 'a'); await say(R, I, 'b'); await say(I, R, 'c') // c carried I's key
+  const lostAnswer = await R.encrypt(te.encode('lost'))              // R's hybrid step, with the ciphertext - never delivered
+  assert.ok(isPq(lostAnswer) && (flagsOf(lostAnswer) & 0x01))
+  const next = await R.encrypt(te.encode('next'))
+  assert.ok(flagsOf(next) & 0x01, 'the ciphertext is on the following frame too')
+  assert.equal(td.decode((await I.decrypt(next))!), 'next', 'I steps into the hybrid root from the second frame')
+  assert.equal(I.stats().pqSteps, 1); assert.equal(R.stats().pqSteps, 1)
+  await say(I, R, 'd'); await say(R, I, 'e')
+})
+
+test('hybrid: a ciphertext under no key of ours, or a header edited in flight, opens nothing and moves nothing', async () => {
+  const { I, R } = await pair({ pqEverySteps: 1000 })
+  await say(I, R, 'a'); await say(R, I, 'b')
+  const good = await I.encrypt(te.encode('c'))
+  // A forged "answer": the same frame with a pq_ct bolted on (type 0x11, flags 0x01).
+  const forged = new Uint8Array(good.length + 1 + 2 + 1088)
+  forged.set(good.subarray(0, 42)); forged[0] = 0x11; forged[42] = 0x01
+  new DataView(forged.buffer).setUint16(43, 1088, false); forged.set(good.subarray(42), 45 + 1088)
+  assert.equal(await R.decrypt(forged), null)
+  const before = R.stats()
+  assert.equal(td.decode((await R.decrypt(good))!), 'c', 'the genuine frame still opens: nothing was consumed')
+  assert.deepEqual(R.stats().pqSteps, before.pqSteps)
+})
+
+test('hybrid: a message key from before the hybrid step stays unreadable after it (forward secrecy across the step)', async () => {
+  const { I, R } = await pair({ pqEverySteps: 1 })
+  const early = await I.encrypt(te.encode('early'))
+  assert.equal(td.decode((await R.decrypt(early))!), 'early')
+  for (let i = 0; i < 6; i++) await say(i % 2 ? I : R, i % 2 ? R : I, `t${i}`)
+  assert.ok(R.stats().pqSteps >= 1)
+  assert.equal(await R.decrypt(early), null)
+})
+
+test('KAT: a scripted hybrid exchange with fixed keys matches docs/kat/ratchet-hybrid.json', async () => {
+  const KAT = JSON.parse(readFileSync(new URL('../../docs/kat/ratchet-hybrid.json', import.meta.url), 'utf8'))
+  const fill = (v: number) => new Uint8Array(32).fill(v)
+  const kem = mlkem768Seeded(new Uint8Array(MLKEM768_SEED).fill(0x55), fill(0x66))
+  let k = 0x50
+  const generateDh = async () => x25519FromPriv(fill(k++))
+  const ikI = await x25519FromPriv(fill(0x11)), ikR = await x25519FromPriv(fill(0x22))
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem, now: NOW, ek: await x25519FromPriv(fill(0x33)) })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW, ek: await x25519FromPriv(fill(0x44)) })
+  const i2 = await initiatorComplete(i1.state, r1.msg2, { now: NOW })
+  const rr = await responderComplete(r1.state, i2.msg3)
+  const opts = { kem, generateDh, pqEverySteps: 1, now: () => NOW }
+  const I = await ratchetFrom(i2.result, opts), R = await ratchetFrom(rr, opts)
+  const frames: string[] = []
+  for (const [who, text] of KAT.script as [string, string][]) {
+    const [from, to] = who === 'I' ? [I, R] : [R, I]
+    const f = await from.encrypt(te.encode(text)); frames.push(hex(f))
+    assert.equal(td.decode((await to.decrypt(f))!), text)
+  }
+  assert.deepEqual(frames, KAT.frames)
+  assert.equal(I.stats().pqSteps, KAT.pq_steps); assert.equal(R.stats().pqSteps, KAT.pq_steps)
 })

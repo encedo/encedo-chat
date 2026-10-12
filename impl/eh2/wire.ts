@@ -27,7 +27,7 @@
 import { sha256, concat } from '../lib/wc.ts'
 
 /** Wire version. Bump only with a spec revision — the peer rejects anything else. */
-export const EH2_VERSION = 1
+export const EH2_VERSION = 2
 
 /** Frame type tags (first byte). */
 export const T_MSG1 = 0x01

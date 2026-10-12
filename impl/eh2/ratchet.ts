@@ -32,20 +32,37 @@
 import { subtle, hkdfBits, concat, b64 } from '../lib/wc.ts'
 import { nowMs } from '../lib/time.ts'
 import { generateX25519, type Dh } from '../lib/x25519.ts'
-import type { HandshakeResult } from './handshake.ts'
+import type { HandshakeResult, Kem, KemKey } from './handshake.ts'
+import { mlkem768 } from './mlkem.ts'
 import { plog, val } from '../lib/protolog.ts'
 
 const enc = new TextEncoder()
 const RK_INFO = enc.encode('encedo-ratchet-dh-v1')
+/** The hybrid step (7.2): the X25519 output with the ML-KEM shared secret behind it. */
+const RK_PQ_INFO = enc.encode('encedo-ratchet-hybrid-v1')
 const MK_INFO = enc.encode('encedo-msg-key')
 const CK_INFO = enc.encode('encedo-chain-key')
 const NONCE_INFO = enc.encode('encedo-aead-nonce')
 const NO_SALT = new Uint8Array(0)
 
-/** Frame tag + version (distinct from the handshake frames of eh2/wire.ts). */
+/** Frame tags + version (distinct from the handshake frames of eh2/wire.ts). */
 const T_DATA = 0x10
-const VERSION = 1
+/** A content frame whose header also carries ML-KEM material (7.2 hybrid step). */
+const T_DATA_PQ = 0x11
+const VERSION = 2
 const HDR_LEN = 2 + 32 + 4 + 4
+const PQ_CT = 0x01, PQ_PUB = 0x02
+/** The largest header the wire can carry: base, flags, two u16 lengths, pq_ct and pq_pub of ML-KEM-768. */
+export const HDR_MAX = HDR_LEN + 1 + 2 + 1088 + 2 + 1184
+
+/**
+ * The hybrid cadence (7.2): on every K-th own DH step, or when the last
+ * ML-KEM contribution is older than T, a sender puts a fresh encapsulation
+ * key in its headers; the peer's next step carries the ciphertext and mixes
+ * the shared secret into the root. Both are per session, both injectable.
+ */
+export const PQ_EVERY_STEPS = 4
+export const PQ_EVERY_MS = 30 * 60_000
 
 /** §7.3 bounds. */
 export const MAX_SKIP_PER_CHAIN = 1000
@@ -66,40 +83,74 @@ export interface Ratchet {
   decrypt(frame: Uint8Array): Promise<Uint8Array | null>
   /** Diagnostics for tests and the security panel — counters in the CURRENT
    *  chains (they reset on every DH step), never secrets. */
-  stats(): { nSend: number; nRecv: number; skipped: number; dhPub: string | null }
+  stats(): { nSend: number; nRecv: number; skipped: number; dhPub: string | null; pqOutstanding: boolean; pqSteps: number }
 }
 
-interface Header { dhPub: Uint8Array; pn: number; n: number }
+interface Header { dhPub: Uint8Array; pn: number; n: number; pqCt?: Uint8Array; pqPub?: Uint8Array }
 
 // ---------------------------------------------------------------------------
 // header wire
 // ---------------------------------------------------------------------------
 
+/**
+ *   0x10 ‖ ver ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be)                                   42 B
+ *   0x11 ‖ ver ‖ dh_pub(32) ‖ pn ‖ n ‖ flags(1) ‖ [u16be len ‖ pq_ct] ‖ [u16be len ‖ pq_pub]
+ *
+ * flags: 0x01 = pq_ct present, 0x02 = pq_pub present (ct first when both).
+ * The whole header is the AEAD's associated data, so neither field can be
+ * stripped, swapped or added by anyone who cannot open the frame.
+ */
 function encodeHeader(h: Header): Uint8Array {
-  const b = new Uint8Array(HDR_LEN)
-  b[0] = T_DATA; b[1] = VERSION
+  const pq = !!(h.pqCt || h.pqPub)
+  const len = HDR_LEN + (pq ? 1 + (h.pqCt ? 2 + h.pqCt.length : 0) + (h.pqPub ? 2 + h.pqPub.length : 0) : 0)
+  const b = new Uint8Array(len)
+  b[0] = pq ? T_DATA_PQ : T_DATA; b[1] = VERSION
   b.set(h.dhPub, 2)
   const dv = new DataView(b.buffer)
   dv.setUint32(34, h.pn, false)
   dv.setUint32(38, h.n, false)
+  if (pq) {
+    b[42] = (h.pqCt ? PQ_CT : 0) | (h.pqPub ? PQ_PUB : 0)
+    let o = 43
+    for (const f of [h.pqCt, h.pqPub]) {
+      if (!f) continue
+      dv.setUint16(o, f.length, false); b.set(f, o + 2); o += 2 + f.length
+    }
+  }
   return b
 }
 
-function decodeHeader(frame: Uint8Array): Header | null {
+function decodeHeader(frame: Uint8Array): { h: Header; len: number } | null {
   if (frame.length < HDR_LEN + 16) return null // 16 = minimum GCM tag
-  if (frame[0] !== T_DATA || frame[1] !== VERSION) return null
+  if (frame[1] !== VERSION) return null
   const dv = new DataView(frame.buffer, frame.byteOffset, frame.byteLength)
-  return { dhPub: frame.slice(2, 34), pn: dv.getUint32(34, false), n: dv.getUint32(38, false) }
+  const h: Header = { dhPub: frame.slice(2, 34), pn: dv.getUint32(34, false), n: dv.getUint32(38, false) }
+  if (frame[0] === T_DATA) return { h, len: HDR_LEN }
+  if (frame[0] !== T_DATA_PQ) return null
+  const flags = frame[42]
+  if (!flags || flags & ~(PQ_CT | PQ_PUB)) return null
+  let o = 43
+  for (const which of [PQ_CT, PQ_PUB]) {
+    if (!(flags & which)) continue
+    if (o + 2 > frame.length) return null
+    const n = dv.getUint16(o, false); o += 2
+    if (!n || o + n > frame.length) return null
+    const field = frame.slice(o, o + n); o += n
+    if (which === PQ_CT) h.pqCt = field; else h.pqPub = field
+  }
+  if (frame.length < o + 16) return null
+  return { h, len: o }
 }
 
 // ---------------------------------------------------------------------------
 // KDFs
 // ---------------------------------------------------------------------------
 
-async function dhStep(rk: Uint8Array, ikm: Uint8Array): Promise<{ rk: Uint8Array; ck: Uint8Array }> {
-  const out = await hkdfBits(ikm, rk, RK_INFO, 64)
+async function dhStep(rk: Uint8Array, ikm: Uint8Array, info: Uint8Array = RK_INFO): Promise<{ rk: Uint8Array; ck: Uint8Array }> {
+  const out = await hkdfBits(ikm, rk, info, 64)
   return { rk: out.slice(0, 32), ck: out.slice(32) }
 }
+const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i])
 
 const messageKey = (ck: Uint8Array) => hkdfBits(ck, NO_SALT, MK_INFO, 32)
 const chainNext = (ck: Uint8Array) => hkdfBits(ck, NO_SALT, CK_INFO, 32)
@@ -188,6 +239,13 @@ export interface RatchetOpts {
   maxChainsBack?: number
   skippedTtlMs?: number
   now?: () => number
+  /** The KEM of the hybrid step (default ML-KEM-768); a seeded one for a KAT. */
+  kem?: Kem
+  /** Hybrid cadence (7.2): every K-th own DH step, or after T ms since the last ML-KEM contribution. */
+  pqEverySteps?: number
+  pqEveryMs?: number
+  /** Test seam: the ratchet's ephemeral X25519 keys, fixed for a KAT. */
+  generateDh?: () => Promise<Dh>
 }
 
 /**
@@ -200,6 +258,35 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
   const ttl = opts.skippedTtlMs ?? SKIPPED_TTL_MS
   const now = opts.now ?? nowMs
   const skipped = new SkippedKeys(ttl, opts.maxChainsBack ?? MAX_CHAINS_BACK)
+  const kem = opts.kem ?? mlkem768
+  const pqEvery = opts.pqEverySteps ?? PQ_EVERY_STEPS
+  const pqEveryMs = opts.pqEveryMs ?? PQ_EVERY_MS
+  const newDh = opts.generateDh ?? generateX25519
+
+  /**
+   * The hybrid step's state (7.2).
+   *
+   * `pqKey` is our encapsulation key, outstanding: its public half rides in
+   * EVERY header we send until the peer's ciphertext arrives, because a frame
+   * can be lost and a lost step frame must not cost the session its PQ
+   * contribution - the peer learns the key from whichever frame reaches it.
+   * `pendingSs`/`pendingCt` are what we owe the peer: encapsulated when its
+   * key arrived, mixed into our NEXT DH step and carried in every header of
+   * that chain (`ctInFlight`) until the peer's next key shows it has stepped
+   * past it - again so that no single lost frame can leave the two roots
+   * apart. A step the peer makes before it has seen our key is classical and
+   * is accepted as such (the keys crossed; ours stays outstanding); what
+   * cannot happen is a ciphertext under a key we never issued, or a header
+   * altered in flight - the header is the AEAD's associated data.
+   */
+  let pqKey: KemKey | null = null
+  let pendingSs: Uint8Array | null = null
+  let pendingCt: Uint8Array | null = null
+  let ctInFlight: Uint8Array | null = null
+  let seenPeerPqPub: Uint8Array | null = null
+  let stepsSincePq = 0
+  let lastPqAt = now()
+  let pqStepsDone = 0
 
   // Root state. The first DH step consumes the handshake's DH(EK_r, EK_i).
   let rk = hs.sk
@@ -227,22 +314,45 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
 
   async function encrypt(plaintext: Uint8Array): Promise<Uint8Array> {
     if (stepBeforeSend || !ckSend) {
-      dhSelf = await generateX25519()
-      const step = await dhStep(rk, await dhSelf.dh(dhPeerPub))
-      plog('§7.2', `DH ratchet (send): new DH_self=${val(dhSelf.pub)} x peer=${val(dhPeerPub)} -> RK=${val(step.rk)} CK_send=${val(step.ck)}`)
+      dhSelf = await newDh()
+      const dh = await dhSelf.dh(dhPeerPub)
+      let step: { rk: Uint8Array; ck: Uint8Array }
+      if (pendingSs) {
+        // The hybrid step: the peer's key was answered, its secret goes in with the DH.
+        const ikm = concat(dh, pendingSs)
+        step = await dhStep(rk, ikm, RK_PQ_INFO)
+        ikm.fill(0); pendingSs.fill(0); pendingSs = null
+        ctInFlight = pendingCt; pendingCt = null
+        stepsSincePq = 0; lastPqAt = now(); pqStepsDone++
+        plog('§7.2', `DH ratchet (send, HYBRID): new DH_self=${val(dhSelf.pub)} x peer=${val(dhPeerPub)} + ML-KEM ss -> RK=${val(step.rk)} CK_send=${val(step.ck)}`)
+      } else {
+        step = await dhStep(rk, dh)
+        stepsSincePq++
+        plog('§7.2', `DH ratchet (send): new DH_self=${val(dhSelf.pub)} x peer=${val(dhPeerPub)} -> RK=${val(step.rk)} CK_send=${val(step.ck)}`)
+      }
+      dh.fill(0)
       rk.fill(0); rk = step.rk
       if (ckSend) ckSend.fill(0)
       ckSend = step.ck
       pn = nSend
       nSend = 0
       stepBeforeSend = false
+      // Time for a fresh encapsulation key of our own? Only when none is outstanding.
+      if (!pqKey && (stepsSincePq >= pqEvery || now() - lastPqAt >= pqEveryMs)) {
+        pqKey = await kem.generate()
+        plog('§7.2', `hybrid: issuing an encapsulation key (${kem.name}) after ${stepsSincePq} classical step(s)`)
+      }
     }
     const mk = await messageKey(ckSend!)
     const next = await chainNext(ckSend!)
     plog('§7.2', `send n=${nSend} pn=${pn}: CK->CK' (${val(ckSend!)} -> ${val(next)}) MK=${val(mk)}`)
     ckSend!.fill(0); ckSend = next
 
-    const header = encodeHeader({ dhPub: dhSelf!.pub, pn, n: nSend })
+    const header = encodeHeader({
+      dhPub: dhSelf!.pub, pn, n: nSend,
+      ...(ctInFlight ? { pqCt: ctInFlight } : {}),
+      ...(pqKey ? { pqPub: pqKey.pub } : {}),
+    })
     const { key, nonce } = await aeadKey(mk)
     const ct = new Uint8Array(await subtle.encrypt(
       { name: 'AES-GCM', iv: await nonce(nSend), additionalData: header }, key, plaintext,
@@ -297,18 +407,28 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
    * the §7.3 skip bound: drop that frame, and treat a stream of them as an
    * attacker or a hopeless desync.
    */
+  /** The peer's encapsulation key arrived (on any frame that opened): answer it once. */
+  async function notePeerPqPub(pub: Uint8Array | undefined): Promise<void> {
+    if (!pub || (seenPeerPqPub && sameBytes(seenPeerPqPub, pub))) return
+    const { ct: pqCt, ss } = await kem.encapsulate(pub)
+    if (pendingSs) pendingSs.fill(0)
+    pendingSs = ss; pendingCt = pqCt; seenPeerPqPub = pub
+    plog('§7.2', `hybrid: encapsulated to the peer's key; the secret goes into our next DH step`)
+  }
+
   async function decrypt(frame: Uint8Array): Promise<Uint8Array | null> {
-    const h = decodeHeader(frame)
-    if (!h) return null
-    const header = frame.slice(0, HDR_LEN)
-    const ct = frame.slice(HDR_LEN)
+    const decoded = decodeHeader(frame)
+    if (!decoded) return null
+    const { h, len: hdrLen } = decoded
+    const header = frame.slice(0, hdrLen)
+    const ct = frame.slice(hdrLen)
     skipped.prune(now())
 
     // 1. A key we already derived for a message that overtook this one?
     const stashed = skipped.peek(h.dhPub, h.n)
     if (stashed) {
       const pt = await tryOpen(stashed, header, ct, h.n)
-      if (pt) { stashed.fill(0); skipped.drop(h.dhPub, h.n) }
+      if (pt) { stashed.fill(0); skipped.drop(h.dhPub, h.n); await notePeerPqPub(h.pqPub) }
       return pt
     }
 
@@ -331,6 +451,7 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
       wipeAll(mk, ckRecv, walk.ck !== ckRecv ? walk.ck : null)
       ckRecv = nextCk
       nRecv = h.n + 1
+      await notePeerPqPub(h.pqPub)
       return pt
     }
 
@@ -338,10 +459,18 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
     //    what never arrived), step the root with the peer's new key, then walk
     //    the new chain — all of it provisional until the frame verifies.
     if (!dhSelf) return null // we have no ratchet key yet, so we cannot step
+    // A ciphertext is an answer to a key we issued; one under no key of ours is
+    // not a frame we can place (and will not open - the header is AAD).
+    if (h.pqCt && !pqKey) return null
     const closing = ckRecv ? await advance(ckRecv, nRecv, h.pn) : null
-    const ikm = await dhSelf.dh(h.dhPub)
-    const step = await dhStep(rk, ikm)
-    ikm.fill(0)
+    const dh = await dhSelf.dh(h.dhPub)
+    let ikm = dh, info = RK_INFO, ss: Uint8Array | null = null
+    if (h.pqCt) {
+      try { ss = await pqKey!.decapsulate(h.pqCt) } catch { dh.fill(0); return null }
+      ikm = concat(dh, ss); info = RK_PQ_INFO
+    }
+    const step = await dhStep(rk, ikm, info)
+    dh.fill(0); ikm.fill(0); ss?.fill(0)
     const walk = await advance(step.ck, 0, h.n)
     const mk = await messageKey(walk.ck)
     const nextCk = await chainNext(walk.ck)
@@ -366,6 +495,13 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
     dhPeerPub = h.dhPub
     nRecv = h.n + 1
     stepBeforeSend = true
+    // The peer stepped past the chain that carried our ciphertext: it is in.
+    ctInFlight = null
+    if (h.pqCt) {
+      pqKey = null; stepsSincePq = 0; lastPqAt = now(); pqStepsDone++
+      plog('§7.2', `DH ratchet (recv, HYBRID): the peer answered our key; ML-KEM ss is in the root`)
+    }
+    await notePeerPqPub(h.pqPub)
     return pt
   }
 
@@ -397,6 +533,6 @@ export async function ratchetFrom(hs: HandshakeResult, opts: RatchetOpts = {}): 
   return {
     encrypt: (plaintext) => serial(() => encrypt(plaintext)),
     decrypt: (frame) => serial(() => decrypt(frame)),
-    stats: () => ({ nSend, nRecv, skipped: skipped.size, dhPub: dhSelf ? b64(dhSelf.pub) : null }),
+    stats: () => ({ nSend, nRecv, skipped: skipped.size, dhPub: dhSelf ? b64(dhSelf.pub) : null, pqOutstanding: !!pqKey, pqSteps: pqStepsDone }),
   }
 }

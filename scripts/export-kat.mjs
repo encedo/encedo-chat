@@ -24,6 +24,7 @@ import { mlkem768Seeded, MLKEM768_SEED } from '../impl/eh2/mlkem.ts'
 import { toyKem, seededRand } from '../impl/test/toy-kem.ts'
 import { sendChainFrom, seal } from '../impl/lib/senderkey.ts'
 import { b64 } from '../impl/lib/wc.ts'
+import { ratchetFrom } from '../impl/eh2/ratchet.ts'
 
 const out = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'kat')
 const hex = (u) => [...u].map((b) => b.toString(16).padStart(2, '0')).join('')
@@ -60,7 +61,34 @@ const senderkey = {
   note: 'MK = HKDF(chain, salt=empty, info="encedo-group-msg", 32); nonce = HKDF(MK, salt=empty, info="encedo-aead-nonce", 12); AES-256-GCM(MK, nonce, plaintext, aad=header) (8.1, 8.2).',
 }
 
-for (const [name, v] of [['eh2-handshake-classical', classical], ['eh2-handshake-mlkem', hybrid], ['group-senderkey', senderkey]]) {
+// The hybrid ratchet (7.2): a scripted exchange with fixed ratchet keys (0x50,
+// 0x51, ... as the ephemeral scalars, in the order generated), the seeded
+// ML-KEM, K = 1 so every step issues a key, the clock frozen.
+const script = [['I', 'a'], ['R', 'b'], ['I', 'c'], ['R', 'd'], ['I', 'e'], ['R', 'f']]
+async function ratchetKat() {
+  const kem = mlkem768Seeded(new Uint8Array(MLKEM768_SEED).fill(0x55), fill(0x66))
+  let k = 0x50
+  const generateDh = async () => x25519FromPriv(fill(k++))
+  const ikI = await x25519FromPriv(fill(0x11)), ikR = await x25519FromPriv(fill(0x22))
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem, now: NOW, ek: await x25519FromPriv(fill(0x33)) })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW, ek: await x25519FromPriv(fill(0x44)) })
+  const i2 = await initiatorComplete(i1.state, r1.msg2, { now: NOW })
+  const rr = await responderComplete(r1.state, i2.msg3)
+  const opts = { kem, generateDh, pqEverySteps: 1, now: () => NOW }
+  const I = await ratchetFrom(i2.result, opts), R = await ratchetFrom(rr, opts)
+  const te = new TextEncoder(), td = new TextDecoder()
+  const frames = []
+  for (const [who, text] of script) {
+    const [from, to] = who === 'I' ? [I, R] : [R, I]
+    const f = await from.encrypt(te.encode(text)); frames.push(hex(f))
+    if (td.decode(await to.decrypt(f)) !== text) throw new Error('ratchet KAT: frame did not open')
+  }
+  return { ...common, kem: hybrid.kem, ratchet_dh_privs: 'fill(0x50), fill(0x51), ... in generation order', pq_every_steps: 1, script, frames, pq_steps: I.stats().pqSteps,
+    note: 'Header 0x10/0x11 per 7.2; hybrid step info "encedo-ratchet-hybrid-v1" with ikm = X25519 || ss; classical step info "encedo-ratchet-dh-v1".' }
+}
+const ratchet = await ratchetKat()
+
+for (const [name, v] of [['eh2-handshake-classical', classical], ['eh2-handshake-mlkem', hybrid], ['group-senderkey', senderkey], ['ratchet-hybrid', ratchet]]) {
   writeFileSync(join(out, name + '.json'), JSON.stringify(v, null, 2) + '\n')
   console.log('wrote docs/kat/' + name + '.json')
 }
