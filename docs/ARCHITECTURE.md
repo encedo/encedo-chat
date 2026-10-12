@@ -1,6 +1,6 @@
 # v6 — Architecture
 
-Status: **design of record for a shipping product** (onchato 0.5.x: web, desktop, Android — one engine in `impl/`). Sections marked **TBD** or **roadmap** are not built; everything else describes what runs. Earlier concept-phase drafts are in git.
+Status: **design of record for a shipping product** (onchato 0.7.x: web at `app.onchato.com`, desktop, Android, and a terminal client — one engine in `impl/`). Sections marked **TBD** or **roadmap** are not built; everything else describes what runs. Earlier concept-phase drafts are in git.
 
 ## Document map
 
@@ -14,7 +14,7 @@ Status: **design of record for a shipping product** (onchato 0.5.x: web, desktop
 
 Instant-only P2P chat — the IRC / "meet in the park" model:
 
-- Both parties are online during the conversation. **No offline messages, no mailbox, no delivery receipts, no push notifications, no server-side history.** A conversation is arranged (out of band or by standing agreement) and happens in a deterministic, crypto-derived room.
+- Both parties are online during the conversation. **No offline messages, no mailbox, no network-side delivery receipts, no push notifications, no server-side history.** (In a 1:1 the receiving *client* acknowledges each message to its sender — `PROTOCOL.md` §7.3 — which is a liveness contract between two endpoints, not a receipt kept by anybody; groups have none. The CLI daemon may queue text on its own disk for a contact who is offline — §13 — the network still holds nothing.) A conversation is arranged (out of band or by standing agreement) and happens in a deterministic, crypto-derived room.
 - Ephemerality is a security feature: nodes store nothing, so there is nothing to seize, subpoena, or leak.
 
 ### Goals
@@ -30,14 +30,17 @@ Positioning: dual-use secure messenger (private, commercial, military / critical
 
 ## Network roles
 
-### Discovery nodes (operator-run; two in production, bs1 + bs2)
+### Discovery nodes (operator-run; three in production, bs1 + bs2 + bs3)
 
-- Plain libp2p nodes: GossipSub + circuit-relay-v2 reservations behind nginx (WSS on 443), interconnected over a direct IPv6 mesh (public IPv4 between the nodes is blocked). A third node's PeerId is precomputed; `relay/README.md` is the operational manual.
-- **Role: discovery + signaling + the ciphertext fallback content path.** GossipSub carries rendezvous, handshake frames, and — where WebRTC cannot be established, for groups always, and for the Linux desktop always — sealed content as opaque bytes (`PROTOCOL.md` §13). The node never sees plaintext or keys.
-- Stateless beyond their identity key. A Docker image for one-command self-hosting is **roadmap**; today the recipe is `relay/README.md` (clone → `npm ci` → systemd).
+- Plain libp2p nodes: GossipSub + circuit-relay-v2 reservations behind nginx (WSS on 443), interconnected over a direct IPv6 mesh (public IPv4 between the nodes is blocked). bs3 (a second jurisdiction) has been live since 2026-09-03; `relay/README.md` is the operational manual.
+- **Role: discovery + signaling + the ciphertext fallback content path.** Since 0.6.24 a client is a **light client** by default: one stream to its node, `/onchato/pick/1` (PICK/DROP a topic, PUSH bytes, DELIVER back — `PROTOCOL.md` §12/§13), and GossipSub runs between the nodes only; `?light=0` makes a client a full GossipSub peer again. What the node carries for a client: rendezvous, handshake frames, and — where the direct plane is not in use, for groups always — sealed content as opaque bytes. The node never sees plaintext or keys.
+- **Policy at the edge (since 0.7.4):** nginx answers every onchato path, and the STUN responder stays silent, for addresses geolocated in sanctioned countries (HTTP 451 — the list is `infra/geoip/`, built weekly from DB-IP Country Lite), and drops connections from an operator-kept **abuse list** of addresses, networks and ASNs (444; the list lives outside the repo and is pushed to the nodes with `infra/geoip/onchato-block`). The client probes `/health` on up to three nodes and turns a 451 into "not available in your region" (`lib/regioncheck.ts`). This is an operator decision about who the main network serves, not a protocol property: a self-hosted network carries none of it.
+- Stateless beyond their identity key. A Docker image of the **node** for one-command self-hosting is **roadmap**; today the recipe is `relay/README.md` (clone → `npm ci` → systemd). (The `Dockerfile` at the repo root is the **CLI** image, not the node's.)
 - Node identity: deterministic from the `--pass` seed — the pass is the hostname by convention, so a node's PeerId (and the multiaddr clients will carry) is derivable on a laptop before the machine exists.
 - Topic management: a large limit + **TTL eviction** (a topic with no traffic for `--idle-ttl` is dropped; heartbeats keep live rooms perpetually fresh) — per-pair daily rooms mean many short-lived topics.
 - Two operational lessons that are now configuration, not choice (`relay/README.md`): GossipSub's IP-colocation scoring is **off** (behind the proxy every client arrives from loopback — the penalty graylisted the whole user base), and libp2p's per-host inbound limits are raised, replaced by per-real-IP `limit_conn`/`limit_req` at nginx.
+- **Load announcements:** each node publishes `{ v, n, pct, at }` on a constant topic shaped like a room topic (so it is not a marker), `pct = max(connections/limit, topics/limit)`; a node replays the others' latest to a client as it joins. That is what the client's node choice below reads.
+- **What a node records** (`PROTOCOL.md` §12): a per-message journal line of metadata only (truncated topic, sender prefix, byte count), refusals, and aggregate per-window counters (messages, bytes, topics, connections, CPU) kept in Redis for 30 days; Prometheus metrics on loopback; nginx's access log. Nothing per user, nothing of content — and the full-trace `DUMP` mode exists for debugging only, never on a production node.
 
 ### Third-party nodes and networks
 
@@ -48,7 +51,7 @@ Positioning: dual-use secure messenger (private, commercial, military / critical
 
 - Browser (web entry channel) and installed app (desktop/Android — the channel with the resilience guarantees).
 - Client libp2p **PeerId is ephemeral**: freshly generated on every app start / page reload (key never persisted). An established room keeps its PeerId and its topic across the daily rotation (`PROTOCOL.md` §5.4) — the rotation bounds *discovery* correlation.
-- Node selection: the client compiles in the node list (`infra/nodes.json`); among the nodes the user has left enabled it **draws** the first (by capacity weight, uniform when the list carries none), then reads every node's announced load from that node and, if a second random choice is lighter by 20 points, moves once at login ("power of two choices"); later it moves only when its node has stayed ≥ 85 % for a minute and another is < 60 %, and then only a fifth of the time per check (hysteresis, `lib/nodepick.ts`). The rest of the list is the failover chain. The list can be refreshed by its compiled-in IPFS CID. No GeoDNS.
+- Node selection: the client compiles in the node list (`infra/nodes.json`: `{ v: 1, nodes: [{ name, addr, w? }] }`, at most 24 entries, `addr` a multiaddr ending in `/p2p/<PeerId>`, `w` an optional capacity weight ≤ 1000); among the nodes the user has left enabled it **draws** the first (by capacity weight, uniform when the list carries none), then reads every node's announced load from that node and, if a second random choice is lighter by 20 points, moves once at login ("power of two choices"); later — checked every 20 s, at most one move per 10 minutes — it moves only when its node has stayed ≥ 85 % for a minute and another is < 60 %, and then only a fifth of the time per check (hysteresis, `lib/nodepick.ts`). The rest of the list is the failover chain. The list can be refreshed by its compiled-in IPFS CID. No GeoDNS. The network id a web client mixes into its derivations is fixed at `main`; only the test peers of the CLI take a `--network`.
 
 ## Identity model
 
@@ -92,15 +95,15 @@ Two planes (`PROTOCOL.md` §13):
 
 | Plane | Mechanism | Carries |
 |---|---|---|
-| Control | GossipSub over the discovery node | rendezvous topics, Announce/presence, self-topic, EH-2 frames, WebRTC signaling, group keepalive |
-| Data | **WebRTC DataChannel** (1:1, browsers, opportunistic) with **GossipSub through the node as the ciphertext fallback** — and as the only path for groups and for the Linux desktop | ratchet / sender-key content |
+| Control | client ↔ node: `/onchato/pick/1` (the light client, default since 0.6.24; a full GossipSub peer with `?light=0`) · node ↔ node: GossipSub | rendezvous topics, Announce/presence, self-topic, EH-2 frames, WebRTC signaling, group keepalive |
+| Data | **WebRTC DataChannel** (1:1, opportunistic — the browser's, or on the Linux desktop the host's) with **the node as the ciphertext fallback** — and as the only path for groups | ratchet / sender-key content |
 
 The session layer (EH-2, ratchet) is transport-agnostic; everything the node carries is ciphertext + metadata to it.
 
-- **WebRTC signaling** rides the pair topic as ratchet-sealed `rtc` envelopes (`PROTOCOL.md` §7.4) — the node learns that a pair is negotiating, never the addresses. This whole path runs only where the user selected the direct plane (node-only is the default since 2026-09-03). ICE then consults **our own STUN servers on the three nodes** (`infra/stun/`, since 2026-09-03; Google's public one before that) for reflexive addresses — a third party that sees client IPs and negotiation timing (`PROTOCOL.md` §13). The offering side (lower PeerId) re-offers on loss; a channel is trusted only after a two-way ping proves it, and one stall demotes the conversation to the relay for its remaining life.
-- **The relay-blind data plane (circuit-relay-v2 streams) is parked**, blocked upstream: on the pinned libp2p 2.2.x generation the destination-side STOP handling is broken, and the v3 upgrade waits for a GossipSub release compatible with libp2p v3. When it lands, it narrows the node path's exposure from "the node sees GossipSub frames" to "one node sees flow metadata of an opaque NOISE tunnel". That is a different promise from the **transport switch that has shipped** (Settings → *Tylko przez węzeł* / *Automatycznie*): the switch decides whether the PEER learns your address, the parked plane would decide whether the NODE does. Since 2026-09-03 the switch defaults to node-only — direct is opt-in — and the badge still reports what the pair actually got (⚪ relay / 🟢 direct). The Linux desktop is relay-only today by platform limitation (WebKitGTK has no `RTCPeerConnection` — measured; `PROTOCOL.md` §3.2).
+- **WebRTC signaling** rides the pair topic as ratchet-sealed `rtc` envelopes (`PROTOCOL.md` §7.4) — the node learns that a pair is negotiating, never the addresses. This whole path runs only where the user selected the direct plane (node-only is the default since 2026-09-03; the setting has three positions — *relay*, *auto*, and *direct-only*, in which the node carries no content at all — `PROTOCOL.md` §13). ICE then consults **our own STUN servers on the three nodes** (`infra/stun/`, since 2026-09-03; Google's public one before that) for reflexive addresses — a third party that sees client IPs and negotiation timing (`PROTOCOL.md` §13). The offering side (lower PeerId) re-offers on loss; a channel is trusted only after a two-way ping proves it, and one stall demotes the conversation to the relay for its remaining life.
+- **The relay-blind data plane (circuit-relay-v2 streams) is parked**, blocked upstream: on the pinned libp2p 2.2.x generation the destination-side STOP handling is broken, and the v3 upgrade waits for a GossipSub release compatible with libp2p v3. When it lands, it narrows the node path's exposure from "the node sees GossipSub frames" to "one node sees flow metadata of an opaque NOISE tunnel". That is a different promise from the **transport switch that has shipped** (Settings → *Tylko przez węzeł* / *Automatycznie* / *Tylko bezpośrednio*): the switch decides whether the PEER learns your address, the parked plane would decide whether the NODE does. Since 2026-09-03 the switch defaults to node-only — direct is opt-in — and the badge still reports what the pair actually got (⚪ relay / 🟢 direct). On the Linux desktop WebKitGTK has no `RTCPeerConnection` (measured), so since 0.5.77 the **Tauri host opens the DataChannel itself** (`webrtc-rs`, `src-tauri/src/rtc.rs`, behind the same link interface the browser implements); frames cross the IPC as base64 and the channel honours a 65 536-byte message ceiling (`PROTOCOL.md` §13.1).
 - **No TURN.** Rationale: a TURN server sees the same metadata as a blind relay (IPs, timing, volume) so there is no security gain; it adds a separate service, credential management, and a protocol that is easy to fingerprint and block — whereas the libp2p node behind nginx on 443/WSS is indistinguishable from ordinary TLS web traffic. Voice/video calls are out of scope, so the one scenario that would justify TURN never arises. Hard-NAT pairs fall back to the relay.
-- **MQTT** is a second, fully working transport (per-session choice, `?mqtt=1` / `--mqtt`): the engine unchanged over a broker, for operators who cannot run libp2p — at a documented metadata cost (a connected client can observe every room's activity; README).
+- **MQTT** is a second, fully working transport (per-session choice, `?mqtt=1` in the web app; the CLI has no flag for it today): the engine unchanged over a broker, for operators who cannot run libp2p — at a documented metadata cost (a connected client can observe every room's activity; README).
 
 ## E2E encryption — **resolved; full detail in `PROTOCOL.md` §6–§8, §11, §15**
 
@@ -124,8 +127,10 @@ The network stores nothing for the text path (shared files: ciphertext for minut
 | Pinned messages | opt-in per message, encrypted per room, capped at 32 |
 | Group state | always cached, encrypted (a group must survive a reload) |
 | Contact book | persistent, MAC'd against key swaps |
+| Published invites, knocks in progress, dismissed knocks, last-heard per contact | sealed (`PROTOCOL.md` §10) |
+| CLI daemon outbox | sealed; text waiting for an offline contact, 24 h |
 
-All keyed off one identity-gated base (`ECDH(IK, emp_pub)`); a stolen disk without the identity is ciphertext plus a public value. A per-profile ephemeral-enforced mode (the P3 posture) is **roadmap** — today there is no policy switch that disables pinning or the group cache. History is per-device by construction (ratchet state is not portable — `PROTOCOL.md` §9.4); a device switch starts empty, with the sealed **profile export** (§10) moving identity/contacts/groups — never a transcript.
+All keyed off one identity-gated base (`ECDH(IK, emp_pub)`); a stolen disk without the identity is ciphertext plus a public value. Plain preferences (language, theme, node list edits, transport choice) are not sealed — they carry no contact, key or timing. A per-profile ephemeral-enforced mode (the P3 posture) is **roadmap** — today there is no policy switch that disables pinning or the group cache. History is per-device by construction (ratchet state is not portable — `PROTOCOL.md` §9.4); a device switch starts empty, with the sealed **profile export** (§10) moving identity/contacts/groups — never a transcript.
 
 ## Distribution & trust
 
@@ -133,15 +138,15 @@ Everything public — security from cryptography, not obscurity. The operator of
 
 What ships today:
 
-- Code on GitHub; the web app served from the domain; installed apps from GitHub Releases (a tag builds desktop for five targets and a **signed Android APK**; the web host self-deploys on the same tag).
+- Code on GitHub; the web app served from `app.onchato.com` (an origin of its own since 0.7.0 — browser storage shares it with nothing, least of all the file store); installed apps from GitHub Releases (a tag builds desktop for five targets and a **signed Android APK**; the web host self-deploys on the same tag). The desktop updater fetches `latest.json` from GitHub; the web app re-fetches its own `index.html` every six hours to notice a new bundle. The in-app feedback form posts to the operator (`/feedback`: kind, text, an optional contact line, language, version/commit/shell, and — only when the box is ticked — the user agent, the window size and the Diagnostics report); the sink keeps no address.
 - **The node list is pinned by content addressing, not signed**: `infra/nodes.json` is compiled into every client, and a runtime refresh fetches a **compiled-in IPFS CID** — the CID is the whole of the list's integrity, at the cost that publishing a new list means shipping a build. A domain seizure does not remove the nodes an installed app already carries.
-- Release signing is **three CI-held keys**, none of them an offline root: minisign for the desktop updater (the draft release is the publish gate), the Android keystore (repository secrets), and Windows Azure Trusted Signing (wired, not yet enabled). The desktop `.deb`/`.rpm` never self-update — they are told, not replaced.
-- **Roadmap, deliberately not claimed as built:** an offline operator root key over releases + node list; the web app additionally on IPFS; **reproducible builds** (the P3-grade chain: signed source tag → source CID → reproducible build → signed binary — without that link a CID of the source says nothing about the binary).
+- Release signing is **three CI-held keys**, none of them an offline root: minisign for the desktop updater (the draft release is the publish gate), the Android keystore (repository secrets), and Windows **Azure Trusted Signing** (live since 0.6.3, behind the `release` environment's reviewer gate — a tagged build waits for approval before it signs). The desktop `.deb`/`.rpm` never self-update — they are told, not replaced.
+- **Reproducibility, measured:** the same commit yields the same web bundle on another machine and another Node version; `scripts/release-cid.mjs` computes the bundle's CID and SRI and can compare them with what `app.onchato.com` serves. What is **not** built is the chain around it — an offline operator root key over releases + node list, and the signed source tag → source CID → binary link that would let a third party verify a shipped binary from the source alone (the P3-grade chain). The web app additionally on IPFS is roadmap too.
 - Web app remains the low-friction entry channel; resilience guarantees are claimed for the installed app only.
 
 ### Self-hosting as a promoted path
 
-Running your own network is not merely tolerated — it is **encouraged**. Today's recipe is `relay/README.md` (VPS + nginx + systemd, node identity derivable in advance); the productized form — Docker image + "a $5 VPS behind your domain, full network up in 15 minutes" — is roadmap. This is simultaneously a resilience property (exit from the operator is always available), the P3 deployment story, and a distribution channel.
+Running your own network is not merely tolerated — it is **encouraged**. Today's recipe is `relay/README.md` (VPS + nginx + systemd, node identity derivable in advance); the productized form — a node Docker image + "a $5 VPS behind your domain, full network up in 15 minutes" — is roadmap. This is simultaneously a resilience property (exit from the operator is always available), the P3 deployment story, and a distribution channel.
 
 ## Desktop / mobile: Tauri 2 (`PROTOCOL.md` §3.2)
 
@@ -149,7 +154,7 @@ Running your own network is not merely tolerated — it is **encouraged**. Today
 
 - Desktop: tray + close-to-tray (probed against the actual desktop — no tray host means close quits, honestly), autostart, native notifications (own D-Bus path on Linux), single-instance, **self-updater** (minisign; `.deb`/`.rpm` get a notification + link, never a silent replace).
 - Android: a **foreground service** (`specialUse`) keeps the process alive so a phone in a pocket stays reachable — the honest price of no store-and-forward, paid as a permanent notification; local notifications, no FCM (no Google server between two people).
-- Desktop caveat, measured (2026-09-14): the packaged app has the direct plane on Windows (WebView2) and macOS (WKWebView); on **Linux** WebKitGTK as shipped by Ubuntu is built without a WebRTC backend and exposes no `RTCPeerConnection`, so that build is **relay-only** (`PROTOCOL.md` §3.2/§13) until a Rust-side DataChannel (`webrtc-rs`) replaces the webview's.
+- Desktop, measured (2026-09-14): the packaged app has the direct plane on Windows (WebView2) and macOS (WKWebView) natively; on **Linux** WebKitGTK as shipped by Ubuntu is built without a WebRTC backend and exposes no `RTCPeerConnection`, so there the **Tauri host opens the DataChannel** (`webrtc-rs`, since 0.5.77) behind the same link interface — the Linux build has the direct plane too, through the host rather than the webview (`PROTOCOL.md` §3.2/§13).
 
 **Roadmap — the hardened tier:** a Rust `core-rs` (native for Tauri, WASM for the web) holding keys, ratchet state and the HEM client outside the webview, with transport behind a trait. That is the isolation story earlier drafts described; it is not the build, and claims about webview-compromise resistance must not be made until it is.
 
@@ -174,7 +179,7 @@ Look & feel is open — two clickable mockups exist sharing **the same DOM skele
 - The mental model is an **arranged meeting, not a mailbox** — rooms as meetings, presence, no fake message history (no "recent messages" previews: there is no history to preview).
 - **Security state must be visible and honest**: the security badge (🤝 → 🔐) and the transport badge (⚪ relay / 🟢 direct) report the measured state of *this* conversation, never a configured wish. Capability probing separates REQUIRED (refuse to start, say why) from DEGRADED (say so, carry on) — a platform that cannot do WebRTC or notifications is told, not silently downgraded.
 - Avatars/identicons derived locally from keys — never fetched from a server.
-- Slash commands exist in the CLI (`/who`, `/me`, `/react`, `/quit`); the web UI has none. Moving the parser into the core so every skin gets them is an open refinement, not a shipped property.
+- Slash commands exist in the CLI (`onchato`: windows, queries, groups and their administration, `/add`, `/verify`, `/invite`, knocks and their acceptance, files, `/me`, `/react`, `/quit` and more — `CLI.md`); the web UI has none. Moving the parser into the core so every skin gets them is an open refinement, not a shipped property.
 
 ## Explicit non-goals
 
@@ -191,7 +196,7 @@ Look & feel is open — two clickable mockups exist sharing **the same DOM skele
 | 2 | Open federation policy | operational experience |
 | 3 | Core↔UI packaging (`@encedo/chat-core`, mountable UI) | priced in `EMBED-PLAN.md` |
 | 4 | Self-hosting recipe (Docker image + manual + $5-VPS guide) | today: `relay/README.md` |
-| 5 | Reproducible builds (closes the CID→binary trust chain) | toolchain work, P3 requirement |
+| 5 | Reproducible builds — the build is repeatable (measured, `scripts/release-cid.mjs`); what remains is the signed tag → source CID → binary chain | P3 requirement |
 | 6 | Relay-blind data plane (hides the address from the NODE; the peer-facing switch already ships) | GossipSub release for libp2p v3 (Transport) |
 | 7 | Hardened tier (`core-rs` outside the webview) | roadmap (`PROTOCOL.md` §3.2) |
 | 8 | ~~Identity backend for the open channel~~ — **resolved: the software profile ships** (`PROTOCOL.md` §4.5) | — |
