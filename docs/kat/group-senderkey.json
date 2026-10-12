@@ -1,0 +1,8 @@
+{
+  "chain_key": "1111111111111111111111111111111111111111111111111111111111111111",
+  "header_aad": "aabbccdd",
+  "plaintext": "hello",
+  "ctr": 0,
+  "ct": "59ec59409bb175107ae1fe6cf187a3d98c21127850",
+  "note": "MK = HKDF(chain, salt=empty, info=\"encedo-group-msg\", 32); nonce = HKDF(MK, salt=empty, info=\"encedo-aead-nonce\", 12); AES-256-GCM(MK, nonce, plaintext, aad=header) (8.1, 8.2)."
+}

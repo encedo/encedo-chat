@@ -18,6 +18,9 @@ import { generateX25519, x25519FromPriv, type Dh } from '../lib/x25519.ts'
 import { decodeMsg2, encodeMsg2, h1 as hashMsg1 } from '../eh2/wire.ts'
 import { hkdfBits, concat, b64 } from '../lib/wc.ts'
 import { toyKem, seededRand } from './toy-kem.ts'
+import { readFileSync } from 'node:fs'
+const hex = (u: Uint8Array) => [...u].map((b) => b.toString(16).padStart(2, '0')).join('')
+const KAT = JSON.parse(readFileSync(new URL('../../docs/kat/eh2-handshake-classical.json', import.meta.url), 'utf8'))
 /** k_tag stand-in (§6.1): the room derives it from the pair's Announce key; these tests hand it in. */
 const TAG_KEY = new Uint8Array(32).fill(0x7a)
 
@@ -190,13 +193,13 @@ test('KAT — fixed keys and fixed KEM randomness pin the classical schedule', a
   const i2 = await initiatorComplete(i1.state, r1.msg2, { now: NOW })
   assert.ok((await responderComplete(r1.state, i2.msg3)).sk)
 
-  // Recorded from this implementation — a change here means the wire format,
-  // the DH ordering, the info string or the transcript changed. (The toy KEM's
-  // ss is part of it; stage 3 re-records with ML-KEM-768.)
-  // Re-recorded 2026-10-12: msg1's 8-byte initiator_id = SHA-256(IK_i)[0:8] became
-  // a 32-byte initiator_tag = HMAC(k_tag, IK_i) (§6.1), so h1 - the HKDF salt for
-  // SK - is over a different frame. Nothing else in the schedule moved.
-  assert.equal(b64(i2.result.sk), '7NRm/mSWhtn6BLeiXobfSNkOVVrbWWiaX7zUyNm0r+8=')
+  // The vector lives in docs/kat/ (re-recorded only by scripts/export-kat.mjs,
+  // deliberately): a change means the wire format, the DH ordering, the info
+  // string or the transcript changed. The inputs here must match the file's.
+  assert.equal(hex(new Uint8Array(32).fill(0x11)), KAT.ik_i_priv)
+  assert.equal(hex(TAG_KEY), KAT.tag_key); assert.equal(NOW, KAT.now_ms)
+  assert.equal(hex(i1.msg1), KAT.msg1); assert.equal(hex(r1.msg2), KAT.msg2); assert.equal(hex(i2.msg3), KAT.msg3)
+  assert.equal(b64(i2.result.sk), KAT.sk_b64)
 })
 
 function flip(b: Uint8Array): Uint8Array {

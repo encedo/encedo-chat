@@ -9,6 +9,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { newSendChain, sendChainFrom, seal, SenderReceiver, tag, verify, MAX_SKIP } from '../lib/senderkey.ts'
 import { hkdfBits, subtle } from '../lib/wc.ts'
+import { readFileSync } from 'node:fs'
+const hex = (u: Uint8Array) => [...u].map((b) => b.toString(16).padStart(2, '0')).join('')
+const KAT = JSON.parse(readFileSync(new URL('../../docs/kat/group-senderkey.json', import.meta.url), 'utf8'))
 
 const enc = new TextEncoder()
 const NO_SALT = new Uint8Array(0)
@@ -18,7 +21,10 @@ const H = new Uint8Array([0xaa, 0xbb, 0xcc, 0xdd]) // an opaque header (the AAD)
 test('KAT: a sealed frame opens with an independently derived MK and nonce', async () => {
   // If the labels/derivation drift, this manual decrypt fails.
   const key0 = new Uint8Array(32).fill(0x11)
-  const { ct } = await seal(sendChainFrom(key0), H, body('hello'))
+  const { ct, n } = await seal(sendChainFrom(key0), H, body('hello'))
+  // ...and matches the recorded vector in docs/kat/ (scripts/export-kat.mjs).
+  assert.equal(hex(key0), KAT.chain_key); assert.equal(hex(H), KAT.header_aad); assert.equal(n, KAT.ctr)
+  assert.equal(hex(ct), KAT.ct)
   const mk0 = await hkdfBits(key0, NO_SALT, enc.encode('encedo-group-msg'), 32)
   const nonce = await hkdfBits(mk0, NO_SALT, enc.encode('encedo-aead-nonce'), 12)
   const k = await subtle.importKey('raw', mk0, { name: 'AES-GCM' }, false, ['decrypt'])

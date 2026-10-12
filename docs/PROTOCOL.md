@@ -1,6 +1,6 @@
 # v6 — PROTOCOL.md
 
-Status: **normative protocol reference (protocol version 1, key schedule "v2" / EH-2) — describes the shipped implementation** (`impl/`, deployed as onchato 0.7.x). Kept 1:1 with the code: a wire behaviour the client has and this document omits, or the reverse, is a defect in one of them. Earlier drafts and the Proposal history are in git.
+Status: **normative protocol reference — describes the shipped implementation** (`impl/`, deployed as onchato 0.7.x). **`spec_version` 1.1**; on the wire `ver = 1` everywhere (EH-2 frames, the ratchet header, the group frame, the envelope). Before 1.0 the two move together: a wire change bumps `ver` and this number, every client updates with it, and no earlier frame is accepted — so one `ver` names exactly one spec version, and the known-answer vectors of `docs/kat/` (§17.5) belong to it. Kept 1:1 with the code: a wire behaviour the client has and this document omits, or the reverse, is a defect in one of them. Earlier drafts and the Proposal history are in git.
 
 This is the single source of truth for the chat protocol: identity, rendezvous, handshake, ratchet, groups, files, session management, transport, cryptographic analysis, PQ roadmap, and the implementation map. It stands alongside `ARCHITECTURE.md` (product & infrastructure — why and where this runs) and `THREAT-MODELS.md` (deployment profiles — against whom).
 
@@ -997,7 +997,7 @@ DH ordering (§6.3) — first test · **msg3 gating** (R rejects application dat
 
 ### 17.5 Verification status
 
-KATs pin the EH-2 schedule and the group sender chain with fixed keys (re-record deliberately; they are the vectors for any future port). `SK_i == SK_r`, FS ("snapshot after *n* cannot read < *n*"), insider-forge negative tests, §8 repair-path and §9.1 stand-down scenarios run in `npm test` (offline, deterministic); the two-browser harness (`npm run browser-test`) drives the real bundle against the real relay through the DOM, including handshake, groups, files, and the §7.5 ciphertext-only check. What no automated harness covers: the HEM device paths (real-device walkthroughs only).
+KATs pin the EH-2 schedule (classical with a seeded stand-in KEM, and hybrid with seeded ML-KEM-768) and the group sender chain with fixed keys; the vectors are the JSON files in `docs/kat/` — inputs as fixed bytes, so a port in another language can reproduce them without this repository's helpers — read by the tests and written only by `scripts/export-kat.mjs` (re-record deliberately, and say in the commit why the numbers moved). `SK_i == SK_r`, FS ("snapshot after *n* cannot read < *n*"), insider-forge negative tests, §8 repair-path and §9.1 stand-down scenarios run in `npm test` (offline, deterministic); the two-browser harness (`npm run browser-test`) drives the real bundle against the real relay through the DOM, including handshake, groups, files, and the §7.5 ciphertext-only check. What no automated harness covers: the HEM device paths (real-device walkthroughs only).
 
 ---
 
