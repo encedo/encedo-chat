@@ -545,6 +545,10 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     /** Responder: the msg1 this attempt answers, and the msg2 it answered with. */
     msg1?: Uint8Array
     reply?: Uint8Array
+    /** Started beside a live ratchet (the 7.3 re-key, or a peer re-handshaking
+     *  under the same PeerId): a failure here is retried, not shelved until the
+     *  next lifetime. */
+    rekey?: boolean
   }
   const sameBytes = (a?: Uint8Array, b?: Uint8Array) =>
     !!a && !!b && a.length === b.length && a.every((v, i) => v === b[i])
@@ -585,6 +589,8 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    * re-key in lockstep, which would be a metadata signal of its own.
    */
   const establishedAt = new Map<string, number>()
+  /** Peers whose 7.3 re-key is in flight or about to be retried, so the sweep does not start a second one. */
+  const rekeying = new Set<string>()
   const skdRepeats: ReturnType<typeof setTimeout>[] = []
   const lifetimeMs = eh2?.sessionLifetimeMs
     ?? 4 * 3_600_000 + Math.floor(Math.random() * 4 * 3_600_000) // 4–8 h
@@ -617,6 +623,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     sessions.delete(peer)
     previous.delete(peer)
     establishedAt.delete(peer)
+    rekeying.delete(peer)
     stuck.delete(peer)
   }
 
@@ -660,7 +667,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     // Reserve the slot BEFORE the first await: generating the ephemerals takes
     // a tick, and two Announces arriving back to back would otherwise both pass
     // the "already handshaking?" check and start two handshakes.
-    const attempt: Attempt = { h: null, role, startedAt: nowMs(), msg1, peer }
+    const attempt: Attempt = { h: null, role, startedAt: nowMs(), msg1, peer, rekey: sessions.has(peer) }
     handshakes.set(peer, attempt)
     try {
       const h = await startHandshake({ role, ik: eh2.ik, peerIkPub: eh2.peerIkPub, tagKey: await initiatorTagKey(keys.macKey), ratchet: eh2.ratchet })
@@ -683,6 +690,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
           everEstablished.add(p)
           sessions.set(p, s)
           establishedAt.set(p, nowMs())
+          rekeying.delete(p)
           retireOtherPeers(p)
           log(`EH-2 established with ${short(p)} (${role}) — ratchet live, ${queued.length} queued frame(s) to flush`)
           eh2.onState?.(p, 'established')
@@ -694,14 +702,14 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
           const p = attempt.peer
           if (attempt.cancelled || handshakes.get(p) !== attempt) return
           clearAttempt(p)
-          giveUp(p)
+          giveUp(p, attempt)
         },
       )
       const timer = setTimeout(() => {
         const p = attempt.peer
         if (handshakes.get(p) !== attempt) return
         clearAttempt(p)
-        giveUp(p)
+        giveUp(p, attempt)
       }, attemptTimeoutMs)
       ;(timer as any).unref?.()
       attemptTimers.set(peer, timer)
@@ -815,8 +823,27 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     if (!warnedForeign) { warnedForeign = true; onForeign(peer) }
   }
 
-  const giveUp = (peer: string) => {
-    if (sessions.has(peer)) return
+  const giveUp = (peer: string, failed?: Attempt) => {
+    if (sessions.has(peer)) {
+      if (!failed?.rekey) return
+      // A re-key that died beside a live ratchet. The old ratchet still carries
+      // content, but the clock is running on it (7.3, and the stolen-device
+      // bound of 9.3) - so it is retried in seconds, from whichever side
+      // noticed, not shelved until the next lifetime. The responder noticing
+      // is the lost-msg3 case: the initiator already moved to the new ratchet
+      // and would never try again by itself.
+      rekeying.delete(peer)
+      if (!lastSeen.has(peer)) { log(`re-key with ${short(peer)} got nowhere and it is not announcing — the next sweep tries again`); return }
+      const wait = RETRY_SOON_MS[0] + Math.floor(Math.random() * RETRY_SOON_MS[1])
+      log(`re-key with ${short(peer)} got nowhere (${failed.role}) — the old ratchet still carries content; retrying in ${wait} ms`)
+      rekeying.add(peer)
+      const t = setTimeout(() => {
+        rekeying.delete(peer)
+        if (sessions.has(peer) && !handshakes.has(peer) && lastSeen.has(peer)) { rekeying.add(peer); void beginHandshake(peer, 'initiator') }
+      }, wait)
+      ;(t as any).unref?.()
+      return
+    }
     const n = (failedAttempts.get(peer) ?? 0) + 1
     failedAttempts.set(peer, n)
     eh2.onState?.(peer, 'failed')
@@ -1166,10 +1193,14 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     // this "transparent to the UI" rather than a visible reconnect.
     for (const [peer, at] of establishedAt) {
       if (now - at < lifetimeMs || !sessions.has(peer)) continue
-      if (handshakes.has(peer) || !lastSeen.has(peer)) continue
+      if (handshakes.has(peer) || rekeying.has(peer) || !lastSeen.has(peer)) continue
       if (!(self < peer)) continue
       log(`session with ${short(peer)} is ${Math.round((now - at) / 60_000)} min old -> forcing a fresh EH-2 (§7.3)`)
-      establishedAt.set(peer, now) // do not fire again while this attempt runs
+      // `establishedAt` is NOT touched here: it moves when the new ratchet is
+      // live. Moving it on the attempt made a lost msg2 cost a whole second
+      // lifetime (audit 2026-10-12); `rekeying` is what keeps this from firing
+      // twice, and giveUp() owns the retry.
+      rekeying.add(peer)
       void beginHandshake(peer, 'initiator')
     }
   }, Math.min(heartbeatMs, 15_000))

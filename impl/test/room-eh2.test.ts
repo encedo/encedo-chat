@@ -809,3 +809,51 @@ test('a group SKD sent on a fresh session survives losing its first copy', async
   assert.equal(dropNext, false, 'the first copy was the one dropped')
   assert.ok(skds.every((x) => x.ctr === 0 && x.chain === skds[0].chain), 'every copy is the same key at the same ctr')
 })
+
+test('a re-key whose opening frames are lost is retried in seconds, not after another lifetime (§7.3)', async (t) => {
+  // The bounded lifetime is the hard stop of §9.3. A lost msg1 on the forced
+  // re-key used to move the clock as if the re-key had happened, so one
+  // dropped frame doubled the window (audit 2026-10-12).
+  const got: string[] = []
+  let dropUntil = 0
+  const { A, B, states } = await rooms({
+    collect: got, sessionLifetimeMs: 3_000, heartbeatMs: 300,
+    drop: (d, from) => from === 'peer-a' && d[0] === 0x01 && Date.now() < dropUntil,
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+  const established = () => states.filter((s) => s.endsWith(':established')).length
+  const before = established()
+  // The re-key starts ~3 s from now; every msg1 of its first attempt is lost.
+  const t0 = Date.now()
+  dropUntil = t0 + 3_600
+  await until(() => established() >= before + 2, 9000)
+  const took = Date.now() - t0
+  assert.ok(took < 5_800, `re-established ${took} ms after the lifetime began - a lost attempt must not cost another lifetime`)
+  A.sendText('po ponowionym re-keyu')
+  await until(() => got.includes('po ponowionym re-keyu'), 8000)
+})
+
+test('a msg3 lost during a re-key does not leave the two sides on different ratchets', async (t) => {
+  // The initiator installs the new ratchet at msg2; the responder only at msg3.
+  // Lose msg3 and the initiator is on the new ratchet, the responder on the
+  // old - and the responder, the only side that knows, must be the one to act.
+  const got: string[] = [], back: string[] = []
+  let armed = false, dropped = 0
+  const { A, B, states } = await rooms({
+    collect: got, backA: back, sessionLifetimeMs: 4_000, heartbeatMs: 300,
+    drop: (d, from) => { if (armed && from === 'peer-a' && d[0] === 0x03 && dropped < 1) { dropped++; return true } return false },
+  })
+  t.after(() => { A.stop(); B.stop() })
+  await until(() => A.secured().length === 1 && B.secured().length === 1, 8000)
+  const established = () => states.filter((s) => s.endsWith(':established')).length
+  const before = established()
+  armed = true
+  await until(() => dropped === 1, 9000)
+  const t0 = Date.now()
+  await until(() => established() >= before + 2, 9000)
+  assert.ok(Date.now() - t0 < 3_000, 'the responder re-opened the handshake itself, within seconds')
+  A.sendText('od A po re-keyu'); B.sendText('od B po re-keyu')
+  await until(() => got.includes('od A po re-keyu') && back.includes('od B po re-keyu'), 8000)
+})
+
