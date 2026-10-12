@@ -100,6 +100,9 @@ module.exports = (_env, argv) => {
         // builds with EC_DIARY=0: the writes are compiled out, the in-memory
         // ring and the copy button stay.
         __EC_DIARY__: JSON.stringify(process.env.EC_DIARY !== '0'),
+        // The operator's offline root key, public half (ARCHITECTURE.md,
+        // Distribution): what the release manifest is verified against.
+        __EC_ROOT_PUB__: JSON.stringify(require('fs').readFileSync(path.resolve(__dirname, '..', '..', 'infra', 'root.pub'), 'utf8').trim()),
         __EC_VERSION__: JSON.stringify(VERSION),
         __EC_COMMIT__: JSON.stringify(COMMIT),
       }),

@@ -53,6 +53,7 @@ import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
 import { iceServersFor, hostOf } from '../../lib/ice.ts'
 import { regionBlocked } from '../../lib/regioncheck.ts'
 import { anchorClock } from '../../lib/clock.ts'
+import { verifyManifest } from '../../lib/manifest.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
@@ -521,6 +522,7 @@ const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talk
 declare const __EC_ALLOW_KEYS__: boolean
 declare const __EC_NETWORK__: string
 declare const __EC_DIARY__: boolean
+declare const __EC_ROOT_PUB__: string
 declare const __EC_VERSION__: string
 declare const __EC_COMMIT__: string
 
@@ -1249,7 +1251,8 @@ function nodeRowsHTML(list: NodeEntry[]): string {
  * its first months. Publish with
  * `ipfs add --cid-version=1 --raw-leaves --pin`.
  */
-const OFFICIAL_NODES_CID = 'bafkreies7oi6xdeyz7gpqifoa7loas65nu25pp6shdczelkxjbiras77ti'
+/** Where the operator serves the signed release manifest (lib/manifest.ts); the root key is compiled in. */
+const MANIFEST_URL = `${SITE_ORIGIN}/release/manifest.json`
 
 /**
  * Replace the local list with the published one.
@@ -1264,15 +1267,25 @@ async function loadOfficialNodes(btnId: string, warn: (t: string) => void, redra
   const btn = $(btnId) as HTMLButtonElement
   btn.disabled = true; const label = btn.textContent; btn.textContent = tr('Pobieram…')
   try {
-    const raw = await getBlob(OFFICIAL_NODES_CID)
-    // The CID is compiled in so nobody can redirect WHICH list is asked for —
-    // and until this check, nothing said the bytes coming back were the ones it
-    // names. They arrive through our own `/f`, so whoever could shape that
-    // response chose the relays for every client: the first hop of every
-    // conversation. Content addressing is only integrity where somebody
-    // computes the hash (lib/cid.ts).
-    if (!await cidMatches(OFFICIAL_NODES_CID, raw)) {
-      warn(isVerifiableCid(OFFICIAL_NODES_CID)
+    // WHICH list is asked for comes from the release manifest, signed by the
+    // operator's offline root key and dated; the bytes that come back are then
+    // checked against the CID it names. Whoever can shape these responses
+    // chooses the relays for every client - the first hop of every
+    // conversation - so neither step is skipped.
+    const [mRes, sRes] = await Promise.all([
+      fetch(MANIFEST_URL, { cache: 'no-store' }), fetch(MANIFEST_URL.replace(/\.json$/, '.sig'), { cache: 'no-store' }),
+    ])
+    if (!mRes.ok || !sRes.ok) { warn(tr('Manifest wydania jest niedostępny ({s})', { s: String(mRes.status) })); return }
+    const verdict = verifyManifest(new Uint8Array(await mRes.arrayBuffer()), await sRes.text(), __EC_ROOT_PUB__, nowMs())
+    if (!verdict.ok) {
+      warn(verdict.why === 'expired' ? tr('Manifest wydania wygasł — nie wczytuję listy. Zaktualizuj aplikację.')
+        : tr('Manifest wydania NIE przeszedł weryfikacji ({why}) — nie wczytuję listy. Zgłoś to.', { why: verdict.why }))
+      return
+    }
+    const listCid = verdict.manifest.nodes.cid
+    const raw = await getBlob(listCid)
+    if (!await cidMatches(listCid, raw)) {
+      warn(isVerifiableCid(listCid)
         ? tr('Pobrana lista NIE zgadza się ze swoim CID — nie wczytuję jej. Zgłoś to.')
         : tr('Tej listy nie da się zweryfikować (stary format CID) — nie wczytuję jej.'))
       return

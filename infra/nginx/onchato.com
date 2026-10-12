@@ -155,6 +155,19 @@ server {
     #
     # Zaufania nie wymaga: po rozpakowaniu CID musi wyjść taki, jaki stoi w
     # notatkach wydania — podmieniona paczka jest po prostu inną liczbą.
+    # Manifest wydania (ARCHITECTURE.md, Distribution): podpisany kluczem root
+    # OFFLINE, serwowany spoza repozytorium (scripts/release-manifest.mjs ->
+    # scp do /var/lib/onchato/release/). Aplikacja czyta go z app.onchato.com,
+    # czyli z innego originu — stąd CORS i CORP. Bez cache: nowe wydanie ma
+    # być widoczne od razu, a plik jest mały.
+    location ^~ /release/ {
+        alias /var/lib/onchato/release/;
+        default_type application/json;
+        add_header Access-Control-Allow-Origin  "*" always;
+        add_header Cross-Origin-Resource-Policy "cross-origin" always;
+        add_header Cache-Control "no-cache";
+    }
+
     location = /chat/dist.tar.gz {
         alias /opt/github/encedo-chat/impl/web/dist.tar.gz;
         default_type application/gzip;

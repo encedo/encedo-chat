@@ -39,10 +39,12 @@ into something worse is a finding.
 
 ## Keys and signatures
 
-Releases are signed by three CI-held keys (`docs/ARCHITECTURE.md`,
-Distribution). There is no offline root key yet; that is an open item, and a
-compromise of the update channel is the highest-leverage attack on this
-system by our own account (`docs/THREAT-MODELS.md`, B2).
+Releases are signed by three CI-held keys, and each release is described by
+a manifest signed with the operator's offline root key, whose public half is
+`infra/root.pub` (`docs/ARCHITECTURE.md`, Distribution). The desktop updater
+does not yet verify the manifest before installing, so a compromise of the
+update channel is still the highest-leverage attack on this system by our own
+account (`docs/THREAT-MODELS.md`, B2).
 
 ## Versions
 

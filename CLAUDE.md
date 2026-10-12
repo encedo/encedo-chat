@@ -1193,6 +1193,19 @@ sits in any CI runner. Clone lives at **`/opt/github/encedo-chat`**.
 git push && git tag v0.X.Y && git push --tags
 ```
 
+After the tag, at that commit and with a fresh `npm run web:build`, sign the
+release manifest and put it where nginx serves `/release/` on bs1 (outside the
+repo, so the tagged commit stays the tip):
+
+```bash
+node scripts/release-manifest.mjs --sign ~/keys/onchato-root.key --out /tmp/rel
+scp /tmp/rel/manifest.json /tmp/rel/manifest.sig bs1.onchato.com:/var/lib/onchato/release/
+node scripts/release-manifest.mjs --verify /tmp/rel
+```
+
+The root key lives in `~/keys/onchato-root.key` (its README says what losing
+or leaking it costs); `infra/root.pub` is compiled into every client.
+
 The tag triggers `desktop.yml` (five desktop targets → **draft** release — the
 draft is the updater's publish gate) and `android.yml` (signed APK), and the
 host's systemd timer (`infra/onchato-deploy.timer` → `deploy-on-tag.sh`) pulls,
