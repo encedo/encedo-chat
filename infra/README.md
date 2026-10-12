@@ -184,6 +184,55 @@ The strategies are `all`, `pinned`, `mfs` and `pinned+mfs`. **There is no
 per-path selector** — `mfs` cannot be narrowed to `/ec` — which is why the pin,
 and not the directory, carries the distinction.
 
+### What is pinned, and where
+
+One node holds every pin. There is no second copy anywhere, and that is
+worth stating because the client's "load the official node list" button
+depends on it:
+
+| content | what it is | pinned on | who reads it, how |
+|---|---|---|---|
+| the node list | `infra/nodes.json` as a single raw block: `bafkreies7oi6xdeyz7gpqifoa7loas65nu25pp6shdczelkxjbiras77ti` — the `OFFICIAL_NODES_CID` compiled into `impl/web/src/app.ts` (525 B, list dated 2026-09-14) | `ipfs1` on `ipfs.encedo.com` — only there | the app, through its own origin `/f/<cid>` (nginx → `cat` on this RPC) and verified against the CID client-side; our gateway `ipfs.encedo.com/ipfs/<cid>`; a public gateway only while announcing (step 4) is on |
+| the WebUI | Kubo's console, installed with `ipfs pin add` | `ipfs1` | `webui.ipfs.encedo.com` (HAProxy: IP list + basic auth) |
+| firmware and other published content | Encedo's, not the chat's; per release | `ipfs1` | by CID, from whatever gateway the reader uses |
+
+If this host is gone, the button fails and nothing else does: every shipped
+build carries its own copy of the list, and the chat needs the store only for
+files. Keep that proportion in mind before adding a replica — a second pinning
+host is a second place to keep in step, for a button.
+
+**Republishing the list** (the full ritual, with the release that must follow,
+is `relay/DEPLOY.md` step 9):
+
+```bash
+# on the store host, from a checkout of the repo
+docker exec -i ipfs1 ipfs add -Q --cid-version=1 --raw-leaves < infra/nodes.json
+```
+
+The flags are not optional. The client accepts **CIDv1 / raw / sha2-256 and
+nothing else** (`impl/lib/cid.ts`): a default `ipfs add` wraps even a small
+file in dag-pb and yields a `bafybei…` the app refuses as unverifiable. The
+CID the command prints must equal what the app computes from the same bytes —
+check it before touching `OFFICIAL_NODES_CID`:
+
+```bash
+cd impl && node -e "import('./lib/cid.ts').then(async (m) => console.log(await m.cidV1Raw(new Uint8Array((await import('node:fs')).readFileSync('../infra/nodes.json')))))"
+```
+
+**Do not unpin an old list.** Every build that ever shipped compiles in the
+CID of its day and asks for exactly that; a `pin rm` turns the button into an
+error for everyone who has not updated. `docker exec ipfs1 ipfs pin ls
+--type=recursive` shows the set; it should only ever grow by one per release
+of the list.
+
+**Checking it from outside** — the two reads that matter are byte-for-byte:
+
+```bash
+C=bafkreies7oi6xdeyz7gpqifoa7loas65nu25pp6shdczelkxjbiras77ti
+curl -s https://onchato.com/f/$C | cmp - infra/nodes.json && echo same
+curl -s https://ipfs.encedo.com/ipfs/$C | cmp - infra/nodes.json && echo same
+```
+
 ### Verifying it, which is not the same as the command succeeding
 
 Two checks that must give OPPOSITE answers. Either one alone proves nothing:
