@@ -20,6 +20,7 @@
 import { randomBytes, b64 } from './wc.ts'
 import { nowMs } from './time.ts'
 import { isQuoteRef, type QuoteRef } from './quote.ts'
+import { MAX_CHUNK, MAX_FILE } from './filecrypto.ts'
 
 export const ENVELOPE_V = 1
 
@@ -242,18 +243,28 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
     // Same body rule as `msg`: plain text, a known format, nothing else — an
     // edit replaces what a bubble says, so it cannot be looser than what put
     // the text there in the first place.
-    case 'edit': return (typeof m.to === 'string' && m.to.length > 0 && typeof m.body === 'string' && FORMATS.has(m.format)) ? (m as EditEnv) : null
+    // ...and never empty: a correction replaces text, it does not remove it.
+    // The composer refuses to send one, and the decoder refuses to apply one,
+    // so no build can blank somebody's bubble by sending `body: ''` (7.4).
+    case 'edit': return (typeof m.to === 'string' && m.to.length > 0 && typeof m.body === 'string' && m.body.length > 0 && FORMATS.has(m.format)) ? (m as EditEnv) : null
     // Nothing to validate beyond the base every envelope already passed: a
     // knock carries no payload, which is also why it cannot carry a surprise.
     case 'knock': return m as KnockEnv
     // Every field is required: a file envelope missing its key, chunking or
     // algorithm is not a partially useful message, it is an undecryptable one,
     // and accepting it would put a permanently broken bubble in the transcript.
+    // The sender's limits are the receiver's too (7.5): a manifest naming a
+    // 2 GB file or a 1 GB chunk is not a file this client could ever have
+    // sent, and `decryptBytes` allocates `size` up front - so the bound is
+    // checked here, before a byte is fetched, not discovered as an allocation
+    // failure. The chunk count must be the one `planChunks` derives from the
+    // size, or the two sides disagree about where the file ends.
     case 'file': return (typeof m.cid === 'string' && typeof m.name === 'string'
-      && typeof m.size === 'number' && m.size >= 0 && typeof m.mime === 'string'
+      && Number.isInteger(m.size) && m.size >= 0 && m.size <= MAX_FILE && typeof m.mime === 'string'
       && typeof m.key === 'string' && typeof m.alg === 'string'
-      && Number.isInteger(m.chunk) && m.chunk > 0
-      && Number.isInteger(m.chunks) && m.chunks > 0
+      && Number.isInteger(m.chunk) && m.chunk > 0 && m.chunk <= MAX_CHUNK
+      && Number.isInteger(m.chunks) && m.chunks === Math.max(1, Math.ceil(m.size / m.chunk))
+      && (m.exp === undefined || typeof m.exp === 'number')
       && (m.body === undefined || typeof m.body === 'string')) ? (sanitizeAlbum(sanitizeQuote(m)) as FileEnv) : null
     case 'rtc': return (typeof m.to === 'string' && m.sig != null) ? (m as RtcEnv) : null
     case 'ack': return (typeof m.ref === 'string' && typeof m.rts === 'number') ? (m as AckEnv) : null

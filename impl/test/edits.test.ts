@@ -52,6 +52,10 @@ test('an edit envelope roundtrips, and a malformed one does not decode', () => {
   assert.equal(raw({ ...base, to: undefined }), null)
   assert.equal(raw({ ...base, body: 42 }), null)
   assert.equal(raw({ ...base, format: 'html' }), null) // the body rule is the message's rule
+  // An empty correction is a deletion wearing an edit's clothes. The composer
+  // never sends one; the decoder refuses one, so no other build can send it.
+  assert.equal(raw({ ...base, body: '' }), null)
+  assert.ok(raw({ ...base, body: ' ' }), 'a body of whitespace is still a body - the rule is "not empty", nothing more')
 })
 
 test('a build that does not know edits ignores them (forward-compat)', () => {

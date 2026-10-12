@@ -29,6 +29,20 @@ test('typing / presence / reaction / file roundtrip', () => {
   }
 })
 
+test('a file manifest past the sender\'s limits, or with a chunk count the size does not give, does not decode', () => {
+  const meta = { cid: 'Qm123', name: 'a.bin', size: 10 * 1024 * 1024, mime: 'application/octet-stream', key: 'AAAA', chunk: 4 * 1024 * 1024, chunks: 3, alg: 'A256GCM-chunked-v1' }
+  assert.ok(rt(envFile(5, meta)), 'a consistent 10 MiB manifest in 4 MiB chunks decodes')
+  assert.ok(rt(envFile(5, { ...meta, size: 0, chunks: 1 })), 'an empty file is one chunk')
+  // Receiver-side bounds (7.5): what the sender may not send, the receiver does
+  // not accept either - `decryptBytes` would otherwise allocate `size` blind.
+  assert.equal(rt(envFile(5, { ...meta, size: 128 * 1024 * 1024 + 1, chunks: 33 })), null, 'a file over 128 MiB')
+  assert.equal(rt(envFile(5, { ...meta, chunk: 16 * 1024 * 1024 + 1, chunks: 1 })), null, 'a chunk over 16 MiB')
+  assert.equal(rt(envFile(5, { ...meta, chunks: 2 })), null, 'too few chunks for the size')
+  assert.equal(rt(envFile(5, { ...meta, chunks: 4 })), null, 'too many chunks for the size')
+  assert.equal(rt(envFile(5, { ...meta, size: 10.5 })), null, 'a fractional size')
+  assert.equal(rt(envFile(5, { ...meta, exp: 'soon' } as any)), null, 'an expiry that is not a number')
+})
+
 test('every envelope carries v / id / ts / seq', () => {
   const d = rt(envMsg(7, 'x'))
   assert.equal(d.v, ENVELOPE_V); assert.equal(typeof d.id, 'string'); assert.equal(typeof d.ts, 'number'); assert.equal(d.seq, 7)
