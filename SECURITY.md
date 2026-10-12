@@ -2,7 +2,7 @@
 
 ## Reporting
 
-Write to **office@rkv.pl** (RKV sp. z o.o., the operator of onchato and the
+Write to **security@rkv.pl** (RKV sp. z o.o., the operator of onchato and the
 author of this code). Say what you found, how to reproduce it, and which
 version or commit. We answer within five working days with what we think it
 is, and we keep you informed until it is fixed. We do not run a bounty.
