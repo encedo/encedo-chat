@@ -285,3 +285,22 @@ test('the repair answer overtakes the original key: the original still opens wha
   await sleep(200) // absence has no condition to wait for
   assert.deepEqual(peers[2].recv.map((r) => r.body), ['pierwsza', 'druga'], 'each once, the replay refused')
 })
+
+test('a counter jump past the skip bound asks the sender for a fresh key, and the re-sent key repairs it', async () => {
+  const { gid, peers } = await makeGroup(2)
+  const [S, R] = peers
+  // S's chain is far ahead of what R holds - as after R slept through a long
+  // day of S's messages. Only the sender's own position moves; R's copy
+  // still stands at 0.
+  const c = S.mgr.session(gid)!.exportChains()
+  S.mgr.session(gid)!.importChains({ send: { key: c.send.key, n: 2001 }, receivers: c.receivers })
+  await S.room!.sendText('za daleko')
+  await until('R asked S for a key after the over-bound jump', () => R.asked.includes(S.id.pub))
+  assert.deepEqual(R.recv, [], 'the frame itself is not opened by walking 2001 keys')
+  // The answer: S's key at the counter its chain stands at (8.3 `ctr`).
+  const skd = (await S.mgr.skdFor(gid, R.id.pub))!
+  assert.ok((skd.ctr ?? 0) >= 2002, `the re-sent key carries the chain position, got ${skd.ctr}`)
+  await R.mgr.applySkd(S.id.pub, skd)
+  await S.room!.sendText('po naprawie')
+  await until('the next frame opens under the re-sent key', () => R.recv.some((m) => m.body === 'po naprawie'))
+})

@@ -351,10 +351,18 @@ export class GroupSession {
     // A counter the chain cannot reach (over the skip bound, section 8.2) is a
     // frame to DROP: the receiver's bound throws so that nothing walks 2000
     // keys, but up here that is one more way a frame fails to open, not a way
-    // out of the topic listener. The gap is repaired by re-distribution (8.4).
+    // out of the topic listener. The gap is repaired by re-distribution (8.4),
+    // and that repair has to be ASKED for, exactly as a missing key is: the
+    // sender's re-sent key carries the counter its chain stands at, and
+    // `setSenderKey` takes the higher one. The MAC verified above, so the ask
+    // is as warranted here as it is for a member with no chain at all.
     let pt: Uint8Array | null
     try { pt = await recv.open(h.ctr, headerBytes, ct) }
-    catch (e: any) { plog('§8', `group recv: frame at ctr=${h.ctr} dropped - ${e?.message ?? e}`); return null }
+    catch (e: any) {
+      plog('§8', `group recv: frame at ctr=${h.ctr} dropped - ${e?.message ?? e}`)
+      if (/skip of .* over the .* bound/.test(String(e?.message ?? e))) this.onNeedSenderKey?.(sender.pub)
+      return null
+    }
     return pt ? { from: sender.pub, pt } : null
   }
 }

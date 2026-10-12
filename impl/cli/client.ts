@@ -62,7 +62,11 @@ const APP_ORIGIN = 'https://app.onchato.com'
 
 /** `win` is null for a 1:1 opened only to carry group keys: it gets a window when
  *  there is something to show, not for every member of every group. */
-interface Room { contact: Contact; conv: Conversation | null; win: Win | null; secure: boolean; lastRecvId: string | null; lastFile: string | null }
+interface Room {
+  contact: Contact; conv: Conversation | null; win: Win | null; secure: boolean; lastRecvId: string | null; lastFile: string | null
+  /** The open in progress: a caller that needs the conversation waits on it rather than reading `conv` as null (a group key was dropped that way). */
+  opening?: Promise<Conversation>
+}
 
 export async function runClient(o: ClientOpts): Promise<{ session: ClientSession; quit: () => Promise<void>; windows: Windows }> {
   const w = new Windows()
@@ -154,7 +158,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
       if (room.win) print(room.win.n, line, level)
     }
     out(sys(`rozmowa z ${c.name} · czekam, aż będzie w pokoju…`))
-    room.conv = await session.open({ pub: c.pub }, {
+    room.opening = session.open({ pub: c.pub }, {
       onSecurity: (_peer, state) => {
         const was = room.secure
         room.secure = state === 'established' || (room.secure && state !== 'failed')
@@ -194,6 +198,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         setTimeout(() => void quit(), 1500)
       },
     })
+    room.conv = await room.opening
     return room
   }
 
@@ -240,7 +245,9 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   if (o.vault) {
     groups = new Groups({
       session, me: o.id.pub, ...o.vault, contacts: () => contactList,
-      conv: async (pub) => { const c = contactList.find((x) => x.pub === pub); return c ? (await openRoom(c, false)).conv : null },
+      // A room still opening has `conv === null` for a second or two; waiting on
+      // the open is what keeps a group key from being dropped in that window.
+      conv: async (pub) => { const c = contactList.find((x) => x.pub === pub); if (!c) return null; const r = await openRoom(c, false); return r.conv ?? (r.opening ? await r.opening : null) },
       handlers: {
         joined: (g, how) => {
           const win = groupWin(g)
