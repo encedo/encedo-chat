@@ -32,6 +32,7 @@ export class Hub {
   private contacts: ContactManager
   private relays: string[]
   private transport: 'light' | 'libp2p'
+  private networkId?: string
   private log: (m: string) => void
   private vault?: { kv: KV; base: Uint8Array | null; kid: string }
   groups: Groups | null = null
@@ -44,8 +45,8 @@ export class Hub {
   /** Received files by message id - the key stays in memory, never in an event. */
   files = new Map<string, FileMeta>()
 
-  constructor(o: { id: Identity; contacts: ContactManager; relays: string[]; transport?: 'light' | 'libp2p'; log?: (m: string) => void; vault?: { kv: KV; base: Uint8Array | null; kid: string } }) {
-    this.id = o.id; this.contacts = o.contacts; this.relays = o.relays; this.vault = o.vault
+  constructor(o: { id: Identity; contacts: ContactManager; relays: string[]; transport?: 'light' | 'libp2p'; networkId?: string; log?: (m: string) => void; vault?: { kv: KV; base: Uint8Array | null; kid: string } }) {
+    this.id = o.id; this.contacts = o.contacts; this.relays = o.relays; this.vault = o.vault; this.networkId = o.networkId
     this.transport = o.transport ?? 'light'; this.log = o.log ?? (() => {})
   }
 
@@ -54,7 +55,7 @@ export class Hub {
 
   async start(): Promise<void> {
     this.session = await startSession(this.id, {
-      relay: this.relays[0], relays: this.relays, transport: this.transport, onLog: this.log,
+      relay: this.relays[0], relays: this.relays, transport: this.transport, networkId: this.networkId, onLog: this.log,
       onLink: (state) => this.emit({ t: 'link', state }),
       onGroupSkd: (from, skd) => { void this.groups?.onInvite(from, skd) },
       onGroupSkdReq: (from, req) => { void this.groups?.onSkdReq(from, req) },

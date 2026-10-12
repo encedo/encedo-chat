@@ -700,6 +700,14 @@ export interface SessionOpts {
    */
   gkBackend?: GkBackend
   /**
+   * The network this session derives its topics for (5.1 `network_id`). The
+   * shipped app compiles it in (`EC_NETWORK` at build time, `main` by
+   * default); the terminal client takes `--network`. Independent networks are
+   * disjoint by derivation, so two clients on different ids never meet even
+   * on one node. `params`, when given, carries it instead.
+   */
+  networkId?: string
+  /**
    * Which libp2p surface carries rendezvous, presence and signalling: the
    * light pick/push stream (`net/light.ts`, the default in the app) or a full
    * GossipSub peer. Same relays either way.
@@ -795,9 +803,14 @@ export async function failoverDial(
   throw lastErr ?? new Error('failoverDial: no relay candidates')
 }
 
+/** The rendezvous parameters a session runs with: explicit `params`, else the network id and today. */
+export function sessionParams(opts: Pick<SessionOpts, 'params' | 'networkId'>): RoomParams {
+  return opts.params ?? { networkId: opts.networkId || 'main', dateUTC: todayUTC() }
+}
+
 export async function startSession(id: Identity, opts: SessionOpts): Promise<ClientSession> {
   const log = opts.onLog ?? (() => {})
-  const params = opts.params ?? { networkId: 'main', dateUTC: todayUTC() }
+  const params = sessionParams(opts)
   // Group Sender Keys (§8). Incoming SKDs on any 1:1 room feed this; `openGroup`
   // joins a group's topic. The manager is identity-scoped, like the self-topic watch.
   const groups = new GroupManager(id, params, opts.gkBackend)

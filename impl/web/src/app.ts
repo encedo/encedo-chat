@@ -84,6 +84,7 @@ import { sealCache, openCache } from '../../lib/gcache.ts'
 import { sealPins, openPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../../lib/pincache.ts'
 import { readSealedKV, writeSealedKV } from '../../lib/sealedstore.ts'
 import { markLeft, unmarkLeft, leftCovers, isLeftMap, LEFT_SALT, LEFT_PREFIX, type LeftMap } from '../../lib/gleft.ts'
+import { loadPrefs, savePrefs, type Prefs } from '../../lib/prefs.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
 // The published relay list, compiled in — see DEFAULT_NODES below for why.
@@ -517,6 +518,7 @@ const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talk
  * key from that bundle.
  */
 declare const __EC_ALLOW_KEYS__: boolean
+declare const __EC_NETWORK__: string
 declare const __EC_VERSION__: string
 declare const __EC_COMMIT__: string
 
@@ -726,6 +728,7 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   if (local.verdict === 'tampered') warnTampered()
   await loadSeen(idKey, await cacheBaseFor(hemId, idKey)) // per identity, sealed; the base is already cached by the book's MAC check
   await loadLeft(idKey, await cacheBaseFor(hemId, idKey))
+  await loadPrefsFor(idKey, await cacheBaseFor(hemId, idKey))
   await enterApp(
     hemId,
     mergedContactBook(hemContactBook(hem, id.kid), local.verdict === 'tampered' ? taintedBook() : local.book),
@@ -1195,6 +1198,7 @@ async function softLogin() {
     if (local.verdict === 'tampered') warnTampered()
     await loadSeen(idKey2, await cacheBaseFor(id, idKey2))
     await loadLeft(idKey2, await cacheBaseFor(id, idKey2))
+    await loadPrefsFor(idKey2, await cacheBaseFor(id, idKey2))
     await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
@@ -1450,6 +1454,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     relays: chosenRelays(),   // 3b: fall through the enabled node list if one is down
     gkBackend,                // §8 bucket A: a HEM identity mints GK in the HSM
     transport: USE_LIGHT ? 'light' : 'libp2p',
+    networkId: __EC_NETWORK__,
     loadBalance: USE_LB,
     // Capacity weights from the published list, by the name a node announces.
     nodeWeights: Object.fromEntries(loadNodes().filter((n) => typeof n.w === 'number').map((n) => [nodeKey(n.addr), n.w as number])),
@@ -1784,6 +1789,15 @@ async function loadLeft(idKey: string, base: Uint8Array | null) {
   leftMap = (await readSealedKV<LeftMap>(localKV(), base, idKey, leftKey, LEFT_SALT, isLeftMap, (m) => ecLog(m, 'debug'))) ?? {}
 }
 const saveLeft = () => { if (leftKey) void writeSealedKV(localKV(), leftBase, leftIdKey, leftKey, LEFT_SALT, leftMap, (m) => ecLog(m, 'debug')) }
+
+/** The identity's preferences (lib/prefs.ts): one sealed blob, read at sign-in beside `seen`. */
+let prefs: Prefs = {}
+let prefsIdKey = '', prefsBase: Uint8Array | null = null
+async function loadPrefsFor(idKey: string, base: Uint8Array | null) {
+  prefsIdKey = idKey; prefsBase = base
+  prefs = await loadPrefs(localKV(), base, idKey, (m) => ecLog(m, 'debug'))
+}
+const persistPrefs = () => { if (prefsIdKey) void savePrefs(localKV(), prefsBase, prefsIdKey, prefs, (m) => ecLog(m, 'debug')) }
 
 /** They announced: they are here, and they hold our key. */
 function markSeen(pub: string, at = nowMs()) {
@@ -5372,7 +5386,7 @@ startDiag()
 // bar), so this costs the packaged app nothing.
 if (DEBUG) (globalThis as any).__diag = diag
 
-ecLog(`app start — debug=${DEBUG} transport=${USE_LIGHT ? 'libp2p-light (pick/push)' : 'libp2p'}`
+ecLog(`app start — debug=${DEBUG} network=${__EC_NETWORK__} transport=${USE_LIGHT ? 'libp2p-light (pick/push)' : 'libp2p'}`
   + ` rotation=${FORCED_ROTATION_SEC == null ? 'per-pair offset' : `forced ${String(Math.floor(FORCED_ROTATION_SEC / 3600)).padStart(2, '0')}:${String(Math.floor((FORCED_ROTATION_SEC % 3600) / 60)).padStart(2, '0')} UTC`};`
   + ' add ?debug=1 for the full trace, ?rot=<hour> to force the rollover time')
 // Printed because the app-shell test is a guess about somebody else's software:
@@ -6097,7 +6111,6 @@ $('reply-cancel').addEventListener('click', () => { cancelReply(); cancelEdit() 
  * Permission is asked when the setting is switched on and never at startup: a
  * prompt nobody understands yet is a prompt that gets denied for good.
  */
-const notifyKey = () => 'ec-notify-' + (session?.idKey ?? '')
 /**
  * Not looking at this window. Reported as a bug by somebody who had the chat
  * open and got nothing: a visible tab behind another window is still a message
@@ -6110,7 +6123,7 @@ let notifyMode: NotifyMode = 'off'
 const liveNotes = new Map<string, Banner>()
 
 function loadNotifyMode() {
-  const v = (() => { try { return localStorage.getItem(notifyKey()) } catch { return null } })()
+  const v = prefs.notify ?? null
   notifyMode = isNotifyMode(v) ? v : 'off'
   paintNotifySetting()
 }
@@ -6135,12 +6148,12 @@ for (const el of document.querySelectorAll('#notify-opts input')) {
         toast(isDesktopShell()
           ? tr('System nie zgodził się na powiadomienia — trzeba ich pozwolić w ustawieniach systemu')
           : tr('Przeglądarka nie zgodziła się na powiadomienia — trzeba jej pozwolić w ustawieniach strony'))
-        try { localStorage.setItem(notifyKey(), 'off') } catch {}
+        prefs.notify = 'off'; persistPrefs()
         return
       }
     }
     notifyMode = want
-    try { localStorage.setItem(notifyKey(), want) } catch {}
+    prefs.notify = want; persistPrefs()
     paintNotifySetting()
     toast(want === 'off' ? tr('Powiadomienia wyłączone') : tr('Powiadomienia włączone'))
   })
@@ -7056,19 +7069,16 @@ function directFileEnv(f: { name: string; size: number; mime: string }, blob: Bl
   return env
 }
 
-/** Per identity, like every other stored preference. The key still says `img`
- *  because it was written before the setting covered sound too, and renaming it
- *  would silently turn the preference off for everybody who had set it. */
-const mediaAutoKey = () => 'ec-autoimg-' + (session?.idKey ?? '')
+/** Per identity, like every other stored preference - sealed with them (lib/prefs.ts). */
 let mediaAuto = false
 function loadMediaAuto() {
-  try { mediaAuto = localStorage.getItem(mediaAutoKey()) === '1' } catch { mediaAuto = false }
+  mediaAuto = prefs.mediaAuto === true
   const box = $('img-auto') as HTMLInputElement | null
   if (box) box.checked = mediaAuto
 }
 $('img-auto')?.addEventListener('change', (e) => {
   mediaAuto = (e.target as HTMLInputElement).checked
-  try { localStorage.setItem(mediaAutoKey(), mediaAuto ? '1' : '0') } catch {}
+  prefs.mediaAuto = mediaAuto; persistPrefs()
 })
 
 /**

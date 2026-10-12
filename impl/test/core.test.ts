@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { deriveRoom, hemIdentityFrom, hemContactBook, localContactBook, mergedContactBook, pubKeyReader, type Identity } from '../lib/core.ts'
+import { deriveRoom, hemIdentityFrom, hemContactBook, localContactBook, mergedContactBook, pubKeyReader, sessionParams, type Identity } from '../lib/core.ts'
 import { topicFromSecret, announceMacKey } from '../lib/rendezvous.ts'
 import { buildPeerDescr, buildSelfDescr, peerSearchPrefix, hemKid } from '../lib/descr.ts'
 import { unb64 } from '../lib/wc.ts'
@@ -232,4 +232,13 @@ test('a failure after the broad scope has worked is reported, not retried narrow
   const read = pubKeyReader(hem)
   assert.equal(await read('K1'), 'P:K1')
   await assert.rejects(() => read('K2'), /device asleep/)
+})
+
+test('a session derives for the network it was given, and for main when given none', () => {
+  assert.equal(sessionParams({}).networkId, 'main')
+  assert.equal(sessionParams({ networkId: '' }).networkId, 'main', 'an empty id is no id')
+  assert.equal(sessionParams({ networkId: 'firma' }).networkId, 'firma')
+  assert.match(sessionParams({ networkId: 'firma' }).dateUTC, /^\d{4}-\d{2}-\d{2}$/)
+  // Explicit params win outright - the test peers pass a fixed date this way.
+  assert.deepEqual(sessionParams({ networkId: 'firma', params: { networkId: 'x', dateUTC: '2026-01-01' } }), { networkId: 'x', dateUTC: '2026-01-01' })
 })

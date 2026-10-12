@@ -570,6 +570,7 @@ Bez demona nie ma kolejki: `--key` i `--ttl` nic wtedy nie zmieniają.
 | `ONCHATO_DOWNLOADS` | gdzie zapisywać pliki (domyślnie `~/Pobrane` albo `~/Downloads`) |
 | `--debug` | w kliencie: dziennik silnika w oknie statusu |
 | `--libp2p` | w kliencie: pełny transport GossipSub zamiast lekkiego (diagnostyka) |
+| `--network <id>` | sieć, dla której liczone są tematy (`PROTOCOL.md` §5.1); domyślnie `main`, czyli sieć operatora. Własna sieć = własne węzły i własny identyfikator; klienci na różnych id nigdy się nie spotkają, nawet na jednym węźle |
 | `ONCHATO_HOME` | katalog danych (domyślnie `$XDG_CONFIG_HOME/onchato`, czyli `~/.config/onchato`) |
 
 Hasło bez terminala (potok): `onchato` czyta pierwszą linię ze standardowego wejścia.

@@ -87,6 +87,8 @@ const [cmd, ...rest] = process.argv.slice(2)
 const opt = (name: string, def?: string) => { const i = rest.indexOf(name); return i >= 0 && rest[i + 1] && !rest[i + 1].startsWith('--') ? rest[i + 1] : def }
 const args = rest.filter((a, i) => !a.startsWith('--') && !(i > 0 && rest[i - 1].startsWith('--') && opt(rest[i - 1]) === a))
 const die = (msg: string): never => { console.error('onchato: ' + msg); process.exit(1) }
+/** The network topics are derived for (PROTOCOL.md 5.1); `main` is the operator's. */
+const NETWORK = opt('--network', 'main')!
 
 /** A secret from the flag, the environment, or a masked prompt (stdin when piped). */
 async function secret(prompt: string, envName = 'ONCHATO_PASSWORD'): Promise<string> {
@@ -272,7 +274,7 @@ try {
           // An invite that answers itself: knock on its inbox with our key. The
           // app's waiting record keeps the client knocking until they accept.
           const raw = inboxSecretBytes(inv)!
-          const session = await startSession(id, { relay: relayList(kv)[0], relays: relayList(kv), transport: 'light' })
+          const session = await startSession(id, { relay: relayList(kv)[0], relays: relayList(kv), transport: 'light', networkId: NETWORK })
           let reach: number | null = null
           try { reach = await session.knock(raw, inv.pub, { name: id.handle, note: opt('--note') }) } finally { await session.close().catch(() => {}) }
           const waiting = await store.waiting()
@@ -321,7 +323,7 @@ try {
       const stdin = process.stdin
       await runClient({
         id, kind, contacts, store, vault: { kv, base, kid: key }, relays: relayList(kv), openFirst: args[0], debug: rest.includes('--debug'),
-        transport: rest.includes('--libp2p') ? 'libp2p' : 'light',
+        transport: rest.includes('--libp2p') ? 'libp2p' : 'light', networkId: NETWORK,
         io: {
           out: process.stdout,
           onInput: (cb) => { stdin.setRawMode(true); stdin.setEncoding('utf8'); stdin.resume(); stdin.on('data', (d) => cb(String(d))) },
@@ -358,7 +360,7 @@ try {
         out({ ...r, via: 'daemon' })
       }
       const { id, contacts, key, base } = await signIn(kv)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), vault: { kv, base, kid: key } })
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, kid: key } })
       await hub.start()
       try { out({ ...(await hub.send(to, text, waitMs)), via: 'direct' }) } finally { await hub.close() }
       break
@@ -378,7 +380,7 @@ try {
       const sock = await connectDaemon()
       if (sock) { const r = await ask(sock, { op: 'sendfile', to, path, wait: waitMs }); sock.end(); if (!r.ok) die(r.error); out({ ...r, via: 'daemon' }) }
       const { id, contacts, key, base } = await signIn(kv)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), vault: { kv, base, kid: key } })
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, kid: key } })
       await hub.start()
       try { out({ ...(await hub.sendFile(to, path, waitMs)), via: 'direct' }) } finally { await hub.close() }
       break
@@ -422,7 +424,7 @@ try {
         await new Promise(() => {})
       }
       const { id, contacts, key, base } = await signIn(kv)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), vault: { kv, base, kid: key } })
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, kid: key } })
       hub.on(show)
       if (saveDir) hub.on((e) => { if (e.t === 'file') hub.getFile(e.id, saveDir).then((p) => saved(e.name, p), (err) => failed(e.name, err?.message ?? String(err))) })
       await hub.start()
@@ -443,7 +445,7 @@ try {
     case 'daemon': {
       const { id, contacts, kind, key, base } = await signIn(kv)
       const say = (m: string) => console.log(`[onchato] ${m}`)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), vault: { kv, base, kid: key }, log: rest.includes('--debug') ? say : undefined })
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, kid: key }, log: rest.includes('--debug') ? say : undefined })
       hub.on((e) => { if (e.t === 'link') say(`łącze: ${e.state}`); if (e.t === 'presence') say(`${e.from}: ${e.state}`) })
       await hub.start()
       const queue = new Queue({ hub, kv, base, kid: key, log: say })

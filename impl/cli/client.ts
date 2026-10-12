@@ -43,6 +43,8 @@ export interface ClientOpts {
   contacts: ContactManager
   relays: string[]              // failover order; [0] is preferred
   transport?: 'light' | 'libp2p'
+  /** The network id topics are derived for (`--network`; `main` by default). */
+  networkId?: string
   /** Open this contact's window at start (onchato chat <name>). */
   openFirst?: string
   debug?: boolean
@@ -120,7 +122,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
     }, 8000).unref?.()
   }
   const session = await startSession(o.id, {
-    relay: o.relays[0], relays: o.relays, transport: o.transport ?? 'light',
+    relay: o.relays[0], relays: o.relays, transport: o.transport ?? 'light', networkId: o.networkId,
     onLog: (m) => { if (o.debug) status(`${SGR.grey}${m}${SGR.reset}`) },
     onLink: (state) => {
       link = state === 'online' ? true : state === 'offline' ? false : null
