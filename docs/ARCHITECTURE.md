@@ -174,7 +174,7 @@ Running your own network is not merely tolerated — it is **encouraged**. Today
 
 ### Reference UI notes
 
-Look & feel is open — two clickable mockups exist sharing **the same DOM skeleton and logic, differing only in the stylesheet** (a working demonstration of the skin-swap principle): `ui-mockup.html` (light, dashboard-style; accepted as the starting point) and `ui-mockup-hacker.html` (terminal skin in v5's GitHub-dark palette). Agreed regardless of skin:
+Look & feel is open; a reference skin beyond the shipped web UI is a question to come back to. Agreed regardless of skin:
 
 - The mental model is an **arranged meeting, not a mailbox** — rooms as meetings, presence, no fake message history (no "recent messages" previews: there is no history to preview).
 - **Security state must be visible and honest**: the security badge (🤝 → 🔐) and the transport badge (⚪ relay / 🟢 direct) report the measured state of *this* conversation, never a configured wish. Capability probing separates REQUIRED (refuse to start, say why) from DEGRADED (say so, carry on) — a platform that cannot do WebRTC or notifications is told, not silently downgraded.
