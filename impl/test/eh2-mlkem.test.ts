@@ -14,6 +14,8 @@ import { MLKEM768_PK, MLKEM768_CT, decodeMsg1, decodeMsg2, encodeMsg2 } from '..
 import { initiate, initiatorComplete, respond, responderComplete } from '../eh2/handshake.ts'
 import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
 import { b64 } from '../lib/wc.ts'
+/** k_tag stand-in (§6.1): the room derives it from the pair's Announce key; these tests hand it in. */
+const TAG_KEY = new Uint8Array(32).fill(0x7a)
 
 const NOW = 1_784_000_000_000
 
@@ -45,9 +47,9 @@ test('each handshake gets fresh KEM material', async () => {
 
 test('hybrid handshake with the real KEM: SK_i == SK_r', async () => {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
-  const i1 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem: mlkem768, now: NOW })
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem: mlkem768, now: NOW })
   assert.equal(decodeMsg1(i1.msg1).pqPub.length, MLKEM768_PK)
-  const r1 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem: mlkem768, now: NOW })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem: mlkem768, now: NOW })
   assert.equal(decodeMsg2(r1.msg2).pqCt.length, MLKEM768_CT)
   const i2 = await initiatorComplete(i1.state, r1.msg2, { now: NOW })
   const rr = await responderComplete(r1.state, i2.msg3)
@@ -57,8 +59,8 @@ test('hybrid handshake with the real KEM: SK_i == SK_r', async () => {
 
 test('ss really enters SK: swapping in another peer\'s ciphertext breaks mac_r', async () => {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
-  const i1 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem: mlkem768, now: NOW })
-  const r1 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem: mlkem768, now: NOW })
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem: mlkem768, now: NOW })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem: mlkem768, now: NOW })
 
   // Same X25519 ephemerals and the same MAC, only the ciphertext replaced: the
   // initiator decapsulates a different ss -> different SK -> mac_r fails. (It also
@@ -76,12 +78,15 @@ test('KAT — fixed X25519 keys + fixed ML-KEM seed pin the hybrid schedule', as
   const ekR = await x25519FromPriv(new Uint8Array(32).fill(0x44))
   const kem = mlkem768Seeded(new Uint8Array(MLKEM768_SEED).fill(0x55), new Uint8Array(32).fill(0x66))
 
-  const i1 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem, now: NOW, ek: ekI })
-  const r1 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW, ek: ekR })
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem, now: NOW, ek: ekI })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW, ek: ekR })
   const i2 = await initiatorComplete(i1.state, r1.msg2, { now: NOW })
   assert.deepEqual((await responderComplete(r1.state, i2.msg3)).sk, i2.result.sk)
 
   // Recorded from this implementation. A change means the wire format, the DH
   // ordering, the info string, the transcript or the KEM binding moved.
-  assert.equal(b64(i2.result.sk), 'HTdOzsUBv2unO/b/cvVkzTQASOCnoYn9aoOkqiog9Xk=')
+  // Re-recorded 2026-10-12: msg1's 8-byte initiator_id = SHA-256(IK_i)[0:8] became
+  // a 32-byte initiator_tag = HMAC(k_tag, IK_i) (§6.1), so h1 - the HKDF salt for
+  // SK - is over a different frame. Nothing else in the schedule moved.
+  assert.equal(b64(i2.result.sk), 'e4ZoVV5gNC+2TbNcaqK6a7SS8IVjbOn3Rnm6xYb3UXg=')
 })

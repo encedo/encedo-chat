@@ -14,6 +14,8 @@ import { ratchetFrom, RatchetError, type Ratchet } from '../eh2/ratchet.ts'
 import { initiate, initiatorComplete, respond, responderComplete } from '../eh2/handshake.ts'
 import { generateX25519 } from '../lib/x25519.ts'
 import { mlkem768 } from '../eh2/mlkem.ts'
+/** k_tag stand-in (§6.1): the room derives it from the pair's Announce key; these tests hand it in. */
+const TAG_KEY = new Uint8Array(32).fill(0x7a)
 
 const NOW = 1_784_000_000_000
 const te = new TextEncoder()
@@ -22,8 +24,8 @@ const td = new TextDecoder()
 /** A real handshake, then both ratchets. */
 async function pair(opts: Parameters<typeof ratchetFrom>[1] = {}): Promise<{ I: Ratchet; R: Ratchet }> {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
-  const i1 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem: mlkem768, now: NOW })
-  const r1 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem: mlkem768, now: NOW })
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem: mlkem768, now: NOW })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem: mlkem768, now: NOW })
   const i2 = await initiatorComplete(i1.state, r1.msg2, { now: NOW })
   const rr = await responderComplete(r1.state, i2.msg3)
   return { I: await ratchetFrom(i2.result, opts), R: await ratchetFrom(rr, opts) }

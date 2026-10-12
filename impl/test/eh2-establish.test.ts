@@ -15,6 +15,8 @@ import { encodeEnvelope, decodeEnvelope, envMsg } from '../lib/envelope.ts'
 import type { Session } from '../lib/session.ts'
 import { HandshakeError } from '../eh2/handshake.ts'
 import { T_MSG1, T_MSG2, T_MSG3 } from '../eh2/wire.ts'
+/** k_tag stand-in (§6.1): the room derives it from the pair's Announce key; these tests hand it in. */
+const TAG_KEY = new Uint8Array(32).fill(0x7a)
 
 const te = new TextEncoder()
 const td = new TextDecoder()
@@ -22,8 +24,8 @@ const td = new TextDecoder()
 /** Run the three frames between the two state machines; return both sessions. */
 async function connect(): Promise<{ i: Session; r: Session; frames: Uint8Array[] }> {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
-  const I = await startHandshake({ role: 'initiator', ik: ikI, peerIkPub: ikR.pub })
-  const R = await startHandshake({ role: 'responder', ik: ikR, peerIkPub: ikI.pub })
+  const I = await startHandshake({ tagKey: TAG_KEY, role: 'initiator', ik: ikI, peerIkPub: ikR.pub })
+  const R = await startHandshake({ tagKey: TAG_KEY, role: 'responder', ik: ikR, peerIkPub: ikI.pub })
 
   const frames: Uint8Array[] = [...I.initial]
   const msg2 = await R.feed(frames[0])
@@ -54,8 +56,8 @@ test('three frames, two sessions, a conversation', async () => {
 
 test('the msg3 gate: the responder has no session until mac_i verifies (§6.2)', async () => {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
-  const I = await startHandshake({ role: 'initiator', ik: ikI, peerIkPub: ikR.pub })
-  const R = await startHandshake({ role: 'responder', ik: ikR, peerIkPub: ikI.pub })
+  const I = await startHandshake({ tagKey: TAG_KEY, role: 'initiator', ik: ikI, peerIkPub: ikR.pub })
+  const R = await startHandshake({ tagKey: TAG_KEY, role: 'responder', ik: ikR, peerIkPub: ikI.pub })
 
   const msg2 = await R.feed(I.initial[0])
   assert.equal(R.authenticated, false, 'R holds SK but I is still unauthenticated')
@@ -76,8 +78,8 @@ test('the msg3 gate: the responder has no session until mac_i verifies (§6.2)',
 
 test('a forged msg3 leaves the responder without a session', async () => {
   const [ikI, ikR, mallory] = [await generateX25519(), await generateX25519(), await generateX25519()]
-  const R = await startHandshake({ role: 'responder', ik: ikR, peerIkPub: ikI.pub })
-  const I = await startHandshake({ role: 'initiator', ik: ikI, peerIkPub: ikR.pub })
+  const R = await startHandshake({ tagKey: TAG_KEY, role: 'responder', ik: ikR, peerIkPub: ikI.pub })
+  const I = await startHandshake({ tagKey: TAG_KEY, role: 'initiator', ik: ikI, peerIkPub: ikR.pub })
   const msg2 = await R.feed(I.initial[0])
   const msg3 = (await I.feed(msg2!))!
 
@@ -90,12 +92,12 @@ test('a forged msg3 leaves the responder without a session', async () => {
 
 test('frames out of order are refused', async () => {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
-  const I = await startHandshake({ role: 'initiator', ik: ikI, peerIkPub: ikR.pub })
-  const R = await startHandshake({ role: 'responder', ik: ikR, peerIkPub: ikI.pub })
+  const I = await startHandshake({ tagKey: TAG_KEY, role: 'initiator', ik: ikI, peerIkPub: ikR.pub })
+  const R = await startHandshake({ tagKey: TAG_KEY, role: 'responder', ik: ikR, peerIkPub: ikI.pub })
 
   await assert.rejects(() => R.feed(new Uint8Array([T_MSG3, 1, ...new Uint8Array(32)])), /expected msg1/)
 
-  const R2 = await startHandshake({ role: 'responder', ik: ikR, peerIkPub: ikI.pub })
+  const R2 = await startHandshake({ tagKey: TAG_KEY, role: 'responder', ik: ikR, peerIkPub: ikI.pub })
   const msg2 = await R2.feed(I.initial[0])
   await assert.rejects(() => R2.feed(I.initial[0]), /expected msg3/)
   await assert.rejects(() => I.feed(new Uint8Array([T_MSG1, 1, 2])), /expected msg2/)
@@ -106,13 +108,13 @@ test('two peers that both initiate: one attempt survives, the session works', as
   // The room breaks the tie (lower peer id initiates); if both start anyway,
   // the crossed attempt fails cleanly and the surviving one still completes.
   const [ikA, ikB] = [await generateX25519(), await generateX25519()]
-  const aInit = await startHandshake({ role: 'initiator', ik: ikA, peerIkPub: ikB.pub })
-  const bInit = await startHandshake({ role: 'initiator', ik: ikB, peerIkPub: ikA.pub })
+  const aInit = await startHandshake({ tagKey: TAG_KEY, role: 'initiator', ik: ikA, peerIkPub: ikB.pub })
+  const bInit = await startHandshake({ tagKey: TAG_KEY, role: 'initiator', ik: ikB, peerIkPub: ikA.pub })
   await assert.rejects(() => aInit.feed(bInit.initial[0]), /expected msg2/)
 
-  const bResp = await startHandshake({ role: 'responder', ik: ikB, peerIkPub: ikA.pub })
+  const bResp = await startHandshake({ tagKey: TAG_KEY, role: 'responder', ik: ikB, peerIkPub: ikA.pub })
   const msg2 = await bResp.feed(aInit.initial[0])
-  const msg3 = await (await startHandshake({ role: 'initiator', ik: ikA, peerIkPub: ikB.pub })).feed(msg2!)
+  const msg3 = await (await startHandshake({ tagKey: TAG_KEY, role: 'initiator', ik: ikA, peerIkPub: ikB.pub })).feed(msg2!)
     .then(() => null, () => null) // the fresh initiator has a different msg1 -> mac_r fails
   assert.equal(msg3, null)
 

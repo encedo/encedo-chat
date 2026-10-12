@@ -5,7 +5,7 @@
  * computed here — this layer only turns the three handshake frames into bytes
  * and back, and derives the transcript hashes those bytes feed.
  *
- *   I -> R  msg1 { version, ek_i_pub, pq_pub, timestamp, initiator_id }
+ *   I -> R  msg1 { version, ek_i_pub, pq_pub, timestamp, initiator_tag }
  *   R -> I  msg2 { version, ek_r_pub, pq_ct,  timestamp, mac_r }
  *   I -> R  msg3 { version, mac_i }
  *
@@ -38,7 +38,8 @@ export const T_MSG3 = 0x03
 const X25519_PUB = 32
 const MAC = 32
 const TS = 8
-const INITIATOR_ID = 8
+/** HMAC-SHA256, full width (§6.1). */
+export const INITIATOR_TAG = 32
 
 /** ML-KEM-768 sizes (FIPS 203) — checked so a wrong-parameter-set peer fails loudly here. */
 export const MLKEM768_PK = 1184
@@ -58,8 +59,13 @@ export interface Msg1 {
   pqPub: Uint8Array
   /** Unix epoch **ms**, UTC (replay window +/-5 min, §6.4). */
   ts: number
-  /** SHA-256(IK_i_pub)[0:8] — non-security hint so R can resolve the contact (§6.1). */
-  initiatorId: Uint8Array
+  /**
+   * HMAC-SHA256(k_tag, IK_i_pub), k_tag from the pair's Announce key of the day
+   * (§6.1). Lets R tell its contact from a second window of its own identity at
+   * the first frame - without the stable `SHA-256(IK_i)[0:8]` this replaced,
+   * which a node could link across rooms and days.
+   */
+  initiatorTag: Uint8Array
 }
 
 export interface Msg2 {
@@ -127,17 +133,17 @@ function slice(b: Uint8Array, off: number, len: number, name: string): Uint8Arra
 // msg1
 // ---------------------------------------------------------------------------
 
-/** `0x01 | ver | ek_i_pub(32) | len(pq_pub) u16 | pq_pub | ts u64 | initiator_id(8)` */
+/** `0x01 | ver | ek_i_pub(32) | len(pq_pub) u16 | pq_pub | ts u64 | initiator_tag(32)` - 1260 B */
 export function encodeMsg1(m: Msg1): Uint8Array {
   fixed('msg1.ekPub', m.ekPub, X25519_PUB)
   fixed('msg1.pqPub', m.pqPub, MLKEM768_PK)
-  fixed('msg1.initiatorId', m.initiatorId, INITIATOR_ID)
+  fixed('msg1.initiatorTag', m.initiatorTag, INITIATOR_TAG)
   return concat(
     new Uint8Array([T_MSG1, EH2_VERSION]),
     m.ekPub,
     u16be(m.pqPub.length), m.pqPub,
     u64be(m.ts),
-    m.initiatorId,
+    m.initiatorTag,
   )
 }
 
@@ -150,9 +156,9 @@ export function decodeMsg1(b: Uint8Array): Msg1 {
   const pqPub = slice(b, o, pqLen, 'msg1.pqPub'); o += pqLen
   if (o + TS > b.length) throw new WireError('msg1.ts: truncated')
   const ts = readU64be(b, o); o += TS
-  const initiatorId = slice(b, o, INITIATOR_ID, 'msg1.initiatorId'); o += INITIATOR_ID
+  const initiatorTag = slice(b, o, INITIATOR_TAG, 'msg1.initiatorTag'); o += INITIATOR_TAG
   exact(b, o, 'msg1')
-  return { ekPub, pqPub, ts, initiatorId }
+  return { ekPub, pqPub, ts, initiatorTag }
 }
 
 // ---------------------------------------------------------------------------
@@ -237,12 +243,4 @@ export function h3(h2partial: Uint8Array, macR: Uint8Array): Promise<Uint8Array>
   return sha256(concat(h2partial, macR))
 }
 
-/**
- * `initiator_id = SHA-256(IK_i_pub)[0:8]` — a contact-book lookup hint only.
- * Never treat it as authentication: it is public and unauthenticated until
- * `mac_i` verifies (§6.2, msg3 gating).
- */
-export async function initiatorId(ikIPub: Uint8Array): Promise<Uint8Array> {
-  fixed('initiatorId.ikIPub', ikIPub, X25519_PUB)
-  return (await sha256(ikIPub)).slice(0, INITIATOR_ID)
-}
+

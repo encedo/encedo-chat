@@ -20,14 +20,16 @@
 import { startHandshake } from '../eh2/establish.ts'
 import { generateX25519 } from '../lib/x25519.ts'
 import type { Session } from '../lib/session.ts'
+/** k_tag stand-in (§6.1): the room derives it from the pair's Announce key; these tests hand it in. */
+const TAG_KEY = new Uint8Array(32).fill(0x7a)
 
 const HANDSHAKES = Math.max(1, parseInt(process.argv[2] ?? '20', 10) || 20)
 const ROUNDTRIPS = Math.max(1, parseInt(process.argv[3] ?? '1000', 10) || 1000)
 
 async function connect(): Promise<{ i: Session; r: Session }> {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
-  const I = await startHandshake({ role: 'initiator', ik: ikI, peerIkPub: ikR.pub })
-  const R = await startHandshake({ role: 'responder', ik: ikR, peerIkPub: ikI.pub })
+  const I = await startHandshake({ tagKey: TAG_KEY, role: 'initiator', ik: ikI, peerIkPub: ikR.pub })
+  const R = await startHandshake({ tagKey: TAG_KEY, role: 'responder', ik: ikR, peerIkPub: ikI.pub })
   const msg2 = await R.feed(I.initial[0])
   const msg3 = await I.feed(msg2!)
   await R.feed(msg3!)

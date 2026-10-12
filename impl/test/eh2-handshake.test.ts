@@ -18,6 +18,8 @@ import { generateX25519, x25519FromPriv, type Dh } from '../lib/x25519.ts'
 import { decodeMsg2, encodeMsg2, h1 as hashMsg1 } from '../eh2/wire.ts'
 import { hkdfBits, concat, b64 } from '../lib/wc.ts'
 import { toyKem, seededRand } from './toy-kem.ts'
+/** k_tag stand-in (§6.1): the room derives it from the pair's Announce key; these tests hand it in. */
+const TAG_KEY = new Uint8Array(32).fill(0x7a)
 
 const NOW = 1_784_000_000_000
 const enc = new TextEncoder()
@@ -26,8 +28,8 @@ const enc = new TextEncoder()
 async function handshake(opts: { ikI: Dh; ikR: Dh; peerIkPubForR?: Uint8Array; kem?: any; now?: number } ) {
   const kem = opts.kem ?? toyKem()
   const now = opts.now ?? NOW
-  const i1 = await initiate({ ik: opts.ikI, peerIkPub: opts.ikR.pub, kem, now })
-  const r1 = await respond({ ik: opts.ikR, peerIkPub: opts.peerIkPubForR ?? opts.ikI.pub, msg1: i1.msg1, kem, now })
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: opts.ikI, peerIkPub: opts.ikR.pub, kem, now })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: opts.ikR, peerIkPub: opts.peerIkPubForR ?? opts.ikI.pub, msg1: i1.msg1, kem, now })
   const i2 = await initiatorComplete(i1.state, r1.msg2, { now })
   const rr = await responderComplete(r1.state, i2.msg3)
   return { init: i1, resp: r1, iResult: i2.result, rResult: rr, msg3: i2.msg3 }
@@ -44,8 +46,8 @@ test('SK_i == SK_r — both sides derive the same session key (§6.3 first test)
 test('the key schedule is exactly ikm = DH(IK_r,EK_i) || DH(EK_r,IK_i) || DH(EK_r,EK_i) || ss', async () => {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
   const kem = toyKem()
-  const i1 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
-  const r1 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW })
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW })
   const i2 = await initiatorComplete(i1.state, r1.msg2, { now: NOW })
 
   const msg2 = decodeMsg2(r1.msg2)
@@ -85,8 +87,8 @@ test('every handshake produces a fresh SK (replay of the same identities)', asyn
 test('mac_r authenticates R: a tampered msg2 is rejected by the initiator', async () => {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
   const kem = toyKem()
-  const i1 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
-  const r1 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW })
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW })
   const m2 = decodeMsg2(r1.msg2)
 
   for (const [what, frame] of [
@@ -106,8 +108,8 @@ test('mac_r authenticates R: a tampered msg2 is rejected by the initiator', asyn
 test('mac_i gates the responder: a tampered msg3 is rejected', async () => {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
   const kem = toyKem()
-  const i1 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
-  const r1 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW })
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW })
   const i2 = await initiatorComplete(i1.state, r1.msg2, { now: NOW })
   const bad = i2.msg3.slice(); bad[bad.length - 1] ^= 0x01
   await assert.rejects(
@@ -119,8 +121,8 @@ test('mac_i gates the responder: a tampered msg3 is rejected', async () => {
   await assert.rejects(() => responderComplete(r1.state, i2.msg3), /mac_i/)
 
   // and the clean run of the same flow does complete
-  const c1 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
-  const c2 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: c1.msg1, kem, now: NOW })
+  const c1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
+  const c2 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: c1.msg1, kem, now: NOW })
   const c3 = await initiatorComplete(c1.state, c2.msg2, { now: NOW })
   assert.deepEqual((await responderComplete(c2.state, c3.msg3)).sk, c3.result.sk)
 })
@@ -130,34 +132,44 @@ test('an impostor cannot complete: wrong long-term key on either side', async ()
   const kem = toyKem()
 
   // I thinks it is talking to Mallory's key, R answers with its own -> no shared SK
-  const i1 = await initiate({ ik: ikI, peerIkPub: mallory.pub, kem, now: NOW })
-  const r1 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW })
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: mallory.pub, kem, now: NOW })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW })
   await assert.rejects(() => initiatorComplete(i1.state, r1.msg2, { now: NOW }), /mac_r/)
 
-  // R resolves the wrong contact for initiator_id -> caught before any DH
-  const i2 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
+  // R's room is Mallory's and the frame is I's: the initiator tag (§6.1) is an
+  // HMAC of I's IK, not Mallory's -> refused before any DH.
+  const i2 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
   await assert.rejects(
-    () => respond({ ik: ikR, peerIkPub: mallory.pub, msg1: i2.msg1, kem, now: NOW }),
-    /initiator_id/,
+    () => respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: mallory.pub, msg1: i2.msg1, kem, now: NOW }),
+    /initiator tag does not match the contact/,
   )
 
-  // Mallory replays I's msg1 with her own IK: R (resolving Mallory) refuses,
-  // because the id in the frame is I's.
+  // A second window of R's OWN identity sends msg1 into the pair's room: the tag
+  // is an HMAC of R's own IK, and R says exactly that - the conclusive signal the
+  // room uses to stop handshaking with its own duplicate (§6, 5-minute rule).
+  const self = await initiate({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, kem, now: NOW })
   await assert.rejects(
-    () => respond({ ik: ikR, peerIkPub: mallory.pub, msg1: i2.msg1, kem, now: NOW }),
-    /initiator_id/,
+    () => respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: self.msg1, kem, now: NOW }),
+    /our own identity: a second window/,
+  )
+
+  // Outside the pair the tag key is unknown: a tag made under another key (another
+  // pair, another day) matches nobody.
+  await assert.rejects(
+    () => respond({ tagKey: new Uint8Array(32).fill(1), ik: ikR, peerIkPub: ikI.pub, msg1: i2.msg1, kem, now: NOW }),
+    /initiator tag does not match the contact/,
   )
 })
 
 test('timestamps outside the +/-5 min window are refused (§6.4 replay)', async () => {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
   const kem = toyKem()
-  const i1 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
   await assert.rejects(
-    () => respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW + MAX_SKEW_MS + 1 }),
+    () => respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW + MAX_SKEW_MS + 1 }),
     /msg1 timestamp/,
   )
-  const r1 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW })
   await assert.rejects(
     () => initiatorComplete(i1.state, r1.msg2, { now: NOW - MAX_SKEW_MS - 1 }),
     /msg2 timestamp/,
@@ -173,15 +185,18 @@ test('KAT — fixed keys and fixed KEM randomness pin the classical schedule', a
   const ekR = await x25519FromPriv(new Uint8Array(32).fill(0x44))
   const kem = toyKem(seededRand())
 
-  const i1 = await initiate({ ik: ikI, peerIkPub: ikR.pub, kem, now: NOW, ek: ekI })
-  const r1 = await respond({ ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW, ek: ekR })
+  const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem, now: NOW, ek: ekI })
+  const r1 = await respond({ tagKey: TAG_KEY, ik: ikR, peerIkPub: ikI.pub, msg1: i1.msg1, kem, now: NOW, ek: ekR })
   const i2 = await initiatorComplete(i1.state, r1.msg2, { now: NOW })
   assert.ok((await responderComplete(r1.state, i2.msg3)).sk)
 
   // Recorded from this implementation — a change here means the wire format,
   // the DH ordering, the info string or the transcript changed. (The toy KEM's
   // ss is part of it; stage 3 re-records with ML-KEM-768.)
-  assert.equal(b64(i2.result.sk), 'DLBOTGa3JpgLmSQW8aSbWduqNg+63qVCgh5xloJy7r8=')
+  // Re-recorded 2026-10-12: msg1's 8-byte initiator_id = SHA-256(IK_i)[0:8] became
+  // a 32-byte initiator_tag = HMAC(k_tag, IK_i) (§6.1), so h1 - the HKDF salt for
+  // SK - is over a different frame. Nothing else in the schedule moved.
+  assert.equal(b64(i2.result.sk), '7NRm/mSWhtn6BLeiXobfSNkOVVrbWWiaX7zUyNm0r+8=')
 })
 
 function flip(b: Uint8Array): Uint8Array {

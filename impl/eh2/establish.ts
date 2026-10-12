@@ -49,8 +49,10 @@ export interface StartOpts {
   role: 'initiator' | 'responder'
   /** Our long-term identity key — the HEM's IK in production. */
   ik: Dh
-  /** The peer's IK public (contact book). The responder resolves it from `initiator_id`. */
+  /** The peer's IK public: the contact this room belongs to. */
   peerIkPub: Uint8Array
+  /** k_tag of the pair and day (`initiatorTagKey(announce key)`, §6.1). */
+  tagKey: Uint8Array
   kem?: Kem
   ratchet?: RatchetOpts
   now?: () => number
@@ -77,7 +79,7 @@ export async function startHandshake(opts: StartOpts): Promise<Eh2Handshake> {
   }
 
   if (opts.role === 'initiator') {
-    const started = await initiate({ ik: opts.ik, peerIkPub: opts.peerIkPub, kem, now: now?.() })
+    const started = await initiate({ ik: opts.ik, peerIkPub: opts.peerIkPub, tagKey: opts.tagKey, kem, now: now?.() })
     let state: InitiatorState | null = started.state
     return {
       initial: [started.msg1],
@@ -109,7 +111,7 @@ export async function startHandshake(opts: StartOpts): Promise<Eh2Handshake> {
       try {
         if (!pending) {
           if (frame[0] !== T_MSG1) throw new HandshakeError(`responder expected msg1, got frame type 0x${frame[0]?.toString(16)}`)
-          const r = await respond({ ik: opts.ik, peerIkPub: opts.peerIkPub, msg1: frame, kem, now: now?.() })
+          const r = await respond({ ik: opts.ik, peerIkPub: opts.peerIkPub, tagKey: opts.tagKey, msg1: frame, kem, now: now?.() })
           pending = r.state
           return r.msg2 // SK exists — but I stays unauthenticated until msg3
         }

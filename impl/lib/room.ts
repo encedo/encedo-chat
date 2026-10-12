@@ -20,6 +20,7 @@ import type { Session } from './session.ts'
 import type { Dh } from './x25519.ts'
 import type { RatchetOpts } from '../eh2/ratchet.ts'
 import { startHandshake, isHandshakeFrame, type Eh2Handshake } from '../eh2/establish.ts'
+import { initiatorTagKey } from '../eh2/handshake.ts'
 import { T_MSG1 } from '../eh2/wire.ts'
 import {
   encodeEnvelope, decodeEnvelope, envMsg, envTyping, envPresence, envReaction, envFile, envRtc, envAck, envGroupSkd, envGroupSkdReq,
@@ -662,7 +663,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     const attempt: Attempt = { h: null, role, startedAt: nowMs(), msg1, peer }
     handshakes.set(peer, attempt)
     try {
-      const h = await startHandshake({ role, ik: eh2.ik, peerIkPub: eh2.peerIkPub, ratchet: eh2.ratchet })
+      const h = await startHandshake({ role, ik: eh2.ik, peerIkPub: eh2.peerIkPub, tagKey: await initiatorTagKey(keys.macKey), ratchet: eh2.ratchet })
       if (handshakes.get(peer) !== attempt) return null // superseded while we generated keys
       attempt.h = h
       log(`EH-2 ${role} attempt -> ${short(peer)}`)
@@ -874,7 +875,7 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
    * msg2 it sent us went in the bin.
    *
    * A PeerId is transport addressing, not identity. What decides whether this
-   * frame is ours is the handshake itself — the MAC and the `initiator_id`
+   * frame is ours is the handshake itself — the MAC and the `initiator_tag`
    * bound to our contact's IK — and that check is unchanged and still ahead of
    * us. So the attempt follows the answer: it is re-keyed to the new id, timers
    * and all, and the dead one is dropped so nothing keeps retrying at it.
@@ -949,12 +950,12 @@ export function joinChat(node, topic: string, keys: RoomKeys, opts: ChatOpts = {
     } catch (e: any) {
       const why = String(e?.message ?? e)
       // The one conclusive statement about identity in the whole handshake: msg1
-      // carries an `initiator_id` derived from the sender's IK, and this check
-      // compares it with the contact we hold a key for. Unlike a failed MAC —
-      // which honest crossfire produces routinely, and which an earlier version
-      // of this code wrongly took as proof — it cannot be an accident of timing.
-      // Whoever sent that frame is not our contact.
-      if (/initiator_id does not match/.test(why)) notOurContact(from)
+      // carries an `initiator_tag` (§6.1), an HMAC of the sender's IK under a key
+      // only the pair has, and it is checked against the contact we hold a key
+      // for. Unlike a failed MAC - which honest crossfire produces routinely, and
+      // which an earlier version of this code wrongly took as proof - it cannot
+      // be an accident of timing. Whoever sent that frame is not our contact.
+      if (/initiator tag/.test(why)) notOurContact(from)
       else dbg(`handshake frame from ${short(from)} did not apply: ${why}`)
       /* the attempt is already gone; giveUp() schedules the next one */
     }

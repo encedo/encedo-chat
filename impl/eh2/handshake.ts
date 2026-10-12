@@ -22,7 +22,9 @@
  *
  * Layering: this module computes and verifies, it does NOT do I/O. The caller
  * moves the three frames over whatever transport it has and decides who the
- * peer is (contact-book resolution via `initiator_id`).
+ * peer is - on a pair topic, the room's contact. msg1 carries `initiator_tag`,
+ * keyed by the pair's Announce key of the day (§6.1), which R checks against
+ * that contact and, failing that, against its own IK.
  *
  * WARNING: msg3 gating (§6.2): until `responderComplete()` returns, the initiator is
  * UNAUTHENTICATED — R must not accept application or ratchet data from it.
@@ -38,13 +40,36 @@ import type { Dh } from '../lib/x25519.ts'
 import { generateX25519 } from '../lib/x25519.ts'
 import {
   encodeMsg1, decodeMsg1, encodeMsg2, decodeMsg2, encodeMsg3, decodeMsg3,
-  h1 as hashMsg1, h2Partial, h3 as hashH3, initiatorId,
+  h1 as hashMsg1, h2Partial, h3 as hashH3,
 } from './wire.ts'
 
 const enc = new TextEncoder()
 const SK_INFO = enc.encode('encedo-handshake-v2')
 const LABEL_R = enc.encode('responder')
 const LABEL_I = enc.encode('initiator')
+
+/**
+ * `k_tag = HMAC-SHA256(announce_key, "encedo-eh2-initiator-tag-v1")` (§6.1).
+ * The Announce key is the pair's and the day's, so the tag means nothing to
+ * anybody outside the pair and changes every day. Domain-separated from the
+ * Announce itself, whose MAC input starts with a digit (`v|peer|nonce|ts`).
+ */
+export async function initiatorTagKey(announceKey: CryptoKey): Promise<Uint8Array> {
+  return new Uint8Array(await subtle.sign('HMAC', announceKey, new TextEncoder().encode('encedo-eh2-initiator-tag-v1')))
+}
+
+/** `initiator_tag = HMAC-SHA256(k_tag, IK_i_pub)`, full 32 bytes (§6.1). */
+export async function initiatorTag(tagKey: Uint8Array, ikPub: Uint8Array): Promise<Uint8Array> {
+  if (tagKey.length !== 32) throw new HandshakeError('initiator tag key must be 32 B')
+  const k = await subtle.importKey('raw', tagKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  return new Uint8Array(await subtle.sign('HMAC', k, ikPub))
+}
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) => {
+  if (a.length !== b.length) return false
+  let d = 0; for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i]
+  return d === 0
+}
 
 /** Replay window on handshake timestamps (§6.4). */
 export const MAX_SKEW_MS = 5 * 60_000
@@ -159,6 +184,8 @@ export interface InitiatorState {
 export async function initiate(opts: {
   ik: Dh
   peerIkPub: Uint8Array
+  /** k_tag of the pair and day (`initiatorTagKey`, §6.1). */
+  tagKey: Uint8Array
   kem: Kem
   now?: number
   maxSkewMs?: number
@@ -173,9 +200,9 @@ export async function initiate(opts: {
     ekPub: ekI.pub,
     pqPub: pq.pub,
     ts: opts.now ?? nowMs(),
-    initiatorId: await initiatorId(ik.pub),
+    initiatorTag: await initiatorTag(opts.tagKey, ik.pub),
   })
-  plog('§6.1', `I -> msg1: EK_i=${val(ekI.pub)} pq_pub=${val(pq.pub)} initiator_id=${val(await initiatorId(ik.pub))} (${msg1.length} B)`)
+  plog('§6.1', `I -> msg1: EK_i=${val(ekI.pub)} pq_pub=${val(pq.pub)} initiator_tag=${val(msg1.slice(msg1.length - 32))} (${msg1.length} B)`)
   return { msg1, state: { ik, peerIkPub, ekI, pq, msg1Bytes: msg1, maxSkewMs: opts.maxSkewMs ?? MAX_SKEW_MS } }
 }
 
@@ -237,13 +264,14 @@ export interface ResponderState {
  * R: consume msg1 -> derive SK, emit msg2 with `mac_r` (this authenticates R to
  * I). R holds SK here but MUST NOT accept data from I until msg3 verifies.
  *
- * `peerIkPub` is the caller's contact-book resolution of `msg1.initiator_id`;
- * the id itself is only a hint (§6.1), so we re-check it against the key the
- * caller supplied — a mismatch means the wrong contact was resolved.
+ * `peerIkPub` is the contact the caller's room belongs to; the initiator tag
+ * (§6.1) is checked against it before anything else.
  */
 export async function respond(opts: {
   ik: Dh
   peerIkPub: Uint8Array
+  /** k_tag of the pair and day (`initiatorTagKey`, §6.1). */
+  tagKey: Uint8Array
   msg1: Uint8Array
   kem: Kem
   now?: number
@@ -257,9 +285,15 @@ export async function respond(opts: {
   const now = opts.now ?? nowMs()
   checkSkew(msg1.ts, now, 'msg1', opts.maxSkewMs ?? MAX_SKEW_MS)
 
-  const expectId = await initiatorId(peerIkPub)
-  if (!expectId.every((b, i) => b === msg1.initiatorId[i])) {
-    throw new HandshakeError('initiator_id does not match the resolved contact IK')
+  // Who sent it, before any DH: only the pair can compute k_tag, so a tag made
+  // with our contact's IK is our contact - and one made with OUR IK is a second
+  // window of our own identity (the one other party that can reach the topic).
+  // Conclusive either way, unlike a failed MAC, which honest crossfire produces.
+  if (!sameBytes(msg1.initiatorTag, await initiatorTag(opts.tagKey, peerIkPub))) {
+    if (sameBytes(msg1.initiatorTag, await initiatorTag(opts.tagKey, ik.pub))) {
+      throw new HandshakeError('initiator tag is our own identity: a second window, not the contact')
+    }
+    throw new HandshakeError('initiator tag does not match the contact')
   }
 
   const ekR = opts.ek ?? await generateX25519()

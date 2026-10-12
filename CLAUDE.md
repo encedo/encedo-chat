@@ -867,10 +867,20 @@ outlived the extra tab (reported live, 2026-07-30).
 
 What settles it:
 
-- **`initiator_id` is the one conclusive statement about identity.** msg1 carries
-  it, derived from the sender's IK, and the responder compares it with the
-  contact it holds a key for. That check cannot be an accident of timing, so one
-  occurrence is enough: the peer is ignored for 5 minutes and the UI is told.
+- **`initiator_tag` is the one conclusive statement about identity.** msg1 carries
+  `HMAC(k_tag, IK_i)` with `k_tag` from the pair's Announce key of the day
+  (PROTOCOL.md §6.1), and the responder checks it against the contact - and,
+  failing that, against its OWN IK, which names a second window outright. That
+  check cannot be an accident of timing, so one occurrence is enough: the peer is
+  ignored for 5 minutes and the UI is told. It replaced `initiator_id =
+  SHA-256(IK)[0:8]` (2026-10-12), which did the same job but was the same 8 bytes
+  in every msg1 of an identity, linkable by a node across pairs and days.
+  **Removing the hint altogether was tried and reverted the same day:** without
+  it the first window keeps handshaking with its duplicate, every one of its msg1
+  is also answered by the real contact, and the contact's live session is
+  re-keyed every few seconds - `room-eh2` "a second tab ..." lost the message one
+  run in two. §9.1 would close both windows soon after, but the room must not
+  depend on that.
   **Do not use a failed MAC for this** — honest peers that open handshakes at the
   same moment produce `mac_i` failures routinely, and an earlier attempt at this
   blacklisted the room's real contact within seconds.

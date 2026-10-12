@@ -386,14 +386,14 @@ Delivery discipline, normative because GossipSub is fire-and-forget:
 - the opening frame is re-sent a few times while an attempt waits (three sends ≤ 700 ms apart); a silent attempt is abandoned after **6 s** and retried on a backoff that slows (200 ms doubling to 1.6 s, 3 s after sixteen failures, **10 s after twenty-four**) but never stops;
 - a **byte-identical repeat of msg1** (the initiator re-sending) gets the **stored msg2 replayed**, not a fresh attempt — a fresh responder ephemeral would doom the initiator's `mac_i`;
 - a *new* msg1 restarts a responder that already holds a session (peer reloaded / rotated its PeerId), the session being replaced only once msg3 verifies;
-- a responder that receives msg1 carrying an `initiator_id` that does not match the contact it holds a key for ignores that peer for 5 minutes — this is the one conclusive identity statement (a failed MAC is not: honest crossed handshakes produce those routinely);
+- a responder whose msg1 carries an `initiator_tag` (§6.1) that is not the contact's ignores that peer for **5 minutes**. The pair topic is reachable only by the pair, so the one other sender is a **second window of one's own identity** — and the tag says so outright (it verifies under the responder's own IK). This is the one conclusive identity statement: a failed MAC is not, since honest crossed handshakes produce those routinely. §9.1 then closes both windows;
 - content typed before establishment queues in a bounded buffer (32 envelopes) and flushes when the session is live; overflow is dropped;
 - a pair topic may hold **more than one live session with the same contact** (a second window of one identity, §9.1, or a peer mid-reload): every outgoing envelope is sealed and published **once per live session** — separate ciphertexts under separate ratchets, not one frame two ways.
 
 ### 6.1 Messages
 
 ```
-I → R  msg1 { version, ek_i_pub, pq_pub (ML-KEM-768), timestamp, initiator_id = SHA-256(IK_i_pub)[0:8] }
+I → R  msg1 { version, ek_i_pub, pq_pub (ML-KEM-768), timestamp, initiator_tag }
 R → I  msg2 { version, ek_r_pub, pq_ct, timestamp, mac_r }
 I → R  msg3 { version, mac_i }
 ```
@@ -401,14 +401,23 @@ I → R  msg3 { version, mac_i }
 **Serialization (normative — `h1 = SHA-256(serialize(msg1))` salts `SK`, so two encodings of one frame are two different session keys):**
 
 ```
-msg1 = 0x01 ‖ ver(1) ‖ ek_i_pub(32) ‖ u16be(|pq_pub|) ‖ pq_pub(1184) ‖ u64be(ts_ms) ‖ initiator_id(8)
+msg1 = 0x01 ‖ ver(1) ‖ ek_i_pub(32) ‖ u16be(|pq_pub|) ‖ pq_pub(1184) ‖ u64be(ts_ms) ‖ initiator_tag(32)
 msg2 = 0x02 ‖ ver(1) ‖ ek_r_pub(32) ‖ u16be(|pq_ct|)  ‖ pq_ct(1088)  ‖ u64be(ts_ms) ‖ mac_r(32)
 msg3 = 0x03 ‖ ver(1) ‖ mac_i(32)
 ```
 
 `ver = 1`; trailing bytes are rejected (a frame parses exactly or not at all). The type bytes are the discriminators of §6's "told apart by their type byte" — `0x01–0x03` handshake, `0x10` ratchet content (§7.2), `0x20`/`0x21` group (§8.2). In `h2_partial` (§6.2), `ts_r` enters as the same `u64be`.
 
-`initiator_id` is a non-security hint for R to resolve IK_i_pub from its contact book.
+**`initiator_tag` — who sent msg1, readable only by the pair** (since 2026-10-12):
+
+```
+k_tag         = HMAC-SHA256(announce_key, "encedo-eh2-initiator-tag-v1")
+initiator_tag = HMAC-SHA256(k_tag, IK_i_pub)                          // full 32 bytes
+```
+
+`announce_key` is the pair's Announce MAC key of the day (§5.5), so `k_tag` exists only for the two identities of the pair and changes with every rotation; the label cannot collide with an Announce, whose MAC input starts with a digit (`v|peer|nonce|ts`). R checks the tag **before any DH**: equal to the tag over the contact's IK → proceed; equal to the tag over **its own** IK → a second window of its own identity; anything else → not the contact. Either mismatch is the 5-minute rule of §6.
+
+It replaced `initiator_id = SHA-256(IK_i_pub)[0:8]`, which did the same job and was a **stable identifier in the clear** — the same 8 bytes in every msg1 an identity sent, in every pair and on every day, so a node could link one identity across rooms however the topics rotated. The tag is neither linkable across pairs nor across days. It is not an authenticator — anyone in the pair can compute it, and the MACs of §6.2 still decide. msg1 is 1260 B. `ver` stays 1: before 1.0 every client updates together and no legacy frame is accepted.
 
 ### 6.2 Key schedule
 
@@ -772,7 +781,7 @@ A pin blob cannot be opened as a group-cache blob even by its own author — the
 **Any peer connected to a discovery node** — not merely its operator — learns the node's whole set of active topics, and this is a property of GossipSub rather than of this deployment. A node announces its subscriptions to every peer it is connected to; that is precisely how a node learns what its own clients want (`relay.mjs`, `subscription-change`). A relay carrying rooms therefore publishes their topic ids to anybody who dials it, and dialling is open by construction: clients are peers with ephemeral ids, so there is nobody to admit and nobody to turn away. The observer can then subscribe to those ids and watch each room's activity, sizes and timing — **content stays E2E, and the topic still does not reveal the pair** (topic→pair needs both IK_pubs), but "unguessable" protects only against enumeration by search, and the ids are not obtained by searching. Compared with the MQTT fall-back above, what GossipSub removes is the convenience of one wildcard, not the visibility. Two things bound it: `--local-topics-only` (2026-09-23) means a node carries only its own clients' topics rather than the network's, so an observer sees one node's share instead of everything; and `--max-topics-per-peer` caps how many a single peer may hold at once. Neither is a fix, and the fix — announcing to each peer only the topics it already holds — means a fork of the GossipSub implementation. **This is why the direct plane (§13) exists and why a node keeps as little as it does**: an open relay sees metadata by construction, so the protocol's answer is to carry less of it and to keep none of it per user. What a production node does record, for the auditor: a journal line per message of metadata only (truncated topic, sender prefix, byte count) and per refusal; aggregate per-window counters (messages, bytes, topics, connections, CPU, memory) in Redis for 30 days; Prometheus metrics on loopback; and nginx's access log, with the real client address — the one place it exists. Nothing is indexed by identity or by room, and the full-trace `DUMP` mode exists for debugging on a test node, never in production. Beyond the node, the client talks to the operator for: the file store (§7.5), the feedback form (an explicit send: kind, text, optional contact, language, version/commit/shell and, only when ticked, user agent, window size and the Diagnostics report — the sink keeps no address), the `/health` probe of up to three nodes (a 451 means the operator's geoblock refuses this region, `ARCHITECTURE.md`), and a six-hourly re-fetch of its own `index.html` to notice a new bundle; the desktop updater asks GitHub for `latest.json`.
 
 
-**The client is a light client by default (since 0.6.24): `/onchato/pick/1`.** It opens one stream to its node and names topics instead of joining GossipSub: PICK/DROP a topic (answered PICKED, or REFUSED when the node is full — the first refusal in the system that is said rather than silent), PUSH bytes onto a topic (the node publishes them unchanged into GossipSub and answers ACK with the reach), and DELIVER frames back. GossipSub runs only between nodes; `?light=0` restores the full GossipSub peer. **This changes what the node CARRIES for the client, not what it KNOWS**: a picked topic is recorded per peer exactly as a subscription is. What disappears for the client is mesh upkeep, subscription lists, gossip and per-frame signatures. Since 0.6.22 the sender travels **inside every frame** (the origin envelope, §13), so a relay publishing on a client's behalf (stage 2, `push`) no longer attributes the message to itself — the receiver never reads the transport's word about who published. What the envelope does NOT do is authenticate: `from` is the key under which a receiver files state (which EH-2 session, which handshake, which ratchet), not evidence of who is speaking. It never was — a libp2p PeerId is generated by whoever shows up, and StrictSign only ever proved that the holder of that throwaway key sent the packet. Identity is proven by EH-2 (`initiator_id`, the IK-derived DHs) and message integrity by the ratchet's AEAD and the group MAC; a forged `from` files a frame under the wrong session, where it does not open. Nothing in the client may treat `from` as identity, and the audit question to ask of any new code is exactly that.
+**The client is a light client by default (since 0.6.24): `/onchato/pick/1`.** It opens one stream to its node and names topics instead of joining GossipSub: PICK/DROP a topic (answered PICKED, or REFUSED when the node is full — the first refusal in the system that is said rather than silent), PUSH bytes onto a topic (the node publishes them unchanged into GossipSub and answers ACK with the reach), and DELIVER frames back. GossipSub runs only between nodes; `?light=0` restores the full GossipSub peer. **This changes what the node CARRIES for the client, not what it KNOWS**: a picked topic is recorded per peer exactly as a subscription is. What disappears for the client is mesh upkeep, subscription lists, gossip and per-frame signatures. Since 0.6.22 the sender travels **inside every frame** (the origin envelope, §13), so a relay publishing on a client's behalf (stage 2, `push`) no longer attributes the message to itself — the receiver never reads the transport's word about who published. What the envelope does NOT do is authenticate: `from` is the key under which a receiver files state (which EH-2 session, which handshake, which ratchet), not evidence of who is speaking. It never was — a libp2p PeerId is generated by whoever shows up, and StrictSign only ever proved that the holder of that throwaway key sent the packet. Identity is proven by EH-2 (the IK-derived DHs and the MACs over them; `initiator_tag` only names the sender within the pair) and message integrity by the ratchet's AEAD and the group MAC; a forged `from` files a frame under the wrong session, where it does not open. Nothing in the client may treat `from` as identity, and the audit question to ask of any new code is exactly that.
 
 **Active MITM (libp2p) can:** delay, drop, inject (rejected by MAC), attempt replay (rejected by timestamp/nonce). **Cannot:** decrypt, break the handshake, or impersonate (needs IK_priv in the HSM).
 
@@ -823,6 +832,7 @@ A file may travel **on the DataChannel itself**, as its own frames, with no stor
 |---|---|
 | HKDF labels (pair/self/announce/rotation) | `encedo-chat-rendezvous-v1`, `encedo-chat-announce-mac-v1`, `encedo-chat-rotation-v1` |
 | HKDF labels (handshake/ratchet) | `encedo-handshake-v2`, `encedo-ratchet-dh-v1`, `encedo-msg-key`, `encedo-chain-key`, `encedo-aead-nonce` |
+| EH-2 initiator tag (§6.1) | label `encedo-eh2-initiator-tag-v1` (HMAC under the day's Announce key → `k_tag`); `initiator_tag` = HMAC-SHA256(`k_tag`, IK_i_pub), 32 B; msg1 1260 B |
 | HKDF labels (groups) | `encedo-chat-group-rendezvous-v1`, `encedo-group-msg`, `encedo-group-chain`, `encedo-group-msg-mac`, `encedo-chat-group-roster-mac` |
 | HKDF labels (published invites, §5.7-5.9) | `encedo-chat-invite-knock-v1`, `encedo-chat-invite-decoy-v1`, `encedo-chat-invite-decoy-slot-v1` |
 | Knock frame | **348 B always** — `eph_pub` 32 + ct 300 + tag 16; plaintext `kind` 1 + `ik` 32 + `nameLen` 1 + `name` 64 + `noteLen` 2 + `note` 200 |
@@ -1020,8 +1030,8 @@ sequenceDiagram
     participant HR as HSM (R)
 
     I->>I: gen EK_i, (sk_i, pk_i) = ML-KEM-768.keygen()
-    I->>R: msg1 {ek_i_pub, pq_pub, ts_i, initiator_id}
-    R->>R: check |ts_i - now| < 5 min, resolve IK_i_pub from contacts
+    I->>R: msg1 {ek_i_pub, pq_pub, ts_i, initiator_tag}
+    R->>R: check |ts_i - now| < 5 min, check initiator_tag against the room's contact
     R->>R: gen EK_r, (ct, ss) = encap(pk_i)
     R->>HR: ecdh(IK_r, EK_i_pub)
     HR-->>R: dh1
