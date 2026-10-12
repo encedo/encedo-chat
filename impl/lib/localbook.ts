@@ -6,12 +6,25 @@
  * two implementations: a profile carried between the browser and the terminal
  * has to open with the same contacts and the same verdict on its signature.
  *
- *   ec-local-contacts-<idKey>   the book, packed with its MAC (lib/bookmac.ts)
- *   ec-gcache-emp-<idKey>       the public half of the §10 cache secret's emp key
+ *   ec-local-contacts-<idKey>          the book, packed with its MAC (lib/bookmac.ts)
+ *   ec-local-contacts-<idKey>-signed   '1' once a signed book has ever been written
+ *   ec-gcache-emp-<idKey>              the public half of the §10 cache secret's emp key
  *
  * The verdicts, unchanged from the app: 'ok' and 'unsigned' work (an
  * unsigned book is upgraded on the next write); 'tampered' is evidence and is
  * never written over - the caller shows an empty book that refuses edits.
+ *
+ * ## Why the marker exists (audit 2026-10-12)
+ *
+ * `unsigned` is accepted so that a book from before the MAC existed is not
+ * refused. Without a memory of having signed, that tolerance was the hole: the
+ * attack §4.4 names - something that can write localStorage swaps a `pub` -
+ * did not need to forge a MAC at all, it could put a bare array back and be
+ * accepted as "pre-MAC", then re-signed. So once this identity has written a
+ * signed book, a bare array is `tampered`, not `unsigned`. The marker is set
+ * only AFTER the packed, signed text has landed, and the unsigned text is
+ * never written first any more, so no crash can leave "marker + bare array"
+ * behind an honest write.
  */
 
 import { localContactBook, type ContactBook, type Identity } from './core.ts'
@@ -38,24 +51,34 @@ export async function openLocalBook(
   idKey: string, kv: KV, base: Uint8Array | null, log?: (m: string) => void,
 ): Promise<{ book: ContactBook; verdict: Verdict }> {
   const lsKey = 'ec-local-contacts-' + idKey
+  const signedKey = lsKey + '-signed'
   if (!base) {
     log?.('contact book: no ECDH base, running unsigned')
     const readRaw = () => { try { return JSON.parse(kv.get(lsKey) || '[]') } catch { return [] } }
     return { book: localContactBook(readRaw, (l) => kv.set(lsKey, JSON.stringify(l))), verdict: 'unsigned' }
   }
-  const { verdict, body } = await checkBook(base, idKey, kv.get(lsKey))
+  const checked = await checkBook(base, idKey, kv.get(lsKey))
+  const body = checked.body
+  let verdict: Verdict = checked.verdict
+  // A bare array where a signed book has been before is not "pre-MAC", it is
+  // the signed book taken away - exactly what swapping a key and dropping the
+  // MAC looks like. A signed book that predates the marker sets it now.
+  if (verdict === 'unsigned' && kv.get(signedKey) === '1') { verdict = 'tampered'; log?.('contact book: unsigned where a signed one was written before - treating as tampered') }
+  if (verdict === 'ok' && kv.get(signedKey) !== '1') kv.set(signedKey, '1')
   let list: Array<{ name: string; pub: string }> = []
   if (verdict !== 'tampered') { try { list = JSON.parse(body) } catch { list = [] } }
   const save = (l: Array<{ name: string; pub: string }>) => {
     if (verdict === 'tampered') throw new Error('contact book failed its signature - refusing to write over it')
     list = l
     const text = JSON.stringify(l)
-    // The text goes down first and the signature follows: a failure to SIGN
-    // must not lose the write (localContactBook's save is synchronous).
-    kv.set(lsKey, text)
+    // Signed text only ever reaches storage (localContactBook's save is
+    // synchronous; reads come from `list` meanwhile). Writing the plain text
+    // first and signing after would let a crash in between leave a bare array
+    // beside the marker - an honest write read as tampering. A failure to sign
+    // is logged and the write is retried by the next one.
     void signBook(base, idKey, text)
-      .then((mac) => kv.set(lsKey, pack(text, mac)))
-      .catch((e) => log?.('contact book: signing failed - ' + (e?.message ?? e)))
+      .then((mac) => { kv.set(lsKey, pack(text, mac)); kv.set(signedKey, '1') })
+      .catch((e) => log?.('contact book: signing failed - the change stays in memory - ' + (e?.message ?? e)))
   }
   return { book: localContactBook(() => list, save), verdict }
 }
