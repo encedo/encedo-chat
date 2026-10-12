@@ -402,3 +402,9 @@ export async function diagAppend(text: string): Promise<void> {
   if (!text || !diagFileAvailable()) return
   try { await invoke<void>('desk_diag_append', { text }) } catch {}
 }
+
+/** Remove the diary and its rotated half: part of a wipeout (PROTOCOL.md 10). */
+export async function diagWipe(): Promise<void> {
+  if (!diagFileAvailable()) return
+  try { await invoke<void>('desk_diag_wipe') } catch {}
+}

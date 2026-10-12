@@ -43,7 +43,7 @@ import {
   closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable, isMobileShell,
   appimageStatus, appimageInstall, showWindow, openExternal,
   nativeScanAvailable, nativeScan, nativeScanCancel, nativeScanZoom, nativeScanSetZoom,
-  diagFileAvailable, diagPath, diagAppend, hostSaveRoute,
+  diagFileAvailable, diagPath, diagAppend, diagWipe, hostSaveRoute,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { safetyNumber, safetyGroups, safetyQr, parseSafetyQr } from '../../lib/safety.ts'
@@ -520,6 +520,7 @@ const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talk
  */
 declare const __EC_ALLOW_KEYS__: boolean
 declare const __EC_NETWORK__: string
+declare const __EC_DIARY__: boolean
 declare const __EC_VERSION__: string
 declare const __EC_COMMIT__: string
 
@@ -2408,7 +2409,7 @@ const openDrawer = () => { $('scrim').classList.add('open'); $('drawer').classLi
  * is a question for the host, and asking it costs nothing once a drawer opens.
  */
 async function paintDiagSetting() {
-  const path = await diagPath()
+  const path = __EC_DIARY__ ? await diagPath() : ''
   for (const id of ['log-section', 'log-hint', 'btn-log-copy']) $(id).hidden = false
   const p = $('log-path')
   p.hidden = !path
@@ -4100,6 +4101,8 @@ $('btn-wipeout').addEventListener('click', async () => {
   try { for (const r of rooms.values()) r.conv?.leave() } catch {}
   try { client?.close() } catch {}
   for (const k of Object.keys(localStorage)) { if (k.startsWith('ec-')) localStorage.removeItem(k) }
+  // The desktop's diary on disk goes with the rest: it names contacts by key prefix.
+  await diagWipe()
   location.reload()
 })
 
@@ -5359,7 +5362,7 @@ const DIAG_TICK_MS = 15_000
 const DIAG_SUMMARY_MS = 5 * 60_000
 const DIAG_FLUSH_MS = 60_000
 
-const diagFlush = () => { const lines = diag.take(); if (lines.length) void diagAppend(lines.join('\n') + '\n') }
+const diagFlush = () => { const lines = diag.take(); if (lines.length && __EC_DIARY__) void diagAppend(lines.join('\n') + '\n') }
 
 function startDiag() {
   diag.note(`start ${BUILD_ID} ${isMobileShell() ? 'mobile' : isDesktopShell() ? 'desktop' : 'browser'}`)

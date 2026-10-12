@@ -642,6 +642,43 @@ mod desk {
         diag_append(&app, &text)
     }
 
+    /// A wipeout takes the diary with it (PROTOCOL.md 10): the file names
+    /// contacts by key prefix beside a clock, and "every ec-* key" would be a
+    /// half-truth on a desktop if this stayed.
+    #[tauri::command]
+    fn desk_diag_wipe(app: AppHandle) -> Result<(), String> {
+        diag_wipe_at(&diag_file(&app)?)
+    }
+
+    fn diag_wipe_at(path: &std::path::Path) -> Result<(), String> {
+        for p in [path.to_path_buf(), path.with_extension("log.1")] {
+            match std::fs::remove_file(&p) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.to_string()),
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    mod diag_wipe_tests {
+        use super::diag_wipe_at;
+        #[test]
+        fn wipe_removes_both_halves_and_tolerates_absence() {
+            let dir = std::env::temp_dir().join(format!("onchato-diag-test-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let log = dir.join("connection.log");
+            std::fs::write(&log, "peer abc lit\n").unwrap();
+            std::fs::write(log.with_extension("log.1"), "older\n").unwrap();
+            diag_wipe_at(&log).unwrap();
+            assert!(!log.exists());
+            assert!(!log.with_extension("log.1").exists());
+            diag_wipe_at(&log).unwrap(); // nothing there: still Ok
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
     fn diag_append(app: &AppHandle, text: &str) -> Result<(), String> {
         use std::io::Write;
         const CAP: u64 = 512 * 1024;
@@ -1098,6 +1135,7 @@ mod desk {
                 desk_platform,
                 desk_diag_path,
                 desk_diag_append,
+                desk_diag_wipe,
                 desk_show,
                 desk_open_url,
                 desk_update_kind,

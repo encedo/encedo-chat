@@ -200,7 +200,7 @@ Running your own network is not merely tolerated — it is **encouraged**. Today
 ### Build & release pipeline
 
 - **What runs:** `desktop.yml` (tags + manual dispatch) builds linux-amd64/arm64, macOS, Windows, Windows-arm64 via `tauri-action` into a **draft release** — the draft is the deliberate publish gate for the updater's `latest.json`. `android.yml` builds and **signs** the APK (keystore from repository secrets; missing secrets fail the job by name) and an unsigned `.aab` for Play App Signing. `ci.yml` runs the test suite and the group scenarios of the two-browser harness, against the live bs1 node.
-- The web host self-deploys on a pushed tag (`infra/deploy-on-tag.sh` + systemd timer — pull model, no production credential in any runner). The deploy builds with the development switches in (`PROTOCOL.md` §12: `?debug`, `?keys`); a release build sets `EC_ALLOW_KEYS=0`.
+- The web host self-deploys on a pushed tag (`infra/deploy-on-tag.sh` + systemd timer — pull model, no production credential in any runner). The deploy builds with the development switches in (`PROTOCOL.md` §12: `?debug`, `?keys`); a release build sets `EC_ALLOW_KEYS=0`. Two more build-time switches: `EC_NETWORK` (the network id) and `EC_DIARY=0` (no connection diary on disk, `PROTOCOL.md` §10).
 - The pipeline later grows reproducible-build verification and an iOS job.
 
 ## Modularity & UI

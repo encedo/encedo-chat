@@ -94,6 +94,12 @@ module.exports = (_env, argv) => {
         // self-hosted network is a build with its own id and node list; the
         // installed app has no flag for it, by design.
         __EC_NETWORK__: JSON.stringify(process.env.EC_NETWORK || 'main'),
+        // The desktop's connection diary on disk (PROTOCOL.md 10). On by
+        // default - it is the one witness to "no dot in the morning" - and a
+        // deployment that wants no plain record of contact presence on disk
+        // builds with EC_DIARY=0: the writes are compiled out, the in-memory
+        // ring and the copy button stay.
+        __EC_DIARY__: JSON.stringify(process.env.EC_DIARY !== '0'),
         __EC_VERSION__: JSON.stringify(VERSION),
         __EC_COMMIT__: JSON.stringify(COMMIT),
       }),
