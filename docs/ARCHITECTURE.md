@@ -10,6 +10,19 @@ Status: **design of record for a shipping product** (onchato 0.7.x: web at `app.
 | this file | Product & infrastructure layer: goals, network roles, node operations, transport modes, distribution, modularity/UI, threat-profile presets |
 | `THREAT-MODELS.md` | Deployment profiles P1–P3 mapped onto the protocol's threat model (`PROTOCOL.md` §2.2, §11.3 S1–S14) |
 
+## What is promised, what is measured, what is roadmap
+
+| Claim | Shipped and measured | Roadmap |
+|---|---|---|
+| HSM-anchored identity | the IK never leaves the HEM; every new session, topic and Announce needs a device call; a stolen unlocked client lives at most one lifetime (4–8 h) | HKDF inside the HSM (closes S13); enrollment by attestation |
+| PQ confidentiality | EH-2 is X25519 + ML-KEM-768; TLS to the HEM is X25519MLKEM768; recorded traffic needs both broken | — |
+| PQ post-compromise security | none inside a session: the ratchet is X25519, the window is one lifetime (S10) | hybrid ratchet (ML-KEM in the DH step) |
+| Hardened tier | none: keys and ratchet state live in the webview on every platform (S1, S5) | Rust core, WASM first, then native |
+| Relay-blind plane | none: the node sees every client's address; direct is peer-to-peer and opt-in | circuit-relay-v2 streams, blocked on libp2p v3 |
+| Offline root key | none: three CI-held keys and a content-addressed node list | signed release manifest under an offline key |
+| Reproducible chain | the bundle is reproducible (measured, `scripts/release-cid.mjs`) | tag → source CID → binary, verified in CI per release |
+| Enrollment | out-of-band: QR, link, safety number; published invites | attestation-gated enrollment into a tenant directory |
+
 ## Product definition
 
 Instant-only P2P chat — the IRC / "meet in the park" model:
@@ -21,7 +34,7 @@ Instant-only P2P chat — the IRC / "meet in the park" model:
 
 1. **Resilient to infrastructure failure** — any single discovery node is sufficient; anyone can run their own network.
 2. **Resistant to takedown** — multi-jurisdiction nodes, signed distribution over multiple channels, installed app independent of any domain.
-3. **Network-level privacy** — honest scope: pseudonymity with rotating identifiers by default; node-only transport for IP privacy from the peer (shipped as the default setting), and a relay-blind plane for IP privacy from the node (parked). Full anonymity against a global observer (mixnet-class) is explicitly out of scope.
+3. **Pseudonymity, and zero content or history at the node** — honest scope: rotating identifiers by default, so the node cannot name anyone; node-only transport for IP privacy from the peer (shipped as the default setting); a relay-blind plane for IP privacy from the node (parked). What the node does see, stated plainly: a conversation as a pair of connections holding one topic, how many topics each connection holds, and the rhythm of its Announces (`PROTOCOL.md` §12). Full anonymity against a global observer (mixnet-class) is explicitly out of scope.
 4. **E2E security** — content readable only by endpoints; long-term keys in HSM (Encedo HEM).
 
 Positioning: dual-use secure messenger (private, commercial, military / critical-infrastructure deployments). Threat profiles in `THREAT-MODELS.md` map to configuration presets of one product.
