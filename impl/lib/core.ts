@@ -14,6 +14,7 @@
 
 import { topicFromSecret, announceMacKey, todayUTC, paramsInfo, rotationCtx, topicFromMaterial, announceKeyFromMaterial, offsetFromMaterial, RV_LABEL, ANNOUNCE_LABEL, ROTATION_LABEL, type RvParams } from './rendezvous.ts'
 import { deriveWith, deriveOverEcdh, type Derive } from './derive.ts'
+import { startDecoys, decoyCount, type Decoys } from './decoy.ts'
 import { nowMs } from './time.ts'
 import { joinChat, type RoomKeys, type ChatOpts, type Eh2Options } from './room.ts'
 import type { SkdFields, FileMeta } from './envelope.ts'
@@ -741,6 +742,8 @@ export interface SessionOpts {
    * system that is said rather than silent). GossipSub never reports this.
    */
   onRefused?: (topic: string) => void
+  /** Decoy subscriptions (SPEC.md 5.10, lib/decoy.ts): on unless false. */
+  decoys?: boolean
   /** Test seam: the transport node this session runs on, e.g. to break it on purpose. */
   onTransport?: (node: any) => void
   /** Test seam: the presence watches' heartbeat (default 15 s; a hidden tab or phone stretches it to 60 s). */
@@ -843,6 +846,13 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // reports it, and the app shows which node is live.
   // `let`, not `const`: the node editor can replace this on a live session
   // (`setRelays`). Every dial reads it fresh, so a change lands on the next sweep.
+  // A refused topic: a refused DECOY just goes; a refused REAL topic means the
+  // node is full, and cover traffic must not keep a slot a room needs.
+  const refused = (t: string) => {
+    if (decoys?.isDecoy(t)) { log(`node refused a decoy topic - dropping decoys`) }
+    else opts.onRefused?.(t)
+    decoys?.yieldAll('the node refused a topic')
+  }
   let candidates = (opts.relays?.length ? opts.relays : [opts.relay]).filter(Boolean)
   if (candidates.length === 0) throw new Error('startSession: no relay to dial')
   let activeRelay = candidates[0]
@@ -850,7 +860,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // pubsub surface is pick/push instead of GossipSub (net/light.ts).
   const node: any = opts.transport === 'light'
       ? await createLightPeer({
-        onLog: opts.onLog, onRefused: opts.onRefused,
+        onLog: opts.onLog, onRefused: (t: string) => refused(t),
         // A stream that ended on a live connection: re-open it, a moment later
         // so an attach already under way can finish first.
         onPickClosed: () => {
@@ -1151,10 +1161,12 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       presence.set(peer.pub, { peer, watch })
     } catch (e: any) { log(`presence watch for ${peer.pub.slice(0, 12)}... failed: ${e?.message ?? e}`) }
   }
-  const stopWatch = (pub: string) => { presence.get(pub)?.watch.stop(); presence.delete(pub); upgradeDate.delete(pub) }
+  const stopWatch = (pub: string) => { presence.get(pub)?.watch.stop(); presence.delete(pub); upgradeDate.delete(pub); void decoys?.resize(decoyCount(presence.size)) }
 
   // The §9.1 rotating watch (declared here — shutdown stops it).
   let selfWatch: SelfWatch | null = null
+  // Decoy subscriptions (SPEC.md 5.10); started with the contact watches.
+  let decoys: Decoys | null = null
 
   const shutdown = async (why: string) => {
     if (closed) return
@@ -1166,6 +1178,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     for (const w of presence.values()) { try { w.watch.stop() } catch {} }
     presence.clear(); upgradeDate.clear()
     selfWatch?.stop()
+    decoys?.stop()
     clearInterval(linkWatch)
     clearInterval(realignTimer)
     for (const r of rooms) { try { r.sendPresence('leave') } catch {} }
@@ -1287,6 +1300,14 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     async watchContacts(contacts: Peer[], handlers) {
       presenceHandlers = handlers
       for (const c of contacts) await startWatch(c)
+      // Decoys last, so the real watches had their slots first (lib/decoy.ts).
+      if (opts.decoys !== false) {
+        decoys ??= startDecoys(node, self, {
+          deriveSelf: (label, ctx, len) => deriveWith(id, label, id.pub, ctx, len),
+          params, heartbeatMs: opts.presenceHeartbeatMs, onLog: opts.onLog,
+        })
+        void decoys.resize(decoyCount(presence.size))
+      }
     },
     unwatch(pub: string) { stopWatch(pub) },
     setRelays(list: string[]) {

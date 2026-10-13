@@ -263,7 +263,7 @@ Two problems on different horizons: PQ confidentiality (needed now, against harv
   5. `hem_usage.md` is re-measured: topic and Announce key become one device call each per contact per day (a batch form of the SDK call, one ECDH with a list of `(ctx, label, L)`, would keep it at one), and a group rekey one call per member per epoch.
   What stays raw by decision: the one DH with `IK` inside EH-2 (four components under one HKDF), the knock key (a DH with a stranger's one-shot ephemeral, one per received frame on a public topic), and the §10 cache base.
 - **Hardened tier** — stage 1 is built: `core-rs` (EH-2, the ratchet and the hybrid step in Rust, built to WASM, the same frames and the same known-answer vectors as the TypeScript engine; the default engine; `?core=ts`, `--core ts` select the TypeScript one). What it buys: ephemeral keys and ratchet state out of the JS heap and zeroed deterministically, a smaller and typed surface for review. What it does not buy: a boundary against a fully compromised page — WASM memory is a JS object of the same realm. Stage 2 (the same crate native in the Tauri host, the webview holding only ciphertext and results) is the boundary that narrows S1 and S5; stage 3 puts the transport behind a trait. The WASM engine is the default since 0.7.21.
-- **Decoy subscriptions** on the node path would narrow what section 9 describes; for a self-hosted deployment, own nodes are trusted (`THREAT-MODELS.md`).
+- **Decoy subscriptions — done (§5.10).** A client holds up to 8 topics shaped like the pair topics of offline contacts, raising the floor under the contact-list count a node reads and blurring which topics are real. Seeded from the self-DH so the set is stable and identity-bound, MAC'd under a random key so nothing answers them, dropped wholesale the moment the node refuses any topic (a real room must never lose its slot to cover traffic). It narrows what section 9 describes without hiding anything the node needs; for a self-hosted deployment, own nodes are trusted (`THREAT-MODELS.md`).
 
 ---
 
@@ -279,7 +279,7 @@ impl/
 ├── lib/        wc.ts (WebCrypto, kdf, aeadNonce) · rendezvous · announce · origin (§13 envelope) · presence
 │               · room (delivery contract, EH-2 seam) · envelope · session (crypto seam) · core (facade) · x25519 (the Dh capability)
 │               · senderkey/group/grouproom/gmarker (§8) · gcache/pincache/bookmac/localbook/localstore/sealedstore/seen/gleft/prefs (§10)
-│               · inbox/knock/invite (§5.7–5.9) · safety (§4.4.1) · descr (§4.2) · clock (§5.4 anchor) · manifest (§5.6)
+│               · inbox/knock/invite (§5.7–5.9) · decoy (§5.10) · safety (§4.4.1) · descr (§4.2) · clock (§5.4 anchor) · manifest (§5.6)
 │               · filecrypto/fileenvelope/cid (§7.5) · xfer/xfer-session (§13.1) · msgsize (§7.4) · migrate · profile/passmeter (§4.5)
 │               · selfsession (§9.1) · quote/edits/mentions/linkify (§7.4) · ice (§13 STUN) · nodelist/nodepick (§5.6) · radiophase (§5.5)
 ├── net/        onchato/peer (libp2p) · light (`/onchato/pick/1`) · webrtc, webrtc-plane, webrtc-tauri (§13) · ipfs, file-decrypt (§7.5)

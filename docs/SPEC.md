@@ -300,6 +300,21 @@ instant = slot * 45_000 + (u32be(HKDF-SHA256(seed,
 
 What an observer of an inbox topic learns: that a 348-byte frame was published, and when (§11.3, S14).
 
+### 5.10 Decoy subscriptions
+
+Per connection a node sees how many topics it carries - the size of the contact list - and which of them hop together (§11.4). A client holds **up to 8** extra topics, `min(contacts, 8)`, indistinguishable from the pair topics of contacts who are offline: the same 52-character base32 shape, the same Announce cadence (§5.5: the beacons, the 15 s heartbeat on the session's radio phase, the hidden-tab slowdown), each rotating daily at its own per-topic instant under the §5.4 guard. They raise the floor under the contact-list count and blur which topics are a client's real pairs.
+
+```
+seed      = HKDF-SHA256(ikm = ECDH(IK_priv, IK_pub), salt = network_id ‖ 0x00, info = "encedo-chat-decoy-v1",        L = 32)
+offset_i  = u32be(HKDF-SHA256(seed, salt = u8(i), info = "encedo-chat-decoy-offset-v1", L = 4)) mod 86400
+topic_i   = base32(HKDF-SHA256(seed, salt = u8(i) ‖ network_id ‖ 0x00 ‖ date_UTC, info = "encedo-chat-decoy-topic-v1", L = 32))[0:52]
+```
+
+- The Announces carry a MAC under a **random per-session key** nobody else holds, so no peer ever verifies one and no peer ever answers - which is exactly how a pair topic reads when its contact is away. A decoy therefore invites no traffic and completes no handshake.
+- The seed is the §5.2 self-DH (`ECDH(IK, IK_pub)`, computable only by the identity holder) and **date-independent**, so the set is stable across a restart. A decoy set that changed on every reload while the real topics stayed would mark itself as the decoys.
+- **Decoys yield.** The node refusing any topic means it is full (§13.2 `REFUSED`), and cover traffic must never cost a real room its slot: a refusal drops every decoy for the rest of the session. The per-peer topic quota (§5.6) already covers the 8, since a client holds about 4 real topics; the node-wide cap is the lever the operator sizes against the decoys (`ARCHITECTURE.md`).
+- Off is possible per client (the engine's `decoys` option); on by default in the shipped clients.
+
 ---
 
 ## 6. Handshake — EH-2
@@ -662,7 +677,7 @@ Numbers are stable identifiers; the retired ones are listed in `RATIONALE.md`.
 
 **A passive observer** sees libp2p packets with ephemeral PeerIds, pseudorandom 52-character topic names, MAC'd Announces, DTLS DataChannels and Noise-wrapped relayed ciphertext, and TLS to the HSM. It does not see identities (`IK_pub` is off the wire except inside MACs verifiable only by the pair), which identities a connection or topic belongs to, or content.
 
-**A discovery node**, and **any peer that dials one** (GossipSub announces a node's subscriptions to every connected peer; `--local-topics-only` limits that to the node's own clients' topics), sees which topics are active and their frame sizes and timing. The node sees a conversation as a pair of connections holding one topic, renewed daily on the next day's topic; per connection, how many topics it holds (the size of the contact list) and the rhythm of its Announces; on the direct plane, that a pair is negotiating (`rtc` is sealed, so not the addresses). The node cannot name anyone. What a node records is operational (`ARCHITECTURE.md`): a line per refusal, per topic joined or evicted with the full topic id, per connection with a truncated PeerId; aggregate counters; the real client address in the reverse proxy's log.
+**A discovery node**, and **any peer that dials one** (GossipSub announces a node's subscriptions to every connected peer; `--local-topics-only` limits that to the node's own clients' topics), sees which topics are active and their frame sizes and timing. The node sees a conversation as a pair of connections holding one topic, renewed daily on the next day's topic; per connection, how many topics it holds (the size of the contact list) - raised and blurred by the decoy subscriptions of §5.10 - and the rhythm of its Announces; on the direct plane, that a pair is negotiating (`rtc` is sealed, so not the addresses). The node cannot name anyone. What a node records is operational (`ARCHITECTURE.md`): a line per refusal, per topic joined or evicted with the full topic id, per connection with a truncated PeerId; aggregate counters; the real client address in the reverse proxy's log.
 
 **The STUN server** (the nodes themselves, §13) sees a client's address and negotiation timing on every direct attempt; direct is opt-in. **The file store** sees S11. **The operator** is also reached for the `/health` probe of up to three nodes, a re-fetch of `index.html` to notice a new bundle, the signed release manifest, and an explicit feedback form that keeps no address.
 
@@ -745,6 +760,8 @@ node → client   0x11 DELIVER  u8 len ‖ from ‖ u8 len ‖ topic ‖ data
 | HKDF labels (handshake, ratchet) | `encedo-handshake-v2`, `encedo-ratchet-dh-v1`, `encedo-ratchet-hybrid-v1`, `encedo-msg-key`, `encedo-chain-key`, `encedo-aead-nonce` |
 | HKDF labels (groups) | `encedo-chat-group-rendezvous-v1`, `encedo-group-msg`, `encedo-group-chain`, `encedo-group-msg-mac`, `encedo-chat-group-roster-mac` |
 | HKDF labels (published invites) | `encedo-chat-invite-knock-v1`, `encedo-chat-invite-decoy-v1`, `encedo-chat-invite-decoy-slot-v1` |
+| HKDF labels (decoy subscriptions, §5.10) | `encedo-chat-decoy-v1`, `encedo-chat-decoy-offset-v1`, `encedo-chat-decoy-topic-v1` |
+| Decoy subscriptions (§5.10) | `min(contacts, 8)`; random per-session MAC key; drop all on any refusal |
 | HKDF labels (local stores, §10) | `encedo-chat-group-cache-v1`, `encedo-chat-pin-cache-v1`, `encedo-chat-contact-book-v1`, `encedo-chat-invites-v1`, `encedo-chat-waiting-v1`, `encedo-chat-ignored-v1`, `encedo-chat-seen-v1`, `encedo-chat-group-left-v1`, `encedo-chat-prefs-v1`, `encedo-chat-outbox-v1` |
 | EH-2 initiator tag (§6.1) | label `encedo-eh2-initiator-tag-v1` under the day's Announce key → `k_tag`; `initiator_tag = HMAC-SHA256(k_tag, IK_i_pub)`, 32 B; msg1 1260 B |
 | Hybrid ratchet cadence (§7.2) | a key every K = 4 own DH steps or T = 30 min; `pq_pub` 1184 B on every frame until answered; `pq_ct` 1088 B on every frame of the answering chain |
