@@ -184,6 +184,8 @@ jobs:
       - run: npm ci
         working-directory: impl
       - name: Build, and record the CID
+        # A container job's default shell is sh, which has no pipefail (v0.7.17 failed on it).
+        shell: bash
         run: |
           set -euo pipefail
           test -z "$(git status --porcelain)" || { git status --porcelain; echo "dirty tree"; exit 1; }
