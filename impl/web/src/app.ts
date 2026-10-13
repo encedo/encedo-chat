@@ -676,6 +676,7 @@ function startHemPoll() {
   stopHemPoll()
   const tick = async () => {
     if ($('login').hidden) return stopHemPoll() // signed in — nothing to watch
+    if ($('hem-sec').hidden) return stopHemPoll() // not on the HEM form — do not probe my.ence.do
     const ok = await refreshStatus({ quiet: true })
     if ($('login').hidden) return stopHemPoll()
     // Green ends the watch: the badge is what unlocks Sign in, and from here the
@@ -691,7 +692,9 @@ $('hsm').addEventListener('blur', () => startHemPoll())
 // there with the button dead and nothing to click.
 let hsmProbeT: any
 $('hsm').addEventListener('input', () => { clearTimeout(hsmProbeT); hsmProbeT = setTimeout(startHemPoll, 600) })
-startHemPoll()
+// No probe at module load: the HEM form is hidden until the user chooses HEM
+// (showHemForm starts the poll), so a software-profile screen never touches the
+// HEM. Probing my.ence.do from the profile chooser was the reported bug.
 
 // ---- login / register ----
 $('toggle').addEventListener('click', () => {
@@ -1001,6 +1004,7 @@ function showHemForm() {
   // one thing to do.
   $('login-links').hidden = true
   $('hsm').focus()
+  startHemPoll() // probe the HEM only now that its form is on screen
 }
 $('go-hem')?.addEventListener('click', showHemForm)
 $('go-hem-empty')?.addEventListener('click', showHemForm)
@@ -1258,6 +1262,12 @@ function nodeRowsHTML(list: NodeEntry[]): string {
  * `ipfs add --cid-version=1 --raw-leaves --pin`.
  */
 /** Where the operator serves the signed release manifest (lib/manifest.ts); the root key is compiled in. */
+// SITE_ORIGIN must be declared BEFORE this line: babel's transform-block-scoping
+// turns const into var, which removes the temporal-dead-zone throw, so using it
+// before its `const` lower down yielded `undefined/release/manifest.json` (every
+// manifest fetch 302'd to the app and failed the signature check - web node-list
+// refresh was broken from 0.7.13 until this was found, 2026-10-13).
+const SITE_ORIGIN = 'https://onchato.com'
 const MANIFEST_URL = `${SITE_ORIGIN}/release/manifest.json`
 
 /**
@@ -2585,7 +2595,6 @@ const CANONICAL_PATH = '/'
  * store, whose path gateway serves what strangers upload. Packaged builds have
  * always talked to the store across origins; the web app now does the same.
  */
-const SITE_ORIGIN = 'https://onchato.com'
 /** Where the app lived until 0.7.0. Links already handed out still say this
  *  (and builds not yet updated go on saying it); nginx redirects it to the app
  *  and the fragment rides along, so it is still OUR invite. */
@@ -9675,4 +9684,6 @@ function startRotation() {
   tick(); rotTimer = setInterval(tick, 1000)
 }
 
-refreshStatus()
+// refreshStatus runs from the HEM poll, which starts only when the HEM form is
+// shown (showHemForm) - not at module load, or the profile chooser would probe
+// my.ence.do.
