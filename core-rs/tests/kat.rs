@@ -117,3 +117,62 @@ fn the_responder_refuses_a_wrong_tag_and_a_wrong_mac() {
     assert_eq!(init.complete(&msg2, &fill(0x00), now).err(), Some(HandshakeError::MacR), "a wrong IK DH on I shows as mac_r failing");
     assert_eq!(resp.finish(&[0x03, 3, 0, 0]).err().map(|e| matches!(e, HandshakeError::Wire(_))), Some(true));
 }
+
+
+#[test]
+fn group_senderkey_matches_the_vector() {
+    use encedo_core::senderkey::{SendChain, SenderReceiver};
+    let v = kat("group-senderkey");
+    let key0: [u8; 32] = unhex(v["chain_key"].as_str().unwrap()).try_into().unwrap();
+    let header = unhex(v["header_aad"].as_str().unwrap());
+    let pt = v["plaintext"].as_str().unwrap().as_bytes();
+    let mut chain = SendChain::from_key(key0);
+    let (n, ct) = chain.seal(&header, pt);
+    assert_eq!(n as u64, v["ctr"].as_u64().unwrap());
+    assert_eq!(hex(&ct), v["ct"].as_str().unwrap(), "the recorded group frame ciphertext");
+    // and a fresh receiver on the same key opens it
+    let mut r = SenderReceiver::new(key0);
+    assert_eq!(r.open(0, 0, &header, &ct).unwrap().unwrap(), pt);
+    // a replay of the spent counter opens nothing
+    assert_eq!(r.open(0, 0, &header, &ct).unwrap(), None);
+}
+
+#[test]
+fn group_receiver_walks_out_of_order_and_refuses_a_jump() {
+    use encedo_core::senderkey::{SendChain, SenderReceiver, SenderKeyError};
+    let key0 = [0x33u8; 32];
+    let header = [0xaa, 0xbb];
+    let mut send = SendChain::from_key(key0);
+    let frames: Vec<(u32, Vec<u8>)> = (0..5).map(|i| send.seal(&header, format!("m{i}").as_bytes())).collect();
+    let mut r = SenderReceiver::new(key0);
+    // deliver 2, then 0, 1 (skipped keys held), then 4, then 3
+    assert_eq!(r.open(0, 2, &header, &frames[2].1).unwrap().unwrap(), b"m2");
+    assert_eq!(r.open(0, 0, &header, &frames[0].1).unwrap().unwrap(), b"m0");
+    assert_eq!(r.open(0, 1, &header, &frames[1].1).unwrap().unwrap(), b"m1");
+    assert_eq!(r.open(0, 4, &header, &frames[4].1).unwrap().unwrap(), b"m4");
+    assert_eq!(r.open(0, 3, &header, &frames[3].1).unwrap().unwrap(), b"m3");
+    assert_eq!(r.open(0, 2, &header, &frames[2].1).unwrap(), None, "a spent key is a replay");
+    // a forged frame at a fresh counter burns nothing
+    let mut r2 = SenderReceiver::new(key0);
+    let mut bad = frames[0].1.clone(); let last = bad.len() - 1; bad[last] ^= 1;
+    assert_eq!(r2.open(0, 0, &header, &bad).unwrap(), None);
+    assert_eq!(r2.open(0, 0, &header, &frames[0].1).unwrap().unwrap(), b"m0", "the chain was untouched");
+    // a jump past the bound is refused
+    let mut r3 = SenderReceiver::new(key0).with_bounds(10, 1_000);
+    assert_eq!(r3.open(0, 11, &header, &frames[0].1).unwrap_err(), SenderKeyError::SkipBound(11));
+}
+
+#[test]
+fn the_per_recipient_mac_is_insider_unforgeable() {
+    use encedo_core::senderkey::{tag, verify};
+    // mk_ij is the caller's pairwise key; a third party with a different one cannot forge.
+    let mk_ab = [0x11u8; 32];
+    let mk_ac = [0x22u8; 32];
+    let header = [1, 2, 3];
+    let ct = [4, 5, 6, 7];
+    let t = tag(&mk_ab, &header, &ct);
+    assert!(verify(&mk_ab, &header, &ct, &t));
+    assert!(!verify(&mk_ac, &header, &ct, &t), "another member's key does not verify A's MAC");
+    let mut bad = t; bad[0] ^= 1;
+    assert!(!verify(&mk_ab, &header, &ct, &bad));
+}

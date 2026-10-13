@@ -11,5 +11,6 @@ pub mod kem;
 pub mod wire;
 pub mod handshake;
 pub mod ratchet;
+pub mod senderkey;
 #[cfg(target_arch = "wasm32")]
 pub mod ffi;
