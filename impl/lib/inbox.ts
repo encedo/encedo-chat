@@ -15,6 +15,12 @@
  *
  * - **Hostile input is ordinary.** `openKnock` returns null rather than
  *   throwing, and everything that fails to open is dropped without a word.
+ * - **A frame costs the identity backend nothing.** Knocks are sealed to a
+ *   per-invite key (`inviteKey`), derived once per invite per session from the
+ *   identity and then held in memory; opening one is a local X25519. Sealing to
+ *   the identity key instead made each frame a HEM call that anybody with the
+ *   link could buy, before any limit below could see it (SPEC.md 5.8). Opening
+ *   is still capped per minute, so a flood costs a bounded amount of CPU.
  * - **Repeats and floods are ordinary.** A frame is surfaced once, and only so
  *   many per minute reach the caller; past that they are counted and dropped,
  *   because the thing an unwanted contact would try to take is attention.
@@ -49,11 +55,24 @@ import { kdf } from './wc.ts'
 import { topicFromSecret, rotationOffsetSec, type RvParams } from './rendezvous.ts'
 import { activeDatesForOffset, type RotationConfig } from './presence.ts'
 import { openKnock, decoyKnock, sealKnock, type Knock } from './knock.ts'
-import type { Dh } from './x25519.ts'
+import { x25519FromPriv, type Dh } from './x25519.ts'
 import { nowMs } from './time.ts'
 
 const SEED_LABEL = 'encedo-chat-invite-decoy-v1'
 const SLOT_LABEL = 'encedo-chat-invite-decoy-slot-v1'
+/** The invite's own X25519 key: HKDF(ECDH(IK, IK_pub), salt = invite_secret).
+ *  A sibling of the decoy seed - computable only by the identity holder, never
+ *  from the link, and the same in every window and on every device of it. */
+export const INVITE_KEY_LABEL = 'encedo-chat-invite-key-v1'
+
+/** The self-derivation an inbox needs, through the identity backend. */
+export type SelfDerive = (label: string, ctx: Uint8Array, len: number) => Promise<Uint8Array>
+
+/** The per-invite key: its private half opens knocks, its public half is `k`. */
+export async function inviteKey(inbox: Uint8Array, deriveSelf: SelfDerive): Promise<Dh> {
+  const priv = await deriveSelf(INVITE_KEY_LABEL, inbox, 32)
+  try { return await x25519FromPriv(priv) } finally { priv.fill(0) }
+}
 
 /** Half the relay's 120 s idle eviction, so the worst gap (just under two
  *  slots) still refreshes the topic with margin for a missed tick. */
@@ -62,6 +81,10 @@ export const DECOY_EVERY_MS = 45_000
 const MAX_PER_MIN = 20
 /** Ephemeral keys remembered, so one frame is surfaced once. */
 const SEEN_MAX = 512
+/** Frames OPENED per minute. Opening is local now, so this bounds CPU under a
+ *  flood rather than protecting a device; a real knock re-sent every 90 s gets
+ *  through once the flood stops. */
+const MAX_OPEN_PER_MIN = 60
 
 export interface InboxKnock {
   /** The Source's identity public key — the thing the Journalist could not derive. */
@@ -77,13 +100,15 @@ export interface InboxOpts extends RotationConfig {
   onKnock(k: InboxKnock): void
   onLog?(m: string): void
   /** HKDF(ECDH(IK, IK_pub), ctx, label, len) through the identity backend
-   *  (lib/derive.ts) for the decoy seed; absent, derived over `dh.dh(dh.pub)`. */
-  deriveSelf?(label: string, ctx: Uint8Array, len: number): Promise<Uint8Array>
+   *  (lib/derive.ts) for the invite key and the decoy seed; absent, derived
+   *  over `dh.dh(dh.pub)`. Asked twice per invite per session, never per frame. */
+  deriveSelf?: SelfDerive
   /** Injected in tests. */
   now?(): number
   tickMs?: number
   decoyEveryMs?: number
   maxPerMin?: number
+  maxOpenPerMin?: number
 }
 
 export interface InboxWatch {
@@ -112,8 +137,9 @@ const readU32 = (b: Uint8Array) => ((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | 
  * Watch one invite's inbox.
  *
  * `dh` is the Journalist's identity — `dhFromEcdh(id.pub, id.ecdh)` for a HEM
- * or a software profile alike. It opens the knocks AND seeds the decoys, which
- * is why nothing else has to be passed in.
+ * or a software profile alike. It is used only for the two self-derivations
+ * (the invite key and the decoy seed), and only when `deriveSelf` is absent;
+ * no frame ever reaches it.
  */
 export function watchInbox(
   node: any,
@@ -127,11 +153,18 @@ export function watchInbox(
   const tickMs = opts.tickMs ?? 1_000
   const decoyEvery = opts.decoyEveryMs ?? DECOY_EVERY_MS
   const maxPerMin = opts.maxPerMin ?? MAX_PER_MIN
+  const maxOpenPerMin = opts.maxOpenPerMin ?? MAX_OPEN_PER_MIN
+  const selfDerive: SelfDerive = opts.deriveSelf ?? (async (label, ctx, len) => kdf(label, await dh.dh(dh.pub), ctx, len))
+  // Both derivations start now; a frame that arrives first waits for the key.
+  const keyP = inviteKey(inbox, selfDerive)
+  keyP.catch(() => {})
 
   const topics = new Map<string, string>()      // dateUTC -> topic
   const seen: string[] = []                     // ephemeral keys, oldest first
   const seenSet = new Set<string>()
   let surfaced: number[] = []                   // timestamps, for the rate cap
+  let opened: number[] = []                     // timestamps, for the open cap
+  let openDropped = 0
   let dropped = 0
   let stopped = false
   let offsetMs = 0
@@ -159,8 +192,18 @@ export function watchInbox(
     if (!eph || seenSet.has(eph)) return
     remember(eph)
 
+    // Capped BEFORE opening, not after: what a flood buys is the opening.
+    const t0 = now()
+    opened = opened.filter((x) => t0 - x < 60_000)
+    if (opened.length >= maxOpenPerMin) {
+      openDropped++
+      if (openDropped === 1 || openDropped % 100 === 0) log(`inbox: over the open cap, not opened ${openDropped}`)
+      return
+    }
+    opened.push(t0)
+
     let k: Knock | null = null
-    try { k = await openKnock(inbox, dh, frame) } catch { k = null }
+    try { k = await openKnock(inbox, await keyP, frame) } catch { k = null }
     if (!k) return                 // not for us, or not a knock at all: silence
     if (k.decoy) return            // ours, or somebody else's cover traffic
 
@@ -192,7 +235,11 @@ export function watchInbox(
     const topic = topics.get(activeDatesForOffset(now(), offsetMs, opts)[0])
     if (!topic) return
     try {
-      const res: any = await node.services.pubsub.publish(topic, await decoyKnock(inbox, dh.pub))
+      const frame = await decoyKnock(inbox, (await keyP).pub)
+      // Our own decoy comes back to us on the topic. Its ephemeral is known
+      // here, so it is never opened - nor counted against the open cap.
+      remember(b64(frame.subarray(0, 32)))
+      const res: any = await node.services.pubsub.publish(topic, frame)
       // Test doubles do not report recipients; absence is not evidence.
       const reach = res?.recipients?.length
       if (typeof reach !== 'number') return
@@ -258,7 +305,8 @@ export function watchInbox(
   // and the seed are both derivations, and the first tick needs them.
   chain = (async () => {
     offsetMs = (await rotationOffsetSec(inbox, params)) * 1000
-    seed = opts.deriveSelf ? await opts.deriveSelf(SEED_LABEL, inbox, 32) : await kdf(SEED_LABEL, await dh.dh(dh.pub), inbox)
+    seed = await selfDerive(SEED_LABEL, inbox, 32)
+    await keyP
   })().then(step).catch(() => {})
 
   try { node.services.pubsub.addEventListener('message', handler) } catch {}
@@ -291,7 +339,7 @@ export function watchInbox(
 export async function sendKnock(
   node: any,
   inbox: Uint8Array,
-  journalistPub: Uint8Array,
+  invitePub: Uint8Array,
   params: RvParams,
   body: { ik: Uint8Array; name: string; note?: string },
   opts: RotationConfig & { now?(): number; waitMs?: number } = {},
@@ -322,7 +370,7 @@ export async function sendKnock(
       try { if (node.services.pubsub.getSubscribers(topic).length > 0) break } catch { break }
       await new Promise((r) => setTimeout(r, 250))
     }
-    const res: any = await node.services.pubsub.publish(topic, await sealKnock(inbox, journalistPub, body))
+    const res: any = await node.services.pubsub.publish(topic, await sealKnock(inbox, invitePub, body))
     // Absence is not evidence (test doubles report nothing); zero is.
     const reach = res?.recipients?.length
     return typeof reach === 'number' ? reach : null

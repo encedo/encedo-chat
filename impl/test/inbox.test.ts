@@ -7,7 +7,9 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { watchInbox, sendKnock, DECOY_EVERY_MS } from '../lib/inbox.ts'
+import { watchInbox, sendKnock, inviteKey, DECOY_EVERY_MS } from '../lib/inbox.ts'
+import { kdf } from '../lib/wc.ts'
+import type { Dh } from '../lib/x25519.ts'
 import { sealKnock, decoyKnock, FRAME_LEN } from '../lib/knock.ts'
 import { topicFromSecret, rotationOffsetSec } from '../lib/rendezvous.ts'
 import { activeDatesForOffset } from '../lib/presence.ts'
@@ -45,6 +47,9 @@ function hub() {
 }
 
 const secret = (fill = 9) => new Uint8Array(32).fill(fill)
+/** The invite's own key as the watch derives it when no backend `deriveSelf`
+ *  is given: over the identity's self-DH. What a link's `k` is. */
+const keyOf = async (inbox: Uint8Array, j: Dh) => (await inviteKey(inbox, async (l, c, n) => kdf(l, await j.dh(j.pub), c, n))).pub
 /** A clock the test drives, so nothing waits on wall time. */
 const clock = (start = Date.UTC(2026, 8, 15, 12)) => { let t = start; return { now: () => t, add: (ms: number) => { t += ms } } }
 
@@ -73,7 +78,7 @@ test('a knock arrives, opened, with the day it came in on', async () => {
   const inbox = secret()
   const { h, j, got, w, c, topic } = await opened(inbox)
   const src = await generateX25519()
-  h.deliver(topic, await sealKnock(inbox, j.pub, { ik: src.pub, name: 'Informator', note: 'mam materialy' }))
+  h.deliver(topic, await sealKnock(inbox, await keyOf(inbox, j), { ik: src.pub, name: 'Informator', note: 'mam materialy' }))
   await sleep(30)
   assert.equal(got.length, 1)
   assert.deepEqual([...got[0].ik], [...src.pub])
@@ -113,7 +118,7 @@ test('a knock for a DIFFERENT invite of the same Journalist does not surface', a
   const { h, j, got, w, topic } = await opened(mine)
   const src = await generateX25519()
   // Sealed for another invite, delivered onto this one's topic.
-  h.deliver(topic, await sealKnock(theirs, j.pub, { ik: src.pub, name: 'X', note: '' }))
+  h.deliver(topic, await sealKnock(theirs, await keyOf(theirs, j), { ik: src.pub, name: 'X', note: '' }))
   await sleep(30)
   assert.equal(got.length, 0)
   w.stop()
@@ -122,7 +127,7 @@ test('a knock for a DIFFERENT invite of the same Journalist does not surface', a
 test('cover traffic never reaches the caller', async () => {
   const inbox = secret()
   const { h, j, got, w, topic } = await opened(inbox)
-  for (let i = 0; i < 5; i++) h.deliver(topic, await decoyKnock(inbox, j.pub))
+  for (let i = 0; i < 5; i++) h.deliver(topic, await decoyKnock(inbox, await keyOf(inbox, j)))
   await sleep(30)
   assert.equal(got.length, 0, 'a decoy was surfaced as a knock')
   w.stop()
@@ -132,7 +137,7 @@ test('the same frame twice is one knock', async () => {
   const inbox = secret()
   const { h, j, got, w, topic } = await opened(inbox)
   const src = await generateX25519()
-  const frame = await sealKnock(inbox, j.pub, { ik: src.pub, name: 'Ala', note: '' })
+  const frame = await sealKnock(inbox, await keyOf(inbox, j), { ik: src.pub, name: 'Ala', note: '' })
   h.deliver(topic, frame)
   h.deliver(topic, frame)
   h.deliver(topic, frame)
@@ -154,7 +159,7 @@ test('a flood is capped — attention is what an unwanted contact would take', a
   const topic = [...h.subscribed][0]
   for (let i = 0; i < 12; i++) {
     const src = await generateX25519()
-    h.deliver(topic, await sealKnock(inbox, j.pub, { ik: src.pub, name: 'spam ' + i, note: '' }))
+    h.deliver(topic, await sealKnock(inbox, await keyOf(inbox, j), { ik: src.pub, name: 'spam ' + i, note: '' }))
   }
   await sleep(60)
   assert.equal(got.length, 3, `cap not applied, got ${got.length}`)
@@ -261,7 +266,7 @@ test('a knock sent by the Source is the knock the Journalist opens', async () =>
   // The Source publishes; the hub delivers to whoever listens on that topic.
   const sent: Array<{ topic: string; data: Uint8Array }> = []
   const sourceNode = { services: { pubsub: { publish: async (t: string, d: Uint8Array) => { sent.push({ topic: t, data: d }) } } } }
-  await sendKnock(sourceNode, inbox, j.pub, P, { ik: src.pub, name: 'Informator', note: 'mam materialy' }, { now: c.now })
+  await sendKnock(sourceNode, inbox, await keyOf(inbox, j), P, { ik: src.pub, name: 'Informator', note: 'mam materialy' }, { now: c.now })
 
   assert.equal(sent.length, 1)
   assert.equal(sent[0].topic, topic, 'the Source published onto a different topic than the Journalist listens on')
@@ -387,4 +392,81 @@ test('a decoy whose instant falls between two ticks is paid, not dropped', async
   assert.ok(at.length >= SLOTS - 1, `${at.length} decoys in ${SLOTS} slots - overdue ones are being dropped`)
   const gaps = at.slice(1).map((t, i) => t - at[i])
   assert.ok(Math.max(...gaps) <= 2 * EVERY, `two decoys fell ${Math.max(...gaps)} ms apart`)
+})
+
+// ---- the identity backend is not reachable from the topic (SPEC.md 5.8) -----
+
+/** An identity that counts every DH asked of it - what a HEM would bill. */
+function counting(j: Dh) {
+  let calls = 0
+  return { dh: { pub: j.pub, dh: (p: Uint8Array) => { calls++; return j.dh(p) } } as Dh, calls: () => calls }
+}
+
+test('a flood of frames costs the identity backend nothing: two derivations per invite, none per frame', async () => {
+  const inbox = secret(11)
+  const h = hub()
+  const id = counting(await generateX25519())
+  const c = clock()
+  const w = watchInbox(h.node, inbox, id.dh, P, { now: c.now, tickMs: 3_600_000, decoyEveryMs: 1_000, maxOpenPerMin: 10_000, onKnock: () => {} })
+  await w.decoy()
+  const topic = [...h.subscribed][0]
+  const before = id.calls()
+  assert.equal(before, 2, `setup asks the identity for the invite key and the decoy seed, got ${before}`)
+  for (let i = 0; i < 1000; i++) {
+    const f = new Uint8Array(FRAME_LEN); crypto.getRandomValues(f)   // a fresh "ephemeral" every time
+    h.deliver(topic, f)
+  }
+  const src = await generateX25519()
+  for (let i = 0; i < 20; i++) h.deliver(topic, await sealKnock(inbox, await keyOf(inbox, (await generateX25519())), { ik: src.pub, name: 'x', note: '' }))
+  await sleep(200)
+  assert.equal(id.calls(), before, `frames on the public topic reached the identity backend ${id.calls() - before} times`)
+  w.stop()
+})
+
+test('opening is capped per minute, before the frame is opened', async () => {
+  const inbox = secret(12)
+  const h = hub()
+  const j = await generateX25519()
+  const got: any[] = []
+  const c = clock()
+  const w = watchInbox(h.node, inbox, j, P, { now: c.now, tickMs: 3_600_000, decoyEveryMs: 1_000, maxPerMin: 100, maxOpenPerMin: 5, onKnock: (k) => got.push(k) })
+  await w.decoy()
+  const topic = [...h.subscribed][0]
+  const k = await keyOf(inbox, j)
+  for (let i = 0; i < 10; i++) h.deliver(topic, await sealKnock(inbox, k, { ik: (await generateX25519()).pub, name: 'n' + i, note: '' }))
+  await sleep(80)
+  assert.equal(got.length, 5, `the open cap let ${got.length} through`)
+  c.add(61_000)
+  h.deliver(topic, await sealKnock(inbox, k, { ik: (await generateX25519()).pub, name: 'later', note: '' }))
+  await sleep(40)
+  assert.equal(got.length, 6, 'a minute later the inbox opens again')
+  w.stop()
+})
+
+test('our own decoy coming back is never opened, so it costs none of the open cap', async () => {
+  const inbox = secret(13)
+  const h = hub()
+  const j = await generateX25519()
+  const got: any[] = []
+  const c = clock()
+  const w = watchInbox(h.node, inbox, j, P, { now: c.now, tickMs: 3_600_000, decoyEveryMs: 1_000, maxOpenPerMin: 1, onKnock: (k) => got.push(k) })
+  await w.decoy()
+  const topic = [...h.subscribed][0]
+  const ours = h.published.find((p) => p.topic === topic)!
+  assert.ok(ours, 'no decoy to echo')
+  h.deliver(topic, ours.data)            // GossipSub hands our own frame back to us
+  await sleep(20)
+  h.deliver(topic, await sealKnock(inbox, await keyOf(inbox, j), { ik: (await generateX25519()).pub, name: 'real', note: '' }))
+  await sleep(40)
+  assert.equal(got.length, 1, 'the echo of our own decoy used the only opening this minute')
+  w.stop()
+})
+
+test('a knock sealed to the identity key - what a link without k meant - is not opened', async () => {
+  const inbox = secret(14)
+  const { h, j, got, w, topic } = await opened(inbox)
+  h.deliver(topic, await sealKnock(inbox, j.pub, { ik: (await generateX25519()).pub, name: 'old', note: '' }))
+  await sleep(30)
+  assert.equal(got.length, 0)
+  w.stop()
 })

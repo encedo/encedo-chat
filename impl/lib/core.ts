@@ -31,7 +31,7 @@ import type { webrtcLink } from '../net/webrtc.ts'
 import { createXferSession, type XferSession, type XferEv, type FileLike, type OfferResult } from './xfer-session.ts'
 import { watchSelfSessionRotating, type SelfWatch } from './selfsession.ts'
 import { watchPresenceRotating, rendezvousDay, type PresenceWatch } from './presence.ts'
-import { watchInbox as startInboxWatch, sendKnock, type InboxWatch, type InboxKnock } from './inbox.ts'
+import { watchInbox as startInboxWatch, sendKnock, inviteKey, type InboxWatch, type InboxKnock } from './inbox.ts'
 import { GroupManager, type AdminGk, type GkBackend } from './group.ts'
 import {
   SELF_PREFIX, buildSelfDescr, selfLabel, buildPeerDescr, parsePeerDescr, parseSelfDescr, peerSearchPrefix, peerLabel, hemKid, descrText,
@@ -668,7 +668,13 @@ export interface ClientSession {
    * nothing is listening on that topic from here, which is §4.7 - but it is the
    * difference between "sent" and "sent to nobody", so it is reported.
    */
-  knock(inboxSecret: Uint8Array, toPub: string, body: { name: string; note?: string }): Promise<number | null>
+  knock(inboxSecret: Uint8Array, invitePub: string, body: { name: string; note?: string }): Promise<number | null>
+  /**
+   * The public half of this identity's key for one invite (`k` in the link,
+   * SPEC.md 4.2): derived, never stored, the same in every window and on every
+   * device holding the identity. One identity-backend derivation per call.
+   */
+  inviteKeyPub(inboxSecret: Uint8Array): Promise<string>
   /** This identity's group manager (Sender Keys, §8) — createGroup / applySkd /
    *  skdFor / rekey. Incoming SKDs on any 1:1 room are applied to it automatically. */
   readonly groups: GroupManager
@@ -1330,16 +1336,19 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       try { peers = node.getConnections().length } catch {}
       return { transport: opts.transport === 'light' ? 'light' : 'libp2p', relay: activeRelay, self, link, connected: connected(), peers, topics }
     },
-    async knock(inboxSecret, toPub, body) {
-      return sendKnock(node, inboxSecret, unb64(toPub), params, {
+    async knock(inboxSecret, invitePub, body) {
+      return sendKnock(node, inboxSecret, unb64(invitePub), params, {
         ik: unb64(id.pub), name: body.name, note: body.note,
       })
     },
+    async inviteKeyPub(inboxSecret) {
+      return b64((await inviteKey(inboxSecret, (label, ctx, len) => deriveWith(id, label, id.pub, ctx, len))).pub)
+    },
     watchInbox(inboxSecret, handlers) {
-      // The identity is both halves: it opens the knocks (a raw DH with each
-      // knocker's one-shot ephemeral - lib/derive.ts says why that stays raw),
-      // and the self-derivation seeds the decoy schedule. Nothing about the
-      // schedule is stored.
+      // The identity is asked twice per invite per session, through the
+      // derivation seam: once for the invite's own key, which opens the knocks
+      // locally, and once for the decoy seed. Never once per frame - the topic
+      // is public. Nothing about either is stored.
       const dh = dhFromEcdh(id.pub, (peerPubB64) => id.ecdh(peerPubB64))
       const inner = startInboxWatch(node, inboxSecret, dh, params, {
         onKnock: handlers.onKnock,

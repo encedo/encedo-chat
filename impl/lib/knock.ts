@@ -3,8 +3,8 @@
  *
  * The frame a Source publishes on a Journalist's inbox topic
  * (DISCOVERY-PROPOSAL.md §2.1). Its shape is EH-2's `msg1`: a one-shot
- * ephemeral public key in the clear, everything else sealed to the recipient's
- * identity key. Nothing new is introduced — X25519, HKDF-SHA256 and AES-GCM,
+ * ephemeral public key in the clear, everything else sealed to the key of the
+ * invite it answers. Nothing new is introduced — X25519, HKDF-SHA256 and AES-GCM,
  * all of them already on the message path.
  *
  * ## Why the ephemeral key is not decoration
@@ -18,6 +18,16 @@
  * that this is traffic analysis rather than deanonymization, and that for a
  * Journalist and a Source traffic analysis can still be enough.
  *
+ * ## Sealed to the invite's key, not the identity key (SPEC.md 5.8)
+ *
+ * The recipient is a per-invite X25519 key the inviter derives from its own
+ * identity (`inviteKey` in inbox.ts), and its public half travels in the link
+ * as `k`. Sealing to the identity key made every frame on this public topic a
+ * DH with that key - on a HEM, a device call per frame, chosen by whoever holds
+ * the link, before any rate limit could look at it. Opening is now a local
+ * X25519 with a key the inviter holds in memory; the identity backend is asked
+ * once per invite per session, to derive it.
+ *
  * ## Why every frame is the same length
  *
  * `FRAME_LEN` is a constant and the plaintext is padded to `PLAIN_LEN` before
@@ -30,9 +40,9 @@
  *
  * The invite secret is the HKDF context (salt), so a knock is bound to the invite it
  * came through as well as to the recipient — a frame sealed for one invite
- * does not open under another even though both are addressed to the same
- * identity key. The cryptographer confirmed the schedule and called the
- * binding important (2026-09-15).
+ * does not open under another. Each invite now has its own key as well, so the
+ * secret is a second binding rather than the only one; the cryptographer
+ * confirmed the v1 schedule and called the binding important (2026-09-15).
  */
 
 import { kdf, subtle } from './wc.ts'
@@ -41,8 +51,9 @@ import { generateX25519, type Dh } from './x25519.ts'
 const te = new TextEncoder()
 const td = new TextDecoder()
 
-/** HKDF salt. Versioned: a later frame shape must not open under this key. */
-const LABEL = 'encedo-chat-invite-knock-v1'
+/** HKDF info. Versioned: v1 sealed to the identity key, and a v1 frame must
+ *  not open under a v2 key or the reverse. */
+const LABEL = 'encedo-chat-invite-knock-v2'
 
 /** Longest display name a knock carries, in BYTES — the wire budget is bytes,
  *  and a name arrives as UTF-8 from a stranger. */
@@ -127,8 +138,8 @@ function unpack(p: Uint8Array): Knock | null {
   }
 }
 
-async function seal(inbox: Uint8Array, toPub: Uint8Array, plain: Uint8Array): Promise<Uint8Array> {
-  const eph = await generateX25519()
+async function seal(inbox: Uint8Array, toPub: Uint8Array, plain: Uint8Array, fixedEph?: Dh): Promise<Uint8Array> {
+  const eph = fixedEph ?? await generateX25519()
   const { raw, nonce } = await frameKey(await eph.dh(toPub), inbox)
   const key = await subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt'])
   const ct = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, plain))
@@ -141,14 +152,17 @@ async function seal(inbox: Uint8Array, toPub: Uint8Array, plain: Uint8Array): Pr
 /**
  * "Here is my key, let me in." `ik` is the Source's own identity public key —
  * the one thing the Journalist cannot derive and the only reason this frame
- * exists.
+ * exists. `invitePub` is the link's `k`, never the Journalist's identity key.
  */
 export function sealKnock(
   inbox: Uint8Array,
-  journalistPub: Uint8Array,
+  invitePub: Uint8Array,
   body: { ik: Uint8Array; name: string; note?: string },
+  /** A fixed ephemeral, for the known-answer vector only. Never in use: the
+   *  key seals once because the ephemeral is fresh, and the nonce relies on it. */
+  kat?: { eph: Dh },
 ): Promise<Uint8Array> {
-  return seal(inbox, journalistPub, pack(KIND_REAL, body.ik, body.name, body.note ?? ''))
+  return seal(inbox, invitePub, pack(KIND_REAL, body.ik, body.name, body.note ?? ''), kat?.eph)
 }
 
 /**
@@ -160,8 +174,8 @@ export function sealKnock(
  * doubles as the keepalive an otherwise silent topic needs, since the relay
  * evicts a topic idle for 120 s (§6.1).
  */
-export function decoyKnock(inbox: Uint8Array, journalistPub: Uint8Array): Promise<Uint8Array> {
-  return seal(inbox, journalistPub, pack(KIND_DECOY, new Uint8Array(IK_LEN), '', ''))
+export function decoyKnock(inbox: Uint8Array, invitePub: Uint8Array): Promise<Uint8Array> {
+  return seal(inbox, invitePub, pack(KIND_DECOY, new Uint8Array(IK_LEN), '', ''))
 }
 
 /**
@@ -169,15 +183,15 @@ export function decoyKnock(inbox: Uint8Array, journalistPub: Uint8Array): Promis
  *
  * Null for every failure and never a throw: this reads bytes off a PUBLIC topic
  * that anyone holding the invite can publish to, so malformed and hostile input
- * is the ordinary case, not the exception. `dh` is the recipient's identity —
- * `dhFromEcdh(id.pub, id.ecdh)` for a HEM or a software profile alike.
+ * is the ordinary case, not the exception. `key` is the invite's own key
+ * (`inviteKey` in inbox.ts) - a local X25519, never the identity backend.
  */
-export async function openKnock(inbox: Uint8Array, dh: Dh, frame: Uint8Array): Promise<Knock | null> {
+export async function openKnock(inbox: Uint8Array, key: Dh, frame: Uint8Array): Promise<Knock | null> {
   if (frame.length !== FRAME_LEN) return null
   try {
-    const { raw, nonce } = await frameKey(await dh.dh(frame.subarray(0, EPH_LEN)), inbox)
-    const key = await subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt'])
-    const plain = new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, frame.subarray(EPH_LEN)))
+    const { raw, nonce } = await frameKey(await key.dh(frame.subarray(0, EPH_LEN)), inbox)
+    const aes = await subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['decrypt'])
+    const plain = new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: nonce }, aes, frame.subarray(EPH_LEN)))
     return unpack(plain)
   } catch { return null }
 }

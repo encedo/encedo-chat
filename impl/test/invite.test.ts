@@ -12,6 +12,7 @@ import { encodeInvite, decodeInvite, inviteLink, inviteFromPaste, newInboxSecret
 
 const PUB = Buffer.alloc(32, 7).toString('base64')      // a well-formed 32-byte key
 const SHORT = Buffer.alloc(16, 7).toString('base64')
+const KEY = Buffer.alloc(32, 9).toString('base64')      // an invite key, the link's `k`
 
 test('an invite survives the round trip', () => {
   const got = decodeInvite('#' + encodeInvite({ pub: PUB, name: 'Alicja' }))
@@ -92,8 +93,9 @@ test('a fragment that is not ours is left alone', () => {
 
 test('an inbox secret survives the round trip and yields its bytes', () => {
   const s = newInboxSecret()
-  const got = decodeInvite('#' + encodeInvite({ pub: PUB, name: 'Dziennikarz', inbox: s }))
+  const got = decodeInvite('#' + encodeInvite({ pub: PUB, name: 'Dziennikarz', inbox: s, key: KEY }))
   assert.equal(got!.inbox, s)
+  assert.equal(got!.key, KEY)
   assert.equal(inboxSecretBytes(got!)!.length, INBOX_BYTES)
 })
 
@@ -103,7 +105,7 @@ test('two invites never share an inbox — retiring one must not retire the rest
   assert.equal(seen.size, 64)
 })
 
-test('an invite with no inbox is still a valid invite — every old link decodes', () => {
+test('an invite with no inbox is still a valid invite — a one-to-one link', () => {
   const got = decodeInvite('#' + encodeInvite({ pub: PUB, name: 'Alicja' }))
   assert.deepEqual(got, { pub: PUB, name: 'Alicja' })
   assert.equal(inboxSecretBytes(got!), null)
@@ -114,7 +116,7 @@ test('a present but broken inbox rejects the WHOLE invite, it does not decode to
   // announce to and no way to find out: it would knock nowhere and wait for an
   // answer that was never possible.
   const bad = (sv: unknown) => {
-    const o: any = { p: PUB, n: 'Ala', s: sv }
+    const o: any = { p: PUB, n: 'Ala', s: sv, k: KEY }
     const frag = 'i=' + btoa(unescape(encodeURIComponent(JSON.stringify(o))))
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
     return decodeInvite('#' + frag)
@@ -129,9 +131,25 @@ test('a present but broken inbox rejects the WHOLE invite, it does not decode to
 
 test('reply and inbox are independent fields', () => {
   const s = newInboxSecret()
-  const got = decodeInvite('#' + encodeInvite({ pub: PUB, name: 'Ala', reply: true, inbox: s }))
+  const got = decodeInvite('#' + encodeInvite({ pub: PUB, name: 'Ala', reply: true, inbox: s, key: KEY }))
   assert.equal(got!.reply, true)
   assert.equal(got!.inbox, s)
+})
+
+test('the invite key travels with the inbox and only with it; anything else rejects the whole link', () => {
+  // A knock is sealed to `k` (SPEC.md 5.8). A link with an inbox but no key is
+  // one minted before that: its inviter no longer opens what it would send.
+  const raw = (o: any) => decodeInvite('#i=' + btoa(unescape(encodeURIComponent(JSON.stringify(o))))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''))
+  const S = Buffer.alloc(INBOX_BYTES, 1).toString('base64')
+  assert.equal(raw({ p: PUB, n: 'Ala', s: S }), null, 'an inbox without a key')
+  assert.equal(raw({ p: PUB, n: 'Ala', k: KEY }), null, 'a key without an inbox')
+  assert.equal(raw({ p: PUB, n: 'Ala', s: S, k: SHORT }), null, 'a short key')
+  assert.equal(raw({ p: PUB, n: 'Ala', s: S, k: Buffer.alloc(33, 1).toString('base64') }), null, 'a long key')
+  assert.equal(raw({ p: PUB, n: 'Ala', s: S, k: 7 }), null, 'a key that is not a string')
+  assert.equal(raw({ p: PUB, n: 'Ala', s: S, k: '!!!' }), null, 'a key that does not decode')
+  assert.deepEqual(raw({ p: PUB, n: 'Ala', s: S, k: KEY }), { pub: PUB, name: 'Ala', inbox: S, key: KEY }, 'the control')
+  assert.deepEqual(raw({ p: PUB, n: 'Ala' }), { pub: PUB, name: 'Ala' }, 'a one-to-one link carries neither')
 })
 
 test('a pasted invite is read in every shape a person passes it on, and nothing else is', () => {

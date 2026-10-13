@@ -17,7 +17,9 @@ import { newInboxSecret, inboxSecretBytes } from '../lib/invite.ts'
 
 const secret = () => inboxSecretBytes({ pub: '', name: '', inbox: newInboxSecret() })!
 
-/** A Journalist: an identity keypair, used here the way the app uses `Identity`. */
+/** The key a knock is sealed to. Here any keypair: what makes it the invite's
+ *  key (a derivation from the identity) is inbox.ts's business, pinned below
+ *  by the vector and in inbox.test.ts. */
 const journalist = () => generateX25519()
 
 test('a knock carries the key the Journalist could not derive, and opens', async () => {
@@ -120,4 +122,31 @@ test('an over-long name or note is cut on a character boundary, never mid-charac
 
 test('the plaintext is padded to a constant, so the wire size is a constant too', () => {
   assert.equal(FRAME_LEN, 32 + PLAIN_LEN + 16)
+})
+
+// ---- the known-answer vector (docs/kat/invite-knock.json, scripts/export-kat.mjs) ----
+
+test('KAT: the invite key and the knock frame match docs/kat/invite-knock.json', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { x25519FromPriv } = await import('../lib/x25519.ts')
+  const { inviteKey } = await import('../lib/inbox.ts')
+  const { kdf } = await import('../lib/wc.ts')
+  const KAT = JSON.parse(readFileSync(new URL('../../docs/kat/invite-knock.json', import.meta.url), 'utf8'))
+  const unhex = (h: string) => Uint8Array.from(h.match(/../g)!.map((x) => parseInt(x, 16)))
+  const hex = (u: Uint8Array) => [...u].map((b) => b.toString(16).padStart(2, '0')).join('')
+  const ik = await x25519FromPriv(unhex(KAT.ik_priv))
+  const inbox = unhex(KAT.invite_secret)
+  const key = await inviteKey(inbox, async (l, c, n) => kdf(l, await ik.dh(ik.pub), c, n))
+  assert.equal(hex(key.pub), KAT.invite_pub, 'the invite key derivation moved')
+  const frame = await sealKnock(inbox, key.pub, { ik: unhex(KAT.answerer_ik_pub), name: KAT.name, note: KAT.note }, { eph: await x25519FromPriv(unhex(KAT.eph_priv)) })
+  assert.equal(hex(frame), KAT.frame, 'the knock schedule or layout moved')
+  const got = await openKnock(inbox, key, unhex(KAT.frame))
+  assert.ok(got && !got.decoy)
+  if (got && !got.decoy) {
+    assert.equal(hex(got.ik), KAT.answerer_ik_pub)
+    assert.equal(got.name, KAT.name)
+    assert.equal(got.note, KAT.note)
+  }
+  // And the identity key itself cannot open it: that is the whole change.
+  assert.equal(await openKnock(inbox, ik, unhex(KAT.frame)), null)
 })

@@ -9,12 +9,15 @@
  * keeps its invites, its pending knocks and its ignore list.
  *
  *   ec-invites-<kid>   [{ id, label, secret, created, expires? }]     invites you hung up
- *   ec-waiting-<kid>   [[pub, { inbox, name, since, note? }], ...]     knocks you are making
+ *   ec-waiting-<kid>   [[pub, { inbox, key, name, since, note? }], ...] knocks you are making (key = the link's k)
  *   ec-ignored-<kid>   [{ fp, at }]                                     keys whose knocks you dismissed
  */
 
 import { readSealedKV, writeSealedKV } from '../lib/sealedstore.ts'
-import { newInboxSecret, inviteLink } from '../lib/invite.ts'
+import { newInboxSecret, inviteLink, inboxSecretBytes } from '../lib/invite.ts'
+import { inviteKey } from '../lib/inbox.ts'
+import { deriveWith, type Deriving } from '../lib/derive.ts'
+import { b64 } from '../lib/wc.ts'
 import type { KV } from '../lib/migrate.ts'
 
 export const INVITES_SALT = 'encedo-chat-invites-v1'
@@ -23,7 +26,7 @@ export const IGNORED_SALT = 'encedo-chat-ignored-v1'
 const IGNORED_MAX = 512
 
 export interface PubInvite { id: string; label: string; secret: string; created: number; expires?: number }
-export interface Waiting { inbox: string; name: string; since: number; note?: string }
+export interface Waiting { inbox: string; key?: string; name: string; since: number; note?: string }
 
 export const expired = (inv: PubInvite, now = Date.now()) => !!inv.expires && now >= inv.expires
 
@@ -34,9 +37,17 @@ export function parseDuration(s: string): number {
   return Number(m[1]) * { m: 60_000, h: 3_600_000, d: 86_400_000 }[m[2] as 'm' | 'h' | 'd']
 }
 
-/** The link an invite is published as - the app's inviteUrlFor. */
-export const publishedLink = (origin: string, path: string, me: { pub: string; handle: string }, inv: PubInvite) =>
-  inviteLink(origin, path, { pub: me.pub, name: me.handle, inbox: inv.secret })
+/**
+ * The link an invite is published as - the app's inviteUrlFor. Its `k` is the
+ * invite's own key (SPEC.md 5.8), derived from the identity: one derivation
+ * through the identity backend per call, nothing stored.
+ */
+export async function publishedLink(origin: string, path: string, me: Deriving & { pub: string; handle: string }, inv: PubInvite): Promise<string> {
+  const raw = inboxSecretBytes({ pub: '', name: '', inbox: inv.secret })
+  if (!raw) throw new Error(`zaproszenie „${inv.label}” ma uszkodzony sekret`)
+  const key = await inviteKey(raw, (label, ctx, len) => deriveWith(me, label, me.pub, ctx, len))
+  return inviteLink(origin, path, { pub: me.pub, name: me.handle, inbox: inv.secret, key: b64(key.pub) })
+}
 
 export class InviteStore {
   private kv: KV; private base: Uint8Array | null; private kid: string

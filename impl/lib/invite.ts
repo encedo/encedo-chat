@@ -77,11 +77,17 @@ export interface Invite {
    * real cost and it is written up in DISCOVERY-PROPOSAL.md §6.1 rather than
    * hidden here.
    *
-   * Absent means an invite with no inbox, which is exactly what this module
-   * produced before it existed: every old link still decodes, and its reply
-   * still travels by hand.
+   * Absent means an invite with no inbox: a one-to-one link whose reply
+   * travels by hand.
    */
   inbox?: string
+  /**
+   * The invite's own X25519 public key, base64 (`inviteKey` in inbox.ts): what
+   * a knock is sealed to. Present exactly when `inbox` is - a link carrying one
+   * without the other is refused whole, because a knock sealed to the identity
+   * key (what links before this field meant) is no longer opened by anybody.
+   */
+  key?: string
 }
 
 /** A fresh inbox secret, base64. One per published invite — never shared
@@ -113,6 +119,7 @@ export function encodeInvite(inv: Invite): string {
   const o: any = { p: inv.pub, n: inv.name.slice(0, MAX_NAME) }
   if (inv.reply) o.r = 1
   if (inv.inbox) o.s = inv.inbox
+  if (inv.key) o.k = inv.key
   return 'i=' + b64urlEncode(JSON.stringify(o))
 }
 
@@ -164,9 +171,20 @@ export function decodeInvite(hash: string): Invite | null {
     inbox = obj.s
   }
 
+  // The invite's key travels with its inbox and only with it (SPEC.md 4.2).
+  let key: string | undefined
+  if (obj.k !== undefined || inbox) {
+    if (!inbox || typeof obj.k !== 'string') return null
+    let raw: Uint8Array
+    try { raw = Uint8Array.from(atob(obj.k), (c) => c.charCodeAt(0)) } catch { return null }
+    if (raw.length !== 32) return null
+    key = obj.k
+  }
+
   const out: Invite = { pub: obj.p, name }
   if (obj.r) out.reply = true
   if (inbox) out.inbox = inbox
+  if (key) out.key = key
   return out
 }
 

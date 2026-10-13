@@ -79,6 +79,9 @@ runs in the client; the raw secret is wiped after each.
 | rotation offset (§5.4) | one `ecdh` per contact, once (date-independent) | one `derive`, once |
 | self topic + MAC (§5.2/§9.1) | two `ecdh` per day + one for the offset | the same, as `derive` |
 | group topic (§5.3) | no — HKDF over `group_secret`, which never leaves the client | no |
+| published invite: invite key + decoy seed (§5.8–5.9) | two `ecdh` per invite per session (self-DH, under the invite secret) | two `derive` per invite per session |
+| a frame arriving on an inbox topic (§5.8) | **none** — opened with the invite key, a local X25519 | none |
+| decoy subscriptions (§5.10) | one `ecdh` per session (self-DH seed) | one `derive` |
 
 The session memoises the **derived values** of a day per contact (`pairDay` in
 `lib/core.ts`), shared by the presence watch, the room and the realignment
@@ -205,6 +208,8 @@ competing with the room the user is waiting for.
 | the user… | device calls |
 |---|---|
 | sends or receives a 1:1 message | **none** |
+| has an invite published and gets knocked on — or flooded | **none** per frame; the two derivations per invite were paid when its watch started |
+| knocks on somebody else's invite | **none** — sealed to the link's `k` under a fresh ephemeral |
 | sends or receives a group message | **none** (after `mk_ij`, once per member per session) |
 | reacts, types, goes away, comes back | **none** |
 | sends a file | **none** — the content key is random and the bytes are encrypted locally |
@@ -250,6 +255,11 @@ newer firmware exists precisely to stop it reaching the client at all.
 
 - **Never call the device on a message path.** If a feature needs the HSM per
   message, the design is wrong — look at how `mk_ij` is memoised instead.
+- **Never let a frame from the network choose a device call.** Until 0.7.29 every
+  frame on a published invite's (public) topic was a raw `ecdh` with the
+  sender's ephemeral, and anyone holding the link decided how many — the
+  20/min cap counted knocks shown, not frames opened. Derive a key once and
+  open with it locally (§5.8); count before opening, not after.
 - **Cache the promise, not the result.** Two callers racing for the same secret
   should share one device call; caching the result only helps the second one.
 - **A failure is not an answer.** Every memo here drops its entry when the call

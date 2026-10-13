@@ -3,6 +3,9 @@ import assert from 'node:assert/strict'
 import { InviteStore, parseDuration, expired, INVITES_SALT, publishedLink, type PubInvite } from '../cli/invites.ts'
 import { readSealedKV, writeSealedKV } from '../lib/sealedstore.ts'
 import { decodeInvite } from '../lib/invite.ts'
+import { inviteKey } from '../lib/inbox.ts'
+import { generateX25519 } from '../lib/x25519.ts'
+import { kdf } from '../lib/wc.ts'
 import type { KV } from '../lib/migrate.ts'
 
 const memKV = (): KV => { const m = new Map<string, string>(); return { keys: () => [...m.keys()], get: (k) => m.get(k) ?? null, set: (k, v) => { m.set(k, v) } } }
@@ -42,10 +45,16 @@ test('the waiting knocks and the ignore list round-trip in the app\'s shapes', a
   assert.deepEqual((await store.ignored()).map((r) => r.fp), ['AA:BB'], 'ignoring twice keeps one entry')
 })
 
-test('the published link carries the inbox; durations and expiry', () => {
+test('the published link carries the inbox and the invite key the watch opens with; durations and expiry', async () => {
   const inv: PubInvite = { id: 'i', label: 'l', secret: newSecret(), created: 0, expires: 100 }
-  const got = decodeInvite(publishedLink('https://app.onchato.com', '/', { pub: 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=', handle: 'ala' }, inv).split('#')[1])
+  const me = await generateX25519()
+  const id = { pub: btoa(String.fromCharCode(...me.pub)), handle: 'ala', ecdh: async (p: string) => me.dh(Uint8Array.from(atob(p), (c) => c.charCodeAt(0))) }
+  const got = decodeInvite((await publishedLink('https://app.onchato.com', '/', id, inv)).split('#')[1])
   assert.equal(got?.inbox, inv.secret)
+  // The same key the inbox watch derives from this identity - not the identity key.
+  const want = await inviteKey(Uint8Array.from(atob(inv.secret), (c) => c.charCodeAt(0)), async (l, c, n) => kdf(l, await me.dh(me.pub), c, n))
+  assert.equal(got?.key, btoa(String.fromCharCode(...want.pub)))
+  assert.notEqual(got?.key, id.pub)
   assert.equal(parseDuration('30m'), 1_800_000); assert.equal(parseDuration('24h'), 86_400_000); assert.equal(parseDuration('7d'), 604_800_000)
   for (const bad of ['', '0h', '5', '2w', '-1h']) assert.throws(() => parseDuration(bad))
   assert.equal(expired(inv, 99), false); assert.equal(expired(inv, 100), true)

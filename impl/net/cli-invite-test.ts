@@ -15,7 +15,8 @@
 import { readFileSync } from 'node:fs'
 import { browserSoftwareIdentity, localContactBook, localOnlyManager, type Identity } from '../lib/core.ts'
 import { runClient } from '../cli/client.ts'
-import { InviteStore, type Waiting } from '../cli/invites.ts'
+import { InviteStore, publishedLink, type Waiting } from '../cli/invites.ts'
+import { decodeInvite } from '../lib/invite.ts'
 import { fingerprint } from '../cli/fp.ts'
 import { cacheBaseOf } from '../lib/localbook.ts'
 import { identityKey } from '../cli/profiles.ts'
@@ -56,7 +57,9 @@ try {
   const alaStore = await storeFor(ala), ceeStore = await storeFor(cee)
   const inv = await alaStore.create('biuro')
   // What `onchato add <ala's invite>` leaves behind on cee's side.
-  await ceeStore.saveWaiting(new Map<string, Waiting>([[ala.pub, { inbox: inv.secret, name: 'ala', since: Date.now() }]]))
+  // The key comes off the link, the way `onchato add` reads it.
+  const link = decodeInvite((await publishedLink('https://app.onchato.com', '/', ala, inv)).split('#')[1])!
+  await ceeStore.saveWaiting(new Map<string, Waiting>([[ala.pub, { inbox: inv.secret, key: link.key, name: 'ala', since: Date.now() }]]))
 
   const A = await terminal(ala, [], alaStore)
   await until('ala listening', () => A.screen().includes('słucham 1 zaproszeń'), 15_000)

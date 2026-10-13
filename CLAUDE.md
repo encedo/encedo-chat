@@ -105,9 +105,20 @@ backend which derives is the one asked and its raw `ecdh` is never called.
    (`hem-gk-test`), because no automated test reaches a device.
 
 Raw `ecdh` stays, by decision, for: the one DH with IK inside EH-2 (four
-components under one HKDF), the knock key (a DH with a stranger's one-shot
-ephemeral — one per received frame on a public topic, which must never be a
-device call), and the §10 cache base `ECDH(IK, emp_pub)`.
+components under one HKDF) and the §10 cache base `ECDH(IK, emp_pub)`.
+
+**The knock is not on that list any more (0.7.29).** It was: a raw DH of IK
+with every stranger's one-shot ephemeral, one per received frame on a public
+topic. The note here said that "must never be a device call" - and on a HEM it
+was exactly that, a device call per frame, chosen by whoever held the link and
+made BEFORE the 20/min cap (which counted surfaced knocks, not opened ones).
+The second audit of 2026-10-13 found it. Knocks are now sealed to a per-invite
+key, `HKDF(self-DH, salt = invite_secret, "encedo-chat-invite-key-v1")`,
+derived once per invite per session through `deriveWith` (`inviteKey` in
+`lib/inbox.ts`); its public half is the link's `k`. Opening is a local X25519,
+capped at 60/min before opening; our own decoys are remembered and never
+opened. `test/inbox.test.ts` "a flood of frames costs the identity backend
+nothing" pins it (proven red with a DH per frame put back).
 
 **Newer FW — `api/search` returns public keys** (per operator). Today
 `searchKeys` returns only `{kid,label,type,description}`, so the HEM contact book

@@ -2753,7 +2753,7 @@ $('import-add').addEventListener('click', async () => {
     // the contact stays marked as waiting until the other side announces. There
     // is no reply channel to watch - the answer IS them appearing on the pair
     // topic, which this client could always derive (DISCOVERY-PROPOSAL.md §2.2).
-    if (inv.inbox && store !== 'none') startKnocking(inv.pub, inv.inbox, name, val('import-note'))
+    if (inv.inbox && inv.key && store !== 'none') startKnocking(inv.pub, inv.inbox, inv.key, name, val('import-note'))
     pendingInvite = null
     endModals() // imported: the windows it came through are finished too
     // Nothing was written, so the conversation is all there is: open it, or the
@@ -4320,7 +4320,9 @@ for (const [tab, pane] of TABS) {
  */
 /** `note` is OURS and travels with every re-knock, so the request says the same
  *  thing whichever attempt is the one that lands. */
-interface Waiting { inbox: string; name: string; since: number; note?: string }
+/** `key` is the invite's `k` - what the knock is sealed to. A record without
+ *  one is from before knocks were sealed to it and is not knocked on. */
+interface Waiting { inbox: string; key?: string; name: string; since: number; note?: string }
 const waitingKey = () => 'ec-waiting-' + (session?.idKey ?? '')
 let waiting = new Map<string, Waiting>()
 let knockTimer: any = null
@@ -4356,6 +4358,11 @@ async function writeSealed(key: string, salt: string, value: unknown): Promise<v
 async function loadWaiting() {
   const v = await readSealed<any[]>(waitingKey(), WAITING_SALT, Array.isArray)
   waiting = new Map(Array.isArray(v) ? v : [])
+  // A knock sealed to the identity key is opened by nobody since knocks are
+  // sealed to the invite's key; such a record would say CZEKAM forever.
+  const stale = [...waiting].filter(([, w]) => !w.key)
+  for (const [pub] of stale) waiting.delete(pub)
+  if (stale.length) ecLog(`knock: dropped ${stale.length} waiting record(s) from links without an invite key`)
   if (v) void saveWaiting()   // re-seals a plain list the moment it is read
 }
 function saveWaiting() { void writeSealed(waitingKey(), WAITING_SALT, [...waiting]) }
@@ -4364,8 +4371,9 @@ async function knockOnce(pub: string, w: Waiting) {
   if (!client || !session) return
   const raw = inboxSecretBytes({ pub: '', name: '', inbox: w.inbox })
   if (!raw) { ecLog(`knock: unusable inbox for ${pub.slice(0, 12)}…`); return }
+  if (!w.key) { ecLog(`knock: no invite key for ${pub.slice(0, 12)}… - the invite predates sealed-to-invite knocks; ask for a new link`); return }
   try {
-    const reach = await client.knock(raw, pub, { name: session.handle, note: w.note })
+    const reach = await client.knock(raw, w.key, { name: session.handle, note: w.note })
     // "Sent" and "sent to nobody" look identical from here otherwise: publishing
     // into a topic nothing carries succeeds quietly. Nobody listening is the
     // ordinary case (§4.7 - they must be online), not a fault, so it is a line in
@@ -4385,8 +4393,8 @@ function ensureKnockTimer() {
   ;(knockTimer as any).unref?.()
 }
 
-function startKnocking(pub: string, inbox: string, name: string, note?: string) {
-  waiting.set(pub, { inbox, name, since: nowMs(), note: note || undefined })
+function startKnocking(pub: string, inbox: string, key: string, name: string, note?: string) {
+  waiting.set(pub, { inbox, key, name, since: nowMs(), note: note || undefined })
   saveWaiting()
   renderContacts()
   const w = waiting.get(pub)!
@@ -4645,6 +4653,13 @@ async function startInboxWatches() {
     if (inboxWatches.has(inv.id) || inviteExpired(inv)) continue
     const raw = inboxSecretBytes({ pub: '', name: '', inbox: inv.secret })
     if (!raw) { ecLog(`invite ${inv.id}: unusable secret, not watched`); continue }
+    // The link's `k` is derived, not stored - and derived HERE, before the
+    // invite is rendered, because "Kopiuj link" writes to the clipboard inside
+    // the click, and a device round trip in between loses the gesture.
+    if (!inviteKeyPubs.has(inviteKeyId(inv))) {
+      try { inviteKeyPubs.set(inviteKeyId(inv), await client.inviteKeyPub(raw)) }
+      catch (e: any) { ecLog(`invite ${inv.id}: no invite key (${e?.message ?? e}), not watched`); continue }
+    }
     inboxWatches.set(inv.id, client.watchInbox(raw, {
       onKnock: (k) => void (async () => {
         const ik = b64(k.ik)
@@ -4782,11 +4797,18 @@ $('paste-go')?.addEventListener('click', async () => {
   await showInvite(inv)
 })
 
+/** Each invite's `k`, derived once per session by startInboxWatches. */
+const inviteKeyPubs = new Map<string, string>()
+const inviteKeyId = (inv: PubInvite) => `${session?.idKey ?? ''}:${inv.id}`
+
 function inviteUrlFor(inv: PubInvite): string {
+  const key = inviteKeyPubs.get(inviteKeyId(inv))
+  // Never a link without its key: it would decode as broken on the other side.
+  if (!key) throw new Error('the invite key is not derived yet')
   return inviteLink(
     inAppShell ? CANONICAL_ORIGIN : location.origin,
     inAppShell ? CANONICAL_PATH : location.pathname,
-    { pub: session!.pub, name: session!.handle, inbox: inv.secret })
+    { pub: session!.pub, name: session!.handle, inbox: inv.secret, key })
 }
 
 async function acceptKnock(k: PendingKnock) {

@@ -69,7 +69,7 @@ The protocol assumes no security property of libp2p beyond hop-to-hop transport 
 
 ### 3.1 Responsibility split
 
-- **Identity backend** (HSM or software identity): key management (create, import, delete, search) and two operations on `IK`: raw `ecdh`, and the derivation `HKDF(ECDH(IK, peer), salt = ctx, info = label, L)` for every rendezvous, Announce, rotation and group-MAC key (§4.3). A backend that cannot derive in-device derives over its raw `ecdh` output in the client; the labels, contexts and outputs are identical either way.
+- **Identity backend** (HSM or software identity): key management (create, import, delete, search) and two operations on `IK`: raw `ecdh`, and the derivation `HKDF(ECDH(IK, peer), salt = ctx, info = label, L)` for every rendezvous, Announce, rotation, invite and group-MAC key (§4.3). No frame received from the network reaches the identity backend except a contact's handshake: a msg1 reaches the one DH with `IK` only once its initiator tag has matched (§6.1). A backend that cannot derive in-device derives over its raw `ecdh` output in the client; the labels, contexts and outputs are identical either way.
 - **Client**: all ephemeral operations (EK, ML-KEM keygen/encapsulation/decapsulation, AEAD, ratchet), all HKDFs, session state, cache, presence.
 - **libp2p**: publish/subscribe for rendezvous, handshake frames and the fallback content path; a WebRTC DataChannel where both ends can open one.
 
@@ -120,14 +120,14 @@ GROUP  the marker of §8.6, on the GK_pub entry
 - **A public key is held once per device**: the device refuses to import a key it already holds under any DESCR. The client predicts this from the KID (one broad `key_search("ETSEIC:peer1,")` on the add path) and names the identity that already holds the contact.
 - All per-identity client state is keyed by the KID, never by the handle. The one record keyed by name is the sealed software identity itself (`ec-soft-id-<name>`, §4.5).
 - **Fingerprint** = `SHA-256(pub)[0:8]`, shown as sixteen uppercase hex digits in colon-separated pairs. It identifies a key (telling entries apart, keying local records such as §5.7's ignore list); it does not verify one — verification is the safety number of §4.4.1.
-- **Invite link**: URL fragment `#i=base64url(JSON { p, n, r?, s? })` — `p` the public key (base64, exactly 32 bytes), `n` a display name (≤ 64 characters, control and format characters stripped), `r: 1` marks a reply to an invite (the receiver adds the contact without sending its own key back), `s` the 32-byte `invite_secret` of a published invite (§5.7, base64; any other length rejects the whole link; a link without `s` is an ordinary one-to-one invite).
+- **Invite link**: URL fragment `#i=base64url(JSON { p, n, r?, s?, k? })` — `p` the public key (base64, exactly 32 bytes), `n` a display name (≤ 64 characters, control and format characters stripped), `r: 1` marks a reply to an invite (the receiver adds the contact without sending its own key back), `s` the 32-byte `invite_secret` of a published invite (§5.7, base64), `k` that invite's 32-byte `invite_pub` (§5.8, base64). `s` and `k` come together or not at all; either without the other, or either of another length, rejects the whole link. A link without them is an ordinary one-to-one invite.
 
 ### 4.3 Identity-backend operations
 
 | Operation | Use | Frequency |
 |---|---|---|
-| `ecdh(kid, peer_pub)` → raw 32 B | the one DH with `IK` in EH-2 (§6.2); the knock key (§5.8, a DH with a stranger's one-shot ephemeral); the cache base (§10) | one per handshake; one per knock received; one per session |
-| `derive(kid, peer_pub, ctx, label, L)` → `HKDF(ECDH(IK, peer_pub), salt = ctx, info = label, L)` | pair and self topic (§5.1–5.2), Announce MAC keys (§5.5), rotation offset (§5.4), decoy seed (§5.9), the group MAC keys `mk_ij` and `rk_i` (§8.1) | topic and MAC key once per contact per day (two days inside the rotation guard); the offset once per contact; one per member per group epoch |
+| `ecdh(kid, peer_pub)` → raw 32 B | the one DH with `IK` in EH-2 (§6.2); the cache base (§10) | one per handshake; one per session |
+| `derive(kid, peer_pub, ctx, label, L)` → `HKDF(ECDH(IK, peer_pub), salt = ctx, info = label, L)` | pair and self topic (§5.1–5.2), Announce MAC keys (§5.5), rotation offset (§5.4), invite key and decoy seed (§5.8–5.9), the group MAC keys `mk_ij` and `rk_i` (§8.1) | topic and MAC key once per contact per day (two days inside the rotation guard); the offset once per contact; two per published invite per session; one per member per group epoch |
 | `key_generate(X25519, purpose = ecdh)` | `IK` at onboarding; `GK` at group creation | once per identity, once per group |
 | `key_import(pub)` | a contact's `IK_pub`; a member's `GK_pub` (§8.6) | once per contact, once per group |
 | `key_delete(kid)` | contact removal, group leave, IK rotation | rare |
@@ -260,7 +260,7 @@ topic_material = HKDF-SHA256(ikm  = invite_secret,
 topic          = base32(topic_material)[0:52]        // rotates per §5.4 with offset = rotationOffsetSec(invite_secret)
 ```
 
-The topic is public: anyone who read the link can subscribe and publish. The inviter's client treats hostile input as the ordinary case: a frame that does not open is dropped silently; at most 20 knocks per minute are surfaced and the rest counted and dropped; the last 512 ephemeral keys are remembered so one frame is surfaced once (the ephemeral is remembered before the frame is tried, and a rate-capped frame is remembered too). Both budgets are per inbox topic. Dismissed knocks are kept as the knocker's fingerprint (§4.2) in a sealed list (§10, capped at 512), a local filter only.
+The topic is public: anyone who read the link can subscribe and publish. The inviter's client treats hostile input as the ordinary case: a frame that does not open is dropped silently; the last 512 ephemeral keys are remembered so one frame is tried once (the ephemeral is remembered before the frame is tried, and a capped frame is remembered too), and the ephemeral of each of its own decoys is remembered before it is published, so its own cover traffic is never opened; at most 60 frames per minute are opened, counted before opening; at most 20 knocks per minute are surfaced and the rest counted and dropped. The budgets are per inbox topic. Opening is a local X25519 with the invite key (§5.8), never an identity-backend call. Dismissed knocks are kept as the knocker's fingerprint (§4.2) in a sealed list (§10, capped at 512), a local filter only.
 
 The answerer subscribes to the inbox topic for the attempt (up to ~8 s), publishes the knock (§5.8), unsubscribes, and re-knocks every 90 s with the same `name` and `note` until it sees the inviter on the pair topic it can already derive. Knocks in progress are kept sealed across a reload (§10).
 
@@ -271,21 +271,26 @@ One frame on the inbox topic, always exactly 348 bytes, published bare (no origi
 ```
 frame = eph_pub (32) ‖ AES-256-GCM ciphertext (300) ‖ tag (16)
 
-k ‖ nonce = HKDF-SHA256(ikm  = ECDH(eph_priv, IK_inviter_pub)    // answerer
-                             = ECDH(IK_priv,  eph_pub)           // inviter
+invite_priv = HKDF-SHA256(ikm  = ECDH(IK_priv, IK_pub),          // the §5.2 self-DH; inviter only
+                          salt = invite_secret,
+                          info = "encedo-chat-invite-key-v1", L = 32)     // an X25519 scalar (RFC 7748 clamping)
+invite_pub  = X25519(invite_priv, 9)                              // the link's `k` (§4.2)
+
+k ‖ nonce = HKDF-SHA256(ikm  = ECDH(eph_priv, invite_pub)        // answerer
+                             = ECDH(invite_priv, eph_pub)        // inviter
                         salt = invite_secret,
-                        info = "encedo-chat-invite-knock-v1",
+                        info = "encedo-chat-invite-knock-v2",
                         L    = 44)                               // 32 B key ‖ 12 B nonce
 
 plaintext (300 B, zero-padded) = kind (1) ‖ ik (32) ‖ nameLen (1) ‖ name (64) ‖ noteLen (2) ‖ note (200)
 kind: 0x00 decoy, 0x01 real
 ```
 
-A fresh ephemeral per frame; the key seals exactly once, so the nonce is derived, not carried. The invite secret is the context, so a knock opens only under the invite it came through. Every frame is the same length. `name` (≤ 64 B) and `note` (≤ 200 B) are claimed, never verified; accepting a knock creates the contact, and §4.4 applies unchanged. Opening returns nothing on every failure and never raises.
+A fresh ephemeral per frame; the key seals exactly once, so the nonce is derived, not carried. The invite key is derived, not stored: one identity-backend derivation per invite per session, the same in every window and on every device of the identity, computable only by the `IK` holder and never from the link; once derived it is held in client memory. A frame on the public topic therefore costs a local X25519 and never an identity-backend call. The invite secret is the context as well, so a knock opens only under the invite it came through. Every frame is the same length. `name` (≤ 64 B) and `note` (≤ 200 B) are claimed, never verified; accepting a knock creates the contact, and §4.4 applies unchanged. Opening returns nothing on every failure and never raises.
 
 ### 5.9 Cover traffic on the inbox
 
-The inviter's own client publishes decoy frames (`kind = 0x00`) on its own inbox topic:
+The inviter's own client publishes decoy frames (`kind = 0x00`), sealed to its own `invite_pub` like any knock, on its own inbox topic:
 
 ```
 seed    = HKDF-SHA256(ikm  = ECDH(IK_priv, IK_pub),          // the §5.2 self-DH
@@ -674,7 +679,7 @@ Numbers are stable identifiers; the retired ones are listed in `RATIONALE.md`.
 - **S11 — the file store sees file metadata.** The store and its gateway observe blob size, timing, uploader and downloader addresses, and the fetch pattern of a CID for the blob's ~5-minute life (§7.5). Content is covered by the AEAD.
 - **S12 — software-identity assurance.** A password-sealed `IK` on disk is offline-guessable after theft, has no hardware bound on §9.3, and travels whole in the §10 export. The HEM path is the assurance tier.
 - **S13 — the pair secret transits client RAM on firmware without in-device HKDF.** On the current HEM firmware each rendezvous derivation runs in the client over the raw `ECDH(IK_a, IK_b)` for the duration of one HKDF (§4.3); the client memoises only derived values. Rendezvous-only material; exposure is pair-linkability for the days derived, not content. Closes when the firmware derives in-device.
-- **S14 — a published invite topic is public.** Anyone who read the link can subscribe and publish (§5.7). An observer learns that a 348-byte frame was published and when, never by whom; cover traffic (§5.9) removes the signal in "a knock happened". Seeding the decoy schedule from the invite secret would destroy this.
+- **S14 — a published invite topic is public.** Anyone who read the link can subscribe and publish (§5.7). An observer learns that a 348-byte frame was published and when, never by whom; cover traffic (§5.9) removes the signal in "a knock happened". Seeding the decoy schedule from the invite secret would destroy this. Flooding the topic costs the inviter at most 60 local X25519 per minute and pushes real knocks past the open cap until it stops (a real knock is re-sent every 90 s); it never reaches the identity backend (§5.8). Once derived, `invite_priv` is in client memory for the session: a compromised client can read the knocks of that invite, as it can read everything else it receives.
 
 ### 11.4 What each party can see
 
@@ -757,12 +762,12 @@ node → client   0x11 DELIVER  u8 len ‖ from ‖ u8 len ‖ topic ‖ data
 
 | Constant | Value |
 |---|---|
-| **KDF convention** | `HKDF-SHA256(ikm, salt = context, info = label, L)`: date and network for the rendezvous keys (§5), `h1` for `SK` (§6.2), `RK` for a root step and ∅ for a chain walk (§7.2, §8.1), `group_id ‖ epoch` for the group MAC keys (§8.1), `invite_secret` for the knock key and the decoy seed (§5.8, §5.9), `u32be(slot)` for the decoy instant (§5.9), the message counter for the AEAD nonce (§7.2, §8.2). The local stores of §10 put the label in the salt |
+| **KDF convention** | `HKDF-SHA256(ikm, salt = context, info = label, L)`: date and network for the rendezvous keys (§5), `h1` for `SK` (§6.2), `RK` for a root step and ∅ for a chain walk (§7.2, §8.1), `group_id ‖ epoch` for the group MAC keys (§8.1), `invite_secret` for the invite key, the knock key and the decoy seed (§5.8, §5.9), `u32be(slot)` for the decoy instant (§5.9), the message counter for the AEAD nonce (§7.2, §8.2). The local stores of §10 put the label in the salt |
 | Wire versions | EH-2 frames and ratchet header `ver = 3`; group frame `version = 3`; Announce `v = 3`; envelope `v = 1` |
 | HKDF labels (rendezvous) | `encedo-chat-rendezvous-v1`, `encedo-chat-announce-mac-v1`, `encedo-chat-rotation-v1` |
 | HKDF labels (handshake, ratchet) | `encedo-handshake-v2`, `encedo-ratchet-dh-v1`, `encedo-ratchet-hybrid-v1`, `encedo-msg-key`, `encedo-chain-key`, `encedo-aead-nonce` |
 | HKDF labels (groups) | `encedo-chat-group-rendezvous-v1`, `encedo-group-msg`, `encedo-group-chain`, `encedo-group-msg-mac`, `encedo-chat-group-roster-mac` |
-| HKDF labels (published invites) | `encedo-chat-invite-knock-v1`, `encedo-chat-invite-decoy-v1`, `encedo-chat-invite-decoy-slot-v1` |
+| HKDF labels (published invites) | `encedo-chat-invite-key-v1`, `encedo-chat-invite-knock-v2`, `encedo-chat-invite-decoy-v1`, `encedo-chat-invite-decoy-slot-v1` |
 | HKDF labels (decoy subscriptions, §5.10) | `encedo-chat-decoy-v1`, `encedo-chat-decoy-offset-v1`, `encedo-chat-decoy-topic-v1` |
 | Decoy subscriptions (§5.10) | `min(contacts, 8)`; random per-session MAC key; drop all on any refusal |
 | HKDF labels (local stores, §10) | `encedo-chat-group-cache-v1`, `encedo-chat-pin-cache-v1`, `encedo-chat-contact-book-v1`, `encedo-chat-invites-v1`, `encedo-chat-waiting-v1`, `encedo-chat-ignored-v1`, `encedo-chat-seen-v1`, `encedo-chat-group-left-v1`, `encedo-chat-prefs-v1`, `encedo-chat-outbox-v1` |
@@ -782,7 +787,7 @@ node → client   0x11 DELIVER  u8 len ‖ from ‖ u8 len ‖ topic ‖ data
 | Rotation (§5.4) | the instant derives from the topic's own key; ±30 min guard, two topics, 60 s re-check |
 | Announce (§5.5) | 15 s heartbeat on the session's radio phase, beacons 1 s/3 s/7 s (pair topics; a light watch 60 s while hidden off the desktop shell; a newcomer answered at once, ≤ 1 per 3 s in a watch); 10 s on the self-topic, no beacons |
 | Presence thresholds | `quiet` after 2.5 heartbeats (~37 s); gone after ~90 s |
-| Inbox (§5.7–5.9) | 20 knocks/min surfaced; 512 ephemerals remembered; 512 dismissed; decoy every 45 s slot at a derived instant; the answerer listens ~8 s and re-knocks every 90 s |
+| Inbox (§5.7–5.9) | 60 frames/min opened, counted before opening; own decoys never opened; 20 knocks/min surfaced; 512 ephemerals remembered; 512 dismissed; decoy every 45 s slot at a derived instant; the answerer listens ~8 s and re-knocks every 90 s |
 | Handshake retry (§6) | attempt silent 6 s; msg1 + 3 repeats 700 ms apart; retry after random 200 ms–1.6 s; 3 s after 16 and 10 s after 24 silent attempts for a peer never established; crossed-msg1 window 2 s; mismatched-tag ignore 5 min |
 | Pre-establishment queue (§6) | 32 envelopes |
 | Skipped keys | 1:1: gap bound 1000, 5 chains, 24 h; group: gap bound 2000 per sender chain, 24 h |

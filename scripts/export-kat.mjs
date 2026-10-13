@@ -25,6 +25,9 @@ import { toyKem, seededRand } from '../impl/test/toy-kem.ts'
 import { sendChainFrom, seal } from '../impl/lib/senderkey.ts'
 import { b64 } from '../impl/lib/wc.ts'
 import { ratchetFrom } from '../impl/eh2/ratchet.ts'
+import { sealKnock } from '../impl/lib/knock.ts'
+import { inviteKey } from '../impl/lib/inbox.ts'
+import { kdf } from '../impl/lib/wc.ts'
 
 const out = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'kat')
 const hex = (u) => [...u].map((b) => b.toString(16).padStart(2, '0')).join('')
@@ -88,7 +91,27 @@ async function ratchetKat() {
 }
 const ratchet = await ratchetKat()
 
-for (const [name, v] of [['eh2-handshake-classical', classical], ['eh2-handshake-mlkem', hybrid], ['group-senderkey', senderkey], ['ratchet-hybrid', ratchet]]) {
+// The published-invite knock (5.8): the invite key derived from the identity,
+// then one frame sealed to it under a fixed ephemeral.
+async function knockKat() {
+  const ik = await x25519FromPriv(fill(0x11))
+  const inviteSecret = fill(0x22)
+  const key = await inviteKey(inviteSecret, async (l, c, n) => kdf(l, await ik.dh(ik.pub), c, n))
+  const eph = await x25519FromPriv(fill(0x33))
+  const answerer = await x25519FromPriv(fill(0x44))
+  const frame = await sealKnock(inviteSecret, key.pub, { ik: answerer.pub, name: 'Ala', note: 'Dzień dobry' }, { eph })
+  return {
+    ik_priv: hex(fill(0x11)), invite_secret: hex(inviteSecret), invite_pub: hex(key.pub),
+    eph_priv: hex(fill(0x33)), answerer_ik_pub: hex(answerer.pub), name: 'Ala', note: 'Dzień dobry',
+    frame: hex(frame),
+    note_construction: 'invite_priv = HKDF(ECDH(IK, IK_pub), salt=invite_secret, info="encedo-chat-invite-key-v1", 32), clamped by X25519; '
+      + 'k || nonce = HKDF(ECDH(eph, invite_pub), salt=invite_secret, info="encedo-chat-invite-knock-v2", 44); '
+      + 'frame = eph_pub || AES-256-GCM(k, nonce, kind 0x01 || ik || nameLen || name(64) || noteLen u16be || note(200), no aad) (5.8).',
+  }
+}
+const knock = await knockKat()
+
+for (const [name, v] of [['eh2-handshake-classical', classical], ['eh2-handshake-mlkem', hybrid], ['group-senderkey', senderkey], ['ratchet-hybrid', ratchet], ['invite-knock', knock]]) {
   writeFileSync(join(out, name + '.json'), JSON.stringify(v, null, 2) + '\n')
   console.log('wrote docs/kat/' + name + '.json')
 }

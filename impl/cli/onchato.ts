@@ -235,20 +235,20 @@ try {
       const when = (t: number) => new Date(t).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
       if (!sub || sub === 'list') {
         if (!list.length) { console.log('(brak zaproszeń - onchato invites new <etykieta>)'); break }
-        list.forEach((inv, i) => console.log(`  ${i + 1}) ${inv.label.padEnd(16)} od ${when(inv.created)}  ${inv.expires ? (expired(inv) ? 'WYGASŁO' : 'do ' + when(inv.expires)) : 'bez terminu'}\n     ${publishedLink(APP_ORIGIN, APP_PATH, id, inv)}`))
+        for (const [i, inv] of list.entries()) console.log(`  ${i + 1}) ${inv.label.padEnd(16)} od ${when(inv.created)}  ${inv.expires ? (expired(inv) ? 'WYGASŁO' : 'do ' + when(inv.expires)) : 'bez terminu'}\n     ${await publishedLink(APP_ORIGIN, APP_PATH, id, inv)}`)
         console.log('Pukanie widać w kliencie (onchato chat) - zaproszenie słucha tylko, gdy klient działa.')
         break
       }
       if (sub === 'new') {
         const ttl = opt('--expires') ? parseDuration(opt('--expires')!) : undefined
         const inv = await store.create(more.join(' '), ttl)
-        const link = publishedLink(APP_ORIGIN, APP_PATH, id, inv)
+        const link = await publishedLink(APP_ORIGIN, APP_PATH, id, inv)
         console.log(`zaproszenie „${inv.label}”${inv.expires ? ' do ' + when(inv.expires) : ' bez terminu'}:\n${link}`)
         if (rest.includes('--qr')) console.log('\n' + qrForTerminal(link))
         console.log('Kto je otworzy, zapuka - zobaczysz to w onchato chat (/knocks, /accept N).')
         break
       }
-      if (sub === 'qr') { const inv = pick(more[0]); console.log(qrForTerminal(publishedLink(APP_ORIGIN, APP_PATH, id, inv))); break }
+      if (sub === 'qr') { const inv = pick(more[0]); console.log(qrForTerminal(await publishedLink(APP_ORIGIN, APP_PATH, id, inv))); break }
       if (sub === 'revoke') {
         const inv = pick(more[0])
         await store.revoke(inv.id)
@@ -274,15 +274,15 @@ try {
         await new Promise((r) => setTimeout(r, 150)) // the book's signature follows the write
         console.log(`zapisano kontakt ${name}`)
         // Until they hold our key too, neither side can compute the pair topic.
-        if (inv.inbox) {
+        if (inv.inbox && inv.key) {
           // An invite that answers itself: knock on its inbox with our key. The
           // app's waiting record keeps the client knocking until they accept.
           const raw = inboxSecretBytes(inv)!
           const session = await startSession(id, { relay: relayList(kv)[0], relays: relayList(kv), transport: 'light', networkId: NETWORK })
           let reach: number | null = null
-          try { reach = await session.knock(raw, inv.pub, { name: id.handle, note: opt('--note') }) } finally { await session.close().catch(() => {}) }
+          try { reach = await session.knock(raw, inv.key, { name: id.handle, note: opt('--note') }) } finally { await session.close().catch(() => {}) }
           const waiting = await store.waiting()
-          waiting.set(inv.pub, { inbox: inv.inbox, name, since: Date.now(), note: opt('--note') } as Waiting)
+          waiting.set(inv.pub, { inbox: inv.inbox, key: inv.key, name, since: Date.now(), note: opt('--note') } as Waiting)
           await store.saveWaiting(waiting)
           console.log(reach === 0
             ? `zapukano, ale nikt teraz nie słucha tego zaproszenia - onchato chat będzie pukać co 90 s, aż ${name} przyjmie`

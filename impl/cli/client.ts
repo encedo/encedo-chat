@@ -211,6 +211,9 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   // Presence for every contact; an incoming conversation opens in the background.
   const contactList = await o.contacts.list()
   let waiting = o.store ? await o.store.waiting() : new Map()
+  // A knock sealed to the identity key is opened by nobody since knocks are
+  // sealed to the invite's key (the app's loadWaiting drops the same records).
+  for (const [pub, w] of [...waiting]) if (!w.key) waiting.delete(pub)
   const presence = {
     onOnline: (p: { pub: string }) => {
       // They announce, so they hold our key: a knock of ours was accepted.
@@ -324,8 +327,8 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   // Knocks we are still making (onchato add <invite>), until they accept.
   const knockAll = () => {
     for (const [pub, wt] of waiting) {
-      const raw = inboxSecretBytes({ pub: '', name: '', inbox: wt.inbox }); if (!raw) continue
-      void session.knock(raw, pub, { name: o.id.handle, note: wt.note }).catch(() => {})
+      const raw = inboxSecretBytes({ pub: '', name: '', inbox: wt.inbox }); if (!raw || !wt.key) continue
+      void session.knock(raw, wt.key, { name: o.id.handle, note: wt.note }).catch(() => {})
     }
   }
   if (waiting.size) { knockAll(); status(sys(`pukam do: ${[...waiting.values()].map((x) => x.name).join(', ')} (co 90 s, aż przyjmą)`)) }
