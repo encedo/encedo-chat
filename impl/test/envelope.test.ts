@@ -54,6 +54,11 @@ test('unknown type decodes (forward-compat); bad shape / version / garbage drop'
   assert.equal(decodeEnvelope(te.encode(JSON.stringify({ v: 1, t: 'msg', id: 'x', ts: 1, seq: 1 }))), null) // msg missing body
   assert.equal(decodeEnvelope(te.encode(JSON.stringify({ v: 2, t: 'msg', id: 'x', ts: 1, seq: 1, body: 'a', format: 'plain' }))), null) // wrong version
   assert.equal(decodeEnvelope(te.encode('nonsense')), null)
+  // ik-rotate: the future-feature seam (T13) - a well-formed one is held to its
+  // shape, a malformed one is dropped. Nothing dispatches it yet.
+  const rot = decodeEnvelope(te.encode(JSON.stringify({ v: 1, t: 'ik-rotate', id: 'x', ts: 1, seq: 1, newPub: 'AAAA', effectiveFrom: 2 }))) as any
+  assert.equal(rot?.t, 'ik-rotate'); assert.equal(rot.newPub, 'AAAA')
+  assert.equal(decodeEnvelope(te.encode(JSON.stringify({ v: 1, t: 'ik-rotate', id: 'x', ts: 1, seq: 1, newPub: 'AAAA' }))), null) // no effectiveFrom
 })
 
 test('full pipe: envelope -> encode -> decode (crypto-agnostic — the Session seals opaque bytes)', async () => {

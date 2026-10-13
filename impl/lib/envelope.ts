@@ -179,10 +179,22 @@ export interface GroupSkdEnv extends BaseEnv {
  * further ahead answers with its own epoch — which is the existing rekey path.
  */
 export interface GroupSkdReqEnv extends BaseEnv { t: 'group-skd-req'; gid: string; epoch: number }
+/**
+ * FUTURE FEATURE - in-band IK rotation (SPEC roadmap, plan T13). NOT wired:
+ * the type and its decode are the seam only, so a build that one day sends
+ * `ik-rotate` already has a receiver that validates the shape, and this build
+ * drops it as `UnknownEnv` rather than mis-parsing it. When T13 is built, the
+ * sender seals `{ t:'ik-rotate', newPub, effectiveFrom }` under the live
+ * ratchet (auth = SK, deniability kept), the receiver re-signs the contact
+ * book (lib/bookmac.ts) and derives rendezvous from newPub at effectiveFrom
+ * (lib/room.ts). Nothing dispatches it today; `decodeEnvelope` validates it so
+ * the shape is frozen and a malformed one is dropped, not acted on.
+ */
+export interface IkRotateEnv extends BaseEnv { t: 'ik-rotate'; newPub: string; effectiveFrom: number }
 /** A valid envelope whose `t` this build doesn't know — carried for forward-compat. */
 export interface UnknownEnv extends BaseEnv { [k: string]: unknown }
 
-export type KnownEnv = MsgEnv | TypingEnv | PresenceEnv | ReactionEnv | EditEnv | KnockEnv | FileEnv | RtcEnv | AckEnv | GroupSkdEnv | GroupSkdReqEnv
+export type KnownEnv = MsgEnv | TypingEnv | PresenceEnv | ReactionEnv | EditEnv | KnockEnv | FileEnv | RtcEnv | AckEnv | GroupSkdEnv | GroupSkdReqEnv | IkRotateEnv
 export type Envelope = KnownEnv | UnknownEnv
 export type FileMeta = Omit<FileEnv, keyof BaseEnv>
 
@@ -272,6 +284,9 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
       && typeof m.secret === 'string' && typeof m.chain === 'string' && Array.isArray(m.roster)
       && (m.ctr === undefined || (Number.isInteger(m.ctr) && m.ctr >= 0))) ? (m as GroupSkdEnv) : null
     case 'group-skd-req': return (typeof m.gid === 'string' && typeof m.epoch === 'number') ? (m as GroupSkdReqEnv) : null
+    // Validated but NOT dispatched (future feature, T13): a well-formed one is
+    // held to a known shape, a malformed one dropped; no caller reads it yet.
+    case 'ik-rotate': return (typeof m.newPub === 'string' && typeof m.effectiveFrom === 'number') ? (m as IkRotateEnv) : null
     default: return m as UnknownEnv // forward-compat: dispatcher ignores unknown types
   }
 }
