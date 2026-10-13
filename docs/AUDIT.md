@@ -23,7 +23,7 @@ Fixed inputs, fixed outputs, in `docs/kat/*.json`. Written only by `scripts/expo
 # TypeScript engine (the default clients run this)
 cd impl && node --test test/eh2-handshake.test.ts test/eh2-mlkem.test.ts test/senderkey.test.ts test/eh2-ratchet.test.ts
 
-# Rust core (the WASM engine in browsers and the terminal since 0.7.21; native in the Tauri host since 0.7.27)
+# Rust core (the WASM engine in browsers and the terminal since 0.7.21; native in the Tauri host since 0.7.31; its IPC: `NATIVE_IPC=1 node --test test/native-ipc.test.ts` after `cargo build --example core-ipc` in impl/src-tauri)
 cd core-rs && cargo test
 ```
 
@@ -37,7 +37,7 @@ Each `docs/kat/` file carries the fixed scalars, seeds and a `note` naming the c
 
 | Spec | Code |
 |---|---|
-| §3.2 engine selection and fallback (TS / WASM / native host) | `impl/eh2/establish.ts` (`setCoreBackend`, `startHandshake`), `impl/eh2/wasm.ts`, `impl/eh2/native.ts`, `impl/src-tauri/src/core_native.rs`, `core-rs/src/ffi.rs`; the default is chosen in `impl/web/src/app.ts` and `impl/cli/onchato.ts` |
+| §3.2 engine selection and fallback (TS / WASM / native host) | `impl/eh2/establish.ts` (`setCoreBackend`, `startHandshake`), `impl/eh2/wasm.ts`, `impl/eh2/native.ts`, `impl/src-tauri/src/core_native.rs`, `core-rs/src/ffi.rs`; the default is chosen in `impl/web/src/app.ts` and `impl/cli/onchato.ts`; `test/native-ipc.test.ts` + `src-tauri/examples/core-ipc.rs` (native through Tauri dispatch), `test/core-status.test.ts` (fallback reporting) |
 | §4.2 identity records, DESCR, fingerprint | `impl/lib/descr.ts` |
 | §4.3 the derivation seam (one DH, label/ctx) | `impl/lib/derive.ts`, `impl/lib/core.ts` (`hemIdentityFrom`, `hemGkBackend`) |
 | §4.4.1 safety number | `impl/lib/safety.ts`, `test/safety.test.ts` |
