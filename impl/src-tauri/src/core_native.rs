@@ -11,6 +11,14 @@
 //!
 //! IPC TRAP (CLAUDE.md, Android/Linux): a raw `Vec<u8>` invoke body becomes a
 //! JSON array and does not survive. Every byte field here is base64 TEXT.
+//!
+//! ARGUMENT NAMES: Tauri 2 maps a snake_case Rust parameter to a camelCase JS
+//! key unless told otherwise, and eh2/native.ts sends snake_case (`ik_pub`,
+//! `now_ms`). Every command here therefore says `rename_all = "snake_case"`.
+//! Without it (0.7.27 - 0.7.30) every command with an argument was refused with
+//! "missing required key ikPub", and every shell silently ran on WASM.
+//! impl/test/native-ipc.test.ts drives these commands through Tauri's real
+//! dispatch (examples/core-ipc.rs) and fails on any refused argument.
 
 use std::sync::{LazyLock, Mutex};
 
@@ -57,11 +65,11 @@ fn hs_err(e: HandshakeError) -> String {
 pub struct Started { pub handle: i32, pub out: String }
 
 /// The wire version the host speaks (must equal the TS engine's; 3).
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn core_version() -> i32 { encedo_core::wire::VERSION as i32 }
 
 /// I: fresh EK and ML-KEM key from the OS CSPRNG; returns a handle + msg1 (b64).
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn core_initiate(ik_pub: String, peer_ik_pub: String, tag_key: String, now_ms: f64) -> Result<Started, String> {
     let (ik, peer, tag) = (a32(&ik_pub)?, a32(&peer_ik_pub)?, a32(&tag_key)?);
     let mut rng = SysRng;
@@ -71,7 +79,7 @@ pub fn core_initiate(ik_pub: String, peer_ik_pub: String, tag_key: String, now_m
 }
 
 /// I: the responder EK pub of msg2, for the webview's DH(IK_i, EK_r).
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn core_peer_ek(handle: i32, msg2: String) -> Result<String, String> {
     let Some(Obj::Init(init)) = take(handle) else { return Err("not an initiator handle".into()) };
     let r = init.peer_ek_of(&b(&msg2)?).map(|ek| enc(&ek)).map_err(hs_err);
@@ -80,7 +88,7 @@ pub fn core_peer_ek(handle: i32, msg2: String) -> Result<String, String> {
 }
 
 /// I: dh2 = DH(EK_r, IK_i) from the webview; returns msg3 (b64); the handle now holds the result.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn core_initiator_complete(handle: i32, msg2: String, dh2: String, now_ms: f64) -> Result<String, String> {
     let Some(Obj::Init(init)) = take(handle) else { return Err("not an initiator handle".into()) };
     let dh2 = a32(&dh2)?;
@@ -91,7 +99,7 @@ pub fn core_initiator_complete(handle: i32, msg2: String, dh2: String, now_ms: f
 }
 
 /// R: decode msg1, check the initiator tag; returns handle + EK_i pub for DH(IK_r, EK_i).
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn core_respond(ik_pub: String, peer_ik_pub: String, tag_key: String, msg1: String, now_ms: f64, max_skew_ms: f64) -> Result<Started, String> {
     let (ik, peer, tag) = (a32(&ik_pub)?, a32(&peer_ik_pub)?, a32(&tag_key)?);
     let skew = if max_skew_ms > 0.0 { max_skew_ms as u64 } else { MAX_SKEW_MS };
@@ -102,7 +110,7 @@ pub fn core_respond(ik_pub: String, peer_ik_pub: String, tag_key: String, msg1: 
 }
 
 /// R: dh1 = DH(IK_r, EK_i) from the webview; returns msg2 (SK held, I unauthenticated).
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn core_responder_complete(handle: i32, dh1: String) -> Result<String, String> {
     let Some(Obj::RespBegin(rb)) = take(handle) else { return Err("not a responder handle".into()) };
     let mut rng = SysRng;
@@ -114,7 +122,7 @@ pub fn core_responder_complete(handle: i32, dh1: String) -> Result<String, Strin
 }
 
 /// R: the msg3 gate; the handle now holds the result.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn core_responder_finish(handle: i32, msg3: String) -> Result<(), String> {
     let Some(Obj::Resp(resp)) = take(handle) else { return Err("not a responder handle".into()) };
     match resp.finish(&b(&msg3)?) {
@@ -124,7 +132,7 @@ pub fn core_responder_finish(handle: i32, msg3: String) -> Result<(), String> {
 }
 
 /// Turn a completed handshake into a ratchet; returns a new session handle.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn core_session(handle: i32, pq_every_steps: u32, pq_every_ms: f64, max_skip: u32, now_ms: f64) -> Result<i32, String> {
     let Some(Obj::Done(res)) = take(handle) else { return Err("handshake not complete".into()) };
     let mut opts = RatchetOpts::default();
@@ -134,7 +142,7 @@ pub fn core_session(handle: i32, pq_every_steps: u32, pq_every_ms: f64, max_skip
     Ok(put(Obj::Rt(Ratchet::from_handshake(res, opts, now_ms as u64))))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn core_encrypt(handle: i32, now_ms: f64, pt: String) -> Result<String, String> {
     let Some(Obj::Rt(mut rt)) = take(handle) else { return Err("not a session handle".into()) };
     let frame = rt.encrypt(&mut SysRng, now_ms as u64, &b(&pt)?);
@@ -145,7 +153,7 @@ pub fn core_encrypt(handle: i32, now_ms: f64, pt: String) -> Result<String, Stri
 #[derive(Serialize)]
 pub struct Opened { pub status: u8, pub pt: String } // 0 = pt; 1 = not ours / tampered / replay
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn core_decrypt(handle: i32, now_ms: f64, frame: String) -> Result<Opened, String> {
     let Some(Obj::Rt(mut rt)) = take(handle) else { return Err("not a session handle".into()) };
     let r = rt.decrypt(&mut SysRng, now_ms as u64, &b(&frame)?);
@@ -157,5 +165,5 @@ pub fn core_decrypt(handle: i32, now_ms: f64, frame: String) -> Result<Opened, S
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub fn core_drop(handle: i32) { let _ = take(handle); }

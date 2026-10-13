@@ -16,6 +16,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+# examples/core-ipc.rs only: Tauri's mock runtime, so the native core's commands
+# are driven through Tauri's REAL argument deserialisation without a window
+# (impl/test/native-ipc.test.ts). Dev-only: no shipped build has the feature.
+[dev-dependencies]
+tauri = { version = "2", features = ["tray-icon", "test"] }
+
 [dependencies]
 # core-rs: the EH-2 handshake + Double Ratchet in Rust (SPEC.md 6-7). On the
 # desktop and Android the HOST runs it, so SK and the ratchet keys live in the
