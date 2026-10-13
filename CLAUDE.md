@@ -1030,7 +1030,12 @@ Things that will bite:
   `core-rs`): any change under `core-rs/src` must be followed by
   `./core-rs/build.sh` and a commit of the new `core.wasm`, or CI fails on
   the byte comparison. The toolchain is pinned in `core-rs/rust-toolchain.toml`
-  (rustup installs it by itself); the build is deterministic on that pin.
+  (rustup installs it by itself); the build is deterministic on that pin
+  **only with the path remapping `build.sh` sets** (`--remap-path-prefix` for
+  the checkout, `$CARGO_HOME` and the sysroot): rustc embeds absolute source
+  paths as panic locations, and the first CI run failed on exactly that (24
+  `/home/chris/...` strings in the module). Never build with plain `cargo
+  build` and commit the result.
 - **CSP needs `'wasm-unsafe-eval'`** in `script-src` (index.html) or
   `WebAssembly.instantiate` is refused with a CompileError that reads like a
   broken file. It allows WASM compilation only, not `eval`.
