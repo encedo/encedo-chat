@@ -105,3 +105,21 @@ test('an album travels with each file, and a broken one costs the grouping, neve
     assert.equal(d.name, 'a.jpg')
   }
 })
+
+test('a group name in an SKD is at most 64 code points, cut by the sender and again on receipt', async () => {
+  const { envGroupSkd, GROUP_NAME_MAX } = await import('../lib/envelope.ts')
+  const fields = { gid: 'g', gkPub: 'k', epoch: 0, secret: 's', chain: 'c', roster: ['a'] }
+  const long = '🌳'.repeat(70) + 'x'   // astral code points: a UTF-16 slice would split one
+  const sent = rt(envGroupSkd(1, { ...fields, name: long }))
+  assert.equal([...sent.name].length, GROUP_NAME_MAX)
+  assert.equal(sent.name, '🌳'.repeat(64))
+  assert.equal(rt(envGroupSkd(1, { ...fields, name: 'Zespół' })).name, 'Zespół', 'a short name is untouched')
+  // An older or hostile sender that did not cut it: the receiver does.
+  const raw = { v: 1, t: 'group-skd', id: 'x', ts: 1, seq: 1, ...fields }
+  const got = decodeEnvelope(te.encode(JSON.stringify({ ...raw, name: 'a'.repeat(500) }))) as any
+  assert.equal(got.name.length, 64)
+  // A name that is not a string costs the name, never the key distribution.
+  const odd = decodeEnvelope(te.encode(JSON.stringify({ ...raw, name: { evil: 1 } }))) as any
+  assert.equal(odd?.t, 'group-skd')
+  assert.equal('name' in odd, false)
+})

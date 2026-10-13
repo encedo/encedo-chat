@@ -24,6 +24,7 @@
 import type { ClientSession, Conversation, Contact } from '../lib/core.ts'
 import type { GroupRoom } from '../lib/grouproom.ts'
 import type { MsgEnv, FileEnv, ReactionEnv } from '../lib/envelope.ts'
+import { clampGroupName } from '../lib/envelope.ts'
 import { sealCache, openCache } from '../lib/gcache.ts'
 import { closeMentions } from '../lib/mentions.ts'
 import { OwedInvites } from '../web/src/groupview.ts'
@@ -208,6 +209,7 @@ export class Groups {
   }
 
   async create(name: string, memberPubs: string[]): Promise<GroupInfo> {
+    name = clampGroupName(name)
     const roster = [this.me, ...memberPubs.filter((p) => p !== this.me)]
     const gid = await this.session.groups.createGroupWithNewKey(`chat-gk-${name}`.slice(0, 32), roster.map((pub) => ({ pub })), name)
     const g: GroupInfo = { gid, name, epoch: 0, members: roster, room: null }
@@ -255,7 +257,7 @@ export class Groups {
   async rename(g: GroupInfo, name: string): Promise<void> {
     if (!this.isAdmin(g)) throw new Error('tylko admin grupy może zmienić jej nazwę')
     const before = g.name
-    g.name = name
+    g.name = clampGroupName(name)
     try {
       await this.distribute(g)
       this.session.groups.writeMarker(g.gid, name).catch(() => false)

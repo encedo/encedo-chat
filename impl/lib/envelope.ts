@@ -221,7 +221,18 @@ export const envFile = (seq: number, f: FileMeta): FileEnv => ({ ...base('file',
 export const envRtc = (seq: number, to: string, sig: any): RtcEnv => ({ ...base('rtc', seq), to, sig })
 export const envAck = (seq: number, ref: string, rts: number = nowMs()): AckEnv => ({ ...base('ack', seq), ref, rts })
 export type SkdFields = Omit<GroupSkdEnv, keyof BaseEnv | 't'>
-export const envGroupSkd = (seq: number, f: SkdFields): GroupSkdEnv => ({ ...base('group-skd', seq), ...f })
+/**
+ * A group's display name in an SKD: at most 64 code points (SPEC.md 8.6). Cut
+ * here, where every front-end's SKD is built, and again on receipt - the
+ * create form, the rename form and the CLI each had their own idea of it.
+ */
+export const GROUP_NAME_MAX = 64
+export const clampGroupName = (n: string): string => [...n].slice(0, GROUP_NAME_MAX).join('')
+export const envGroupSkd = (seq: number, f: SkdFields): GroupSkdEnv => {
+  const e: GroupSkdEnv = { ...base('group-skd', seq), ...f }
+  if (typeof e.name === 'string') e.name = clampGroupName(e.name)
+  return e
+}
 export const envGroupSkdReq = (seq: number, gid: string, epoch: number): GroupSkdReqEnv => ({ ...base('group-skd-req', seq), gid, epoch })
 
 export const encodeEnvelope = (e: Envelope): Uint8Array => te.encode(JSON.stringify(e))
@@ -239,6 +250,13 @@ const PRESENCE = new Set<string>(['active', 'away', 'leave'])
 const sanitizeQuote = (m: any) => { if (m.re !== undefined && !isQuoteRef(m.re)) delete m.re; return m }
 /** Same rule for an album: a broken `album` costs the grouping, never the file. */
 const sanitizeAlbum = (m: any) => { if (m.album !== undefined && !isAlbumRef(m.album)) delete m.album; return m }
+
+/** A name that is not a string costs the name, never the distribution (like a broken `re`). */
+function sanitizeSkdName(m: GroupSkdEnv): GroupSkdEnv {
+  if (m.name === undefined) return m
+  if (typeof m.name !== 'string') { const { name: _drop, ...rest } = m; return rest as GroupSkdEnv }
+  return { ...m, name: clampGroupName(m.name) }
+}
 
 export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
   let m: any
@@ -282,7 +300,7 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
     case 'ack': return (typeof m.ref === 'string' && typeof m.rts === 'number') ? (m as AckEnv) : null
     case 'group-skd': return (typeof m.gid === 'string' && typeof m.gkPub === 'string' && typeof m.epoch === 'number'
       && typeof m.secret === 'string' && typeof m.chain === 'string' && Array.isArray(m.roster)
-      && (m.ctr === undefined || (Number.isInteger(m.ctr) && m.ctr >= 0))) ? (m as GroupSkdEnv) : null
+      && (m.ctr === undefined || (Number.isInteger(m.ctr) && m.ctr >= 0))) ? sanitizeSkdName(m as GroupSkdEnv) : null
     case 'group-skd-req': return (typeof m.gid === 'string' && typeof m.epoch === 'number') ? (m as GroupSkdReqEnv) : null
     // Validated but NOT dispatched (future feature, T13): a well-formed one is
     // held to a known shape, a malformed one dropped; no caller reads it yet.
