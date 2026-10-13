@@ -72,8 +72,34 @@ export function isHandshakeFrame(frame: Uint8Array): boolean {
  */
 export type CoreBackend = 'ts' | 'wasm' | 'native'
 let backend: CoreBackend = 'ts'
-export function setCoreBackend(b: CoreBackend): void { backend = b }
+export function setCoreBackend(b: CoreBackend): void { backend = b; asked = b; used = null; fallbacks = [] }
 export function coreBackend(): CoreBackend { return backend }
+
+/**
+ * Which engine was asked for, which one the last handshake actually ran on,
+ * and every fallback on the way. `coreBackend()` alone cannot say this: the
+ * fallback happens at the first handshake, so before one it still names the
+ * engine that was asked for - and in a shell whose host does not answer, the
+ * difference is whether the keys are outside the webview or not. A KAT run
+ * with an injected KEM goes to the TS engine and is not recorded.
+ */
+export interface CoreStatus {
+  asked: CoreBackend
+  used: CoreBackend | null
+  fallbacks: Array<{ from: CoreBackend, to: CoreBackend, reason: string }>
+}
+let asked: CoreBackend = 'ts'
+let used: CoreBackend | null = null
+let fallbacks: CoreStatus['fallbacks'] = []
+let onFallback: ((f: CoreStatus['fallbacks'][number]) => void) | null = null
+export function coreStatus(): CoreStatus { return { asked, used, fallbacks: [...fallbacks] } }
+/** Told once per fallback, so a front-end can put it where a person reads it. */
+export function onCoreFallback(fn: ((f: CoreStatus['fallbacks'][number]) => void) | null): void { onFallback = fn }
+const fellBack = (from: CoreBackend, to: CoreBackend, e: unknown) => {
+  const f = { from, to, reason: String((e as Error)?.message ?? e).slice(0, 200) }
+  fallbacks.push(f)
+  try { onFallback?.(f) } catch { /* a listener never breaks a handshake */ }
+}
 
 export async function startHandshake(opts: StartOpts): Promise<Eh2Handshake> {
   // A KEM injected for a known-answer test is the TS engine's seam; the other
@@ -84,8 +110,9 @@ export async function startHandshake(opts: StartOpts): Promise<Eh2Handshake> {
     // ratchet keys outside the webview. If it is not reachable (not a shell, a
     // version mismatch), fall back to WASM for the rest of the process - same
     // frames, so the peer cannot tell.
-    try { return await startHandshakeNative(opts) } catch (e) {
+    try { const h = await startHandshakeNative(opts); used = 'native'; return h } catch (e) {
       backend = 'wasm'
+      fellBack('native', 'wasm', e)
       console.warn('core-rs: the native host core did not answer, falling back to WASM -', (e as Error)?.message ?? e)
     }
   }
@@ -97,10 +124,12 @@ export async function startHandshake(opts: StartOpts): Promise<Eh2Handshake> {
     // tell, and a handshake that cannot start is worse than a JS-heap key.
     try { await loadCore() } catch (e) {
       backend = 'ts'
+      fellBack('wasm', 'ts', e)
       console.warn('core-rs: the WASM module did not load, using the TypeScript engine -', (e as Error)?.message ?? e)
     }
-    if (backend === 'wasm') return startHandshakeWasm(opts)
+    if (backend === 'wasm') { const h = await startHandshakeWasm(opts); used = 'wasm'; return h }
   }
+  if (!opts.kem) used = 'ts'
   const kem = opts.kem ?? mlkem768
   const now = opts.now
   let authenticated = false
