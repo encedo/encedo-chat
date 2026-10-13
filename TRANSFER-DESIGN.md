@@ -4,7 +4,7 @@
 `impl/lib/xfer-session.ts`). Written as a proposal on 2026-09-13 and implemented
 the same day; this header went on saying "nothing built" until 2026-09-21.
 
-**Normative text is `docs/PROTOCOL.md` §13.1** — frames, subtypes, the
+**Normative text is `docs/SPEC.md` §13.1** — frames, subtypes, the
 reliability model it inherits from the channel, and the consent and timeout
 rules. This file keeps the reasoning and the measurements behind them.
 

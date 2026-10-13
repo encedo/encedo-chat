@@ -230,7 +230,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   }
   await session.watchContacts(contactList.map((c) => ({ pub: c.pub })), presence)
 
-  // ---- groups (PROTOCOL.md §8; cli/groups.ts) ----------------------------------
+  // ---- groups (SPEC.md §8; cli/groups.ts) ----------------------------------
   const fps = new Map<string, string>()
   const memberName = (pub: string) => pub === o.id.pub ? o.id.handle
     : contactList.find((c) => c.pub === pub)?.name ?? (fps.get(pub) ? fps.get(pub)!.slice(0, 11) + '…' : pub.slice(0, 8))
@@ -280,7 +280,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   }
   const groupOf = (win: Win) => win.kind === 'group' ? groups?.get(win.key) ?? null : null
 
-  // ---- invites that answer themselves (PROTOCOL.md §5.7-5.8) ----------------
+  // ---- invites that answer themselves (SPEC.md §5.7-5.8) ----------------
   interface Knock { n: number; ik: string; name: string; note: string; fp: string; inv: PubInvite }
   let knocks: Knock[] = []
   let knockSeq = 0

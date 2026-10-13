@@ -1,5 +1,5 @@
 /**
- * EH-2 stage 4 — Double Ratchet (docs/PROTOCOL.md §7).
+ * EH-2 stage 4 — Double Ratchet (docs/SPEC.md §7).
  *
  * The properties that matter: both sides stay in step across hundreds of
  * messages and direction changes; a late message still opens; a message key is

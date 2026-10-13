@@ -1,7 +1,7 @@
 /**
  * groups.ts - groups for the CLI (CLI-PLAN.md stage 6), the app's mechanism.
  *
- * The crypto is lib/group.ts (Sender Keys, PROTOCOL.md §8) behind the session;
+ * The crypto is lib/group.ts (Sender Keys, SPEC.md §8) behind the session;
  * this is the orchestration app.ts does for the web, written for a terminal:
  *   - an invitation (`group-skd` over a 1:1) joins the group, and we hand our
  *     own sender key to every member once (that is also the admin's receipt);

@@ -1,5 +1,5 @@
 /**
- * eh2/handshake.ts — the EH-2 handshake state machines (docs/PROTOCOL.md §6).
+ * eh2/handshake.ts — the EH-2 handshake state machines (docs/SPEC.md §6).
  *
  * Interactive, Noise-XX-flavored, 1.5 round-trips, mutually authenticated by
  * MACs over the transcript (no signatures -> deniability, §6.4). Output: `SK`

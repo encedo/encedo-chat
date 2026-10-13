@@ -8,7 +8,7 @@
  * the ratchet in a `file` envelope. So a voice note is a FILE, and every
  * property of the file path — the encryption, the expiry, the caption, the
  * reply, the delivery marker — comes along without a line of new wire format.
- * Nothing in `PROTOCOL.md` changes, because nothing about the wire changes.
+ * Nothing in `SPEC.md` changes, because nothing about the wire changes.
  *
  * It is also the reason this is not a call. A call would need signalling, a
  * live path and both people present; a voice note needs a microphone and the

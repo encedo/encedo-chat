@@ -1,7 +1,7 @@
 /**
  * gleft.ts - the groups this identity walked out of, and at which epoch.
  *
- * Leaving a group is local: nothing goes on the wire (PROTOCOL.md 8.3), so
+ * Leaving a group is local: nothing goes on the wire (SPEC.md 8.3), so
  * the admin keeps distributing to the roster it still holds, and the other
  * members keep re-sending their keys. Dropping the record and the sealed blob
  * (the 2026-10-12 audit found neither was dropped - the group came back on
@@ -10,7 +10,7 @@
  * over at a NEWER epoch is a fresh distribution by the admin's rekey, and
  * joining on it is the ordinary automatic join every group has.
  *
- * Sealed under the identity (PROTOCOL.md 10, `encedo-chat-group-left-v1`):
+ * Sealed under the identity (SPEC.md 10, `encedo-chat-group-left-v1`):
  * a list of group ids is a list of relationships.
  */
 

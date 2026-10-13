@@ -1,7 +1,7 @@
 /**
  * invites.ts - published invites and knocks for the CLI (CLI-PLAN.md stage 2b).
  *
- * The app's mechanism and the app's storage (PROTOCOL.md §5.7-5.8): an invite
+ * The app's mechanism and the app's storage (SPEC.md §5.7-5.8): an invite
  * carries an inbox secret that names a topic you listen on; whoever opens it
  * KNOCKS there with their key, and accepting the knock makes them a contact.
  * The records are the app's, under the same keys and salts, sealed by

@@ -1,5 +1,5 @@
 /**
- * safety.ts - the safety number of a pair (PROTOCOL.md §4.4.1).
+ * safety.ts - the safety number of a pair (SPEC.md §4.4.1).
  *
  * One string both people see IDENTICALLY, so verifying a contact is reading
  * one list aloud, not comparing "my key on your screen" with "my key on mine"

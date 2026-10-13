@@ -3,7 +3,7 @@
  * member list has to, kept out of app.ts so they can be tested without a DOM.
  *
  * 1. Who in the roster is NOT one of my contacts. Sender keys ride 1:1
- *    conversations (PROTOCOL.md §8.3), and this app opens a 1:1 only with a
+ *    conversations (SPEC.md §8.3), and this app opens a 1:1 only with a
  *    contact, so such a member and I cannot read each other in the group - in
  *    either direction - while everybody else can. Reported 2026-10-06: a member
  *    showed as "wv7z1yc+" (eight characters of a key) with nothing saying why.

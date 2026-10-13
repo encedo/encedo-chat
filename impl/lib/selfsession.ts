@@ -1,5 +1,5 @@
 /**
- * selfsession.ts — one active session per identity (docs/PROTOCOL.md §9.1).
+ * selfsession.ts — one active session per identity (docs/SPEC.md §9.1).
  *
  * Every client subscribes to a topic derived from its OWN identity key, and
  * announces itself there. Nobody else can derive that topic or forge an announce

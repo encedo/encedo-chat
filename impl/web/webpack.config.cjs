@@ -90,11 +90,11 @@ module.exports = (_env, argv) => {
       },
       new webpack.DefinePlugin({
         __EC_ALLOW_KEYS__: JSON.stringify(allowKeys),
-        // The network this build derives its topics for (PROTOCOL.md 5.1). A
+        // The network this build derives its topics for (SPEC.md 5.1). A
         // self-hosted network is a build with its own id and node list; the
         // installed app has no flag for it, by design.
         __EC_NETWORK__: JSON.stringify(process.env.EC_NETWORK || 'main'),
-        // The desktop's connection diary on disk (PROTOCOL.md 10). On by
+        // The desktop's connection diary on disk (SPEC.md 10). On by
         // default - it is the one witness to "no dot in the morning" - and a
         // deployment that wants no plain record of contact presence on disk
         // builds with EC_DIARY=0: the writes are compiled out, the in-memory

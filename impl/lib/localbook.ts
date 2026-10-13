@@ -1,5 +1,5 @@
 /**
- * localbook.ts - the signed local contact book (PROTOCOL.md §4.4), over any KV.
+ * localbook.ts - the signed local contact book (SPEC.md §4.4), over any KV.
  *
  * It lived in the web app, bound to localStorage. The CLI keeps the same keys
  * in a file (cli/store.ts), and a contact book is the thing that must not have

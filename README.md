@@ -86,9 +86,12 @@ costs are in [`hem_usage.md`](hem_usage.md).
 
 ## Documentation
 
-- [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — protocol & cryptography (identity,
-  rendezvous, EH-2 handshake, ratchet, groups, session management, PQ roadmap,
-  implementation guide, flow diagrams). **Describes what ships.**
+- [`docs/SPEC.md`](docs/SPEC.md) — the normative protocol specification
+  (identity, rendezvous, EH-2 handshake, ratchet, groups, session management,
+  transport, constants). **Describes what ships.**
+- [`docs/RATIONALE.md`](docs/RATIONALE.md) — why it is built that way: design
+  rationale, decision record, PQ roadmap, open questions, implementation map,
+  flow diagrams.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — product & infrastructure.
 - [`docs/THREAT-MODELS.md`](docs/THREAT-MODELS.md) — deployment profiles P1–P3.
 

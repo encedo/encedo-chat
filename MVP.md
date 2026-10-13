@@ -215,7 +215,7 @@ czeka na gossipsub v3), TURN (**zdecydowane: nie**).
 ## 8. Kolejność (stan 2026-08-30)
 
 1. ~~§6.1 na Androidzie z artefaktu~~ — ✅ przechodzone, etap C potwierdzony.
-2. ~~Migracja profilu i `PROTOCOL.md`~~ — ✅ obie.
+2. ~~Migracja profilu i `SPEC.md`~~ — ✅ obie.
 3. ~~Windows z podpisem~~ i ~~`bs3`~~ i ~~strona pobierania~~ — ✅ wszystkie trzy.
 4. **Teraz**: podmiana updatera na Windows (§4 pkt 9) przy wydaniu 0.6.4, potem
    §6.1 przechodzone **przez testerów**, nie przeze mnie — i §6.3, którego nadal

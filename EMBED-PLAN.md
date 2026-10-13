@@ -154,7 +154,7 @@ middle.**
 
 What makes it survivable is already built: the fingerprint comparison in the
 import dialog, treating the first key seen for a contact as pinned, and — since
-0.6.45 — the pair's **safety number** with a QR scan (PROTOCOL.md §4.4.1), one
+0.6.45 — the pair's **safety number** with a QR scan (SPEC.md §4.4.1), one
 string both people see identically. A substituted key then becomes
 *detectable* by anyone who checks — not *impossible*. Anything that hides the
 safety number to make the integration smoother throws away the only defence
@@ -299,7 +299,7 @@ of 15 days rather than 8). The order of work changed:
 | # | Step | Days | Note |
 |---|---|---:|---|
 | 1 | **0.7.0** and the group test | — | first, unchanged; nothing here starts before it |
-| 2 | **Compatibility rule**: protocol version on the wire, a visible "older version" message | 2–3 | prerequisite for anything external; also touches PROTOCOL.md (user's GO, cryptographer note) |
+| 2 | **Compatibility rule**: protocol version on the wire, a visible "older version" message | 2–3 | prerequisite for anything external; also touches SPEC.md (user's GO, cryptographer note) |
 | 3 | **`@encedo/chat-core`** (stage 1 above) | 2–3 | |
 | 4 | **Embed page + Open Mercato PR, iframe mode** — module, postMessage bridge, key column, pinning + key-change warning, CSP | 5–7 | answers (a) with their maintainers in the PR discussion |
 | 5 | **Component** (stages 2–4 above) | 18–30 | only if the iframe module earns it; `mount()` spike first |
@@ -307,6 +307,6 @@ of 15 days rather than 8). The order of work changed:
 ## Next step
 
 Nothing is coded yet (2026-10-06, the user's call). After 0.7.0: write the
-compatibility rule as a PROTOCOL.md proposal for the user's GO, then the
+compatibility rule as a SPEC.md proposal for the user's GO, then the
 Open Mercato proposal text that opens the PR discussion — leading with the
 instant-only question (a), because it decides whether the rest is worth it.

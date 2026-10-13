@@ -1,5 +1,5 @@
 /**
- * The signed local contact book, over a key-value store (PROTOCOL.md 4.4).
+ * The signed local contact book, over a key-value store (SPEC.md 4.4).
  *
  * bookmac.test.ts pins the primitive; this pins the policy around it - above
  * all the one the 2026-10-12 audit found missing: a book that has ever been

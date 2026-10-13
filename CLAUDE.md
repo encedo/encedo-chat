@@ -1,18 +1,21 @@
 # CLAUDE.md — v6 implementation notes
 
 Working notes for building v6. **Since 2026-08-30 (the user's decision) the
-docs describe the SHIPPED implementation — `docs/PROTOCOL.md` is kept 1:1 with
+docs describe the SHIPPED implementation — `docs/SPEC.md` is kept 1:1 with
 the code.** A wire behaviour the client has and the spec omits, or the reverse,
 is a defect in one of them: fix the spec in the same change, or flag it to the
 user if the divergence is a decision. This file remains authoritative for
 operational reality — lessons, deploy rituals, platform traps.
 
-- `docs/PROTOCOL.md` — protocol & crypto, **normative for what is on the wire**.
-  (Known intended-future items are marked in place: in-HSM HKDF §4.3/S13, the
-  hardened Rust-core tier §3.2, the relay-blind plane §13.)
+- `docs/SPEC.md` — protocol & crypto, **normative for what is on the wire**;
+  flat: it states the shipped behaviour and carries no history or change notes.
+- `docs/RATIONALE.md` — the why: rationale per area, decision record,
+  alternatives, the PQ roadmap, open questions, implementation map, diagrams.
+  (Intended-future items live there: in-HSM HKDF / S13, the hardened Rust-core
+  tier, the relay-blind plane.)
 - `docs/ARCHITECTURE.md` — product & infrastructure, shipped state + roadmap rows.
 - `docs/THREAT-MODELS.md` — deployment profiles P1–P3, controls vs intentions marked.
-- These three go to the external cryptographer — protocol-meaningful changes
+- These four go to the external cryptographer — protocol-meaningful changes
   still need the user's explicit GO; editorial truth-keeping does not.
 
 ## Code is ASCII (the user's rule, 2026-09-03)
@@ -69,7 +72,7 @@ local workspace, not in this repo — since 2026-08-21 under `dep/` beside it.
 **Design (in the specs):** the HSM exposes `ecdh` in two modes — raw, and
 `ecdh`+**HKDF executed inside the HSM** (salt/info/L as arguments) — so that
 IK-derived secrets (rendezvous topics, announce MAC keys, cache key) never
-leave the device. `docs/PROTOCOL.md` §4.3 is written against this.
+leave the device. `docs/SPEC.md` §4.3 is written against this.
 
 **Current firmware / `hem-sdk-js`:** **no in-HSM HKDF yet.** `ecdh` returns the
 **raw** 32-byte shared secret only (the REST endpoint has an optional `alg`
@@ -187,7 +190,7 @@ The plaintext inside the interim seal is a **versioned JSON envelope**, not a
 raw string. One shape: `{ v, t, id, ts, seq, …payload }` — `t` is the type
 discriminator, `id` a short per-message id (reactions/replies), `ts` Unix epoch
 **ms (UTC)**, `seq` per-sender monotonic (dedup/order, **UX only, not
-security**). Types — exactly the eleven of `PROTOCOL.md` §7.4: `msg` (text,
+security**). Types — exactly the eleven of `SPEC.md` §7.4: `msg` (text,
 `format:'plain'` — **never raw HTML**; `md` safe-subset reserved), `typing`,
 `presence` (`active|away|leave`), `reaction`, `edit`, `knock`, `file`
 (**shipped end-to-end**: chunked AES-GCM before IPFS upload, CID + content key
@@ -304,7 +307,7 @@ fills `au` from `contact.pub` in a 1:1 and from `from` in a group — hinting of
 a PeerId would hash the wrong bytes and name nobody. This is the third time this
 pair has been confused (see the sender-key note in §8).
 
-`docs/PROTOCOL.md` **§7.4 describes `re`** — the field went into the frozen specs
+`docs/SPEC.md` **§7.4 describes `re`** — the field went into the frozen specs
 once the user decided it should (2026-08-27). The rule that put it there stands:
 a wire field the client sends and the spec omits means the audit is of a
 different program, so the decision is the user's and the default is to ask.
@@ -354,7 +357,7 @@ Covered by `test/edits.test.ts` (window, skew, the who-may-edit-what rule, codec
 refusals, forward-compat) and a `room-eh2` scenario proving the correction
 reaches the peer, is not delivered as a message, and is acked **under its own
 id**. Covered by `browser-test` since 2026-08-24 (it clicks ✏ and checks the old text
-is gone on the other side). `docs/PROTOCOL.md` **§7.4 describes `edit`**, with
+is gone on the other side). `docs/SPEC.md` **§7.4 describes `edit`**, with
 the window, the skew tolerance and the 1:1-only reasoning.
 
 ### Sessions and rooms — `lib/core.ts`
@@ -504,7 +507,7 @@ are decisions, not details:
   no longer holds). Unpinning removes the bubble only when it came FROM the
   store (`dataset.frompin`); a message pinned in this session just loses its mark.
 
-Nothing about pins goes over the wire, so `PROTOCOL.md` is untouched. The
+Nothing about pins goes over the wire, so `SPEC.md` is untouched. The
 storage-key rule above applies: `browser-test` asserts the blob is encrypted and
 identity-keyed, and that a pinned message is first in the room after a reload.
 
@@ -829,7 +832,7 @@ What settles it:
 
 - **`initiator_tag` is the one conclusive statement about identity.** msg1 carries
   `HMAC(k_tag, IK_i)` with `k_tag` from the pair's Announce key of the day
-  (PROTOCOL.md §6.1), and the responder checks it against the contact - and,
+  (SPEC.md §6.1), and the responder checks it against the contact - and,
   failing that, against its OWN IK, which names a second window outright. That
   check cannot be an accident of timing, so one occurrence is enough: the peer is
   ignored for 5 minutes and the UI is told. It replaced `initiator_id =
@@ -981,7 +984,7 @@ on the one transport, **not** twenty handshakes.
   `test/presence-rotation.test.ts` pins the shifted-clock schedule, `rendezvousDay`,
   the offset derivation (range/determinism/date-independence/network scope), the
   two-day online aggregation and the handshake-day surfacing. The per-pair
-  offset is **normative** in `docs/PROTOCOL.md` §5.4 (promoted 2026-08-30); both
+  offset is **normative** in `docs/SPEC.md` §5.4 (promoted 2026-08-30); both
   ends must run the same scheme, so a mixed old/new deployment would mismatch —
   the whole build cut over together.
 - **Duplicate-tab caveat, documented:** a second tab of our OWN identity derives
@@ -1013,7 +1016,7 @@ on the one transport, **not** twenty handshakes.
   `RTCPeerConnection`), so it seeds `ec-transport=auto` for both browsers; drop
   that line and the WebRTC scenarios pass by negotiating nothing. Everything on
   GossipSub (presence, signalling, relayed and group content) is ciphertext +
-  metadata to the relay. The **relay-blind** plane (`docs/PROTOCOL.md` §13) is a
+  metadata to the relay. The **relay-blind** plane (`docs/SPEC.md` §13) is a
   different promise and still parked: today's default hides the address from the
   PEER, that plane would hide it from the NODE.
 
@@ -1131,13 +1134,13 @@ changes the topic (§5.3), so a member who is offline at that instant is locked 
 entirely: a repair that can drop a healthy member is worse than the fault. Epoch rotation
 stays where it belongs, on membership change.
 
-Written up as a Proposal at the end of `docs/PROTOCOL.md` §8 (both conditions above are
+Written up as a Proposal at the end of `docs/SPEC.md` §8 (both conditions above are
 normative there).
 
 ### The HEM marker DESCR — `lib/gmarker.ts`
 
 One DESCR field per group, written on the `GK_pub` key, found by
-`key_search`. **This must stay 1:1 with `docs/PROTOCOL.md` §8.6** — the spec is
+`key_search`. **This must stay 1:1 with `docs/SPEC.md` §8.6** — the spec is
 normative for the format, this describes the code, and a reader comparing them
 should find no difference.
 
@@ -1413,7 +1416,7 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
   plane (no IP exposure).
 - **Several identities in one HEM — BUILT** (Track A: identity records, scoped
   contacts, KID-keyed local state, sign-in picker; normative in
-  `docs/PROTOCOL.md` §4.2). This note is the implementation side and the two
+  `docs/SPEC.md` §4.2). This note is the implementation side and the two
   must not drift.
 
   Today a HEM holds one chat identity by construction: sign-in does
@@ -1451,7 +1454,7 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
     show a short KID beside it, or the wrong identity is chosen silently.
   No backward compatibility: pre-MVP, the old format is dropped rather than read.
 - **Groups: a member holds `GK_pub` in the HEM too — BUILT 2026-08-09**
-  (Proposal in `docs/PROTOCOL.md` §8, after the marker note; §8's own text said members
+  (Proposal in `docs/SPEC.md` §8, after the marker note; §8's own text said members
   import `GK_pub` all along, and until now the code did not).
 
   ```
@@ -1514,7 +1517,7 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
   diagnosis separating a dead webview from a blocked network, and since 0.5.76
   it sits behind the Diagnostyka button at the bottom of Settings, not `?debug=1`.
 - Shipped since these notes' earlier eras, with their stories in `git log` and
-  the protocol truth in `docs/PROTOCOL.md`: files over IPFS + voice notes
+  the protocol truth in `docs/SPEC.md`: files over IPFS + voice notes
   (§7.5), notifications (`lib/notify.ts`), contact-book MAC (`lib/bookmac.ts`,
   §4.4), profile export/import (`lib/migrate.ts`, §10), software profiles
   (`lib/profile.ts`, §4.5), group keepalive + repair (§8), the Tauri desktop +

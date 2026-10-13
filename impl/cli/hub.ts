@@ -4,7 +4,7 @@
  * rooms opened on demand, and events out.
  *
  * `send` returns once the recipient's client confirms (the ordinary `ack`,
- * PROTOCOL.md delivery contract) or the wait runs out. A message that was not
+ * SPEC.md delivery contract) or the wait runs out. A message that was not
  * confirmed in time is NOT dropped: the room keeps it and re-sends it when the
  * recipient is back - for as long as this process runs. That is the honest
  * meaning of exit 3 ("queued"): it waits HERE, nowhere else (instant-only).
@@ -26,7 +26,7 @@ export type HubEvent =
   | { t: 'delivered'; to: string; pub: string; id: string; ms: number }
   | { t: 'link'; state: 'online' | 'reconnecting' | 'offline' }
 
-/** 'sent' is a group: a broadcast has no acks to wait for (PROTOCOL.md §8). */
+/** 'sent' is a group: a broadcast has no acks to wait for (SPEC.md §8). */
 export interface SendResult { status: 'delivered' | 'queued' | 'sent'; id: string; ms?: number; to: string }
 
 export class Hub {

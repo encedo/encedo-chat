@@ -16,7 +16,7 @@
  * keyed the EH-2 session by the GossipSub publisher id, and a relay publishing
  * on a client's behalf signs as itself -- every message would have arrived as
  * `from = relay`. Since 0.6.22 every frame carries its sender inside (the
- * origin envelope, impl/lib/origin.ts, PROTOCOL.md S13), so who publishes the
+ * origin envelope, impl/lib/origin.ts, SPEC.md S13), so who publishes the
  * GossipSub message no longer matters to any receiver. A PUSH is therefore:
  * publish these bytes UNCHANGED on this topic (the relay never opens the
  * envelope) and hand them to the local pick-holders of that topic except the
@@ -32,7 +32,7 @@
  *
  * A picked topic is recorded per peer the same way a subscription is. The
  * relay learns nothing it did not learn from GossipSub; it carries less.
- * Written into PROTOCOL.md §12 so nobody reads "light client" as "the relay
+ * Written into SPEC.md §11.4 so nobody reads "light client" as "the relay
  * sees less".
  *
  * ## REFUSED -- the first non-silent refusal

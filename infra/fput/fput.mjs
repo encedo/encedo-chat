@@ -2,7 +2,7 @@
 //
 // `POST /f` jest otwarty dla swiata z rozmyslu: uwierzytelniony upload wiedzialby,
 // KTO wyslal CO i KIEDY, czyli dokladnie te metadane, ktorych produkt unika
-// (docs/PROTOCOL.md 12, infra/README.md). Cena byla taka, ze pod nasza nazwa dalo
+// (docs/SPEC.md 11.4, infra/README.md). Cena byla taka, ze pod nasza nazwa dalo
 // sie powiesic cudza strone — sprawdzone: plik HTML wgrany curl-em wracal z bramki
 // jako `text/html`, na jednym originie z aplikacja uruchomiona z IPFS.
 //

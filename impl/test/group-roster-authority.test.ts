@@ -1,5 +1,5 @@
 /**
- * Roster authority lives in the engine (PROTOCOL.md §8.3 / §8.4).
+ * Roster authority lives in the engine (SPEC.md §8.3 / §8.4).
  *
  * The audit of 2026-10-11 found the front-ends keeping a roster of their own,
  * adopted from ANY same-epoch SKD, and handing out `group_secret` + the own

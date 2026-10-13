@@ -1,5 +1,5 @@
 /**
- * senderkey.ts — group Sender Keys (docs/PROTOCOL.md §8, ECDH-HMAC Proposal).
+ * senderkey.ts — group Sender Keys (docs/SPEC.md §8, ECDH-HMAC Proposal).
  *
  * Each group MEMBER has one sending chain: a symmetric hash-ratchet that yields a
  * fresh message key per message and steps forward, giving per-message forward

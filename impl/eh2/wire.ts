@@ -1,5 +1,5 @@
 /**
- * eh2/wire.ts — EH-2 handshake wire format + transcript hashes (docs/PROTOCOL.md §6.1–6.2).
+ * eh2/wire.ts — EH-2 handshake wire format + transcript hashes (docs/SPEC.md §6.1–6.2).
  *
  * STAGE 1 of the EH-2 build. Pure serialization: no keys, no DH, no MACs are
  * computed here — this layer only turns the three handshake frames into bytes

@@ -87,7 +87,7 @@ const [cmd, ...rest] = process.argv.slice(2)
 const opt = (name: string, def?: string) => { const i = rest.indexOf(name); return i >= 0 && rest[i + 1] && !rest[i + 1].startsWith('--') ? rest[i + 1] : def }
 const args = rest.filter((a, i) => !a.startsWith('--') && !(i > 0 && rest[i - 1].startsWith('--') && opt(rest[i - 1]) === a))
 const die = (msg: string): never => { console.error('onchato: ' + msg); process.exit(1) }
-/** The network topics are derived for (PROTOCOL.md 5.1); `main` is the operator's. */
+/** The network topics are derived for (SPEC.md 5.1); `main` is the operator's. */
 const NETWORK = opt('--network', 'main')!
 
 /** A secret from the flag, the environment, or a masked prompt (stdin when piped). */

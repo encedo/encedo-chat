@@ -1,5 +1,5 @@
 /**
- * eh2/ratchet.ts — Double Ratchet over the EH-2 handshake (docs/PROTOCOL.md §7).
+ * eh2/ratchet.ts — Double Ratchet over the EH-2 handshake (docs/SPEC.md §7).
  *
  * Signal-style, `RK_0 = SK`. Two ratchets turn one handshake into per-message
  * keys: a symmetric one that advances a chain key on every message (per-message
@@ -47,7 +47,7 @@ const CK_LABEL = 'encedo-chain-key'
 const T_DATA = 0x10
 /** A content frame whose header also carries ML-KEM material (7.2 hybrid step). */
 const T_DATA_PQ = 0x11
-const VERSION = 3 // one ver names one spec (PROTOCOL.md header); 3 = the one KDF/nonce convention of spec 3.0
+const VERSION = 3 // one ver names one spec (SPEC.md header); 3 = the one KDF/nonce convention of spec 3.0
 const HDR_LEN = 2 + 32 + 4 + 4
 const PQ_CT = 0x01, PQ_PUB = 0x02
 /** The largest header the wire can carry: base, flags, two u16 lengths, pq_ct and pq_pub of ML-KEM-768. */

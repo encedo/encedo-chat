@@ -1,6 +1,6 @@
 /**
  * descr.ts — what a key looks like in the HEM: its `label`, its `DESCR`, and the
- * id the device gives it (docs/PROTOCOL.md §4, "several identities in one HEM").
+ * id the device gives it (docs/SPEC.md §4, "several identities in one HEM").
  *
  * Two fields with different jobs, and both are used deliberately:
  *

@@ -1,5 +1,5 @@
 /**
- * group.ts — group state + wire (docs/PROTOCOL.md §8/§5.3, ECDH-HMAC Proposal).
+ * group.ts — group state + wire (docs/SPEC.md §8/§5.3, ECDH-HMAC Proposal).
  *
  * A group is a software layer over the 1:1 mesh: each member has its own sending
  * chain (`lib/senderkey.ts`), everyone broadcasts on a shared topic derived from a
@@ -37,7 +37,7 @@ const MSG_MAC_LABEL = enc.encode('encedo-group-msg-mac')
 const ROSTER_MAC_LABEL = enc.encode('encedo-chat-group-roster-mac')
 
 const T_GMSG = 0x20
-const VERSION = 3 // one ver names one spec (PROTOCOL.md header): the MAC-key derivation changed with spec 3.0
+const VERSION = 3 // one ver names one spec (SPEC.md header): the MAC-key derivation changed with spec 3.0
 const HDR_LEN = 16 + 8 + 4 + 4 // 32
 const REC_LEN = 8 + 32         // recipient_id || mac
 

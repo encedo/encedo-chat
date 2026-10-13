@@ -1,5 +1,5 @@
 /**
- * One active session per identity (docs/PROTOCOL.md §9.1) — `lib/selfsession.ts`.
+ * One active session per identity (docs/SPEC.md §9.1) — `lib/selfsession.ts`.
  *
  * The self-topic carries only our own windows: nobody else can derive it or
  * forge an announce on it. What is under test is the rule that fires when there

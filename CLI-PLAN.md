@@ -129,7 +129,7 @@ exported from the app cannot be used here. Today it is a developer tool.
   the process. Proved live by `net/cli-group-admin-test.ts` (two terminals +
   a script behind the daemon: add, script send, kick locks bob out, rename).
   And in the engine, for both clients: a frame that beats its sender's key is
-  now held and opened when the key lands (PROTOCOL.md §8.4), not dropped. And a
+  now held and opened when the key lands (SPEC.md §8.4), not dropped. And a
   room repeats each frame it sends in its first 30 s (+2/+6 s): a message right
   after /add used to miss a member whose subscription was not at the relay yet.
 - **Stage 7 - in progress: the Docker image** (2026-10-08). `Dockerfile` at the
@@ -161,7 +161,7 @@ exported from the app cannot be used here. Today it is a developer tool.
   only sealed with a password, in the browser's format (§4.5), files `0600`.
   The plaintext test keystore goes.
 - **Instant-only, said plainly.** Nothing stores messages for the absent
-  (PROTOCOL.md). A script reaches a human who is online, or one who comes
+  (SPEC.md). A script reaches a human who is online, or one who comes
   online **while the daemon still runs** — that is what the daemon is for.
   Fire-and-forget to somebody offline does not work, by design.
 - **No voice recording** in the terminal (user's call). Files: yes.
@@ -230,7 +230,7 @@ The same hook fits cron, `systemd OnFailure=`, a monitoring alarm, or a
    The daemon holds the sessions; `send` hands it the message over a local
    socket (`$XDG_RUNTIME_DIR/onchato.sock`, `0600`) and returns at once.
 2. **A queue that waits for the recipient to be online** — the core of the
-   feature. The network stores nothing (PROTOCOL.md), so a notification for an
+   feature. The network stores nothing (SPEC.md), so a notification for an
    absent admin waits **on the bot's side**:
    - an outbox **sealed to a file** (§10 cache key), so a daemon restart or a
      reboot does not lose it;

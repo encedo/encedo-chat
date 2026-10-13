@@ -90,7 +90,7 @@ try {
   const r1 = await req({ op: 'send', to: 'zespol', text: s1, wait: 5000 })
   if (!r1.ok || r1.status !== 'sent') throw new Error('daemon send to a group: ' + JSON.stringify(r1))
   // cee's 1:1 with bob may be seconds old, so this frame can beat cee's key to
-  // bob; it is held there and opened when the key lands (PROTOCOL.md §8.4).
+  // bob; it is held there and opened when the key lands (SPEC.md §8.4).
   await until('the script\'s message on ala and bob', () => A.all().includes('<cee> ' + s1) && B.all().includes('<cee> ' + s1))
   step('daemon `send zespol`: status "sent", the message on both terminals')
 

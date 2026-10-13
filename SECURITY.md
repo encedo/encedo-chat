@@ -19,8 +19,8 @@ not to.
 - `relay/` - the discovery node.
 - `infra/` - the operator's nginx, STUN, file-store prefixer, feedback sink,
   geoblock and deploy scripts as versioned here.
-- `docs/PROTOCOL.md`, `docs/THREAT-MODELS.md` - the protocol and its threat
-  model are in scope as documents: a property the spec claims and the code
+- `docs/SPEC.md`, `docs/RATIONALE.md`, `docs/THREAT-MODELS.md` - the protocol and its
+  threat model are in scope as documents: a property the spec claims and the code
   does not deliver is a finding, not a typo.
 
 Out of scope here, with their own channels: the HEM firmware and the
@@ -33,7 +33,7 @@ Anything that lets somebody who is not a party to a conversation read it,
 forge a message or a group key, learn which identities a connection belongs
 to, take over a session, or make a client derive the wrong rendezvous with the
 wrong peer - and anything on a node or the file store that goes beyond what
-`docs/PROTOCOL.md` 12 says the operator sees. The weakness register (`11.3`,
+`docs/SPEC.md` 11.4 says the operator sees. The weakness register (`11.3`,
 S1-S14) lists what is already known and accepted; a way to turn one of those
 into something worse is a finding.
 
@@ -49,5 +49,5 @@ not yet cover is the bundle itself (`docs/THREAT-MODELS.md`, B2).
 ## Versions
 
 The protocol document carries a `spec_version` and the wire a `ver`
-(`docs/PROTOCOL.md`, header); before 1.0 every client updates together and
+(`docs/SPEC.md`, header); before 1.0 every client updates together and
 only the current version is served or accepted.

@@ -1485,7 +1485,7 @@ async function main() {
         return [...document.querySelectorAll('#messages .b-file .f-name')]
           .filter((n) => n.textContent.includes(${JSON.stringify(multiTok)})).length === 3;
       `, 40_000)
-      // One pick is one ALBUM (PROTOCOL.md 7.4, 2026-09-26): each file is
+      // One pick is one ALBUM (SPEC.md 7.4, 2026-09-26): each file is
       // still its own message, but the other side draws them as ONE bubble.
       const multi = await B.eval<any>(`
         const rows = [...document.querySelectorAll('#messages .mrow')]

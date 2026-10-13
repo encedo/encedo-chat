@@ -17,7 +17,7 @@ export async function hkdfBits(ikm: Uint8Array, salt: Uint8Array, info: Uint8Arr
 const NO_CTX = new Uint8Array(0)
 const utf8 = (s: string | Uint8Array) => (typeof s === 'string' ? new TextEncoder().encode(s) : s)
 /**
- * The ONE derivation convention of the protocol (PROTOCOL.md 14): the label
+ * The ONE derivation convention of the protocol (SPEC.md 14): the label
  * is HKDF's `info`, the context - a date, a group id and epoch, a root key, a
  * counter - is HKDF's `salt`, empty where there is none. Two families used
  * to coexist (label-as-salt for the rendezvous and group MAC keys, label-as-

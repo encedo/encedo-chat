@@ -1,7 +1,7 @@
 /**
  * files.ts - sending and receiving files from the terminal (CLI-PLAN.md stage 5).
  *
- * The app's construction, the app's code (PROTOCOL.md §7.5): a fresh key per
+ * The app's construction, the app's code (SPEC.md §7.5): a fresh key per
  * file, chunked AES-GCM (lib/filecrypto.ts), the ciphertext uploaded to the
  * store (net/ipfs.ts, onchato.com/f - the store prepends an 8-byte envelope,
  * lib/fileenvelope.ts), and a `file` envelope over the ratchet carrying the CID

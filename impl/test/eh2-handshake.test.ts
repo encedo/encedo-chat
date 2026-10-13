@@ -1,5 +1,5 @@
 /**
- * EH-2 stage 2 — the handshake key schedule (docs/PROTOCOL.md §6.2–6.3).
+ * EH-2 stage 2 — the handshake key schedule (docs/SPEC.md §6.2–6.3).
  *
  * The spec names the first test to write: **both sides must derive the same
  * SK**, because the DH triad is concatenated in *responder perspective* and

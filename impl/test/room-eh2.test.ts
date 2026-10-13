@@ -1,5 +1,5 @@
 /**
- * EH-2 stage 6 — the room seam (docs/PROTOCOL.md §6–7 meeting §5).
+ * EH-2 stage 6 — the room seam (docs/SPEC.md §6–7 meeting §5).
  *
  * Offline test over a mock pubsub: two rooms on one topic. What it pins is the
  * wiring, not the crypto (that is covered in eh2-*.test.ts): the handshake runs

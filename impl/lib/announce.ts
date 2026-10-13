@@ -1,5 +1,5 @@
 /**
- * announce.ts — rendezvous presence message (docs/PROTOCOL.md §5.5). WebCrypto only.
+ * announce.ts — rendezvous presence message (docs/SPEC.md §5.5). WebCrypto only.
  *
  * Announce = { v, peer, nonce, ts, mac },  mac = HMAC-SHA256(macKey, v|peer|nonce|ts).
  * macKey is a CryptoKey; verify uses subtle.verify (constant-time). Only holders
@@ -16,7 +16,7 @@ const REPLAY_WINDOW_MS = 5 * 60 * 1000   // +/-5 min (§5.4)
 const macMessage = (v: number, peer: string, nonce: string, ts: number) => enc.encode(`${v}|${peer}|${nonce}|${ts}`)
 
 export async function buildAnnounce(peerId: string, macKey: CryptoKey): Promise<Uint8Array> {
-  const v = 3 // one ver names one spec (PROTOCOL.md header); the MAC key's derivation changed with spec 3.0
+  const v = 3 // one ver names one spec (SPEC.md header); the MAC key's derivation changed with spec 3.0
   const nonce = b64(randomBytes(16))
   const ts = nowMs()
   const sig = new Uint8Array(await subtle.sign('HMAC', macKey, macMessage(v, peerId, nonce, ts)))

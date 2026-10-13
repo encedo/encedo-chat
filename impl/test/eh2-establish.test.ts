@@ -1,5 +1,5 @@
 /**
- * EH-2 stage 5 — establishment end to end (docs/PROTOCOL.md §6.1–6.2, §7).
+ * EH-2 stage 5 — establishment end to end (docs/SPEC.md §6.1–6.2, §7).
  *
  * Everything below runs over an in-memory channel: two peers, three handshake
  * frames, then a real conversation through the `Session` seam. The property

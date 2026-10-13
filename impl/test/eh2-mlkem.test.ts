@@ -1,5 +1,5 @@
 /**
- * EH-2 stage 3 — ML-KEM-768, the PQ half of the hybrid (docs/PROTOCOL.md §6.2, §6.4).
+ * EH-2 stage 3 — ML-KEM-768, the PQ half of the hybrid (docs/SPEC.md §6.2, §6.4).
  *
  * Two things must hold: the KEM itself round-trips at the sizes the wire format
  * expects, and the full handshake still lands on one SK when the real KEM

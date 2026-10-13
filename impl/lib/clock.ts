@@ -1,5 +1,5 @@
 /**
- * clock.ts - the clock anchor (PROTOCOL.md 5.4).
+ * clock.ts - the clock anchor (SPEC.md 5.4).
  *
  * Every rendezvous derivation and every replay window reads the local clock,
  * and the local clock is whatever the device says. The daily rotation hides

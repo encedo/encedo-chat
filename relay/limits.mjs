@@ -1,7 +1,7 @@
 /**
  * limits.mjs - what a node will carry, per frame.
  *
- * The client bounds every frame it publishes at 64 KiB (PROTOCOL.md 7.4), and
+ * The client bounds every frame it publishes at 64 KiB (SPEC.md 7.4), and
  * until 2026-10-12 that was the only bound: `maxMessageSize` was passed to
  * gossipsub and silently ignored (the option does not exist in 14.x; the
  * library bounds a whole inbound RPC, at 4 MB by default). So a node that

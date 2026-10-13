@@ -1,6 +1,6 @@
 /**
  * The CLI's group layer reads the roster from the engine, never from an SKD
- * (PROTOCOL.md section 8.3: the attested roster is the only roster).
+ * (SPEC.md section 8.3: the attested roster is the only roster).
  *
  * test/group-roster-authority.test.ts proves the ENGINE refuses an outsider's
  * same-epoch SKD and builds no distribution for a non-member. This file proves

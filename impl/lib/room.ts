@@ -32,7 +32,7 @@ import type { QuoteRef } from './quote.ts'
 import { nowMs } from './time.ts'
 
 /**
- * EH-2 content crypto (docs/PROTOCOL.md §6–7). Content is sealed by a per-peer
+ * EH-2 content crypto (docs/SPEC.md §6–7). Content is sealed by a per-peer
  * Double Ratchet established over this topic:
  *
  *   - the three handshake frames travel UNSEALED on the control plane (they

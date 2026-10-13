@@ -1,5 +1,5 @@
 /**
- * prefs.ts - the per-identity preferences, sealed (PROTOCOL.md 10).
+ * prefs.ts - the per-identity preferences, sealed (SPEC.md 10).
  *
  * Two settings used to sit beside the sealed stores as plain keys named by
  * the identity: `ec-notify-<KID>` (the notification mode) and

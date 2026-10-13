@@ -5,7 +5,7 @@
  * Rendezvous/messages via the SAME engine as the CLI (../../lib, WebCrypto).
  * Content crypto is EH-2 + Double Ratchet, the only scheme; content prefers a
  * direct WebRTC DataChannel with GossipSub through the relay as the fallback
- * (docs/PROTOCOL.md §7.3/§13). The §13 relay-blind plane is pending the libp2p
+ * (docs/SPEC.md §7.3/§13). The §13 relay-blind plane is pending the libp2p
  * v3 ecosystem (gossipsub not yet migrated). Timestamps are shown on the
  * READER's clock (`localHHMM`) — UTC is what the protocol computes in, not what
  * a person is asked to read.
@@ -8378,7 +8378,7 @@ function sendComposer() {
     // bubbles land in pick order in THIS conversation even if the screen
     // moves on while they upload; each send waits for the one before it.
     showAttach(null)
-    // One pick, one album (PROTOCOL.md 7.4): each file still its own message,
+    // One pick, one album (SPEC.md 7.4): each file still its own message,
     // tagged so the other side draws them as one bubble.
     const n = 1 + more.length
     const aid = n > 1 ? [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, '0')).join('') : ''

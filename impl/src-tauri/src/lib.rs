@@ -642,7 +642,7 @@ mod desk {
         diag_append(&app, &text)
     }
 
-    /// A wipeout takes the diary with it (PROTOCOL.md 10): the file names
+    /// A wipeout takes the diary with it (SPEC.md 10): the file names
     /// contacts by key prefix beside a clock, and "every ec-* key" would be a
     /// half-truth on a desktop if this stayed.
     #[tauri::command]

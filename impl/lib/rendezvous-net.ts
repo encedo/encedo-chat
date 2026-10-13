@@ -1,6 +1,6 @@
 /**
  * rendezvous-net.ts — join a deterministic room over libp2p GossipSub and detect
- * peer presence (docs/PROTOCOL.md §5.4–5.6). Presence only (no chat) — used by
+ * peer presence (docs/SPEC.md §5.4–5.6). Presence only (no chat) — used by
  * the meet integration check. WebCrypto (async). See room.ts for presence+chat.
  */
 

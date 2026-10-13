@@ -1,5 +1,5 @@
 /**
- * rendezvous.ts — deterministic rendezvous derivation (docs/PROTOCOL.md §5).
+ * rendezvous.ts — deterministic rendezvous derivation (docs/SPEC.md §5).
  *
  * SHARED, browser+Node engine on WebCrypto only (no third-party crypto lib).
  * Both sides compute the same ss = ECDH(IK_a, IK_b) and MUST run this exact
@@ -72,7 +72,7 @@ export async function groupTopicFromSecret(groupSecret: Uint8Array, p: RvParams)
 }
 
 /**
- * Per-pair rotation offset (docs/PROTOCOL.md §5.4 Proposal): the second of the
+ * Per-pair rotation offset (docs/SPEC.md §5.4 Proposal): the second of the
  * UTC day at which THIS pair rotates its topic. Derived from the pair secret so
  * both members agree, and pseudo-random across pairs so the user base spreads
  * over 24 h instead of spiking at 00:00 UTC. **Date-independent** (the `info`

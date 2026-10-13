@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * export-kat.mjs - re-record the known-answer vectors in docs/kat/ from the
- * implementation (PROTOCOL.md 17.5).
+ * implementation (SPEC.md 12).
  *
  * The tests READ these files; this script is the only thing that writes them.
  * Re-recording is a deliberate act - a vector that changes means the wire

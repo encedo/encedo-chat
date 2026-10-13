@@ -1,10 +1,10 @@
 # Groups v1 — design record
 
-**Status:** the design record behind `docs/PROTOCOL.md` §8/§5.3 — decisions
+**Status:** the design record behind `docs/SPEC.md` §8/§5.3 — decisions
 reached 2026-08-01, built through 2026-08, brought up to the shipped state
-2026-08-30. **`docs/PROTOCOL.md` is normative for what is on the wire**; this
+2026-08-30. **`docs/SPEC.md` is normative for what is on the wire**; this
 file keeps the reasoning, the rejected alternatives, and the marker layout
-detail. Where the two disagree, PROTOCOL.md wins.
+detail. Where the two disagree, SPEC.md wins.
 
 **One line:** Sender Keys (messages, like Signal/WhatsApp) + decentralized
 membership (like Threema, no group server) + identity in HEM. Groups are a
@@ -45,7 +45,7 @@ Rotates per-epoch (group_secret changes on membership change) and daily at the
 construction on the group's shared key, so every member derives the same
 instant and rotations spread across the day — with the ±30 min guard and a
 60 s re-check: the room walks the date itself, keepalives warm both live
-topics inside the guard, sends go to the current day's (`PROTOCOL.md` §5.3,
+topics inside the guard, sends go to the current day's (`SPEC.md` §5.3,
 fixed 2026-08-30 after the audit flagged the frozen-date defect).
 A removed member has the old group_secret only → cannot derive the new topic.
 
@@ -89,7 +89,7 @@ Two parts of distribution exist because "sent once" fails in practice:
 - **`ctr` — the counter the chain key is at.** A sending chain ratchets per
   message, so a key handed over mid-conversation is `chain@k`; a receiver seeded
   at 0 can never open anything. Absent ⇒ 0, so old SKDs stay valid.
-- **The repair path (§8 in PROTOCOL.md).** A lost SKD makes one member deaf to
+- **The repair path (§8 in SPEC.md).** A lost SKD makes one member deaf to
   exactly one sender with no error anywhere. The receiver notices at the one
   safe point — MAC verified, no chain — and asks over the 1:1 (`group-skd-req`,
   rate-limited to one ask per member per 30 s); the responder re-checks the
@@ -261,7 +261,7 @@ catch up POSITION, never recover CONTENT.
 
 ---
 
-## 2. Diff vs the pre-2026-08 spec (historical — every change below is now IN `docs/PROTOCOL.md`)
+## 2. Diff vs the pre-2026-08 spec (historical — every change below is now IN `docs/SPEC.md`)
 
 | Spec (then) | Now | Change | Why |
 |---|---|---|---|
@@ -339,7 +339,7 @@ change (the common case) re-syncs the roster from members who still have it.
 
 ## 5. Items put to the cryptographer — all four RESOLVED
 
-Approved and now normative in `docs/PROTOCOL.md` §8/§5.3:
+Approved and now normative in `docs/SPEC.md` §8/§5.3:
 
 1. §8 with **ECDH-HMAC** instead of Ed25519 — approved; the per-recipient MAC
    set (O(N−1)) stands at N≤10.
