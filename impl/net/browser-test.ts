@@ -51,11 +51,11 @@ const APP_URL = process.env.APP_URL ?? `http://127.0.0.1:${LOCAL_PORT}/?eh2=1&de
 // talking to a new one looks like; GOSSIP=1 puts both there (the old path).
 const withParam = (url: string, p: string) => `${url}${url.includes('?') ? '&' : '?'}${p}`
 const ALL_GOSSIP = !!process.env.GOSSIP && process.env.GOSSIP !== '0'
-// CORE=wasm puts both browsers on core-rs (eh2/wasm.ts): the handshake and the
-// ratchet in the WASM module, the same frames on the wire. CORE_B=wasm only B,
-// the mixed case a fleet in mid-rollout looks like.
-const CORE_WASM = process.env.CORE === 'wasm'
-const CORE_B_WASM = CORE_WASM || process.env.CORE_B === 'wasm'
+// Both browsers run the app's default engine, core-rs in WASM (eh2/wasm.ts).
+// CORE=ts puts both on the TypeScript engine; CORE_B=ts only B - the mixed
+// case, which is what a peer on an older build looks like.
+const CORE_WASM = process.env.CORE !== 'ts'
+const CORE_B_WASM = CORE_WASM && process.env.CORE_B !== 'ts'
 const A_URL = withParam(ALL_GOSSIP ? withParam(APP_URL, 'light=0') : APP_URL, CORE_WASM ? 'core=wasm' : 'core=ts')
 // B_APP_URL: browser B on ANOTHER build (serve an old tag's web/dist on a
 // second port) - what a tab left open over a release looks like to a peer

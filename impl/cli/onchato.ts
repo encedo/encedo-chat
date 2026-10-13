@@ -90,8 +90,9 @@ const args = rest.filter((a, i) => !a.startsWith('--') && !(i > 0 && rest[i - 1]
 const die = (msg: string): never => { console.error('onchato: ' + msg); process.exit(1) }
 /** The network topics are derived for (SPEC.md 5.1); `main` is the operator's. */
 const NETWORK = opt('--network', 'main')!
-// `--core wasm`: the handshake and the ratchet from core-rs (eh2/wasm.ts).
-if (opt('--core') === 'wasm') setCoreBackend('wasm')
+// The handshake and the ratchet from core-rs (eh2/wasm.ts) by default;
+// `--core ts` selects the TypeScript engine.
+if (opt('--core') !== 'ts') setCoreBackend('wasm')
 
 /** A secret from the flag, the environment, or a masked prompt (stdin when piped). */
 async function secret(prompt: string, envName = 'ONCHATO_PASSWORD'): Promise<string> {

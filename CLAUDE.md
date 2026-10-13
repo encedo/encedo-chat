@@ -1020,9 +1020,11 @@ reproduce `docs/kat/eh2-handshake-mlkem.json` and `docs/kat/ratchet-hybrid.json`
 byte for byte. `core-rs/build.sh` builds it to **`impl/core-wasm/core.wasm`
 (140 KB, COMMITTED)**; `eh2/wasm.ts` loads it and offers the same
 `Eh2Handshake`/`Session` contracts as `eh2/establish.ts`; `setCoreBackend('wasm')`
-(`?core=wasm` in the web app, `--core wasm` in the CLI) routes every new
-handshake to it. `test/eh2-wasm.test.ts` pins TS<->WASM interop in both roles,
-through a hybrid step and out of order. The TS engine is the default.
+routes every new handshake to it, and is **the default since 0.7.21**
+(`?core=ts` / `--core ts` select the TS engine; a platform that cannot load the
+module falls back to TS by itself, `establish.ts`). `test/eh2-wasm.test.ts` pins
+TS<->WASM interop in both roles, through a hybrid step and out of order;
+`browser-test` runs WASM by default, `CORE=ts` / `CORE_B=ts` for the others.
 
 Things that will bite:
 

@@ -14,9 +14,10 @@
  * wasm-bindgen, so the build is one `cargo build` and the bytes are
  * reproducible from the pinned toolchain (core-rs/build.sh).
  *
- * Selection: `setCoreBackend('wasm')` (eh2/establish.ts) - the web app from
- * `?core=wasm`, the terminal client from `--core wasm`; the TS engine remains
- * the default until the live two-browser run says otherwise.
+ * Selection: `setCoreBackend('wasm')` (eh2/establish.ts), the default of both
+ * front-ends since 0.7.21; `?core=ts` in the web app and `--core ts` in the
+ * terminal client select the TS engine, and a platform that cannot load the
+ * module falls back to it.
  */
 
 import type { Eh2Handshake, StartOpts } from './establish.ts'

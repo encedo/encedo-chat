@@ -66,8 +66,8 @@ export function isHandshakeFrame(frame: Uint8Array): boolean {
 /**
  * Which engine computes the handshake and the ratchet: this TypeScript one, or
  * core-rs in WASM (eh2/wasm.ts) with every ephemeral key outside the JS heap.
- * One switch for the whole process, set by the front-end (`?core=wasm`,
- * `--core wasm`) before any room opens; the frames are identical either way,
+ * One switch for the whole process, set by the front-end before any room opens
+ * (WASM by default; `?core=ts`, `--core ts` select this engine); the frames are identical either way,
  * so the peer does not know and does not care.
  */
 export type CoreBackend = 'ts' | 'wasm'
@@ -79,8 +79,16 @@ export async function startHandshake(opts: StartOpts): Promise<Eh2Handshake> {
   // A KEM injected for a known-answer test is the TS engine's seam; the module
   // has its own randomness, so such a test runs the TS path whatever the switch.
   if (backend === 'wasm' && !opts.kem) {
-    const { startHandshakeWasm } = await import('./wasm.ts')
-    return startHandshakeWasm(opts)
+    const { startHandshakeWasm, loadCore } = await import('./wasm.ts')
+    // A platform that cannot instantiate the module (no WebAssembly, a CSP
+    // without 'wasm-unsafe-eval', a failed fetch) falls back to this engine for
+    // the rest of the process: the frames are identical, so the peer cannot
+    // tell, and a handshake that cannot start is worse than a JS-heap key.
+    try { await loadCore() } catch (e) {
+      backend = 'ts'
+      console.warn('core-rs: the WASM module did not load, using the TypeScript engine -', (e as Error)?.message ?? e)
+    }
+    if (backend === 'wasm') return startHandshakeWasm(opts)
   }
   const kem = opts.kem ?? mlkem768
   const now = opts.now
