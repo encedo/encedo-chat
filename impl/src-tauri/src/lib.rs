@@ -30,6 +30,10 @@
 #[cfg(desktop)]
 mod rtc;
 
+// core-rs in the host (T15 stage 2): EH-2 + ratchet in this process, the webview
+// drives it over IPC (core_native.rs). Desktop and mobile both.
+mod core_native;
+
 #[cfg(desktop)]
 mod desk {
     use std::sync::Mutex;
@@ -1229,6 +1233,17 @@ mod desk {
                 crate::rtc::rtc_poll,
                 crate::rtc::rtc_close,
                 crate::rtc::rtc_selftest,
+                crate::core_native::core_version,
+                crate::core_native::core_initiate,
+                crate::core_native::core_peer_ek,
+                crate::core_native::core_initiator_complete,
+                crate::core_native::core_respond,
+                crate::core_native::core_responder_complete,
+                crate::core_native::core_responder_finish,
+                crate::core_native::core_session,
+                crate::core_native::core_encrypt,
+                crate::core_native::core_decrypt,
+                crate::core_native::core_drop,
                 desk_notify,
                 desk_notify_permission,
                 desk_notify_request,
@@ -1542,6 +1557,17 @@ mod mobile {
                 desk_save_begin,
                 desk_save_write,
                 desk_save_end,
+                crate::core_native::core_version,
+                crate::core_native::core_initiate,
+                crate::core_native::core_peer_ek,
+                crate::core_native::core_initiator_complete,
+                crate::core_native::core_respond,
+                crate::core_native::core_responder_complete,
+                crate::core_native::core_responder_finish,
+                crate::core_native::core_session,
+                crate::core_native::core_encrypt,
+                crate::core_native::core_decrypt,
+                crate::core_native::core_drop,
                 desk_notify,
                 desk_notify_permission,
                 desk_notify_request,

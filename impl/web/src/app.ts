@@ -197,11 +197,17 @@ const USE_LIGHT = LIGHT_PARAM !== '0'
 // Load-aware node choice (lib/nodepick.ts, wired in core): on by default,
 // `?lb=0` turns it off -- e.g. to stay on a node picked by hand for a test.
 const USE_LB = new URLSearchParams(location.search).get('lb') !== '0'
-// The EH-2 handshake and the ratchet run in core-rs (eh2/wasm.ts) by default
-// since 0.7.21: every ephemeral key outside the JS heap. Same frames on the
-// wire, so the peer does not know. `?core=ts` selects the TypeScript engine
-// for a page load; a platform that cannot load the module falls back to it.
-if (new URLSearchParams(location.search).get('core') !== 'ts') setCoreBackend('wasm')
+// Which engine computes the handshake and the ratchet. In a Tauri shell the
+// NATIVE host core (core-rs in the host process, keys outside the webview) is
+// the default - the real boundary; it falls back to WASM if the host does not
+// answer. In a browser, WASM (every ephemeral key out of the JS heap, but in
+// the page's realm). `?core=ts|wasm|native` overrides for a page load.
+{
+  const want = new URLSearchParams(location.search).get('core')
+  if (want === 'ts' || want === 'wasm' || want === 'native') setCoreBackend(want)
+  else if (isDesktopShell()) setCoreBackend('native')
+  else setCoreBackend('wasm')
+}
 // `?rot=<hour>` forces every pair's topic rotation to that UTC time-of-day, so
 // two test tabs can share a known rollover instant instead of waiting for each
 // pair's real offset (§5.4). Absent or `0` = the real per-pair offset algorithm

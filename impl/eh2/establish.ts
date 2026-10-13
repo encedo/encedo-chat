@@ -70,14 +70,25 @@ export function isHandshakeFrame(frame: Uint8Array): boolean {
  * (WASM by default; `?core=ts`, `--core ts` select this engine); the frames are identical either way,
  * so the peer does not know and does not care.
  */
-export type CoreBackend = 'ts' | 'wasm'
+export type CoreBackend = 'ts' | 'wasm' | 'native'
 let backend: CoreBackend = 'ts'
 export function setCoreBackend(b: CoreBackend): void { backend = b }
 export function coreBackend(): CoreBackend { return backend }
 
 export async function startHandshake(opts: StartOpts): Promise<Eh2Handshake> {
-  // A KEM injected for a known-answer test is the TS engine's seam; the module
-  // has its own randomness, so such a test runs the TS path whatever the switch.
+  // A KEM injected for a known-answer test is the TS engine's seam; the other
+  // engines have their own randomness, so such a test runs the TS path.
+  if (backend === 'native' && !opts.kem) {
+    const { startHandshakeNative } = await import('./native.ts')
+    // The native host (core-rs in the Tauri process, T15) keeps SK and the
+    // ratchet keys outside the webview. If it is not reachable (not a shell, a
+    // version mismatch), fall back to WASM for the rest of the process - same
+    // frames, so the peer cannot tell.
+    try { return await startHandshakeNative(opts) } catch (e) {
+      backend = 'wasm'
+      console.warn('core-rs: the native host core did not answer, falling back to WASM -', (e as Error)?.message ?? e)
+    }
+  }
   if (backend === 'wasm' && !opts.kem) {
     const { startHandshakeWasm, loadCore } = await import('./wasm.ts')
     // A platform that cannot instantiate the module (no WebAssembly, a CSP
