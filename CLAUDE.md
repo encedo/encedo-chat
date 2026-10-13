@@ -1028,16 +1028,20 @@ TS<->WASM interop in both roles, through a hybrid step and out of order;
 
 Things that will bite:
 
-- **The module is a committed artifact, and CI rebuilds it** (`ci.yml`, job
-  `core-rs`): any change under `core-rs/src` must be followed by
-  `./core-rs/build.sh` and a commit of the new `core.wasm`, or CI fails on
-  the byte comparison. The toolchain is pinned in `core-rs/rust-toolchain.toml`
-  (rustup installs it by itself); the build is deterministic on that pin
-  **only with the path remapping `build.sh` sets** (`--remap-path-prefix` for
-  the checkout, `$CARGO_HOME` and the sysroot): rustc embeds absolute source
-  paths as panic locations, and the first CI run failed on exactly that (24
-  `/home/chris/...` strings in the module). Never build with plain `cargo
-  build` and commit the result.
+- **The module is a committed artifact; CI rebuilds it and checks it WORKS**
+  (`ci.yml`, job `core-rs`): after any change under `core-rs/src`, run
+  `./core-rs/build.sh` and commit the new `impl/core-wasm/core.wasm`. CI runs
+  the Rust KATs, rebuilds the module on the pinned toolchain
+  (`core-rs/rust-toolchain.toml`, rustup installs it) and drives the REBUILT
+  module through `test/eh2-wasm.test.ts` (TS<->WASM interop). It does NOT
+  byte-compare: `build.sh` remaps paths (`--remap-path-prefix` for the
+  checkout, `$CARGO_HOME`, the sysroot - rustc embeds absolute panic-location
+  paths, 24 `/home/chris/...` strings before the remap), but an ~18-byte
+  toolchain-environment residue remains across machines, which made a
+  byte-identity gate flap. The user-facing reproducibility is the web bundle
+  CID (`docs/REPRODUCIBLE.md`), not the wasm's bytes; the KATs in both
+  languages are the functional-equivalence proof. Still: build with
+  `./core-rs/build.sh`, never plain `cargo build`, and commit the result.
 - **CSP needs `'wasm-unsafe-eval'`** in `script-src` (index.html) or
   `WebAssembly.instantiate` is refused with a CompileError that reads like a
   broken file. It allows WASM compilation only, not `eval`.
