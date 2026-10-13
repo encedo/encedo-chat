@@ -117,6 +117,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Nie ma tu jeszcze profilu.': 'No profile on this device yet.',
     'Nie ma tu jeszcze profilu. Załóż go teraz albo zaloguj się swoim HEM.': 'No profile here yet. Create one now, or sign in with your HEM.',
     'Nie udało się zaktualizować — pobierz nową wersję ręcznie': 'Could not update — download the new version by hand',
+    'Nie mogę potwierdzić aktualizacji: manifest wydania jest niedostępny. Spróbuję później.': 'Cannot confirm the update: the release manifest is unavailable. I will try later.',
+    'Aktualizacja odrzucona — {why}. Nic nie zainstalowano.': 'Update refused — {why}. Nothing was installed.',
     'Offline': 'Offline',
     'Online': 'Online',
     'Pobieram aktualizację…': 'Downloading the update…',

@@ -3055,6 +3055,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "rfd 0.15.4",
+ "ring",
  "serde",
  "serde_json",
  "tauri",

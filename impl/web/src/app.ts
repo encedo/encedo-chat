@@ -43,7 +43,7 @@ import {
   closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable, isMobileShell,
   appimageStatus, appimageInstall, showWindow, openExternal,
   nativeScanAvailable, nativeScan, nativeScanCancel, nativeScanZoom, nativeScanSetZoom,
-  diagFileAvailable, diagPath, diagAppend, diagWipe, hostSaveRoute,
+  diagFileAvailable, diagPath, diagAppend, diagWipe, hostSaveRoute, type ManifestBlob,
 } from './desktop.ts'
 import { qrSvg } from '../../lib/qr.ts'
 import { safetyNumber, safetyGroups, safetyQr, parseSafetyQr } from '../../lib/safety.ts'
@@ -7745,6 +7745,22 @@ async function offerUpdateInner() {
     info = again
   }
 
+  // The release manifest, for the host to check before it fetches a byte
+  // (THREAT-MODELS B2): without it there is no update, and the app says so
+  // instead of installing on the CI key's word alone.
+  let blob: ManifestBlob
+  try {
+    const [mRes, sRes] = await Promise.all([
+      fetch(MANIFEST_URL, { cache: 'no-store' }), fetch(MANIFEST_URL.replace(/\.json$/, '.sig'), { cache: 'no-store' }),
+    ])
+    if (!mRes.ok || !sRes.ok) throw new Error(`HTTP ${mRes.status}/${sRes.status}`)
+    blob = { manifest: b64(new Uint8Array(await mRes.arrayBuffer())), sig: (await sRes.text()).trim() }
+  } catch (e: any) {
+    ecLog('update refused: release manifest unavailable - ' + (e?.message ?? e))
+    toast(tr('Nie mogę potwierdzić aktualizacji: manifest wydania jest niedostępny. Spróbuję później.'))
+    return
+  }
+
   // The bar exists because its absence was the reported bug: between the click
   // and the restart 0.5.16 showed NOTHING, and a person watching nothing
   // assumes a dead button. Progress is polled off the host (two atomics on the
@@ -7766,13 +7782,13 @@ async function offerUpdateInner() {
   }, 200)
 
   let fetched = ''
-  try { fetched = await updateDownload() } catch (e: any) {
+  try { fetched = await updateDownload(blob) } catch (e: any) {
     // The app is still the old version and still working, so this is a toast
     // and not a stop.
     clearInterval(poll)
     bar.hidden = true
     ecLog('update download failed: ' + (e?.message ?? e))
-    toast(tr('Nie udało się zaktualizować — pobierz nową wersję ręcznie'))
+    toast(updateRefusal(e) ?? tr('Nie udało się zaktualizować — pobierz nową wersję ręcznie'))
     return
   }
   clearInterval(poll)
@@ -7792,10 +7808,19 @@ async function offerUpdateInner() {
     tr('Zainstalować i uruchomić ponownie teraz?'),
     tr('Uruchom ponownie'), undefined, undefined, tr('Później'))
   if (!go.ok) { answeredUpdates.add(got); toast(tr('Dobrze — zaproponuję znów po następnym uruchomieniu.')); return }
-  try { await updateApply() } catch (e: any) {
+  try { await updateApply(blob) } catch (e: any) {
     ecLog('update install failed: ' + (e?.message ?? e))
-    toast(tr('Nie udało się zaktualizować — pobierz nową wersję ręcznie'))
+    toast(updateRefusal(e) ?? tr('Nie udało się zaktualizować — pobierz nową wersję ręcznie'))
   }
+}
+
+/** The host refused on the manifest's account: say that, not "could not update". */
+function updateRefusal(e: any): string | null {
+  const why = String(e?.message ?? e ?? '')
+  const prefix = 'manifest:'
+  if (!why.startsWith(prefix)) return null
+  const reason = why.slice(prefix.length).trim()
+  return tr('Aktualizacja odrzucona — {why}. Nic nie zainstalowano.', { why: reason })
 }
 
 // ---- an AppImage that is installed nowhere --------------------------------

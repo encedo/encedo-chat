@@ -278,9 +278,16 @@ export const updateCheck = () => invoke<UpdateInfo | null>('desk_update_check')
 /** Resolves to the version that was ACTUALLY fetched — the release can move
  *  between the dialog and the click, and the dialog must not name a version
  *  the disk does not hold. */
-export const updateDownload = () => invoke<string>('desk_update_download')
+/**
+ * The release manifest the host checks before it downloads or installs
+ * (lib.rs `update_allowed`): the exact bytes, base64, and the signature. The
+ * webview fetches them (it fetches the node list the same way); the host
+ * verifies and decides, so a webview that lies can only withhold an update.
+ */
+export interface ManifestBlob { manifest: string; sig: string }
+export const updateDownload = (m: ManifestBlob) => invoke<string>('desk_update_download', m)
 export const updateProgress = () => invoke<{ got: number; total: number | null }>('desk_update_progress')
-export const updateApply = () => invoke<void>('desk_update_apply')
+export const updateApply = (m: ManifestBlob) => invoke<void>('desk_update_apply', m)
 
 // ---- the camera, on the phone ----------------------------------------------
 /**

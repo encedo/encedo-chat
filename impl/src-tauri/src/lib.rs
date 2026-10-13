@@ -918,6 +918,106 @@ mod desk {
     #[derive(serde::Serialize)]
     struct UpdateInfo { version: String, notes: Option<String> }
 
+    /// The operator's root key, public half (infra/root.pub): what the release
+    /// manifest is verified against. Compiled in, like the updater's own key.
+    const ROOT_PUB_B64: &str = include_str!("../../../infra/root.pub");
+    /// A manifest may not claim to have been made this far in the future.
+    const MANIFEST_FUTURE_MS: i64 = 10 * 60 * 1000;
+
+    #[derive(serde::Deserialize, Debug)]
+    struct ManifestCi { updater_pubkey: String }
+    #[derive(serde::Deserialize, Debug)]
+    struct Manifest { v: u32, version: String, expires: i64, made: i64, ci: ManifestCi }
+
+    /// The gate on the update channel (THREAT-MODELS.md B2). The manifest is
+    /// signed by a key that is on no build machine and in no CI runner, and it
+    /// names the updater key that may sign installers: a release signed by a
+    /// key the root has not blessed - a swapped CI key, a runner that signs
+    /// with a key of its own - does not install, whatever latest.json says.
+    /// Fail closed: no manifest, no update; the app keeps working as it is.
+    ///
+    /// The webview fetches the two files (it already does so for the node
+    /// list) and hands the exact bytes over; the host decides. A webview that
+    /// lies here can withhold an update, never obtain one.
+    fn check_manifest(raw: &[u8], sig_b64: &str, root_pub_b64: &str, configured_pubkey: &str, now_ms: i64) -> Result<Manifest, String> {
+        use base64::Engine as _;
+        let dec = base64::engine::general_purpose::STANDARD;
+        let sig = dec.decode(sig_b64.trim()).map_err(|_| "manifest: signature is not base64".to_string())?;
+        let root = dec.decode(root_pub_b64.trim()).map_err(|_| "manifest: root key is not base64".to_string())?;
+        ring::signature::UnparsedPublicKey::new(&ring::signature::ED25519, &root)
+            .verify(raw, &sig)
+            .map_err(|_| "manifest: signature does not verify under the root key".to_string())?;
+        let m: Manifest = serde_json::from_slice(raw).map_err(|_| "manifest: not the expected shape".to_string())?;
+        if m.v != 1 { return Err("manifest: unknown manifest version".into()); }
+        if now_ms > m.expires { return Err("manifest: expired".into()); }
+        if m.made > now_ms + MANIFEST_FUTURE_MS { return Err("manifest: dated in the future".into()); }
+        if m.ci.updater_pubkey.trim() != configured_pubkey.trim() {
+            return Err("manifest: the updater key it names is not the one this build trusts".into());
+        }
+        Ok(m)
+    }
+
+    fn configured_updater_pubkey(app: &AppHandle) -> Result<String, String> {
+        app.config().plugins.0.get("updater")
+            .and_then(|u| u.get("pubkey")).and_then(|p| p.as_str()).map(|s| s.to_string())
+            .ok_or_else(|| "manifest: this build has no updater key configured".to_string())
+    }
+
+    /// Both update commands pass through here first.
+    fn update_allowed(app: &AppHandle, manifest_b64: &str, sig: &str) -> Result<(), String> {
+        use base64::Engine as _;
+        let raw = base64::engine::general_purpose::STANDARD.decode(manifest_b64.trim())
+            .map_err(|_| "manifest: not base64".to_string())?;
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+        let m = check_manifest(&raw, sig, ROOT_PUB_B64, &configured_updater_pubkey(app)?, now)?;
+        eprintln!("[update] release manifest ok: v{} (expires in {} days)", m.version, (m.expires - now) / 86_400_000);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    mod manifest_tests {
+        use super::check_manifest;
+        use base64::Engine as _;
+        const UPD: &str = "updater-key-of-this-build";
+        fn keypair() -> (ring::signature::Ed25519KeyPair, String) {
+            let kp = ring::signature::Ed25519KeyPair::from_seed_unchecked(&[7u8; 32]).unwrap();
+            use ring::signature::KeyPair;
+            let pub_b64 = base64::engine::general_purpose::STANDARD.encode(kp.public_key().as_ref());
+            (kp, pub_b64)
+        }
+        fn signed(body: &str) -> (Vec<u8>, String, String) {
+            let (kp, pub_b64) = keypair();
+            let sig = base64::engine::general_purpose::STANDARD.encode(kp.sign(body.as_bytes()).as_ref());
+            (body.as_bytes().to_vec(), sig, pub_b64)
+        }
+        const NOW: i64 = 1_800_000_000_000;
+        fn body(expires: i64, made: i64, upd: &str) -> String {
+            format!(r#"{{"v":1,"version":"0.7.16","commit":"abc","made":{made},"expires":{expires},"nodes":{{"cid":"bafy"}},"ci":{{"updater_pubkey":"{upd}"}}}}"#)
+        }
+        #[test]
+        fn a_good_manifest_passes() {
+            let (raw, sig, root) = signed(&body(NOW + 86_400_000, NOW - 1000, UPD));
+            assert_eq!(check_manifest(&raw, &sig, &root, UPD, NOW).unwrap().version, "0.7.16");
+        }
+        #[test]
+        fn a_changed_byte_or_another_key_fails_the_signature() {
+            let (raw, sig, root) = signed(&body(NOW + 86_400_000, NOW - 1000, UPD));
+            let mut edited = raw.clone(); edited[10] ^= 1;
+            assert!(check_manifest(&edited, &sig, &root, UPD, NOW).unwrap_err().contains("signature"));
+            let other = base64::engine::general_purpose::STANDARD.encode([9u8; 32]);
+            assert!(check_manifest(&raw, &sig, &other, UPD, NOW).unwrap_err().contains("signature"));
+        }
+        #[test]
+        fn expiry_future_and_a_foreign_updater_key_are_refused() {
+            let (raw, sig, root) = signed(&body(NOW - 1, NOW - 86_400_000, UPD));
+            assert!(check_manifest(&raw, &sig, &root, UPD, NOW).unwrap_err().contains("expired"));
+            let (raw, sig, root) = signed(&body(NOW + 86_400_000 * 2, NOW + 11 * 60_000, UPD));
+            assert!(check_manifest(&raw, &sig, &root, UPD, NOW).unwrap_err().contains("future"));
+            let (raw, sig, root) = signed(&body(NOW + 86_400_000, NOW - 1000, "somebody-elses-key"));
+            assert!(check_manifest(&raw, &sig, &root, UPD, NOW).unwrap_err().contains("updater key"));
+        }
+    }
+
     #[tauri::command]
     async fn desk_update_check(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
         use tauri_plugin_updater::UpdaterExt;
@@ -950,9 +1050,10 @@ mod desk {
     /// into two atomics the webview POLLS (`desk_update_progress`) — no event
     /// plugin, no npm package, the same two-sided ask the rest of this file is.
     #[tauri::command]
-    async fn desk_update_download(app: AppHandle) -> Result<String, String> {
+    async fn desk_update_download(app: AppHandle, manifest: String, sig: String) -> Result<String, String> {
         use std::sync::atomic::Ordering;
         use tauri_plugin_updater::UpdaterExt;
+        update_allowed(&app, &manifest, &sig)?;
         let update = app.updater().map_err(|e| e.to_string())?
             .check().await.map_err(|e| e.to_string())?
             .ok_or_else(|| "nothing to download".to_string())?;
@@ -996,8 +1097,11 @@ mod desk {
     /// plugin during install; a release that MOVED between download and this
     /// call fails that check and the app stays on the old version, working.
     #[tauri::command]
-    async fn desk_update_apply(app: AppHandle) -> Result<(), String> {
+    async fn desk_update_apply(app: AppHandle, manifest: String, sig: String) -> Result<(), String> {
         use tauri_plugin_updater::UpdaterExt;
+        // Checked again at the moment that matters: the manifest may have been
+        // re-signed - or expired - between the download and this click.
+        update_allowed(&app, &manifest, &sig)?;
         let bytes = app.state::<Shell>().pending_update.lock().unwrap().take()
             .ok_or_else(|| "nothing downloaded".to_string())?;
         let update = app.updater().map_err(|e| e.to_string())?

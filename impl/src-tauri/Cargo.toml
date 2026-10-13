@@ -68,6 +68,13 @@ rfd = "0.15"
 # not — see `desk_update_kind`, which is what stops the app offering an update
 # it cannot perform.
 tauri-plugin-updater = "2"
+# The release manifest (lib/manifest.ts, ARCHITECTURE.md Distribution): before an
+# update is downloaded or installed the host checks the manifest's Ed25519
+# signature under the root key compiled in from infra/root.pub, its dates, and
+# that the updater key it names is the one this build trusts. `ring` is
+# already in the tree (rustls), so this adds no new crate.
+ring = "0.17"
+base64 = "0.22"
 # One running copy per machine. Not a nicety — see `wire()`: a second copy of
 # this app is a second window of the SAME IDENTITY, and the protocol's answer to
 # that is to close both sessions.

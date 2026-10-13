@@ -42,9 +42,9 @@ into something worse is a finding.
 Releases are signed by three CI-held keys, and each release is described by
 a manifest signed with the operator's offline root key, whose public half is
 `infra/root.pub` (`docs/ARCHITECTURE.md`, Distribution). The desktop updater
-does not yet verify the manifest before installing, so a compromise of the
-update channel is still the highest-leverage attack on this system by our own
-account (`docs/THREAT-MODELS.md`, B2).
+verifies the manifest before it downloads and before it installs, and refuses
+an installer signed by a key the manifest does not name; what the manifest does
+not yet cover is the bundle itself (`docs/THREAT-MODELS.md`, B2).
 
 ## Versions
 

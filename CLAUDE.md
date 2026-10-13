@@ -1208,7 +1208,14 @@ node scripts/release-manifest.mjs --verify /tmp/rel
 ```
 
 The PKCS#11 path was written against the ykcs11 documentation (EDDSA = pure
-Ed25519, slot 9c = object id 2) and not yet exercised against a token here.
+Ed25519, slot 9c = object id 2); the user signs on their machine and hands the
+signature over, which `--attach-sig` takes.
+
+**TRAP: the desktop updater refuses any update unless the manifest names the
+updater key the build trusts and has not expired.** Rotating the minisign
+updater key, or letting the manifest expire, means every desktop refuses the
+next update with a toast naming the reason. Re-sign the manifest FIRST, then
+release with the new key.
 
 The tag triggers `desktop.yml` (five desktop targets → **draft** release — the
 draft is the updater's publish gate) and `android.yml` (signed APK), and the
