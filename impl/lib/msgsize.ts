@@ -22,8 +22,10 @@
  * So the measure is the encoded body, and the budget is what is left of the
  * frame after the envelope and the EH-2 seal. Measured from a real session:
  * a 16-character message goes out as a 162-byte frame, so the fixed cost is
- * about 146 bytes; 1 KB of headroom covers that with room for a reply
- * reference and anything a later envelope field adds.
+ * about 146 bytes. The hybrid ratchet's header can grow to 2 319 B when it
+ * carries an ML-KEM key and ciphertext (SPEC.md 7.2), and the origin envelope
+ * adds the publisher's PeerId (SPEC.md 13); 3 KB of headroom covers all three
+ * with room for a reply reference.
  */
 
 /** The relay's ceiling. Keep in step with `maxMessageSize` in relay/relay.mjs. */
