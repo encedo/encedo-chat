@@ -82,6 +82,10 @@ fn ratchet_hybrid_matches_the_vector() {
     assert_eq!(frames, want);
     let pq = v["pq_steps"].as_u64().unwrap() as u32;
     assert_eq!(i.stats().pq_steps, pq); assert_eq!(r.stats().pq_steps, pq);
+    // n (u32be at header bytes 38..42) must reach past 0, or the counter's
+    // place in the nonce is not pinned by this vector.
+    let max_n = want.iter().map(|h| u32::from_str_radix(&h[76..84], 16).unwrap()).max().unwrap();
+    assert!(max_n >= 2, "the vector never leaves n = 0 of a chain");
 }
 
 #[test]
@@ -175,4 +179,83 @@ fn the_per_recipient_mac_is_insider_unforgeable() {
     assert!(!verify(&mk_ac, &header, &ct, &t), "another member's key does not verify A's MAC");
     let mut bad = t; bad[0] ^= 1;
     assert!(!verify(&mk_ab, &header, &ct, &bad));
+}
+
+#[test]
+fn group_senderkey_cases_walk_the_chain_with_the_counter_in_the_nonce() {
+    use encedo_core::kdf::{aead_nonce, kdf};
+    use encedo_core::senderkey::{tag, SendChain, SenderReceiver};
+    let v = kat("group-senderkey");
+    let mk_ij = unhex(v["mk_ij"].as_str().unwrap());
+    let cases = v["cases"].as_array().unwrap();
+    assert!(cases.len() >= 6, "the vector lost its cases");
+    // Group the cases into chains: each chain starts at ctr 0.
+    let mut chains: Vec<Vec<&serde_json::Value>> = Vec::new();
+    for c in cases { if c["ctr"].as_u64().unwrap() == 0 { chains.push(Vec::new()) } chains.last_mut().unwrap().push(c) }
+    for g in &chains {
+        let key0: [u8; 32] = unhex(g[0]["chain_key_at_ctr"].as_str().unwrap()).try_into().unwrap();
+        let base_hdr = unhex(g[0]["header_aad"].as_str().unwrap());
+        let last = g.last().unwrap()["ctr"].as_u64().unwrap() as u32;
+        let mut chain = SendChain::from_key(key0);
+        let mut ck = key0;
+        for n in 0..=last {
+            let case = g.iter().find(|c| c["ctr"].as_u64().unwrap() as u32 == n);
+            let mut hdr = case.map(|c| unhex(c["header_aad"].as_str().unwrap())).unwrap_or(base_hdr.clone());
+            if hdr.len() == 32 { hdr[28..32].copy_from_slice(&n.to_be_bytes()) }
+            let pt = case.map(|c| c["plaintext"].as_str().unwrap().to_string()).unwrap_or(format!("skipped {n}"));
+            let (got_n, ct) = chain.seal(&hdr, pt.as_bytes());
+            assert_eq!(got_n, n);
+            if let Some(c) = case {
+                // Independently of SendChain: the chain key, MK and nonce at this counter.
+                assert_eq!(hex(&ck), c["chain_key_at_ctr"].as_str().unwrap(), "chain key at {n}");
+                let mut mk = [0u8; 32]; kdf("encedo-group-msg", &ck, &[], &mut mk);
+                assert_eq!(hex(&mk), c["mk"].as_str().unwrap(), "MK at {n}");
+                assert_eq!(hex(&aead_nonce(&mk, n)), c["nonce"].as_str().unwrap(), "nonce at {n}");
+                if n > 0 {
+                    let mut no_ctr = [0u8; 12]; kdf("encedo-aead-nonce", &mk, &[], &mut no_ctr);
+                    assert_ne!(hex(&no_ctr), c["nonce"].as_str().unwrap(), "ctr {n}: the counter must reach the nonce");
+                }
+                assert_eq!(hex(&ct), c["ct"].as_str().unwrap(), "ct at {n}");
+                assert_eq!(hex(&tag(&mk_ij, &hdr, &ct)), c["mac_under_mk_ij"].as_str().unwrap(), "MAC at {n}");
+            }
+            let mut next = [0u8; 32]; kdf("encedo-group-chain", &ck, &[], &mut next); ck = next;
+        }
+        // A receiver at 0 opens the last case, walking past the skipped counters.
+        let lc = g.last().unwrap();
+        let mut r = SenderReceiver::new(key0);
+        let pt = r.open(0, last, &unhex(lc["header_aad"].as_str().unwrap()), &unhex(lc["ct"].as_str().unwrap())).unwrap().unwrap();
+        assert_eq!(pt, lc["plaintext"].as_str().unwrap().as_bytes());
+    }
+}
+
+#[test]
+fn group_keys_match_the_vector() {
+    use encedo_core::kdf::{hmac, kdf, sha256};
+    let v = kat("group-keys");
+    let p = |k: &str| Priv::from_bytes(unhex(k).try_into().unwrap());
+    let gk = p(v["gk_priv"].as_str().unwrap());
+    let a = p(v["ik_priv"]["a"].as_str().unwrap());
+    let b = p(v["ik_priv"]["b"].as_str().unwrap());
+    let c = p(v["ik_priv"]["c"].as_str().unwrap());
+    assert_eq!(hex(&gk.public()), v["gk_pub"].as_str().unwrap());
+    let gid = &sha256(&gk.public())[..16];
+    assert_eq!(hex(gid), v["group_id"].as_str().unwrap());
+    for (who, k) in [("a", &a), ("b", &b), ("c", &c)] {
+        assert_eq!(hex(&sha256(&k.public())[..8]), v["sender_id"][who].as_str().unwrap(), "sender_id {who}");
+    }
+    for e in v["epochs"].as_array().unwrap() {
+        let epoch = e["epoch"].as_u64().unwrap() as u32;
+        let mut ctx = gid.to_vec(); ctx.extend_from_slice(&epoch.to_be_bytes());
+        let d = |label: &str, ss: &[u8; 32]| { let mut o = [0u8; 32]; kdf(label, ss, &ctx, &mut o); o };
+        let mk_ab = d("encedo-group-msg-mac", &a.dh(&b.public()));
+        assert_eq!(hex(&mk_ab), e["mk_ab"].as_str().unwrap(), "mk_ab at {epoch}");
+        assert_eq!(hex(&d("encedo-group-msg-mac", &b.dh(&a.public()))), e["mk_ab"].as_str().unwrap());
+        assert_eq!(hex(&d("encedo-group-msg-mac", &a.dh(&c.public()))), e["mk_ac"].as_str().unwrap(), "mk_ac at {epoch}");
+        let rk_b = d("encedo-chat-group-roster-mac", &gk.dh(&b.public()));
+        assert_eq!(hex(&rk_b), e["rk_b"].as_str().unwrap(), "rk_b at {epoch}");
+        assert_eq!(hex(&d("encedo-chat-group-roster-mac", &b.dh(&gk.public()))), e["rk_b"].as_str().unwrap());
+        let roster: Vec<&str> = e["roster"].as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect();
+        assert_eq!(roster, vec![b64(&a.public()), b64(&b.public()), b64(&c.public())]);
+        assert_eq!(hex(&hmac(&rk_b, &[roster.join("\n").as_bytes()])), e["rmac_b"].as_str().unwrap(), "rmac at {epoch}");
+    }
 }

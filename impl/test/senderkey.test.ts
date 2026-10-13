@@ -103,3 +103,52 @@ test('newSendChain gives a random 32-byte key at position 0', () => {
   assert.equal(a.key.length, 32); assert.equal(a.n, 0)
   assert.notDeepEqual(a.key, b.key)
 })
+
+test('KAT cases: one chain walked to several counters - chain key, MK, nonce, ct and MAC at each (docs/kat/group-senderkey.json)', async () => {
+  const unhex = (h: string) => Uint8Array.from((h.match(/../g) ?? []).map((x) => parseInt(x, 16)))
+  const u32 = (n: number) => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, n, false); return b }
+  const label = (s: string) => enc.encode(s)
+  assert.ok(KAT.cases.length >= 6, 'the vector lost its cases')
+  const mkij = unhex(KAT.mk_ij)
+  // Walk each chain INDEPENDENTLY of lib/senderkey.ts, from HKDF alone, and
+  // check every recorded step - then check the library seals the same bytes.
+  let ck: Uint8Array = new Uint8Array(0), at = -1
+  for (const c of KAT.cases) {
+    if (c.ctr === 0) { ck = unhex(c.chain_key_at_ctr); at = 0 }
+    while (at < c.ctr) { ck = await hkdfBits(ck, NO_SALT, label('encedo-group-chain'), 32); at++ }
+    assert.equal(hex(ck), c.chain_key_at_ctr, `chain key at ctr ${c.ctr}`)
+    const mk = await hkdfBits(ck, NO_SALT, label('encedo-group-msg'), 32)
+    assert.equal(hex(mk), c.mk, `MK at ctr ${c.ctr}`)
+    const nonce = await hkdfBits(mk, u32(c.ctr), label('encedo-aead-nonce'), 12)
+    assert.equal(hex(nonce), c.nonce, `nonce at ctr ${c.ctr}`)
+    if (c.ctr > 0) {
+      // The point of the extra cases: past 0 an empty salt is a DIFFERENT
+      // nonce, so a port that drops the counter fails here, not in the field.
+      const noCounter = await hkdfBits(mk, NO_SALT, label('encedo-aead-nonce'), 12)
+      assert.notEqual(hex(noCounter), c.nonce, `ctr ${c.ctr}: the counter must reach the nonce`)
+    }
+    const k = await subtle.importKey('raw', mk, { name: 'AES-GCM' }, false, ['decrypt'])
+    const pt = new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: nonce, additionalData: unhex(c.header_aad) }, k, unhex(c.ct)))
+    assert.equal(new TextDecoder().decode(pt), c.plaintext, `plaintext at ctr ${c.ctr}`)
+    assert.equal(hex(await tag(mkij, unhex(c.header_aad), unhex(c.ct))), c.mac_under_mk_ij, `MAC at ctr ${c.ctr}`)
+    assert.ok(await verify(mkij, unhex(c.header_aad), unhex(c.ct), unhex(c.mac_under_mk_ij)))
+  }
+  // The library's own seal produces the recorded ciphertexts.
+  const groups: Array<typeof KAT.cases> = []
+  for (const c of KAT.cases) { if (c.ctr === 0) groups.push([]); groups[groups.length - 1].push(c) }
+  for (const g of groups) {
+    const chain = sendChainFrom(unhex(g[0].chain_key_at_ctr))
+    const last = g[g.length - 1].ctr
+    for (let n = 0; n <= last; n++) {
+      const c = g.find((x: any) => x.ctr === n)
+      const hdr = c ? unhex(c.header_aad) : unhex(g[0].header_aad)
+      if (hdr.length === 32) new DataView(hdr.buffer).setUint32(28, n, false)
+      const out = await seal(chain, hdr, enc.encode(c ? c.plaintext : 'skipped ' + n))
+      if (c) assert.equal(hex(out.ct), c.ct, `library seal at ctr ${n}`)
+    }
+    // A receiver at 0 opens the last case after walking past the skipped ones.
+    const lc = g[g.length - 1]
+    const recv = new SenderReceiver(unhex(g[0].chain_key_at_ctr))
+    assert.equal(new TextDecoder().decode((await recv.open(lc.ctr, unhex(lc.header_aad), unhex(lc.ct)))!), lc.plaintext)
+  }
+})

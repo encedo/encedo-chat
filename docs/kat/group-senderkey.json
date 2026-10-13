@@ -4,5 +4,68 @@
   "plaintext": "hello",
   "ctr": 0,
   "ct": "59ec59409bb175107ae1fe6cf187a3d98c21127850",
-  "note": "MK = HKDF(chain, salt=empty, info=\"encedo-group-msg\", 32); nonce = HKDF(MK, salt=empty, info=\"encedo-aead-nonce\", 12); AES-256-GCM(MK, nonce, plaintext, aad=header) (8.1, 8.2)."
+  "mk_ij": "9999999999999999999999999999999999999999999999999999999999999999",
+  "cases": [
+    {
+      "ctr": 0,
+      "chain_key_at_ctr": "1111111111111111111111111111111111111111111111111111111111111111",
+      "header_aad": "aabbccdd",
+      "plaintext": "hello",
+      "mk": "16d6262fd2c3ce541a7f1aa117806e963ea7ba95ce6fdcb48b5d3d6c19e5ba4f",
+      "nonce": "4cc3d9a12758d2884a7e1d1d",
+      "ct": "59ec59409bb175107ae1fe6cf187a3d98c21127850",
+      "mac_under_mk_ij": "8687795c567c2971cab0b1f25d917845c963ebe56581912838161267d6fb82c9"
+    },
+    {
+      "ctr": 1,
+      "chain_key_at_ctr": "dabf37e1926955687a95f6c21864ad2789fd829ad3396a559a6534dbc436d3d9",
+      "header_aad": "aabbccdd",
+      "plaintext": "world",
+      "mk": "5feaebfe146c033a97aee5f27ae6f7778dd42eeaf8be54254fb34ac556a69235",
+      "nonce": "5e4092739f9d34576e94f97d",
+      "ct": "9fe45f7aec14052b020661c60b820dfd71cad4d4ff",
+      "mac_under_mk_ij": "bf4526bdc59e54eebcce864e50148a29890b424d85a1784885f7670aeaa6d025"
+    },
+    {
+      "ctr": 2,
+      "chain_key_at_ctr": "a3232f598fe13fc8281762e369697565e9aa5c503c6712619e65828bb764598f",
+      "header_aad": "aabbccdd",
+      "plaintext": "",
+      "mk": "1fe9d580c776726f1bd7dd4455182e7f1336c6414df7468413de2cb8ba1545f6",
+      "nonce": "4f59bf6ada866b3cd5758194",
+      "ct": "a2e5300dbcab314327c80344bdca2dc2",
+      "mac_under_mk_ij": "3eaef72818bf57388255b514986fa389bba67d4ad893aa69628a841f92535dc4"
+    },
+    {
+      "ctr": 0,
+      "chain_key_at_ctr": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+      "header_aad": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1b2b2b2b2b2b2b2b20000000500000000",
+      "plaintext": "pierwsza",
+      "mk": "c861a7a2f455ef9eb7fed0d29dd1a5f68be2483e1be9d0ae4be073cdd4e50fa0",
+      "nonce": "6cf97e877d45a95ef0d66f4d",
+      "ct": "bdeaf953d3acdf36e60172deb256fc45c6cde387ef091a0b",
+      "mac_under_mk_ij": "f669005d4074bce5a6d6564ab8f0db0baa8862ad647b4023246c16ff518f263f"
+    },
+    {
+      "ctr": 3,
+      "chain_key_at_ctr": "dd3d7bceaae9e193db5258ef37bcb9019ef1a735e3d38a394abd5740737e28d0",
+      "header_aad": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1b2b2b2b2b2b2b2b20000000500000003",
+      "plaintext": "zażółć gęślą jaźń - a body past one AES block, with UTF-8 in it",
+      "mk": "b9bc40ea28a14f2852d0224ebe6c330a7e654328ae33855368286d3f1bc2666d",
+      "nonce": "843e884c6cf74d2d77a16724",
+      "ct": "efce659cc822d291579577b8253bdc89fb2a0a20d7f537e3cd531428d6faaa55425a48be50bd39a55b1224f1b7171d72cee6d65d6020f9114adb9edd28055d96e255cac02f05ec9f84a9b94e832b34cac3c056af1e6c3949",
+      "mac_under_mk_ij": "546f609bcd3b319b0c3000739a8d78917f4070cd24ea82e0d7c21b8043b68038"
+    },
+    {
+      "ctr": 7,
+      "chain_key_at_ctr": "20f6060f8c71e983c1e7b82c5a6cbb08e85f2fcd30fc6317472c0d9254551f23",
+      "header_aad": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1b2b2b2b2b2b2b2b20000000500000007",
+      "plaintext": "siódma",
+      "mk": "3d6f112f3c99460bcfac539f5b34d8e7c5c1be09956571f22e386274e2ba26de",
+      "nonce": "42aa777b264ee22a2fd39eb7",
+      "ct": "d0fea24b645555291619bff93a3ef7661ce72a8892b58b",
+      "mac_under_mk_ij": "ea72023dfe229a2ce16cf038ad12ee5471d8dc760f9591f014a498e53325596d"
+    }
+  ],
+  "note": "chain_key' = HKDF(chain, salt=empty, info=\"encedo-group-chain\", 32); MK = HKDF(chain, salt=empty, info=\"encedo-group-msg\", 32); nonce = HKDF(MK, salt=u32be(ctr), info=\"encedo-aead-nonce\", 12); ct = AES-256-GCM(MK, nonce, plaintext, aad=header); mac = HMAC-SHA256(mk_ij, header || ct) (8.1, 8.2). Counters not listed in a case were sealed with \"skipped <n>\" to advance the chain. The 32-byte header is gid 0xa1 x16 || sender_id 0xb2 x8 || u32be(epoch 5) || u32be(ctr)."
 }

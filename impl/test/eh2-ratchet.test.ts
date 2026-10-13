@@ -311,4 +311,9 @@ test('KAT: a scripted hybrid exchange with fixed keys matches docs/kat/ratchet-h
   }
   assert.deepEqual(frames, KAT.frames)
   assert.equal(I.stats().pqSteps, KAT.pq_steps); assert.equal(R.stats().pqSteps, KAT.pq_steps)
+  // The vector must reach past n = 0 of a chain, or the counter's place in the
+  // nonce is unpinned (it was, until the script got its bursts). n is the u32be
+  // at header bytes 38..42 (type, ver, dh_pub 32, pn 4).
+  const ns = (KAT.frames as string[]).map((h) => parseInt(h.slice(76, 84), 16))
+  assert.ok(Math.max(...ns) >= 2, `the vector never leaves n = 0 of a chain: ${ns}`)
 })
