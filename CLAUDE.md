@@ -1053,6 +1053,15 @@ Things that will bite:
   CID (`docs/REPRODUCIBLE.md`), not the wasm's bytes; the KATs in both
   languages are the functional-equivalence proof. Still: build with
   `./core-rs/build.sh`, never plain `cargo build`, and commit the result.
+- **Tauri 2 renames command arguments to camelCase.** A Rust parameter
+  `ik_pub` is the JS key `ikPub` unless the command says
+  `#[tauri::command(rename_all = "snake_case")]`. `eh2/native.ts` sends
+  snake_case, so every `core_native.rs` command carries that attribute; without
+  it (0.7.27-0.7.30) every command with an argument was refused and every shell
+  silently ran on WASM - conversations worked, so nothing looked wrong.
+  `test/native-ipc.test.ts` drives the real `native.ts` through Tauri's real
+  dispatch (`src-tauri/examples/core-ipc.rs`, mock runtime) and is in the
+  release gate; a new host command gets the attribute and a case there.
 - **CSP needs `'wasm-unsafe-eval'`** in `script-src` (index.html) or
   `WebAssembly.instantiate` is refused with a CompileError that reads like a
   broken file. It allows WASM compilation only, not `eval`.
