@@ -1,0 +1,6 @@
+# onchato / Encedo Chat - security contact (RFC 9116)
+Contact: mailto:security@rkv.pl
+Expires: 2027-10-13T00:00:00.000Z
+Preferred-Languages: en, pl
+Canonical: https://onchato.com/.well-known/security.txt
+Policy: https://github.com/encedo/encedo-chat/blob/main/SECURITY.md

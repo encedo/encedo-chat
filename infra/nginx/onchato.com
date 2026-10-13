@@ -77,6 +77,15 @@ server {
 
     # ── NOWE: strona publiczna odpowiada na sam "/" ────────────────────────
     # Blok "= /" (dopasowanie dokładne) wygrywa z "location /" niżej, więc to
+    # security.txt (RFC 9116): kontakt bezpieczeństwa, wersjonowany w
+    # infra/well-known/security.txt. Alias, nie try_files w dist/ -- plik ma żyć
+    # niezależnie od buildu webappki (dist/ jest czyszczony przy każdym deployu).
+    location = /.well-known/security.txt {
+        alias /opt/github/encedo-chat/infra/well-known/security.txt;
+        default_type text/plain;
+        add_header Cache-Control "max-age=86400";
+    }
+
     # jedyne miejsce, które przestaje serwować aplikację. Nagłówki są POWTÓRZONE
     # świadomie: add_header nie dziedziczy się do bloku, który ma własne.
     location = / {
