@@ -55,6 +55,14 @@ jobs:
     name: release gate (npm test + cargo test)
     if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
     uses: ./.github/workflows/ci.yml
+    # A called workflow may not ask for more than its caller grants, and GitHub
+    # checks that at startup for EVERY job in it, skipped or not: ci.yml's
+    # sweep-artifacts asks for actions: write, so without this line the whole
+    # run is a startup_failure (v0.7.29). The sweep itself never runs here - it
+    # is `if: github.ref == 'refs/heads/main'`.
+    permissions:
+      contents: read
+      actions: write
     with:
       gate: true
 
