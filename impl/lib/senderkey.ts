@@ -9,7 +9,7 @@
  *
  *   MK_n        = HKDF(chain_n, "encedo-group-msg")
  *   chain_{n+1} = HKDF(chain_n, "encedo-group-chain")
- *   nonce       = HKDF(MK_n, "encedo-aead-nonce")           // MK is single-use -> n not needed
+ *   nonce       = HKDF(MK_n, salt = n, info = "encedo-aead-nonce")  // the one nonce of 1:1 and groups
  *   ct          = AES-256-GCM(MK_n, nonce, plaintext, aad = header)
  *
  * Authentication is a per-recipient HMAC, NOT a signature (deniability, S3
@@ -22,14 +22,12 @@
  * WebCrypto only (HKDF + AES-GCM + HMAC); no third-party crypto.
  */
 
-import { subtle, hkdfBits, randomBytes, concat } from './wc.ts'
+import { subtle, kdf, aeadNonce, randomBytes, concat } from './wc.ts'
 import { nowMs } from './time.ts'
 
 const enc = new TextEncoder()
-const MK_INFO = enc.encode('encedo-group-msg')
-const CK_INFO = enc.encode('encedo-group-chain')
-const NONCE_INFO = enc.encode('encedo-aead-nonce')
-const NO_SALT = new Uint8Array(0)
+const MK_LABEL = 'encedo-group-msg'
+const CK_LABEL = 'encedo-group-chain'
 
 /** Bounded catch-up: a header claiming a jump past this many messages is dropped
  *  (DoS — a peer must not make us derive unbounded keys). Group chains are not
@@ -37,17 +35,20 @@ const NO_SALT = new Uint8Array(0)
 export const MAX_SKIP = 2000
 export const SKIPPED_TTL_MS = 24 * 60 * 60 * 1000
 
-const msgKey = (ck: Uint8Array) => hkdfBits(ck, NO_SALT, MK_INFO, 32)
-const chainNext = (ck: Uint8Array) => hkdfBits(ck, NO_SALT, CK_INFO, 32)
-const nonceFor = (mk: Uint8Array) => hkdfBits(mk, NO_SALT, NONCE_INFO, 12)
+const msgKey = (ck: Uint8Array) => kdf(MK_LABEL, ck)
+const chainNext = (ck: Uint8Array) => kdf(CK_LABEL, ck)
 
-async function aeadSeal(mk: Uint8Array, header: Uint8Array, pt: Uint8Array): Promise<Uint8Array> {
+// The nonce is the same construction as the 1:1 ratchet's (lib/wc.ts
+// aeadNonce): from the single-use MK and the counter it seals. MK never seals
+// twice, so the counter adds nothing cryptographically; it removes the second
+// construction an auditor had to hold (S7).
+async function aeadSeal(mk: Uint8Array, n: number, header: Uint8Array, pt: Uint8Array): Promise<Uint8Array> {
   const key = await subtle.importKey('raw', mk, { name: 'AES-GCM' }, false, ['encrypt'])
-  return new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv: await nonceFor(mk), additionalData: header }, key, pt))
+  return new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv: await aeadNonce(mk, n), additionalData: header }, key, pt))
 }
-async function aeadOpen(mk: Uint8Array, header: Uint8Array, ct: Uint8Array): Promise<Uint8Array | null> {
+async function aeadOpen(mk: Uint8Array, n: number, header: Uint8Array, ct: Uint8Array): Promise<Uint8Array | null> {
   const key = await subtle.importKey('raw', mk, { name: 'AES-GCM' }, false, ['decrypt'])
-  try { return new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: await nonceFor(mk), additionalData: header }, key, ct)) }
+  try { return new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: await aeadNonce(mk, n), additionalData: header }, key, ct)) }
   catch { return null }
 }
 
@@ -81,8 +82,8 @@ export function sendChainFrom(key: Uint8Array): SendChain { return { key: key.sl
  *  counter used (goes into the header the caller MACs) and the ciphertext. */
 export async function seal(chain: SendChain, header: Uint8Array, plaintext: Uint8Array): Promise<{ n: number; ct: Uint8Array }> {
   const mk = await msgKey(chain.key)
-  const ct = await aeadSeal(mk, header, plaintext)
   const n = chain.n
+  const ct = await aeadSeal(mk, n, header, plaintext)
   const next = await chainNext(chain.key)
   chain.key.fill(0); chain.key = next; chain.n++
   mk.fill(0)
@@ -129,7 +130,7 @@ export class SenderReceiver {
     // 1. A key we derived for a message that overtook this one.
     const stashed = this.skipped.get(n)
     if (stashed) {
-      const pt = await aeadOpen(stashed.mk, header, ct)
+      const pt = await aeadOpen(stashed.mk, n, header, ct)
       if (pt) { stashed.mk.fill(0); this.skipped.delete(n) }
       return pt
     }
@@ -149,7 +150,7 @@ export class SenderReceiver {
     }
     const mkN = await msgKey(cur)
     const nextCk = await chainNext(cur)
-    const pt = await aeadOpen(mkN, header, ct)
+    const pt = await aeadOpen(mkN, n, header, ct)
     if (!pt) {
       mkN.fill(0); nextCk.fill(0)
       for (const p of passed) { p.mk.fill(0); p.ck.fill(0) }

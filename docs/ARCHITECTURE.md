@@ -117,8 +117,8 @@ Key properties (`PROTOCOL.md` §4):
 ```
 topic = base32( HKDF-SHA256(
   ikm  = ECDH(IK_a_priv, IK_b_pub),          // identity backend call — same value both sides
-  salt = "encedo-chat-rendezvous-v1",
-  info = network_id || 0x00 || date_UTC       // date on the pair's shifted clock (§5.4)
+  salt = network_id || 0x00 || date_UTC,      // date on the pair's shifted clock (§5.4)
+  info = "encedo-chat-rendezvous-v1"          // the label; one convention for every derivation (§14)
 ) )[0:52]
 ```
 

@@ -28,21 +28,21 @@
  *
  * ## The binding to the invite
  *
- * The invite secret is the HKDF `info`, so a knock is bound to the invite it
+ * The invite secret is the HKDF context (salt), so a knock is bound to the invite it
  * came through as well as to the recipient — a frame sealed for one invite
  * does not open under another even though both are addressed to the same
  * identity key. The cryptographer confirmed the schedule and called the
  * binding important (2026-09-15).
  */
 
-import { hkdfBits, subtle } from './wc.ts'
+import { kdf, subtle } from './wc.ts'
 import { generateX25519, type Dh } from './x25519.ts'
 
 const te = new TextEncoder()
 const td = new TextDecoder()
 
 /** HKDF salt. Versioned: a later frame shape must not open under this key. */
-const LABEL = te.encode('encedo-chat-invite-knock-v1')
+const LABEL = 'encedo-chat-invite-knock-v1'
 
 /** Longest display name a knock carries, in BYTES — the wire budget is bytes,
  *  and a name arrives as UTF-8 from a stranger. */
@@ -79,7 +79,7 @@ export type Knock =
  * itself load-bearing.
  */
 async function frameKey(shared: Uint8Array, inbox: Uint8Array) {
-  const bits = await hkdfBits(shared, LABEL, inbox, KEY_LEN + NONCE_LEN)
+  const bits = await kdf(LABEL, shared, inbox, KEY_LEN + NONCE_LEN)
   return { raw: bits.subarray(0, KEY_LEN), nonce: bits.subarray(KEY_LEN) }
 }
 

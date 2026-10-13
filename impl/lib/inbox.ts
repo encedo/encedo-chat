@@ -45,16 +45,15 @@
  * it was not, and measured gaps of 102 s and 129 s evicted live inboxes.
  */
 
-import { hkdfBits } from './wc.ts'
+import { kdf } from './wc.ts'
 import { topicFromSecret, rotationOffsetSec, type RvParams } from './rendezvous.ts'
 import { activeDatesForOffset, type RotationConfig } from './presence.ts'
 import { openKnock, decoyKnock, sealKnock, type Knock } from './knock.ts'
 import type { Dh } from './x25519.ts'
 import { nowMs } from './time.ts'
 
-const te = new TextEncoder()
-const SEED_LABEL = te.encode('encedo-chat-invite-decoy-v1')
-const SLOT_LABEL = te.encode('encedo-chat-invite-decoy-slot-v1')
+const SEED_LABEL = 'encedo-chat-invite-decoy-v1'
+const SLOT_LABEL = 'encedo-chat-invite-decoy-slot-v1'
 
 /** Half the relay's 120 s idle eviction, so the worst gap (just under two
  *  slots) still refreshes the topic with margin for a missed tick. */
@@ -205,7 +204,7 @@ export function watchInbox(
   }
 
   const planSlot = async (n: number) => {
-    const h = await hkdfBits(seed!, SLOT_LABEL, u32(n), 4)
+    const h = await kdf(SLOT_LABEL, seed!, u32(n), 4)
     curSlot = n
     fireAt = n * decoyEvery + (readU32(h) % decoyEvery)
     fired = false
@@ -256,7 +255,7 @@ export function watchInbox(
   // and the seed are both derivations, and the first tick needs them.
   chain = (async () => {
     offsetMs = (await rotationOffsetSec(inbox, params)) * 1000
-    seed = await hkdfBits(await dh.dh(dh.pub), SEED_LABEL, inbox, 32)
+    seed = await kdf(SEED_LABEL, await dh.dh(dh.pub), inbox)
   })().then(step).catch(() => {})
 
   try { node.services.pubsub.addEventListener('message', handler) } catch {}

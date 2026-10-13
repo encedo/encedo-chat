@@ -26,7 +26,7 @@ test('KAT: a sealed frame opens with an independently derived MK and nonce', asy
   assert.equal(hex(key0), KAT.chain_key); assert.equal(hex(H), KAT.header_aad); assert.equal(n, KAT.ctr)
   assert.equal(hex(ct), KAT.ct)
   const mk0 = await hkdfBits(key0, NO_SALT, enc.encode('encedo-group-msg'), 32)
-  const nonce = await hkdfBits(mk0, NO_SALT, enc.encode('encedo-aead-nonce'), 12)
+  const nonce = await hkdfBits(mk0, new Uint8Array([0, 0, 0, 0]), enc.encode('encedo-aead-nonce'), 12) // counter 0 as the context
   const k = await subtle.importKey('raw', mk0, { name: 'AES-GCM' }, false, ['decrypt'])
   const pt = new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: nonce, additionalData: H }, k, ct))
   assert.deepEqual(pt, body('hello'))

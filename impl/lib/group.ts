@@ -11,8 +11,8 @@
  *   group_id  = SHA-256(GK_pub)[0:16]                          (GK = §8 group identity key)
  *   sender_id = SHA-256(IK_pub)[0:8]
  *   topic     = groupTopicFromSecret(group_secret, params)     (§5.3, rendezvous.ts)
- *   mk_ij     = HKDF(ECDH(IK_i,IK_j), "encedo-group-msg-mac"      , gid || epoch)   msg auth
- *   rk_i      = HKDF(ECDH(GK,   IK_i), "encedo-chat-group-roster-mac", gid || epoch)   roster auth
+ *   mk_ij     = HKDF(ECDH(IK_i,IK_j), salt = gid || epoch, info = "encedo-group-msg-mac")         msg auth
+ *   rk_i      = HKDF(ECDH(GK,   IK_i), salt = gid || epoch, info = "encedo-chat-group-roster-mac")  roster auth
  *
  * Distribution of `group_secret` + each member's sending key rides the 1:1 ratchet
  * (stage 3); this module takes them as inputs and does the crypto/state/wire.
@@ -22,7 +22,7 @@
  *   header = group_id(16) || sender_id(8) || epoch(4 BE) || ctr(4 BE)     (also the AEAD AAD)
  */
 
-import { subtle, hkdfBits, sha256, unb64, b64, concat, randomBytes } from './wc.ts'
+import { subtle, kdf, sha256, unb64, b64, concat, randomBytes } from './wc.ts'
 import type { RvParams } from './rendezvous.ts'
 import { groupTopicFromSecret, rotationOffsetSec } from './rendezvous.ts'
 import { seal, sendChainFrom, newSendChain, SenderReceiver, tag, verify, type SendChain, type ReceiverOpts } from './senderkey.ts'
@@ -33,11 +33,11 @@ import { groupLabel } from './descr.ts'
 import { plog, val } from './protolog.ts'
 
 const enc = new TextEncoder()
-const MSG_MAC_INFO = enc.encode('encedo-group-msg-mac')
-const ROSTER_MAC_INFO = enc.encode('encedo-chat-group-roster-mac')
+const MSG_MAC_LABEL = enc.encode('encedo-group-msg-mac')
+const ROSTER_MAC_LABEL = enc.encode('encedo-chat-group-roster-mac')
 
 const T_GMSG = 0x20
-const VERSION = 1
+const VERSION = 3 // one ver names one spec (PROTOCOL.md header): the MAC-key derivation changed with spec 3.0
 const HDR_LEN = 16 + 8 + 4 + 4 // 32
 const REC_LEN = 8 + 32         // recipient_id || mac
 
@@ -62,17 +62,17 @@ export async function senderIdOf(pubB64: string): Promise<Uint8Array> { return (
 const HOLD_MAX = 32
 const HOLD_MS = 120_000
 const epochBytes = (epoch: number) => { const b = new Uint8Array(4); new DataView(b.buffer).setUint32(0, epoch, false); return b }
-const macInfo = (gid: Uint8Array, epoch: number) => concat(gid, epochBytes(epoch))
+const macCtx = (gid: Uint8Array, epoch: number) => concat(gid, epochBytes(epoch))
 
 /** Per-recipient message MAC key from a pairwise ECDH secret (both members
  *  derive the same value). */
 export async function msgMacKeyFromSecret(ss: Uint8Array, gid: Uint8Array, epoch: number): Promise<Uint8Array> {
-  return hkdfBits(ss, MSG_MAC_INFO, macInfo(gid, epoch), 32)
+  return kdf(MSG_MAC_LABEL, ss, macCtx(gid, epoch))
 }
 /** Roster MAC key from ECDH(GK, IK_i) — admin holds GK_priv, member holds GK_pub;
  *  the caller supplies the shared secret. */
 export async function rosterMacKeyFromSecret(ss: Uint8Array, gid: Uint8Array, epoch: number): Promise<Uint8Array> {
-  return hkdfBits(ss, ROSTER_MAC_INFO, macInfo(gid, epoch), 32)
+  return kdf(ROSTER_MAC_LABEL, ss, macCtx(gid, epoch))
 }
 
 /** Canonical roster bytes for the roster MAC - the member pubs IN ORDER, newline-

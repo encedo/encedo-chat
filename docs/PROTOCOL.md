@@ -1,6 +1,6 @@
 # v6 — PROTOCOL.md
 
-Status: **normative protocol reference — describes the shipped implementation** (`impl/`, deployed as onchato 0.7.x). **`spec_version` 2.0**; on the wire `ver = 2` on the EH-2 frames and the ratchet header (the hybrid step, §7.2), `version = 1` on the group frame and `v = 1` on the envelope, both unchanged. Before 1.0 the wire and this number move together: a wire change bumps the `ver` of the frames it touches and this number, every client updates with it, and no earlier frame is accepted — so one `ver` names exactly one spec version, and the known-answer vectors of `docs/kat/` (§17.5) belong to it. Kept 1:1 with the code: a wire behaviour the client has and this document omits, or the reverse, is a defect in one of them. Earlier drafts and the Proposal history are in git.
+Status: **normative protocol reference — describes the shipped implementation** (`impl/`, deployed as onchato 0.7.x). **`spec_version` 3.0**; on the wire `ver = 3` on the EH-2 frames and the ratchet header, `version = 3` on the group frame and `v = 3` on the Announce (the one derivation convention of §14, which moved every rendezvous key, the group MAC keys and the AEAD nonce), `v = 1` on the envelope, unchanged. Before 1.0 the wire and this number move together: a wire change bumps the `ver` of the frames it touches and this number, every client updates with it, and no earlier frame is accepted — so one `ver` names exactly one spec version, and the known-answer vectors of `docs/kat/` (§17.5) belong to it. Kept 1:1 with the code: a wire behaviour the client has and this document omits, or the reverse, is a defect in one of them. Earlier drafts and the Proposal history are in git.
 
 This is the single source of truth for the chat protocol: identity, rendezvous, handshake, ratchet, groups, files, session management, transport, cryptographic analysis, PQ roadmap, and the implementation map. It stands alongside `ARCHITECTURE.md` (product & infrastructure — why and where this runs) and `THREAT-MODELS.md` (deployment profiles — against whom).
 
@@ -215,12 +215,13 @@ Because the guess is the whole attack, the password is **not** left entirely to 
 shared_secret  = ECDH(IK_a_priv, IK_b_pub)            // HSM call; equal on both sides
 topic_material = HKDF-SHA256(
                    ikm  = shared_secret,
-                   salt = "encedo-chat-rendezvous-v1",
-                   info = network_id || 0x00 || date_UTC,
+                   salt = network_id || 0x00 || date_UTC,      // the context
+                   info = "encedo-chat-rendezvous-v1",         // the label
                    L    = 32)
 topic          = base32(topic_material)[0:52]
 ```
 
+- **Every derivation in this document reads the same way**: the label is HKDF's `info`, the context (a date, a group id and epoch, a root key, a counter, an invite secret) is HKDF's `salt`, empty where there is none (§14, "KDF convention"). Swapping the two derives a different key.
 - `base32` is RFC 4648, **lowercase, no padding** (the multiformats convention) — stated because a second implementation that pads or uppercases derives a different topic string from the same material.
 - `date_UTC` = `YYYY-MM-DD` **on the pair's shifted clock** (§5.4 — each pair rolls over at its own instant, not at 00:00 UTC).
 - `network_id` (a constant `main` in the shipped clients; the test peers take it as `--network`) is mixed in so independent networks are disjoint even if their nodes interconnect by accident. `0x00` is a domain separator against ambiguity between `network_id` and date.
@@ -240,8 +241,8 @@ Same construction with a client-side seed and its own salt:
 ```
 topic = base32(HKDF-SHA256(
           ikm  = group_secret,
-          salt = "encedo-chat-group-rendezvous-v1",
-          info = network_id ‖ 0x00 ‖ date_UTC,
+          salt = network_id ‖ 0x00 ‖ date_UTC,
+          info = "encedo-chat-group-rendezvous-v1",
           L    = 32))[0:52]
 ```
 
@@ -262,8 +263,8 @@ The pair topic rotates daily, but **each pair rolls over at its own instant**, d
 ```
 rotation_material = HKDF-SHA256(
                       ikm  = shared_secret,
-                      salt = "encedo-chat-rotation-v1",
-                      info = network_id || 0x00,          // NO date — the offset is stable per pair
+                      salt = network_id || 0x00,          // NO date — the offset is stable per pair
+                      info = "encedo-chat-rotation-v1",
                       L    = 4)
 offset_seconds    = be32(rotation_material) mod 86400     // rollover time-of-day, seconds past 00:00 UTC
 ```
@@ -286,12 +287,12 @@ The offset is secret to the pair — derived from `shared_secret`, so not predic
 
 Published on pair topics and the self-topic — never on group topics (those carry the §8 keepalive instead). Cadence on **pair topics**: at join, early beacons at **[1 s, 3 s, 7 s]** (the first Announce goes out before the relay grafts the topic's mesh and reaches nobody), then a heartbeat every **15 s**. A room gates its *first* Announce on the relay appearing among the topic's subscribers, or 1.5 s, whichever comes first, and counts the beacons from that moment; a light watch announces at once. Every 15 s publisher of a session — pair watches, rooms, group keepalives — fires on **one shared radio phase** (a random per-session offset of the 15 s grid), so a phone's radio wakes once per cycle for all of them (the self-topic's 10 s heartbeat is its own interval); a **light watch** (not a room) slows its heartbeat **4× to 60 s while the page is hidden on any host but the desktop shell** — a phone in a pocket, and equally a browser tab in the background — a room never slows, because its peer is timing it. A newly heard announcer is **answered at once** (a watch rate-limits this to one reply per 3 s), so the dot lights in one hop rather than at the next beat. On the **self-topic**: one Announce at subscribe (no beacons), a heartbeat every **10 s**, and a farewell Announce on §9.1 stand-down. This is also the room-presence signal ("is Y in the park yet").
 
-**Wire encoding** (normative — a second implementation must interoperate): a UTF-8 JSON object `{ v, peer, nonce, ts, mac }` with `v = 1`, `peer` the sender's PeerId string, `nonce` = base64 of 16 random bytes, `ts` unix ms, and
+**Wire encoding** (normative — a second implementation must interoperate): a UTF-8 JSON object `{ v, peer, nonce, ts, mac }` with `v = 3` (any other value is refused), `peer` the sender's PeerId string, `nonce` = base64 of 16 random bytes, `ts` unix ms, and
 
 ```
 announce_mac_key = HKDF-SHA256(ikm  = shared_secret,    // the pair ss; the self-DH value on the self-topic
-                               salt = "encedo-chat-announce-mac-v1",
-                               info = network_id || 0x00 || date_UTC,
+                               salt = network_id || 0x00 || date_UTC,
+                               info = "encedo-chat-announce-mac-v1",
                                L    = 32)
 mac = base64( HMAC-SHA256(announce_mac_key, ASCII("<v>|<peer>|<nonce>|<ts>")) )
 ```
@@ -317,8 +318,8 @@ An identity may mint any number of **invites**, each a random 32-byte `invite_se
 ```
 topic_material = HKDF-SHA256(
                    ikm  = invite_secret,               // public: it is in the link
-                   salt = "encedo-chat-rendezvous-v1", // §5.1, unchanged
-                   info = network_id || 0x00 || date_UTC,
+                   salt = network_id || 0x00 || date_UTC,
+                   info = "encedo-chat-rendezvous-v1", // §5.1, unchanged
                    L    = 32)
 topic          = base32(topic_material)[0:52]
 ```
@@ -339,8 +340,8 @@ frame = eph_pub (32) || AES-256-GCM ciphertext (300) || tag (16)
 k || nonce = HKDF-SHA256(
                ikm  = ECDH(eph_priv, IK_inviter_pub),   // answerer
                     = ECDH(IK_priv,  eph_pub),          // inviter
-               salt = "encedo-chat-invite-knock-v1",
-               info = invite_secret,
+               salt = invite_secret,
+               info = "encedo-chat-invite-knock-v1",
                L    = 44)                               // 32 B key || 12 B nonce
 
 plaintext (300 B, fixed, zero-padded) =
@@ -362,11 +363,11 @@ The inviter's own client publishes indistinguishable frames (`kind = 0x00`) on i
 
 ```
 seed    = HKDF-SHA256(ikm  = ECDH(IK_priv, IK_pub),          // the §5.2 self-DH
-                      salt = "encedo-chat-invite-decoy-v1",
-                      info = invite_secret, L = 32)
+                      salt = invite_secret,
+                      info = "encedo-chat-invite-decoy-v1", L = 32)
 instant = slot * 45_000 + (u32be(HKDF-SHA256(seed,
-                      salt = "encedo-chat-invite-decoy-slot-v1",
-                      info = u32be(slot), L = 4)) mod 45_000)
+                      salt = u32be(slot),
+                      info = "encedo-chat-invite-decoy-slot-v1", L = 4)) mod 45_000)
 ```
 
 - **The seed must not be the invite secret**, and this is the one place an implementer can destroy the mitigation while the code still works. The secret is public, so every holder of the link could otherwise compute when the decoys fall, subtract them, and read off the real knocks — leaving an observer *better* off than with no cover traffic at all. Deriving it from the self-DH means only the identity holder can compute the schedule.
@@ -406,7 +407,7 @@ msg2 = 0x02 ‖ ver(1) ‖ ek_r_pub(32) ‖ u16be(|pq_ct|)  ‖ pq_ct(1088)  ‖
 msg3 = 0x03 ‖ ver(1) ‖ mac_i(32)
 ```
 
-`ver = 2`; trailing bytes are rejected (a frame parses exactly or not at all). The type bytes are the discriminators of §6's "told apart by their type byte" — `0x01–0x03` handshake, `0x10` ratchet content (§7.2), `0x20`/`0x21` group (§8.2). In `h2_partial` (§6.2), `ts_r` enters as the same `u64be`.
+`ver = 3`; trailing bytes are rejected (a frame parses exactly or not at all). The type bytes are the discriminators of §6's "told apart by their type byte" — `0x01–0x03` handshake, `0x10` ratchet content (§7.2), `0x20`/`0x21` group (§8.2). In `h2_partial` (§6.2), `ts_r` enters as the same `u64be`.
 
 **`initiator_tag` — who sent msg1, readable only by the pair** (since 2026-10-12):
 
@@ -417,7 +418,7 @@ initiator_tag = HMAC-SHA256(k_tag, IK_i_pub)                          // full 32
 
 `announce_key` is the pair's Announce MAC key of the day (§5.5) — the key of the topic the frame is published on — so `k_tag` exists only for the two identities of the pair and changes with every rotation; the label cannot collide with an Announce, whose MAC input starts with a digit (`v|peer|nonce|ts`). R checks the tag **before any DH**: equal to the tag over the contact's IK → proceed; equal to the tag over **its own** IK → a second window of its own identity; anything else → not the contact. Either mismatch is the 5-minute rule of §6. A room that moves to another day's topic (§5.4) drops any attempt in flight and starts over under that topic's key: the tag was computed under the old one, and re-sent onto the new topic it would read as a stranger.
 
-It replaced `initiator_id = SHA-256(IK_i_pub)[0:8]`, which did the same job and was a **stable identifier in the clear** — the same 8 bytes in every msg1 an identity sent, in every pair and on every day, so a node could link one identity across rooms however the topics rotated. The tag is neither linkable across pairs nor across days. It is not an authenticator — anyone in the pair can compute it, and the MACs of §6.2 still decide. msg1 is 1260 B. `ver` is 2 since the hybrid ratchet (§7.2): before 1.0 every client updates together and no legacy frame is accepted.
+It replaced `initiator_id = SHA-256(IK_i_pub)[0:8]`, which did the same job and was a **stable identifier in the clear** — the same 8 bytes in every msg1 an identity sent, in every pair and on every day, so a node could link one identity across rooms however the topics rotated. The tag is neither linkable across pairs nor across days. It is not an authenticator — anyone in the pair can compute it, and the MACs of §6.2 still decide. msg1 is 1260 B. `ver` is 3 since the one KDF convention (§14; 2 was the hybrid ratchet, §7.2): before 1.0 every client updates together and no legacy frame is accepted.
 
 ### 6.2 Key schedule
 
@@ -483,11 +484,11 @@ Hybrid step:    RK', CK = HKDF-SHA256(ikm = X25519(DH_self, DH_peer) ‖ ss, sal
                                       info = "encedo-ratchet-hybrid-v1", L = 64)     // ss = ML-KEM-768 shared secret
 Message key:    MK       = HKDF-SHA256(CK, salt = ∅, info = "encedo-msg-key",   L = 32)
 Chain advance:  CK'      = HKDF-SHA256(CK, salt = ∅, info = "encedo-chain-key", L = 32)
-Nonce:          12 B     = HKDF-SHA256(MK, salt = ∅, info = "encedo-aead-nonce" || u32be(N), L = 12)
+Nonce:          12 B     = HKDF-SHA256(MK, salt = u32be(N), info = "encedo-aead-nonce", L = 12)   // the same function seals a group frame (§8.2)
 AEAD:           AES-256-GCM(MK, nonce, plaintext, aad = header)
 Header (wire):  0x10 ‖ ver(1) ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be)                        — 42 bytes
                 0x11 ‖ ver(1) ‖ dh_pub(32) ‖ pn ‖ n ‖ flags(1) ‖ [u16be len ‖ pq_ct] ‖ [u16be len ‖ pq_pub]
-                flags: 0x01 pq_ct present, 0x02 pq_pub present (ct first when both); `ver = 2`
+                flags: 0x01 pq_ct present, 0x02 pq_pub present (ct first when both); `ver = 3`
                 — the WHOLE header, whichever form, is the AAD
 ```
 
@@ -571,28 +572,28 @@ A group is a software layer over the 1:1 mesh: each member has its own sending c
 ```
 group_id  = SHA-256(GK_pub)[0:16]
 sender_id = SHA-256(IK_pub)[0:8]
-mk_ij     = HKDF(ECDH(IK_i, IK_j), salt = "encedo-group-msg-mac",         info = group_id ‖ epoch_be32, L = 32)   // pairwise message auth
-rk_i      = HKDF(ECDH(GK,   IK_i), salt = "encedo-chat-group-roster-mac", info = group_id ‖ epoch_be32, L = 32)   // admin roster auth
+mk_ij     = HKDF(ECDH(IK_i, IK_j), salt = group_id ‖ epoch_be32, info = "encedo-group-msg-mac",         L = 32)   // pairwise message auth
+rk_i      = HKDF(ECDH(GK,   IK_i), salt = group_id ‖ epoch_be32, info = "encedo-chat-group-roster-mac", L = 32)   // admin roster auth
 MK        = HKDF(chain_key, salt = ∅, info = "encedo-group-msg",   L = 32)   // per message
 chain_key′ = HKDF(chain_key, salt = ∅, info = "encedo-group-chain", L = 32)  // hash-ratchet forward, old discarded (FS)
 ```
 
-Note the two salt/info conventions coexisting deliberately (§7.2 has the same split): the ECDH-based auth keys put the label in the **salt**; the chain-walk derivations put it in the **info** with an empty salt. Both are normative as written — swapping them derives different keys.
+All four read by the one convention of §14: the label in `info`, the context (`group_id ‖ epoch` for the pairwise keys, nothing for the chain walk) in `salt`. Swapping them derives different keys.
 
 Per group: **`GK`** — a per-group X25519 keypair the admin generates in the HSM (members hold `GK_pub`); **`group_secret`** — random 32 B, admin-generated, client-side only, seeds the topic (§5.3), rotates per epoch; per member a **sending `chain_key`** (client-side, encrypted cache §10). `GK` is stable for the group's life; it never seeds the topic (a `GK_pub` leak must not expose it).
 
 ### 8.2 Message wire format (normative)
 
 ```
-frame  = 0x20 ‖ version(1) ‖ header(32) ‖ macCount(1) ‖ { recipient_id(8) ‖ mac(32) }* ‖ ct
+frame  = 0x20 ‖ version(1) ‖ header(32) ‖ macCount(1) ‖ { recipient_id(8) ‖ mac(32) }* ‖ ct      // version = 3
 header = group_id(16) ‖ sender_id(8) ‖ epoch(4 BE) ‖ ctr(4 BE)          // also the AEAD AAD
-ct     = AES-256-GCM(MK, nonce = HKDF(MK, salt = ∅, info = "encedo-aead-nonce", L=12), envelope, aad = header)
+ct     = AES-256-GCM(MK, nonce = HKDF(MK, salt = u32be(ctr), info = "encedo-aead-nonce", L=12), envelope, aad = header)
 mac    = HMAC(mk_ij, header ‖ ct)     // one per other member
 ```
 
 `recipient_id = SHA-256(recipient IK_pub)[0:8]` — the same function as `sender_id`.
 
-The plaintext inside `ct` is the ordinary §7.4 envelope — of which a group receiver **dispatches only `msg`, `reaction` and `file`**; the 1:1-only types (`edit`, `knock`, `ack`, `typing`, `presence`, `rtc`) do not exist on a group topic and are ignored if sealed into one. The nonce comes whole from the single-use MK (no counter — MK never seals twice; note for the auditor: the 1:1 path of §7.2 uses the same `"encedo-aead-nonce"` label **with** `u32be(N)` appended to the info — one label, two constructions, both safe because each MK is single-use, but a unification is a fair review comment). A recipient locates its `recipient_id`, **verifies its MAC before deriving anything**, then walks its copy of the sender's chain to `ctr` and decrypts. Skipped positions are messages it never received (bounded by a **gap rule: a single jump of more than 2000 past the chain's position is refused** — the frame dropped, the chain untouched — and derived-but-unused keys expire after **24 h**; a larger gap is repaired by re-distribution, §8.4, not by iterating). A frame consisting of the single byte `0x21` is the **topic keepalive** (§8.5), not a message.
+The plaintext inside `ct` is the ordinary §7.4 envelope — of which a group receiver **dispatches only `msg`, `reaction` and `file`**; the 1:1-only types (`edit`, `knock`, `ack`, `typing`, `presence`, `rtc`) do not exist on a group topic and are ignored if sealed into one. The nonce is the one function of §7.2, from the single-use MK and the counter it seals (`ctr` here, `N` there); MK never seals twice, so the counter adds no security — it removes a second construction. (For a reader of `docs/kat/group-senderkey.json`: at `ctr = 0` the salt `u32be(0)` and an empty salt are the same HMAC key once zero-padded, so that vector's ciphertext is the one recorded before the unification.). A recipient locates its `recipient_id`, **verifies its MAC before deriving anything**, then walks its copy of the sender's chain to `ctr` and decrypts. Skipped positions are messages it never received (bounded by a **gap rule: a single jump of more than 2000 past the chain's position is refused** — the frame dropped, the chain untouched — and derived-but-unused keys expire after **24 h**; a larger gap is repaired by re-distribution, §8.4, not by iterating). A frame consisting of the single byte `0x21` is the **topic keepalive** (§8.5), not a message.
 
 **Insider-unforgeable and deniable at once:** member B lacks `mk_AC` (it needs A's or C's private IK), so B cannot forge A→C even holding A's chain key from the distribution; and C holds `mk_AC`, so C could have produced any A→C MAC — nothing here proves authorship to a third party. A compromised IK forges, it does not decrypt (content FS lives in the chain keys, which the pair ECDH never yields).
 
@@ -699,7 +700,7 @@ base = ECDH(IK_priv, emp_pub)                                   // one device ca
 
 `emp_pub` is a random X25519 public value generated at first run and stored **in plain sight** in localStorage; X25519 consumes it as if it were a public key (RFC 7748 clamping; the output feeds HKDF, so contributory-behaviour caveats do not apply). This is a deliberate "KDF through the HSM": deriving `base` requires the IK holder *plus* this device-local value, so a stolen disk yields ciphertext and a public key. On current firmware `base` transits client RAM (§4.3); with HKDF-in-HSM firmware the per-store keys below derive in-device.
 
-Every derivation shares the one `base`, each with its own salt — the design rule being that the *next* consumer reuses `base` too, instead of adding a device call:
+Every derivation shares the one `base`, each with its own label — the design rule being that the *next* consumer reuses `base` too, instead of adding a device call. These stores keep the label in the **salt** and the scope in `info`, the reverse of the wire convention (§14): they are on-device only, and re-keying them would wipe every device's cache for nothing an observer could see.
 
 | store | key schedule | protects |
 |---|---|---|
@@ -763,7 +764,7 @@ The **terminal client** keeps the same records under the same keys in `~/.config
 - **S4 — GossipSub subscription timing.** *(open; accepted)* An observer with GossipSub logs sees who subscribes which topics; correlating to a pairing still needs both IK_pubs. Mitigation: daily rotation, ephemeral PeerId.
 - **S5 — ML-KEM encap client-side.** *(open; narrows with the Rust core, roadmap)* `sk_i` in client RAM; client compromise during handshake + message capture reveals `ss`. Active-attacker + endpoint-compromise only.
 - **S6 — [WITHDRAWN in v1.3].** "IK reuse for X25519 and Ed25519" does not occur: IK is native X25519, purpose `ecdh`, no conversion, no signing capability, not shared across products. Numbering kept for cross-reference stability.
-- **S7 — nonce via HKDF.** *(open; review item)* Non-standard vs a GCM counter; auditor should confirm no collision edge case (impossible across distinct MKs, but review).
+- **S7 — nonce via HKDF.** *(closed 2026-10-13: one construction)* Non-standard vs a GCM counter, but every MK seals exactly once, so a collision needs two frames under one MK, which the chains never produce. The 1:1 and the group path used two constructions under one label; both now derive `HKDF(MK, salt = u32be(counter), info = "encedo-aead-nonce")` (§7.2, §8.2), and the KDF convention is the same everywhere (§14) — nothing is left for a reviewer to hold apart.
 - **S8 — ±5 min replay window.** *(open; narrowed by the clock anchor of §5.4)* Needs NTP; skew can DoS legitimate messages or widen replay. A UX↔security compromise.
 - **S9 — classical authentication in Phase 1 (the PQ gap).** *(open; Phase 3, §15)* Confidentiality is PQ-safe; authentication is classical X25519. "Harvest now, decrypt later" is fully covered (ML-KEM protects `ss`, a required SK component even if all DHs break). "Future active MITM" (CRQC, est. 2035–2040) is realistic only for state-level adversaries vs high-value targets. "Retrospective impersonation proof" is impossible even with a broken IK (no long-term signatures; deniability holds). Mitigation: Phase 3 in-band migration (§15) — done **before** CRQC exists (target 2030 vs 2035+). Why not now: PQ signatures (ML-DSA, standardized Aug 2024) are far less audited than classical curves; an identity certificate adds classical attack surface (parser, chain validation, revocation) — a real CVE risk today against a decade-away threat; the Phase 3 construction should be chosen at a mature standardization state.
 - **S10 — in-session PCS was classical, bounded by session lifetime.** *(closed by the hybrid ratchet of §7.2: every K-th DH step, or every 30 min, mixes an ML-KEM-768 secret into the root, so a CRQC holding a ratchet snapshot is cut off at the next hybrid step rather than at the lifetime timer; what remains below is the history)* The hybrid PQ protects SK derivation, but ratchet DH steps (§7.2) use X25519 only. An adversary with both a ratchet snapshot **and** a CRQC could track subsequent steps within one continuous session. The window is narrow here because the product forces frequent full re-key (no store-and-forward, non-portable ratchet, single-session stand-down, and above all the lifetime timer — every such re-key is a fresh EH-2 with ML-KEM). **Phase 1 mitigation:** the bounded session lifetime (§7.3) turns this from emergent into guaranteed. **Optional Phase 2.5:** a hybrid ratchet injecting periodic ML-KEM into DH steps — simple here (reliable ordered stream, PQ key fits one header; no SPQR-style chunking/FEC needed).
@@ -875,6 +876,7 @@ node → client   0x11 DELIVER  u8 len ‖ from ‖ u8 len ‖ topic ‖ data
 
 | Constant | Value |
 |---|---|
+| **KDF convention** (every wire derivation) | `HKDF-SHA256(ikm, salt = context, info = label, L)` — the label in `info`, the context in `salt` (empty where there is none): date/network for the rendezvous keys (§5), `h1` for `SK` (§6.2), `RK` for a ratchet step and ∅ for a chain walk (§7.2, §8.1), `group_id ‖ epoch` for the group MAC keys (§8.1), `invite_secret` for the knock key and decoy seed (§5.8–5.9), the message counter for the AEAD nonce (§7.2, §8.2). The local stores of §10 are the documented exception (label as salt, as shipped before 3.0 — a change there re-keys every device's cache for no wire benefit) |
 | HKDF labels (pair/self/announce/rotation) | `encedo-chat-rendezvous-v1`, `encedo-chat-announce-mac-v1`, `encedo-chat-rotation-v1` |
 | HKDF labels (handshake/ratchet) | `encedo-handshake-v2`, `encedo-ratchet-dh-v1`, `encedo-ratchet-hybrid-v1`, `encedo-msg-key`, `encedo-chain-key`, `encedo-aead-nonce` |
 | Hybrid ratchet cadence (§7.2) | a key every K = 4 own DH steps or T = 30 min; `pq_pub` 1184 B on every frame until answered; `pq_ct` 1088 B on every frame of the answering chain |
@@ -889,8 +891,9 @@ node → client   0x11 DELIVER  u8 len ‖ from ‖ u8 len ‖ topic ‖ data
 | Topic alphabet | base32 RFC 4648, lowercase, no padding |
 | Frame / text size | published frame ≤ 65 536 B (bounded by the client and by the node, §5.6; the DataChannel ceiling); `msg.body` ≤ 62 464 B of JSON |
 | Envelope (§7.4) | `v = 1`; `id` = 6 random bytes as 8 base64 chars |
+| Group frame (§8.2) / Announce (§5.5) | `version = 3` / `v = 3` |
 | Frame type bytes | `0x01`–`0x03` EH-2 msg1–3 · `0x10` 1:1 ratchet content · `0x11` ratchet content with ML-KEM fields · `0x20` group message · `0x21` group keepalive · `0xE1` origin envelope (§13, outermost on pair/self/group topics; never on inbox topics) · on the pick stream only: `0x01`–`0x03`, `0x11`–`0x14` (§13.2) |
-| Ratchet content header (§7.2) | 42 B = `0x10` ‖ ver ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be); or `0x11` with flags and `pq_ct`/`pq_pub` (≤ 2 319 B); the whole header is the AAD; `ver = 2` |
+| Ratchet content header (§7.2) | 42 B = `0x10` ‖ ver ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be); or `0x11` with flags and `pq_ct`/`pq_pub` (≤ 2 319 B); the whole header is the AAD; `ver = 3` |
 | Topic | base32, 52 chars |
 | Clock tolerance / replay window | ±5 min |
 | Rotation | one rule (§5.4): the instant derives from the topic's own key — pairs from the pair `ss`, groups from `group_secret`, self from the self-DH; all: ±30 min guard, double-subscribe, 60 s re-check |

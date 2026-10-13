@@ -952,7 +952,7 @@ on the one transport, **not** twenty handshakes.
     after one side restarted (2026-10-01); `net/rotation-pin-test.ts` pins it.
   - **Per-pair rotation instant, no 00:00 spike.** Each pair rotates at
     `midnight + offset`, where `offset = rotationOffsetSec(ss)` (`lib/rendezvous.ts`:
-    `HKDF(ss, "encedo-chat-rotation-v1", info = network_id||0x00)`, **date-independent**
+    `HKDF(ss, salt = network_id||0x00, info = "encedo-chat-rotation-v1")`, **date-independent**
     → computed once per contact and cached in core's `offsetCache`). Because it comes
     from the pair secret, **both members derive the identical offset** and cross
     together — and because it is pseudo-random across pairs, rotations spread over 24 h

@@ -14,6 +14,26 @@ export async function hkdfBits(ikm: Uint8Array, salt: Uint8Array, info: Uint8Arr
   return new Uint8Array(bits)
 }
 
+const NO_CTX = new Uint8Array(0)
+const utf8 = (s: string | Uint8Array) => (typeof s === 'string' ? new TextEncoder().encode(s) : s)
+/**
+ * The ONE derivation convention of the protocol (PROTOCOL.md 14): the label
+ * is HKDF's `info`, the context - a date, a group id and epoch, a root key, a
+ * counter - is HKDF's `salt`, empty where there is none. Two families used
+ * to coexist (label-as-salt for the rendezvous and group MAC keys, label-as-
+ * info for the chains), which was two things for an auditor to hold and one
+ * way to derive the wrong key by swapping them (S7, 2026-10-13).
+ */
+export function kdf(label: string | Uint8Array, ikm: Uint8Array, ctx: Uint8Array = NO_CTX, len = 32): Promise<Uint8Array> {
+  return hkdfBits(ikm, ctx, utf8(label), len)
+}
+/** The one AEAD nonce: 12 bytes from the single-use message key and the counter it seals (7.2, 8.2). */
+export function aeadNonce(mk: Uint8Array, n: number): Promise<Uint8Array> {
+  const nb = new Uint8Array(4)
+  new DataView(nb.buffer).setUint32(0, n, false)
+  return kdf('encedo-aead-nonce', mk, nb, 12)
+}
+
 /** SHA-256 -> 32 raw bytes. */
 export async function sha256(data: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await subtle.digest('SHA-256', data))

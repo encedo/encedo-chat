@@ -60,3 +60,40 @@ this: a reviewer who can show that one of the three deviations loses a property
 KK has, or a decision to adopt a Noise library for the hardened tier so that the
 handshake comes from audited code rather than our own — in which case the
 rewrite buys something beyond the mapping.
+
+## One KDF convention, one nonce (2026-10-13)
+
+**What was chosen.** Every derivation on the wire is `HKDF-SHA256(ikm, salt =
+context, info = label)`: the label names the purpose, the context is whatever
+scopes the key (a date and network, `h1`, the root key, a group id and epoch,
+an invite secret, a message counter) and is empty where nothing does. The AEAD
+nonce of a 1:1 frame and of a group frame is the same function of the
+single-use message key and its counter. `PROTOCOL.md` §14 states it; `spec_version`
+3.0 and `ver = 3` on every frame that carries a version mark the change.
+
+**What it was chosen against.** Until 3.0 two families coexisted and the spec
+said so in two places: the rendezvous keys, the group MAC keys and the knock
+key put the label in the *salt* and the context in `info`; the handshake output,
+the ratchet steps and the chain walks put the label in `info`. Both are sound
+on their own (HKDF with either argument fixed is a PRF in the other), and the
+split was written down as deliberate, which is exactly the kind of sentence an
+auditor has to carry through the whole document. The group nonce dropped the
+counter the 1:1 nonce appended, under one label: one label, two constructions,
+again both safe and again two things to remember. RFC 5869 itself puts the
+application-specific string in `info` and keeps `salt` for a value that is
+"ideally" independent of the key material, which is what a date or an epoch is.
+
+**Why now.** Before 1.0 the wire moves with the spec and no client reads an
+older frame, so the cost is one coordinated update, and the known-answer
+vectors are re-recorded in the same commit (`docs/kat/`). After 1.0 the same
+change would need a protocol version negotiation it is not worth.
+
+**What stays.** The local stores of §10 keep the label in the salt: they never
+cross the wire, and re-keying them would wipe every device's cache for a
+uniformity nobody outside the device can observe. The handshake `SK` and the
+ratchet root step already conformed and did not move.
+
+**What would reopen it.** A reviewer showing that the salt position matters for
+some context we use (it does not for HKDF-SHA256 with inputs of these sizes),
+or a port that cannot express the convention — in which case §14 is the one
+line to change, and the KATs will say whether it was changed correctly.

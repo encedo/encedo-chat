@@ -97,7 +97,7 @@ test('insider-forge: B re-seals under A\'s chain but cannot forge A->C\'s MAC', 
   const { ct } = await seal(sendChainFrom(aKey), header, body('forged as A'))
   const ssBC = await g.B.ecdh(g.C.pub)
   const wrongMac = await tag(await msgMacKeyFromSecret(ssBC, g.gid, 0), header, ct)
-  const forged = concat(new Uint8Array([0x20, 1]), header, new Uint8Array([1]), sidC, wrongMac, ct)
+  const forged = concat(new Uint8Array([0x20, 3]), header, new Uint8Array([1]), sidC, wrongMac, ct)
   assert.equal(await g.sc.receive(forged), null, 'C rejects a frame claiming to be from A but MAC\'d by B')
 })
 

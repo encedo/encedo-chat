@@ -16,7 +16,7 @@ const REPLAY_WINDOW_MS = 5 * 60 * 1000   // +/-5 min (§5.4)
 const macMessage = (v: number, peer: string, nonce: string, ts: number) => enc.encode(`${v}|${peer}|${nonce}|${ts}`)
 
 export async function buildAnnounce(peerId: string, macKey: CryptoKey): Promise<Uint8Array> {
-  const v = 1
+  const v = 3 // one ver names one spec (PROTOCOL.md header); the MAC key's derivation changed with spec 3.0
   const nonce = b64(randomBytes(16))
   const ts = nowMs()
   const sig = new Uint8Array(await subtle.sign('HMAC', macKey, macMessage(v, peerId, nonce, ts)))
@@ -28,7 +28,7 @@ export interface VerifyResult { ok: boolean; peer?: string; nonce?: string; reas
 export async function verifyAnnounce(data: Uint8Array, macKey: CryptoKey, now = nowMs()): Promise<VerifyResult> {
   let m: any
   try { m = JSON.parse(dec.decode(data)) } catch { return { ok: false, reason: 'parse' } }
-  if (m?.v !== 1) return { ok: false, reason: 'version' }
+  if (m?.v !== 3) return { ok: false, reason: 'version' }
   if (typeof m.peer !== 'string' || typeof m.nonce !== 'string' || typeof m.ts !== 'number' || typeof m.mac !== 'string')
     return { ok: false, reason: 'shape' }
   if (Math.abs(now - m.ts) > REPLAY_WINDOW_MS) return { ok: false, reason: 'timestamp' }

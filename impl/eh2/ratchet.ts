@@ -11,7 +11,7 @@
  *                               info = "encedo-ratchet-dh-v1", L = 64)
  *     MK         = HKDF(CK, info = "encedo-msg-key",   L = 32)
  *     CK'        = HKDF(CK, info = "encedo-chain-key", L = 32)
- *     nonce      = HKDF(MK, info = "encedo-aead-nonce" || N, L = 12)
+ *     nonce      = HKDF(MK, salt = N, info = "encedo-aead-nonce", L = 12)
  *     frame      = header || AES-256-GCM(MK, nonce, plaintext, aad = header)
  *     header     = { dh_pub, pn, n }
  *
@@ -29,7 +29,7 @@
  * WebCrypto only (HKDF + AES-GCM + X25519); no third-party crypto here.
  */
 
-import { subtle, hkdfBits, concat, b64 } from '../lib/wc.ts'
+import { subtle, hkdfBits, kdf, aeadNonce, concat, b64 } from '../lib/wc.ts'
 import { nowMs } from '../lib/time.ts'
 import { generateX25519, type Dh } from '../lib/x25519.ts'
 import type { HandshakeResult, Kem, KemKey } from './handshake.ts'
@@ -40,16 +40,14 @@ const enc = new TextEncoder()
 const RK_INFO = enc.encode('encedo-ratchet-dh-v1')
 /** The hybrid step (7.2): the X25519 output with the ML-KEM shared secret behind it. */
 const RK_PQ_INFO = enc.encode('encedo-ratchet-hybrid-v1')
-const MK_INFO = enc.encode('encedo-msg-key')
-const CK_INFO = enc.encode('encedo-chain-key')
-const NONCE_INFO = enc.encode('encedo-aead-nonce')
-const NO_SALT = new Uint8Array(0)
+const MK_LABEL = 'encedo-msg-key'
+const CK_LABEL = 'encedo-chain-key'
 
 /** Frame tags + version (distinct from the handshake frames of eh2/wire.ts). */
 const T_DATA = 0x10
 /** A content frame whose header also carries ML-KEM material (7.2 hybrid step). */
 const T_DATA_PQ = 0x11
-const VERSION = 2
+const VERSION = 3 // one ver names one spec (PROTOCOL.md header); 3 = the one KDF/nonce convention of spec 3.0
 const HDR_LEN = 2 + 32 + 4 + 4
 const PQ_CT = 0x01, PQ_PUB = 0x02
 /** The largest header the wire can carry: base, flags, two u16 lengths, pq_ct and pq_pub of ML-KEM-768. */
@@ -152,19 +150,14 @@ async function dhStep(rk: Uint8Array, ikm: Uint8Array, info: Uint8Array = RK_INF
 }
 const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((v, i) => v === b[i])
 
-const messageKey = (ck: Uint8Array) => hkdfBits(ck, NO_SALT, MK_INFO, 32)
-const chainNext = (ck: Uint8Array) => hkdfBits(ck, NO_SALT, CK_INFO, 32)
+const messageKey = (ck: Uint8Array) => kdf(MK_LABEL, ck)
+const chainNext = (ck: Uint8Array) => kdf(CK_LABEL, ck)
 
+// The root step keeps HKDF(ikm, salt = RK, info = label): the root key IS the
+// context there, which is the one convention (lib/wc.ts kdf) spelled out.
 async function aeadKey(mk: Uint8Array): Promise<{ key: CryptoKey; nonce: (n: number) => Promise<Uint8Array> }> {
   const key = await subtle.importKey('raw', mk, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])
-  return {
-    key,
-    nonce: async (n: number) => {
-      const nb = new Uint8Array(4)
-      new DataView(nb.buffer).setUint32(0, n, false)
-      return hkdfBits(mk, NO_SALT, concat(NONCE_INFO, nb), 12)
-    },
-  }
+  return { key, nonce: (n: number) => aeadNonce(mk, n) }
 }
 
 // ---------------------------------------------------------------------------
