@@ -35,3 +35,4 @@ dist.tar.gz
 
 # core-rs build tree (the committed artifact is impl/core-wasm/core.wasm)
 core-rs/target/
+docs/proverif/mutant/

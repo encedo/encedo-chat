@@ -1,0 +1,6 @@
+(* eh2-secrecy.pv - SK of a session between honest A and B is secret.
+   KEM: kem-ideal.pvl. *)
+query attacker(secretI).
+query attacker(secretR).
+
+process World

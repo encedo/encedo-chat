@@ -1,0 +1,174 @@
+(* eh2.pvl - the EH-2 handshake of SPEC.md section 6, for ProVerif 2.05.
+   Loaded after one of kem-ideal.pvl / kem-public.pvl (run.sh says which).
+
+   One library, one scenario per file (eh2-*.pv). The scenarios differ only in
+   what the attacker is given and when; the protocol below is the same in all.
+
+   What is modelled, against SPEC.md:
+     msg1 = (ek_i, pq_pub, ts_i, initiator_tag)                       6.1
+     initiator_tag = HMAC(HMAC(announce_key, LABEL_TAG), IK_i)       6.1
+       announce_key = HKDF(ECDH(IK_i, IK_r), date, LABEL_ANNOUNCE)   5.5
+     h1  = H(msg1)                                                    6.2
+     ss  = ML-KEM-768 encap (R) / decap (I)
+     SK  = HKDF(DH(IK_r,EK_i) || DH(EK_r,IK_i) || DH(EK_r,EK_i) || ss,
+                salt = h1, info = "encedo-handshake-v2")              6.2, 6.3
+     h2p = H(msg1 || EK_r || pq_ct || ts_r)
+     mac_r = HMAC(SK, "responder" || h2p)                             msg2
+     h3  = H(h2p || mac_r)
+     mac_i = HMAC(SK, "initiator" || h3)                              msg3
+   R accepts I only once mac_i verifies (the msg3 gate, 6.2).
+
+   Abstractions (the usual ones, stated so a reader can judge them):
+   - X25519 is a Diffie-Hellman group with exp(exp(g,a),b) = exp(exp(g,b),a);
+     no small-subgroup or clamping behaviour.
+   - ML-KEM is an ideal KEM: the ciphertext reveals nothing, decapsulation with
+     the right key gives the encapsulated secret, nothing else does.
+   - HKDF, HMAC and SHA-256 are random oracles (free constructors with no
+     inverse); concatenation is a tuple, so it is injective by construction.
+   - Timestamps are values the attacker may choose; the +/-5 min window is not
+     modelled. Replay is excluded by the fresh ephemerals, which is what the
+     injective queries check.
+   - The 0x01..0x03 type bytes and version byte are folded into the tuple shape.
+   - Deniability is an observational property ProVerif's correspondence and
+     secrecy queries do not express; it is argued in RATIONALE.md, not here.
+*)
+
+(* ---- types and channels ---- *)
+type G.
+type exponent.
+type key.
+
+free c: channel.
+const g: G [data].
+
+(* ---- X25519 as a DH group ---- *)
+fun exp(G, exponent): G.
+equation forall x: exponent, y: exponent; exp(exp(g, x), y) = exp(exp(g, y), x).
+
+(* ---- ML-KEM-768: declared by kem-ideal.pvl or kem-public.pvl, loaded
+   before this file. Interface: kempk_of(sk), kem_ct(pk, coins),
+   kem_ss(pk, coins), kem_dec(sk, ct). ---- *)
+
+(* ---- symmetric primitives as random oracles ---- *)
+fun hkdf(bitstring, bitstring, bitstring): key.       (* hkdf(salt, ikm, info) *)
+fun hmac(key, bitstring): bitstring.
+fun hmackey(bitstring): key [typeConverter].
+fun sha(bitstring): bitstring.
+fun g2b(G): bitstring [typeConverter].
+fun k2b(key): bitstring [typeConverter].
+
+(* the witness each side seals under SK, for the secrecy queries *)
+fun senc(bitstring, key): bitstring.
+reduc forall m: bitstring, k: key; sdec(senc(m, k), k) = m.
+
+(* ---- labels (SPEC.md 14) ---- *)
+const L_SK: bitstring [data].          (* "encedo-handshake-v2" *)
+const L_TAG: bitstring [data].         (* "encedo-eh2-initiator-tag-v1" *)
+const L_ANNOUNCE: bitstring [data].    (* "encedo-chat-announce-mac-v1" *)
+const L_RESP: bitstring [data].        (* "responder" *)
+const L_INIT: bitstring [data].        (* "initiator" *)
+
+free date: bitstring.                  (* the rendezvous day; public *)
+
+(* ---- events ---- *)
+event BeginI(G, G, key).               (* I sent msg3 for (IK_i, IK_r) under SK *)
+event EndI(G, G, key).                 (* I accepted R: mac_r verified *)
+event BeginR(G, G, key).               (* R sent msg2 for (IK_i, IK_r) under SK *)
+event EndR(G, G, key).                 (* R accepted I: mac_i verified *)
+event Corrupt(G).                      (* the attacker legitimately holds this identity *)
+
+(* ---- what each side leaves behind, for the scenarios to reveal later ---- *)
+table ephI(exponent).                  (* EK_i private *)
+table ephR(exponent).                  (* EK_r private *)
+table kemI(kemsk).                     (* the initiator's ML-KEM secret key *)
+
+(* secrets sealed under SK when both ends are honest *)
+free secretI: bitstring [private].
+free secretR: bitstring [private].
+
+letfun tagkey(ss: G) = hmackey(hmac(hkdf(date, g2b(ss), L_ANNOUNCE), L_TAG)).
+
+(* ---- the initiator ----
+   ik: its own private identity key; pkR: the contact it believes it opens to;
+   honestPeer: whether that contact is one of the honest identities (only then
+   is a secret sealed, since a session with the attacker's own identity is
+   legitimately readable by the attacker). *)
+let Initiator(ik: exponent, pkR: G, honestPeer: bool) =
+  let pkI = exp(g, ik) in
+  new eki: exponent;
+  new pqsk: kemsk;
+  new tsI: bitstring;
+  insert ephI(eki);
+  insert kemI(pqsk);
+  let ekI = exp(g, eki) in
+  let pqpk = kempk_of(pqsk) in
+  let itag = hmac(tagkey(exp(pkR, ik)), g2b(pkI)) in
+  let msg1 = (ekI, pqpk, tsI, itag) in
+  out(c, msg1);
+  in(c, (ekR: G, ct: bitstring, tsR: bitstring, macR: bitstring));
+  let ss = kem_dec(pqsk, ct) in
+  (* responder perspective, by commutativity: DH(IK_r,EK_i), DH(EK_r,IK_i), DH(EK_r,EK_i) *)
+  let ikm = (exp(pkR, eki), exp(ekR, ik), exp(ekR, eki), ss) in
+  let h1 = sha(msg1) in
+  let sk = hkdf(h1, ikm, L_SK) in
+  let h2p = sha((msg1, ekR, ct, tsR)) in
+  if macR = hmac(sk, (L_RESP, h2p)) then
+  event EndI(pkI, pkR, sk);
+  let h3 = sha((h2p, macR)) in
+  event BeginI(pkI, pkR, sk);
+  out(c, hmac(sk, (L_INIT, h3)));
+  if honestPeer then out(c, senc(secretI, sk)).
+
+(* ---- the responder ----
+   ik: its own private identity key; pkI: the contact it expects. *)
+let Responder(ik: exponent, pkI: G, honestPeer: bool) =
+  let pkR = exp(g, ik) in
+  in(c, msg1: bitstring);
+  let (ekI: G, pqpk: kempk, tsI: bitstring, itag: bitstring) = msg1 in
+  (* the tag is checked before any DH that matters (6.1); it is not an
+     authenticator, so a mismatch is simply the end of this attempt *)
+  if itag = hmac(tagkey(exp(pkI, ik)), g2b(pkI)) then
+  new ekr: exponent;
+  new coins: bitstring;
+  new tsR: bitstring;
+  insert ephR(ekr);
+  let ekR = exp(g, ekr) in
+  let ct = kem_ct(pqpk, coins) in
+  let ss = kem_ss(pqpk, coins) in
+  let ikm = (exp(ekI, ik), exp(pkI, ekr), exp(ekI, ekr), ss) in
+  let h1 = sha(msg1) in
+  let sk = hkdf(h1, ikm, L_SK) in
+  let h2p = sha((msg1, ekR, ct, tsR)) in
+  let macR = hmac(sk, (L_RESP, h2p)) in
+  event BeginR(pkI, pkR, sk);
+  out(c, (ekR, ct, tsR, macR));
+  in(c, macI: bitstring);
+  let h3 = sha((h2p, macR)) in
+  if macI = hmac(sk, (L_INIT, h3)) then
+  event EndR(pkI, pkR, sk);
+  if honestPeer then out(c, senc(secretR, sk)).
+
+(* ---- the world: honest A and B, and C, whose key the attacker holds ----
+   The identity keys are free names so the scenarios can name A and B in their
+   queries and decide what the attacker learns. Every honest identity runs any
+   number of sessions in both roles, with the other honest one and with C. *)
+free ikA: exponent [private].
+free ikB: exponent [private].
+free ikC: exponent [private].
+letfun pkA() = exp(g, ikA).
+letfun pkB() = exp(g, ikB).
+letfun pkC() = exp(g, ikC).
+
+let World =
+  out(c, (pkA(), pkB(), pkC()));
+  event Corrupt(pkC());
+  out(c, ikC);
+  (   (!Initiator(ikA, pkB(), true)) | (!Responder(ikB, pkA(), true))
+    | (!Initiator(ikB, pkA(), true)) | (!Responder(ikA, pkB(), true))
+    | (!Initiator(ikA, pkC(), false)) | (!Responder(ikA, pkC(), false))
+    | (!Initiator(ikB, pkC(), false)) | (!Responder(ikB, pkC(), false)) ).
+
+(* phase-1 leaks the scenarios compose *)
+let LeakStatics = phase 1; out(c, (ikA, ikB)).
+let LeakEphemerals = phase 1; ((!get ephI(x) in out(c, x)) | (!get ephR(y) in out(c, y))).
+let LeakKem = phase 1; (!get kemI(z) in out(c, z)).

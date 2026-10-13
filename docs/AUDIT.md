@@ -6,8 +6,9 @@ Where to start, what is normative, how to run the checks, and which code file an
 
 1. **`SPEC.md`** — the normative protocol: identity, rendezvous, EH-2 handshake, Double Ratchet with the hybrid step, groups, sessions, local persistence, security considerations, constants. Flat, no history. Section numbers §4–§10, §13, §14 are the ones the code cites.
 2. **`RATIONALE.md`** — why each choice was made, the alternatives rejected, the decision record, the PQ roadmap, the open questions, the implementation map, and the **review checklist** (§15, common pitfalls). Read §4 there first: it maps EH-2 onto Noise KKhfs and states the three deviations (no `ss`, one HKDF over the concatenation, MAC confirmation).
-3. **`THREAT-MODELS.md`** — deployment profiles P1–P3; the crypto-layer threat model lives in `SPEC.md` §2 and §11.
-4. **This guide** — the section→code table and how to run the vectors.
+3. **`EH2-PROVERIF.md`** — the symbolic model of EH-2 (ProVerif 2.05, `docs/proverif/`, `run.sh` checks every result and a mutant): what is proved, under which abstractions, and what is not modelled.
+4. **`THREAT-MODELS.md`** — deployment profiles P1–P3; the crypto-layer threat model lives in `SPEC.md` §2 and §11.
+5. **This guide** — the section→code table and how to run the vectors.
 
 ## What is in scope
 
@@ -47,7 +48,7 @@ Each `docs/kat/` file carries the fixed scalars, seeds and a `note` naming the c
 | §5.5 presence, rotating watch | `impl/lib/presence.ts`, `test/presence.test.ts`, `test/presence-rotation.test.ts` |
 | §5.7–5.9 published invites, knock, decoy cover | `impl/lib/invite.ts`, `impl/lib/knock.ts`, `impl/lib/inbox.ts` |
 | §5.10 decoy subscriptions | `impl/lib/decoy.ts`, `test/decoy.test.ts` |
-| §6 handshake EH-2 | `impl/eh2/wire.ts`, `impl/eh2/handshake.ts`, `impl/eh2/establish.ts`; Rust: `core-rs/src/{wire,handshake}.rs` |
+| §6 handshake EH-2 | `impl/eh2/wire.ts`, `impl/eh2/handshake.ts`, `impl/eh2/establish.ts`; Rust: `core-rs/src/{wire,handshake}.rs`; symbolic model: `docs/proverif/eh2.pvl` (`EH2-PROVERIF.md`) |
 | §6 ML-KEM-768 | `impl/eh2/mlkem.ts` (`@noble/post-quantum`); Rust: `core-rs/src/kem.rs` (`ml-kem`) |
 | §7 Double Ratchet, hybrid step | `impl/eh2/ratchet.ts`; Rust: `core-rs/src/ratchet.rs`; `test/eh2-ratchet.test.ts` |
 | §7.4 application envelope | `impl/lib/envelope.ts`, `impl/lib/{quote,edits,mentions,linkify}.ts` |

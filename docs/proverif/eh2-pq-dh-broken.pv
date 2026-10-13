@@ -1,0 +1,8 @@
+(* eh2-pq-dh-broken.pv - "harvest now, decrypt later" with X25519 broken: after
+   the sessions the attacker learns every X25519 secret - both identity keys
+   and every ephemeral - but not the ML-KEM keys. SK must stay secret: the
+   hybrid's confidentiality rests on ML-KEM alone here. *)
+query attacker(secretI) phase 1.
+query attacker(secretR) phase 1.
+
+process World | LeakStatics | LeakEphemerals

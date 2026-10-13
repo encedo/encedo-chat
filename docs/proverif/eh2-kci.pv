@@ -1,0 +1,13 @@
+(* eh2-kci.pv - key-compromise impersonation: the attacker holds B's identity
+   key from the start; B is not marked Corrupt, so nothing excuses a failure.
+   KEM: kem-public.pvl.
+   1. B as responder still accepts A only if A really ran with B - holding B's
+      key does not let the attacker pose as A to B (KCI resistance);
+   2. B as initiator still accepts A only if A really answered;
+   3. control: the attacker CAN pose as B to A - expected FALSE, which shows the
+      leak took effect and queries 1-2 are not true for a trivial reason. *)
+query k: key; inj-event(EndR(exp(g, ikA), exp(g, ikB), k)) ==> inj-event(BeginI(exp(g, ikA), exp(g, ikB), k)).
+query k: key; inj-event(EndI(exp(g, ikB), exp(g, ikA), k)) ==> inj-event(BeginR(exp(g, ikB), exp(g, ikA), k)).
+query k: key; inj-event(EndR(exp(g, ikB), exp(g, ikA), k)) ==> inj-event(BeginI(exp(g, ikB), exp(g, ikA), k)).
+
+process World | out(c, ikB)

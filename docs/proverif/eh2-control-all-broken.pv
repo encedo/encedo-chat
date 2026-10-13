@@ -1,0 +1,8 @@
+(* eh2-control-all-broken.pv - the NEGATIVE CONTROL. Everything leaks after the
+   sessions: identity keys, ephemerals and ML-KEM keys. SK is then computable,
+   and ProVerif MUST find it (both queries FALSE). If this file ever proves
+   secrecy, the leak plumbing above is broken and the PQ files prove nothing. *)
+query attacker(secretI) phase 1.
+query attacker(secretR) phase 1.
+
+process World | LeakStatics | LeakEphemerals | LeakKem

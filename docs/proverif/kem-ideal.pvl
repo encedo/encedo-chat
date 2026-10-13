@@ -1,0 +1,9 @@
+(* kem-ideal.pvl - ML-KEM-768 as an ideal KEM: the ciphertext reveals nothing,
+   decapsulation with the right secret key yields the encapsulated secret,
+   nothing else does. Used for every confidentiality scenario. *)
+type kemsk.
+type kempk.
+fun kempk_of(kemsk): kempk.
+fun kem_ct(kempk, bitstring): bitstring.
+fun kem_ss(kempk, bitstring): bitstring.
+reduc forall sk: kemsk, r: bitstring; kem_dec(sk, kem_ct(kempk_of(sk), r)) = kem_ss(kempk_of(sk), r).

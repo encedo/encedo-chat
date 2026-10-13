@@ -1,0 +1,13 @@
+(* kem-public.pvl - a KEM that hides nothing: the ciphertext IS the shared
+   secret, so the attacker knows every ss. Used for the authentication and KCI
+   scenarios: EH-2 authenticates through the X25519 DHs alone (SPEC.md 6.4), so
+   authentication proved against an attacker who knows ss holds a fortiori
+   with the real KEM. (It also keeps ProVerif's saturation finite: the
+   initiator's decapsulation of an attacker-chosen ct is what did not
+   terminate with the ideal KEM.) *)
+type kemsk.
+type kempk.
+fun kempk_of(kemsk): kempk.
+letfun kem_ct(pk: kempk, r: bitstring) = r.
+letfun kem_ss(pk: kempk, r: bitstring) = r.
+letfun kem_dec(sk: kemsk, ct: bitstring) = ct.

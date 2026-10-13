@@ -1,0 +1,6 @@
+(* eh2-fs.pv - forward secrecy: both honest identity keys go to the attacker
+   after the sessions (phase 1); the SK of every earlier session stays secret. *)
+query attacker(secretI) phase 1.
+query attacker(secretR) phase 1.
+
+process World | LeakStatics

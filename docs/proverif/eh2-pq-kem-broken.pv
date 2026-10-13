@@ -1,0 +1,7 @@
+(* eh2-pq-kem-broken.pv - ML-KEM broken: after the sessions the attacker learns
+   every initiator ML-KEM secret key (hence every ss) and both identity keys.
+   SK must stay secret on the ephemeral DHs alone. *)
+query attacker(secretI) phase 1.
+query attacker(secretR) phase 1.
+
+process World | LeakStatics | LeakKem

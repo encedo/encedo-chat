@@ -1,0 +1,16 @@
+(* eh2-auth.pv - mutual authentication: injective agreement on both identities
+   and SK, in both directions, with honest A and B and a corrupt C.
+   KEM: kem-public.pvl (the attacker knows every ss; see there). *)
+
+(* Reachability: the handshake completes, in both roles. Expected FALSE
+   ("the event can be reached"); TRUE would make the agreements vacuous. *)
+query k: key; event(EndR(exp(g, ikA), exp(g, ikB), k)).
+query k: key; event(EndI(exp(g, ikA), exp(g, ikB), k)).
+
+(* R accepts I only if I really ran with R under the same SK, once per run -
+   unless I is the attacker's own identity. *)
+query x: G, y: G, k: key; inj-event(EndR(x, y, k)) ==> inj-event(BeginI(x, y, k)) || event(Corrupt(x)).
+(* I accepts R only if R really ran with I under the same SK, once per run. *)
+query x: G, y: G, k: key; inj-event(EndI(x, y, k)) ==> inj-event(BeginR(x, y, k)) || event(Corrupt(y)).
+
+process World
