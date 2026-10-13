@@ -47,9 +47,21 @@ jobs:
   # v0.5.27). With the release pre-created there is nothing to race for; the
   # updater-json job still knows how to merge twins, as the belt to this
   # suspender.
+  # Only green builds are built (the user's rule, 2026-10-13): the draft, and so
+  # every bundle, the CID report and the updater manifest behind it, waits for
+  # npm test and cargo test on this very commit. A red gate leaves the tag with
+  # no release at all - fix forward, bump, tag again.
+  gate:
+    name: release gate (npm test + cargo test)
+    if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
+    uses: ./.github/workflows/ci.yml
+    with:
+      gate: true
+
   draft:
     name: draft release
     if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
+    needs: gate
     runs-on: ubuntu-latest
     permissions:
       contents: write

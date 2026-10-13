@@ -12,10 +12,22 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release gate: desktop.yml and android.yml call this on every v* tag
+  # with gate: true, and nothing they build or publish starts until unit and
+  # core-rs are green on the tagged commit. The browser harness is not part of
+  # the gate - it needs the live relay, and a relay hiccup must not block a
+  # release; it runs on every push to main, where its result is read by hand.
+  workflow_call:
+    inputs:
+      gate:
+        type: boolean
+        default: false
 
 concurrency:
-  # A new push supersedes the run in flight for the same ref.
-  group: ci-${{ github.ref }}
+  # A new push supersedes the run in flight for the same ref. The workflow name
+  # is in the group because on a tag BOTH release workflows call this one: with
+  # the ref alone the second call would cancel the first one's gate.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -80,6 +92,7 @@ jobs:
 
   browser:
     name: two-browser harness
+    if: ${{ !inputs.gate }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

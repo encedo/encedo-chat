@@ -61,8 +61,17 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Only green builds are built: no APK is signed or published until npm test
+  # and cargo test pass on this commit (ci.yml, called as the release gate).
+  gate:
+    name: release gate (npm test + cargo test)
+    uses: ./.github/workflows/ci.yml
+    with:
+      gate: true
+
   bundle:
     name: android-aab
+    needs: gate
     runs-on: ubuntu-22.04
     # Create/refresh the Android test prerelease at the end (gh needs write).
     permissions:
