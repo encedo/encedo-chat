@@ -52,7 +52,7 @@ jobs:
   # npm test and cargo test on this very commit. A red gate leaves the tag with
   # no release at all - fix forward, bump, tag again.
   gate:
-    name: release gate (npm test + cargo test)
+    name: release gate (npm test + cargo test + native IPC)
     if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
     uses: ./.github/workflows/ci.yml
     # A called workflow may not ask for more than its caller grants, and GitHub

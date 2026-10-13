@@ -64,7 +64,7 @@ jobs:
   # Only green builds are built: no APK is signed or published until npm test
   # and cargo test pass on this commit (ci.yml, called as the release gate).
   gate:
-    name: release gate (npm test + cargo test)
+    name: release gate (npm test + cargo test + native IPC)
     uses: ./.github/workflows/ci.yml
     # A called workflow may not ask for more than its caller grants, and GitHub
     # checks that at startup for EVERY job in it, skipped or not: ci.yml's

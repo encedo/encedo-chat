@@ -90,6 +90,43 @@ jobs:
           ./core-rs/build.sh    # overwrites impl/core-wasm/core.wasm with the fresh build
           cd impl && node --test test/eh2-wasm.test.ts
 
+  # The native host engine (src-tauri/src/core_native.rs) driven by the real
+  # eh2/native.ts through Tauri's real command dispatch, on the mock runtime -
+  # no window, no device. Nothing else reaches that seam, and the first run
+  # found every shell since 0.7.27 refusing all its arguments and falling back
+  # to WASM. Part of the release gate: it is the engine every shell defaults to.
+  native-ipc:
+    name: native host engine through Tauri IPC
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: recursive }
+      - name: Linux system libraries (to compile the shell crate)
+        run: |
+          sudo apt-get update -o Acquire::Retries=3
+          sudo apt-get install -y --no-upgrade --no-install-recommends -o Acquire::Retries=3 \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libssl-dev libxdo-dev build-essential pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: impl/src-tauri
+          key: native-ipc
+      - name: Build the mock-runtime host (examples/core-ipc.rs)
+        run: cargo build --example core-ipc
+        working-directory: impl/src-tauri
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: impl/package-lock.json
+      - run: npm ci
+        working-directory: impl
+      - name: native.ts <-> Tauri dispatch <-> core_native.rs, and interop with TS and WASM
+        # NATIVE_IPC=1: a missing binary is a failure, not a skip.
+        run: NATIVE_IPC=1 node --test test/native-ipc.test.ts
+        working-directory: impl
+
   browser:
     name: two-browser harness
     if: ${{ !inputs.gate }}
