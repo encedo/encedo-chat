@@ -64,6 +64,11 @@ jobs:
   bundle:
     name: android-aab
     runs-on: ubuntu-22.04
+    # Create/refresh the Android test prerelease at the end (gh needs write).
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
 
     steps:
       - uses: actions/checkout@v5
@@ -221,6 +226,30 @@ jobs:
           path: ${{ env.APK_OUT }}
           if-no-files-found: error
           retention-days: 7
+
+      # The signed APK as a GitHub PRE-RELEASE, so a tester can grab it from a
+      # releases page rather than a workflow artifact that expires in a week.
+      # Only on a version tag. The prerelease tag is `android-<version>` -
+      # deliberately NOT `v*`, so creating it does not re-trigger this workflow
+      # or the desktop one (both fire on `tags: ['v*']`), and because it is a
+      # prerelease GitHub keeps `releases/latest` on the stable v<version>, so
+      # the landing page's download links are untouched. Idempotent: re-running
+      # the tag replaces the asset instead of failing.
+      - name: Publish the APK as an Android test prerelease
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME#v}"
+          TAG="android-$VER"
+          TITLE="Android test build - native core ($VER)"
+          NOTES="Sideload APK for testing on Android 14+. Not the stable channel; the stable release is v$VER (desktop/web). Signed."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK_OUT" --clobber
+          else
+            gh release create "$TAG" --prerelease --target "$GITHUB_SHA" \
+              --title "$TITLE" --notes "$NOTES" "$APK_OUT"
+          fi
+          echo "Android prerelease: $TAG"
 
       # Kept apart from the APK above on purpose: one artifact is a thing to tap
       # on a phone, the other is a thing to upload to Play, and putting them in
