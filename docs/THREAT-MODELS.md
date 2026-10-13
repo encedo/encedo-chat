@@ -332,7 +332,7 @@ worth not confusing one for the other.
 
 **Key posture change: the operator is *outside* the trust boundary.** The deployment must not depend on our infrastructure, our node list, or our goodwill.
 
-**Config preset**: fully independent network — own nodes (`relay/README.md`; Docker image is roadmap), own build carrying its own network id and node list (`EC_NETWORK` at build time; `--network` on the terminal client); HEM mandatory for all identities (**never** software profiles); installed app only; deployment inside a controlled network perimeter where applicable. Three P3 prerequisites are **open items, named**: an enforced node-only transport (the setting ships, the lock does not — limit 2), an ephemeral-enforced cache policy (no switch exists today — pins and the group cache are always available), and reproducible builds.
+**Config preset**: fully independent network — own nodes (`relay/README.md`; Docker image is roadmap), own build carrying its own network id and node list (`EC_NETWORK` at build time; `--network` on the terminal client); HEM mandatory for all identities (**never** software profiles); installed app only; deployment inside a controlled network perimeter where applicable. Two P3 prerequisites are **open items, named**: an enforced node-only transport (the setting ships, the lock does not — limit 2) and an ephemeral-enforced cache policy (no switch exists today — pins and the group cache are always available); reproducible builds are verified per release for the web (`docs/REPRODUCIBLE.md`), not for the installers.
 
 **What this defeats**: compelled-operator scenarios — an independent deployment carries nothing the operator can be compelled to hand over or sabotage.
 
@@ -346,7 +346,7 @@ worth not confusing one for the other.
 |---|---|---|---|
 | Transport | node-only by default, direct opt-in (shipped) | node-only as the user's setting (shipped); **enforced preset not built — Tor under WSS today** | node-only **(same gap)** |
 | Network | operator (applies the sanctions geoblock, limit 8) | operator (same) | self-hosted (no operator policy) |
-| App channel | web or installed | installed only | installed only, reproducible build **(roadmap)** |
+| App channel | web or installed | installed only | installed only; the web build is reproducible and verified per release in CI (`docs/REPRODUCIBLE.md`), the installers are not |
 | Tor/VPN | optional | recommended | per deployment policy |
 | Node list source | compiled-in + CID refresh | the installed build's own copy | own build, own list |
 | Identity backend | software profile (shipped, §4.5) or PPA | PPA/HEM recommended | EPA or PPA **mandatory** |
@@ -355,7 +355,7 @@ worth not confusing one for the other.
 ## Open questions
 
 1. Rendezvous DoS resistance (P2/P3): can a censor who learns nothing from roomIDs still jam rendezvous wholesale? (Blocking nodes ≈ blocking HTTPS; per-IP limits at nginx are the deployed flood control — `relay/README.md`.)
-2. Reproducible builds — required for P3 credibility; toolchain implications TBD.
+2. Reproducible builds — **answered for the web** (`docs/REPRODUCIBLE.md`: two independent builds per tag, the host checked against them, the report a release asset); the installers remain unreproducible by packaging, so P3 credibility for them rests on the signature chain, not on a rebuild.
 3. Node logging — **answered by the running config and now written down** (`PROTOCOL.md` §12): the per-message journal line is a flag the production nodes leave off; topics joined and evicted are logged with the full topic id, connections with a truncated PeerId; aggregate counters are kept 30 days; the JSON metrics endpoint stays on loopback; the real address exists in nginx's access log and in a header the relay reads only in its debugging dump mode; payloads never. A formal no-log statement for third-party operators remains to be written.
 4. ~~E2E scheme properties per profile~~ — **resolved**: defined in `PROTOCOL.md` (§6.4, §11.2–11.3, §15), uniform across profiles.
 5. ~~Identity backend for the open channel~~ — **resolved: the software profile ships** (`PROTOCOL.md` §4.5), with its assurance difference recorded as S12 and in the Assets table.

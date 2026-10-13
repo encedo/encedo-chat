@@ -160,6 +160,119 @@ jobs:
           gh release edit "$TAG" --notes-file /tmp/notes.md
           echo "stated in the draft for $TAG"
 
+      # The build itself, for the `reproducible` job below to compare and to
+      # check against the host with; small (one bundle, icons, two pages).
+      - uses: actions/upload-artifact@v5
+        with:
+          name: web-dist
+          path: impl/web/dist
+          retention-days: 7
+
+  # The same tag built a SECOND time, independently: a pinned container image
+  # rather than the runner's own Node, so a CID that agrees with the job above
+  # was produced by two different toolchains from one tree. docs/REPRODUCIBLE.md.
+  reproduce:
+    name: reproduce in a container
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    container: node:24-bookworm
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: npm ci
+        working-directory: impl
+      - name: Build, and record the CID
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)" || { git status --porcelain; echo "dirty tree"; exit 1; }
+          npm run web:build --prefix impl
+          node scripts/release-cid.mjs | awk '/^index.html/ {print $2}' > /tmp/cid-container.txt
+          echo "container build: $(cat /tmp/cid-container.txt)"
+      - uses: actions/upload-artifact@v5
+        with:
+          name: cid-container
+          path: /tmp/cid-container.txt
+          retention-days: 7
+
+  # The chain, written down per release (docs/REPRODUCIBLE.md): the tag's tree
+  # hash -> the CID two independent builds agree on -> the bytes the host
+  # serves. Fails when the two builds differ, and when the host has not served
+  # that CID within twenty minutes of the tag (the deploy timer runs every five).
+  reproducible:
+    name: reproducible chain
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [cid, reproduce]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: impl/package-lock.json
+      - run: npm ci
+        working-directory: impl
+      - uses: actions/download-artifact@v5
+        with:
+          name: web-dist
+          path: impl/web/dist
+      - uses: actions/download-artifact@v5
+        with:
+          name: cid-container
+          path: /tmp/cid
+      - name: Compare the two builds, then the host, and write the report
+        run: |
+          set -euo pipefail
+          RUNNER=$(node scripts/release-cid.mjs | awk '/^index.html/ {print $2}')
+          CONTAINER=$(cat /tmp/cid/cid-container.txt)
+          TREE=$(git rev-parse "$TAG^{tree}")
+          COMMIT=$(git rev-parse --short "$TAG^{commit}")
+          echo "runner    $RUNNER"
+          echo "container $CONTAINER"
+          [ "$RUNNER" = "$CONTAINER" ] || { echo "::error::the two builds of $TAG differ: runner $RUNNER, container $CONTAINER"; exit 1; }
+
+          SERVED=""; WAITED=0
+          for i in $(seq 1 40); do
+            SERVED=$(curl -fsSL --max-time 20 https://app.onchato.com/ | node -e '
+              import(process.cwd() + "/impl/lib/cid.ts").then(async ({ cidV1Raw }) => {
+                const chunks = []; for await (const c of process.stdin) chunks.push(c);
+                console.log(await cidV1Raw(new Uint8Array(Buffer.concat(chunks))))
+              })' || true)
+            [ "$SERVED" = "$RUNNER" ] && break
+            sleep 30; WAITED=$((WAITED + 30))
+          done
+          STATUS=$([ "$SERVED" = "$RUNNER" ] && echo "SERVED - the host serves this CID (seen after ${WAITED}s)" || echo "NOT SERVED - after ${WAITED}s the host serves $SERVED")
+
+          {
+            echo "# Reproducible chain for $TAG"
+            echo
+            echo "| Link | Value |"
+            echo "|---|---|"
+            echo "| tag | \`$TAG\` at commit \`$COMMIT\` |"
+            echo "| source tree (git tree hash of the tag) | \`$TREE\` |"
+            echo "| web build, GitHub runner (Node 24) | \`$RUNNER\` |"
+            echo "| web build, container node:24-bookworm | \`$CONTAINER\` |"
+            echo "| served by https://app.onchato.com/ | $STATUS |"
+            echo
+            echo "Both builds are of the tagged tree with \`npm ci && npm run web:build\`, no"
+            echo "EC_ALLOW_KEYS, a clean tree; the CID is CIDv1/raw/sha2-256 of index.html, which"
+            echo "carries an SRI hash for the bundle it loads. Recompute by hand: docs/REPRODUCIBLE.md."
+            echo
+            echo "Desktop and Android bundles are NOT covered: signing and packaging stamp them."
+          } > "reproducible-$TAG.md"
+          cat "reproducible-$TAG.md"
+          gh release upload "$TAG" "reproducible-$TAG.md" --clobber
+          [ "$SERVED" = "$RUNNER" ] || { echo "::error::the host does not serve the CID both builds agree on"; exit 1; }
+
   bundle:
     name: ${{ matrix.label }}
     # Skipped only for the repair dispatch (a tag input): that run exists to
