@@ -137,7 +137,7 @@ test('GK_priv never leaves the HSM: nothing persisted is key material', async ()
   assert.ok(!JSON.stringify(snap).includes(b64(priv)), 'no GK scalar anywhere in the snapshot')
 })
 
-test('the roster-MAC secret is memoised: a rekey with the same members costs no HSM calls', async () => {
+test('the roster-MAC key is memoised per member and epoch: a repeat SKD is free, a rekey costs one call per member', async () => {
   const hem = fakeHem()
   const A = await peer(hemGkBackend(hem))
   const B = await peer(), C = await peer()
@@ -156,18 +156,21 @@ test('the roster-MAC secret is memoised: a rekey with the same members costs no 
   assert.equal(hem.calls.ecdh, afterFirst, 'a repeat SKD is free')
 
   // A membership change bumps the epoch and re-MACs the whole roster. The epoch
-  // enters through HKDF, AFTER the ECDH, so the memo still holds: removing C and
-  // re-MACing for B costs nothing.
+  // is the derivation's context, and the derivation runs where the GK backend
+  // runs it (lib/derive.ts) - so that the raw ECDH(GK, member) is never held
+  // in the client - which makes a rekey one call per remaining member.
   await A.mgr.rekey(gid, [{ pub: A.id.pub }, { pub: B.id.pub }])
   await A.mgr.skdFor(gid, B.id.pub)
-  assert.equal(hem.calls.ecdh, afterFirst, 'a rekey re-MACs an existing member without the HSM')
+  assert.equal(hem.calls.ecdh, afterFirst + 1, 'a rekey re-derives the existing member\'s key for the new epoch')
+  await A.mgr.skdFor(gid, B.id.pub)
+  assert.equal(hem.calls.ecdh, afterFirst + 1, 'and the repeat at that epoch is free again')
 
-  // Only a genuinely new member costs a call.
+  // Adding a member: one call for each member of the new epoch.
   const D = await peer()
   await A.mgr.rekey(gid, [{ pub: A.id.pub }, { pub: B.id.pub }, { pub: D.id.pub }])
   await A.mgr.skdFor(gid, B.id.pub)
   await A.mgr.skdFor(gid, D.id.pub)
-  assert.equal(hem.calls.ecdh, afterFirst + 1, 'exactly one new ecdh, for the new member only')
+  assert.equal(hem.calls.ecdh, afterFirst + 3, 'one derivation per member of the new epoch')
 })
 
 test('a memoised secret is still the RIGHT secret — the member verifies after a rekey', async () => {

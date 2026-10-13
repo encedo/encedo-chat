@@ -3,9 +3,10 @@
  *
  * SHARED, browser+Node engine on WebCrypto only (no third-party crypto lib).
  * Both sides compute the same ss = ECDH(IK_a, IK_b) and MUST run this exact
- * derivation so the topic matches. On current HEM firmware the HKDF runs
- * client-side over the raw ECDH output; on newer fw it moves into the device
- * (same inputs/labels/output — only the execution site moves). See CLAUDE.md.
+ * derivation so the topic matches. For a pair the HKDF runs wherever the
+ * identity backend runs it (lib/derive.ts): the labels, contexts and lengths
+ * are the ones here, and the material converters below turn its output into
+ * a topic, a MAC key or an offset.
  */
 
 import { subtle, kdf } from './wc.ts'
@@ -32,6 +33,26 @@ export interface RvParams {
   dateUTC: string     // YYYY-MM-DD (UTC)
 }
 
+export const RV_LABEL = 'encedo-chat-rendezvous-v1'
+export const ANNOUNCE_LABEL = 'encedo-chat-announce-mac-v1'
+export const ROTATION_LABEL = 'encedo-chat-rotation-v1'
+export const GROUP_RV_LABEL = 'encedo-chat-group-rendezvous-v1'
+
+/** The context of the rotation offset: network_id || 0x00, NO date (§5.4). */
+export function rotationCtx(networkId: string): Uint8Array {
+  const nid = enc.encode(networkId)
+  const ctx = new Uint8Array(nid.length + 1)
+  ctx.set(nid, 0); ctx[nid.length] = 0
+  return ctx
+}
+/** 32 bytes of topic material -> the 52-character topic (§5.1). */
+export const topicFromMaterial = (mat: Uint8Array): string => base32(mat).slice(0, 52)
+/** 32 bytes of key material -> the non-extractable Announce HMAC key (§5.5). */
+export const announceKeyFromMaterial = (raw: Uint8Array): Promise<CryptoKey> =>
+  subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
+/** 4 bytes of rotation material -> seconds past 00:00 UTC (§5.4). */
+export const offsetFromMaterial = (mat: Uint8Array): number => new DataView(mat.buffer, mat.byteOffset, 4).getUint32(0) % 86400
+
 // The context (HKDF salt) = network_id || 0x00 || date_UTC   (§5.1, with the v6 domain separator)
 export function paramsInfo({ networkId, dateUTC }: RvParams): Uint8Array {
   const n = enc.encode(networkId), d = enc.encode(dateUTC)
@@ -42,17 +63,17 @@ export function paramsInfo({ networkId, dateUTC }: RvParams): Uint8Array {
 
 /** Deterministic rendezvous topic (§5.1). ss = raw ECDH(IK_a, IK_b). */
 export async function topicFromSecret(ss: Uint8Array, p: RvParams): Promise<string> {
-  const mat = await kdf('encedo-chat-rendezvous-v1', ss, paramsInfo(p))
-  const topic = base32(mat).slice(0, 52)
+  const mat = await kdf(RV_LABEL, ss, paramsInfo(p))
+  const topic = topicFromMaterial(mat)
   plog('§5.1', `pair topic: kdf("encedo-chat-rendezvous-v1", ss=${val(ss)}, ctx=net|date=${p.networkId}|${p.dateUTC}) -> ${topic}`)
   return topic
 }
 
 /** Announce MAC key as a non-extractable HMAC CryptoKey (§5.5). */
 export async function announceMacKey(ss: Uint8Array, p: RvParams): Promise<CryptoKey> {
-  const raw = await kdf('encedo-chat-announce-mac-v1', ss, paramsInfo(p))
+  const raw = await kdf(ANNOUNCE_LABEL, ss, paramsInfo(p))
   plog('§5.5', `announce MAC key: kdf("encedo-chat-announce-mac-v1", ss, ctx=net|date=${p.networkId}|${p.dateUTC}) -> ${val(raw)}`)
-  return subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])
+  return announceKeyFromMaterial(raw)
 }
 
 export function todayUTC(): string {
@@ -65,8 +86,8 @@ export function todayUTC(): string {
  *  `group_secret`, so all derive the same topic; it rotates per epoch (the secret
  *  changes on membership change) and daily (`date_UTC` in `info`). */
 export async function groupTopicFromSecret(groupSecret: Uint8Array, p: RvParams): Promise<string> {
-  const mat = await kdf('encedo-chat-group-rendezvous-v1', groupSecret, paramsInfo(p))
-  const topic = base32(mat).slice(0, 52)
+  const mat = await kdf(GROUP_RV_LABEL, groupSecret, paramsInfo(p))
+  const topic = topicFromMaterial(mat)
   plog('§5.3', `group topic: kdf("encedo-chat-group-rendezvous-v1", group_secret=${val(groupSecret)}, ctx=net|date=${p.networkId}|${p.dateUTC}) -> ${topic}`)
   return topic
 }
@@ -78,19 +99,13 @@ export async function groupTopicFromSecret(groupSecret: Uint8Array, p: RvParams)
  * over 24 h instead of spiking at 00:00 UTC. **Date-independent** (the `info`
  * carries no date) -> stable per pair, computed once and cached.
  *
- * Firmware seam (same as the topic/MAC/cache derivations — CLAUDE.md): TODAY this
- * runs HKDF client-side over the raw `ss` a HEM returns. On newer fw the ecdh+HKDF
- * runs INSIDE the device (raw `ss` never leaves), and this becomes, in effect,
- * `rotationOffsetSec(myKid, peerKidOrPub) -> offset` — one HSM ecdh+HKDF call whose
- * label/context/`L` are exactly the ones here. It migrates in-device together with
- * `topicFromSecret`/`announceMacKey`, not on its own.
+ * This form takes a secret the caller holds (a group_secret, an invite_secret);
+ * for a pair or the self-DH, core derives the material through the identity
+ * backend (lib/derive.ts) and converts it with `offsetFromMaterial`.
  */
 export async function rotationOffsetSec(ss: Uint8Array, p: RvParams): Promise<number> {
-  const nid = enc.encode(p.networkId)
-  const ctx = new Uint8Array(nid.length + 1)
-  ctx.set(nid, 0); ctx[nid.length] = 0 // network_id || 0x00 — NO date
-  const mat = await kdf('encedo-chat-rotation-v1', ss, ctx, 4)
-  const off = new DataView(mat.buffer, mat.byteOffset, 4).getUint32(0) % 86400
+  const mat = await kdf(ROTATION_LABEL, ss, rotationCtx(p.networkId), 4)
+  const off = offsetFromMaterial(mat)
   plog('§5.4', `rotation offset: kdf("encedo-chat-rotation-v1", ss, ctx=net=${p.networkId}, no date) -> ${off}s `
     + `(${String(Math.floor(off / 3600)).padStart(2, '0')}:${String(Math.floor((off % 3600) / 60)).padStart(2, '0')} UTC)`)
   return off

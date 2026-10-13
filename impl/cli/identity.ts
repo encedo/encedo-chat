@@ -9,6 +9,7 @@ import { HEM } from '../../hem-sdk-js/hem-sdk.js'
 import { diffieHellman } from 'node:crypto'
 import { Keystore, rawToPriv, rawToPub } from './keystore.ts'
 import { hemIdentityFrom, type Identity } from '../lib/core.ts'
+import { deriveOverEcdh } from '../lib/derive.ts'
 import { SELF_PREFIX, buildSelfDescr, parseSelfDescr, selfLabel } from '../lib/descr.ts'
 
 export type { Identity }
@@ -94,14 +95,9 @@ export async function hemCreate(url: string, password: string, handle: string): 
 /** Software identity (dev/test). Creates the keystore if missing. */
 export function softwareIdentity(storePath: string, handleHint = 'me'): Identity {
   const ks = Keystore.exists(storePath) ? Keystore.load(storePath) : Keystore.create(storePath, handleHint)
-  return {
-    handle: ks.data.handle,
-    pub: ks.data.pub,
-    async ecdh(peerPubB64: string) {
-      return new Uint8Array(diffieHellman({
-        privateKey: rawToPriv(new Uint8Array(Buffer.from(ks.data.priv, 'base64'))),
-        publicKey: rawToPub(new Uint8Array(Buffer.from(peerPubB64, 'base64'))),
-      }))
-    },
-  }
+  const ecdh = async (peerPubB64: string) => new Uint8Array(diffieHellman({
+    privateKey: rawToPriv(new Uint8Array(Buffer.from(ks.data.priv, 'base64'))),
+    publicKey: rawToPub(new Uint8Array(Buffer.from(peerPubB64, 'base64'))),
+  }))
+  return { handle: ks.data.handle, pub: ks.data.pub, ecdh, derive: deriveOverEcdh(ecdh) }
 }

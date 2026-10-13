@@ -76,6 +76,9 @@ export interface InboxKnock {
 export interface InboxOpts extends RotationConfig {
   onKnock(k: InboxKnock): void
   onLog?(m: string): void
+  /** HKDF(ECDH(IK, IK_pub), ctx, label, len) through the identity backend
+   *  (lib/derive.ts) for the decoy seed; absent, derived over `dh.dh(dh.pub)`. */
+  deriveSelf?(label: string, ctx: Uint8Array, len: number): Promise<Uint8Array>
   /** Injected in tests. */
   now?(): number
   tickMs?: number
@@ -255,7 +258,7 @@ export function watchInbox(
   // and the seed are both derivations, and the first tick needs them.
   chain = (async () => {
     offsetMs = (await rotationOffsetSec(inbox, params)) * 1000
-    seed = await kdf(SEED_LABEL, await dh.dh(dh.pub), inbox)
+    seed = opts.deriveSelf ? await opts.deriveSelf(SEED_LABEL, inbox, 32) : await kdf(SEED_LABEL, await dh.dh(dh.pub), inbox)
   })().then(step).catch(() => {})
 
   try { node.services.pubsub.addEventListener('message', handler) } catch {}

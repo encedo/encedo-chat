@@ -23,6 +23,7 @@
  */
 
 import { subtle, kdf, sha256, unb64, b64, concat, randomBytes } from './wc.ts'
+import { deriveWith, deriveOverEcdh, type Derive } from './derive.ts'
 import type { RvParams } from './rendezvous.ts'
 import { groupTopicFromSecret, rotationOffsetSec } from './rendezvous.ts'
 import { seal, sendChainFrom, newSendChain, SenderReceiver, tag, verify, type SendChain, type ReceiverOpts } from './senderkey.ts'
@@ -45,6 +46,8 @@ const REC_LEN = 8 + 32         // recipient_id || mac
 export interface GroupId {
   pub: string // base64 IK_pub
   ecdh(peerPubB64: string, peerKid?: string): Promise<Uint8Array>
+  /** The backend's own derivation (lib/derive.ts); absent, derived over `ecdh`. */
+  derive?: Derive
 }
 export interface Member { pub: string; kid?: string }
 
@@ -65,14 +68,23 @@ const epochBytes = (epoch: number) => { const b = new Uint8Array(4); new DataVie
 const macCtx = (gid: Uint8Array, epoch: number) => concat(gid, epochBytes(epoch))
 
 /** Per-recipient message MAC key from a pairwise ECDH secret (both members
- *  derive the same value). */
+ *  derive the same value). The secret form, for tests and forgeries; the
+ *  session derives through the identity backend (`msgMacKeyFor`). */
 export async function msgMacKeyFromSecret(ss: Uint8Array, gid: Uint8Array, epoch: number): Promise<Uint8Array> {
   return kdf(MSG_MAC_LABEL, ss, macCtx(gid, epoch))
 }
 /** Roster MAC key from ECDH(GK, IK_i) — admin holds GK_priv, member holds GK_pub;
- *  the caller supplies the shared secret. */
+ *  the caller supplies the shared secret (tests, forgeries). */
 export async function rosterMacKeyFromSecret(ss: Uint8Array, gid: Uint8Array, epoch: number): Promise<Uint8Array> {
   return kdf(ROSTER_MAC_LABEL, ss, macCtx(gid, epoch))
+}
+/** mk_ij through the identity backend: no raw pairwise secret in this module. */
+export function msgMacKeyFor(id: GroupId, memberPub: string, gid: Uint8Array, epoch: number, memberKid?: string): Promise<Uint8Array> {
+  return deriveWith(id, MSG_MAC_LABEL, memberPub, macCtx(gid, epoch), 32, memberKid)
+}
+/** rk_i on the member's side: HKDF(ECDH(IK_i, GK_pub)) through the identity backend. */
+export function rosterMacKeyFor(id: GroupId, gkPubB64: string, gid: Uint8Array, epoch: number): Promise<Uint8Array> {
+  return deriveWith(id, ROSTER_MAC_LABEL, gkPubB64, macCtx(gid, epoch))
 }
 
 /** Canonical roster bytes for the roster MAC - the member pubs IN ORDER, newline-
@@ -293,9 +305,7 @@ export class GroupSession {
     let mk = this.macKeyCache.get(memberPub)
     if (!mk) {
       const member = this.members.find((m) => m.pub === memberPub)
-      const ss = await this.id.ecdh(memberPub, member?.kid)
-      mk = await msgMacKeyFromSecret(ss, this.gid, this.epoch)
-      ss.fill(0)
+      mk = await msgMacKeyFor(this.id, memberPub, this.gid, this.epoch, member?.kid)
       this.macKeyCache.set(memberPub, mk)
     }
     return mk
@@ -386,6 +396,9 @@ export class GroupSession {
 export interface AdminGk {
   /** Raw ECDH(GK_priv, peer) — the roster-MAC secret before HKDF. */
   dh(peerPub: Uint8Array): Promise<Uint8Array>
+  /** HKDF(ECDH(GK_priv, peer), salt = ctx, info = label, len) where the backend
+   *  runs it (lib/derive.ts); absent, derived over `dh`. */
+  derive?(label: string, peerPub: Uint8Array, ctx: Uint8Array, len: number): Promise<Uint8Array>
   /** HEM-backed: the HSM key id. Persisted instead of key material. */
   kid?: string
   /** Software-backed: the raw scalar. Persisted (secret) as in bucket B. */
@@ -442,18 +455,18 @@ interface GroupRec {
    */
   memberGkKid?: string
   /**
-   * ECDH(GK, member) memoised per member pubkey.
+   * rk_i = HKDF(ECDH(GK, member), gid || epoch) memoised per (member, epoch).
    *
-   * This is the whole reason a membership change is cheap: the secret depends
-   * on (GK, member) and NOT on the epoch — the epoch enters afterwards, through
-   * HKDF — so re-MACing a roster for a new epoch costs ZERO HSM calls for
-   * everyone already present. Only a genuinely new member costs one `ecdh`.
+   * The raw ECDH(GK, member) is not held: the derivation goes through the GK
+   * backend (lib/derive.ts), so a membership change costs one derivation per
+   * member per epoch - a device call each on a HEM admin - and what this memo
+   * holds is an epoch's MAC key, dead with the epoch.
    *
    * Deliberately RAM-only and absent from the §10 snapshot: it is re-derivable
    * on demand, so persisting it would widen what a stolen cache yields in
    * exchange for saving one call after a reload.
    */
-  ssCache: Map<string, Uint8Array>
+  rkCache: Map<string, Uint8Array>
 }
 
 /** A group serialized for the persistence cache (§10) — full state, base64 bytes. */
@@ -485,7 +498,9 @@ export async function softwareGk(): Promise<{ gk: AdminGk; pub: Uint8Array }> {
 
 async function softwareGkFromPriv(priv: Uint8Array): Promise<AdminGk> {
   const dh = await x25519FromPriv(priv)
-  return { dh: (peerPub) => dh.dh(peerPub), priv }
+  const d = (peerPub: Uint8Array) => dh.dh(peerPub)
+  const derive = deriveOverEcdh((peerPubB64) => d(unb64(peerPubB64)))
+  return { dh: d, derive: (label, peerPub, ctx, len) => derive(label, b64(peerPub), ctx, len), priv }
 }
 
 /**
@@ -509,17 +524,23 @@ export class GroupManager {
   }
 
   /**
-   * ECDH(GK, member) for the admin, through the per-group memo.
+   * rk_i = HKDF(ECDH(GK, member), gid || epoch) for the admin, through the
+   * per-group memo keyed by member and epoch. No raw GK secret is held.
    *
    * Every roster MAC goes through here, so this one function is what bounds the
-   * HSM traffic of a membership change to "one call per NEW member".
+   * HSM traffic of a membership change to "one call per member per epoch".
    */
-  private async gkSecret(rec: GroupRec, memberPub: string): Promise<Uint8Array> {
-    const hit = rec.ssCache.get(memberPub)
+  private async rosterKeyFor(rec: GroupRec, memberPub: string, gid: Uint8Array, epoch: number): Promise<Uint8Array> {
+    const key = `${memberPub}|${epoch}`
+    const hit = rec.rkCache.get(key)
     if (hit) return hit
-    const ss = await rec.gk!.dh(unb64(memberPub))
-    rec.ssCache.set(memberPub, ss)
-    return ss
+    const gk = rec.gk!
+    const ctx = macCtx(gid, epoch)
+    const rk = gk.derive
+      ? await gk.derive(ROSTER_MAC_LABEL, unb64(memberPub), ctx, 32)
+      : await (async () => { const ss = await gk.dh(unb64(memberPub)); try { return await kdf(ROSTER_MAC_LABEL, ss, ctx) } finally { ss.fill(0) } })()
+    rec.rkCache.set(key, rk)
+    return rk
   }
 
   gidHexOf(gid: Uint8Array): string { return hex(gid) }
@@ -681,7 +702,7 @@ export class GroupManager {
   dropGroup(gidHex: string): void {
     const rec = this.recs.get(gidHex)
     if (!rec) return
-    rec.ssCache.clear()
+    rec.rkCache.clear()
     this.recs.delete(gidHex)
     this.labels.delete(gidHex)
   }
@@ -718,7 +739,7 @@ export class GroupManager {
       // GK survives a rekey (only the secret and the topic move), so the entry
       // holding it survives too — re-importing on every membership change would
       // leave a trail of orphaned keys in the device.
-      gk: m.gk ?? cur?.gk, memberGkKid: cur?.memberGkKid, ssCache: cur?.ssCache ?? new Map(),
+      gk: m.gk ?? cur?.gk, memberGkKid: cur?.memberGkKid, rkCache: cur?.rkCache ?? new Map(),
     })
     return session
   }
@@ -763,8 +784,7 @@ export class GroupManager {
       // of, MAC a forged roster with it, and have it verify — hijacking the group.
       if (!bytesEq(gid, await groupIdFromGK(unb64(skd.gkPub)))) throw new Error('group id does not match its GK — rejected')
       if (!skd.rmac) throw new Error('group SKD advances the epoch without a roster MAC — rejected')
-      const ss = await this.id.ecdh(skd.gkPub)
-      const rk = await rosterMacKeyFromSecret(ss, gid, skd.epoch)
+      const rk = await rosterMacKeyFor(this.id, skd.gkPub, gid, skd.epoch)
       if (!(await verifyRosterMac(rk, skd.roster, unb64(skd.rmac)))) throw new Error('group roster MAC does not verify — rejected')
       // The MAC proves the sender holds GK, and the GK holder is the admin by
       // definition (8.3): so roster[0] - the position the convention gives the
@@ -825,8 +845,7 @@ export class GroupManager {
       roster: rec.roster.map((m) => m.pub),
     }
     if (rec.gk && forPub) {
-      const ss = await this.gkSecret(rec, forPub)
-      const rk = await rosterMacKeyFromSecret(ss, rec.session.gid, rec.epoch)
+      const rk = await this.rosterKeyFor(rec, forPub, rec.session.gid, rec.epoch)
       skd.rmac = b64(await rosterMac(rk, skd.roster))
     }
     return skd
@@ -858,7 +877,7 @@ export class GroupManager {
       const kid = rec.gk.kid
       if (kid && this.gkBackend?.destroy) await this.gkBackend.destroy(kid)
     }
-    this.recs.get(gidHex)?.ssCache.clear()
+    this.recs.get(gidHex)?.rkCache.clear()
     this.recs.delete(gidHex)
     this.labels.delete(gidHex)
   }

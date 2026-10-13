@@ -255,7 +255,13 @@ Two problems on different horizons: PQ confidentiality (needed now, against harv
 - **P6** — IK rotation on compromise: no built-in contact notification; out-of-band re-import today; in-band rotation (a new `IK_pub` MAC'd under `SK` in a live session to every contact) is planned.
 - **P7** — crypto library audit, especially `@noble/post-quantum`.
 - **P8** — cache backend: localStorage today; IndexedDB or SQLite in the shell as data outgrows it.
-- **HKDF in the HSM** — when firmware ships `ecdh` + HKDF in one call, the derivations of §4.3 move in-device and S13 closes. The call sites are the `ecdh` entry point of `lib/core.ts` and its consumers in `lib/rendezvous.ts`, `lib/group.ts`, `lib/knock.ts`, `lib/inbox.ts` and `lib/localbook.ts`; EH-2 keeps raw mode.
+- **HKDF in the HSM** — the client is already on the seam (`lib/derive.ts`): every rendezvous, Announce, rotation, decoy-seed and group-MAC key is asked of the identity backend as `derive(label, peer, ctx, L)`, and the HEM backend realises it today over its raw `ecdh`. When firmware ships `ecdh` + HKDF in one call, what changes is:
+  1. `hemIdentityFrom` in `lib/core.ts`: `derive` becomes the SDK call (`ecdhDerive(token, kid, peerKid ?? peerPub, ctx, label, L)` or whatever the SDK names it), for both the public-key and the two-KID form;
+  2. `hemGkBackend` in `lib/core.ts`: the admin's `rk_i` likewise, through the GK's kid;
+  3. nothing in `lib/rendezvous.ts`, `lib/group.ts`, `lib/inbox.ts` or any consumer — the labels, contexts and lengths they pass are the ones §14 lists;
+  4. S13 in `SPEC.md` §11.3 closes and §4.3 loses its sentence about the raw output;
+  5. `hem_usage.md` is re-measured: topic and Announce key become one device call each per contact per day (a batch form of the SDK call, one ECDH with a list of `(ctx, label, L)`, would keep it at one), and a group rekey one call per member per epoch.
+  What stays raw by decision: the one DH with `IK` inside EH-2 (four components under one HKDF), the knock key (a DH with a stranger's one-shot ephemeral, one per received frame on a public topic), and the §10 cache base.
 - **Hardened tier** — `core-rs` (EH-2, ratchet and ephemeral keys in WASM, keys outside the JS heap; then native in the Tauri host; then transport behind a trait) narrows S1 and S5.
 - **Decoy subscriptions** on the node path would narrow what section 9 describes; for a self-hosted deployment, own nodes are trusted (`THREAT-MODELS.md`).
 

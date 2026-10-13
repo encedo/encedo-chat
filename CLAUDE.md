@@ -80,17 +80,34 @@ hash, but the SDK does not expose it). **HKDF-in-HEM is coming in a newer
 firmware, per the protocol's assumptions** — the specs describe that target and
 stay as-is.
 
-**Consequence for the spike, until the newer FW ships:** compute the
-rendezvous/MAC/cache HKDF **client-side over the raw `ecdh` output**. This is a
-temporary *implementation detail*, not a protocol change. Note for the record
-(and for the cryptographer, when relevant): on current FW the pair secret
-`ss = ECDH(IK_a, IK_b)` transits client RAM — it is rendezvous-only and
-disjoint from the message-key DHs, so message confidentiality is unaffected;
-the exposure is metadata-linkability of that pair until IK rotation. When the
-FW lands, move the derivation in-device and the gap closes.
+**The seam is built (`lib/derive.ts`, 0.7.18).** No consumer calls `id.ecdh`
+for a rendezvous, Announce, rotation, decoy-seed or group-MAC key any more;
+they call `deriveWith(id, label, peer, ctx, L)`, and the backend's `derive`
+decides where the HKDF runs. Today the HEM backend's `derive` is
+`deriveOverEcdh(ecdh)` — HKDF in the client over the raw output, wiped at once.
+The session memoises **derived values** (a day's topic and Announce key per
+contact, `pairDay` in `lib/core.ts`; an epoch's `rk_i` per member in
+`GroupManager`), never a pair secret; `test/derive.test.ts` pins that a
+backend which derives is the one asked and its raw `ecdh` is never called.
 
-EH-2 needs raw `ecdh` regardless (it concatenates the DH outputs client-side),
-so the handshake path is unaffected by the firmware phase.
+**When the newer FW lands, change exactly this** (the list is also in
+`docs/RATIONALE.md`, open questions):
+
+1. `hemIdentityFrom` (`lib/core.ts`): `derive:` becomes the SDK's in-device
+   call — label, ctx and L go to the device; cover both the public-key form and
+   the two-KID form (`peerKid`).
+2. `hemGkBackend` (`lib/core.ts`): the GK's `derive` likewise, through its kid.
+3. Nothing else in the engine. Then: close S13 in `docs/SPEC.md` §11.3 and
+   drop the raw-output sentence of §4.3; re-measure `hem_usage.md` (topic +
+   Announce key become one device call each per contact per day — ask for a
+   batch form, one ECDH with a list of `(ctx, label, L)`, to keep it at one;
+   a group rekey costs one call per member per epoch); run the live HEM test
+   (`hem-gk-test`), because no automated test reaches a device.
+
+Raw `ecdh` stays, by decision, for: the one DH with IK inside EH-2 (four
+components under one HKDF), the knock key (a DH with a stranger's one-shot
+ephemeral — one per received frame on a public topic, which must never be a
+device call), and the §10 cache base `ECDH(IK, emp_pub)`.
 
 **Newer FW — `api/search` returns public keys** (per operator). Today
 `searchKeys` returns only `{kid,label,type,description}`, so the HEM contact book

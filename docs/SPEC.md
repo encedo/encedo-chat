@@ -69,7 +69,7 @@ The protocol assumes no security property of libp2p beyond hop-to-hop transport 
 
 ### 3.1 Responsibility split
 
-- **Identity backend** (HSM or software identity): key management (create, import, delete, search) and one cryptographic operation on `IK`: raw `ecdh`. The current HEM firmware exposes no in-HSM HKDF, so every IK-derived HKDF — topics, Announce MAC keys, rotation offsets, the §10 cache base — runs client-side over the raw ECDH output (§4.3).
+- **Identity backend** (HSM or software identity): key management (create, import, delete, search) and two operations on `IK`: raw `ecdh`, and the derivation `HKDF(ECDH(IK, peer), salt = ctx, info = label, L)` for every rendezvous, Announce, rotation and group-MAC key (§4.3). A backend that cannot derive in-device derives over its raw `ecdh` output in the client; the labels, contexts and outputs are identical either way.
 - **Client**: all ephemeral operations (EK, ML-KEM keygen/encapsulation/decapsulation, AEAD, ratchet), all HKDFs, session state, cache, presence.
 - **libp2p**: publish/subscribe for rendezvous, handshake frames and the fallback content path; a WebRTC DataChannel where both ends can open one.
 
@@ -126,7 +126,8 @@ GROUP  the marker of §8.6, on the GK_pub entry
 
 | Operation | Use | Frequency |
 |---|---|---|
-| `ecdh(kid, peer_pub)` → raw 32 B | the one DH with `IK` in EH-2 (§6.2); the base of every IK-derived HKDF: pair and self topic (§5.1–5.2), Announce MAC keys (§5.5), rotation offset (§5.4), the knock key (§5.8), the decoy seed (§5.9), the group MAC keys (§8.1), the cache base (§10) | one per handshake; one per contact per session, memoised |
+| `ecdh(kid, peer_pub)` → raw 32 B | the one DH with `IK` in EH-2 (§6.2); the knock key (§5.8, a DH with a stranger's one-shot ephemeral); the cache base (§10) | one per handshake; one per knock received; one per session |
+| `derive(kid, peer_pub, ctx, label, L)` → `HKDF(ECDH(IK, peer_pub), salt = ctx, info = label, L)` | pair and self topic (§5.1–5.2), Announce MAC keys (§5.5), rotation offset (§5.4), decoy seed (§5.9), the group MAC keys `mk_ij` and `rk_i` (§8.1) | topic and MAC key once per contact per day (two days inside the rotation guard); the offset once per contact; one per member per group epoch |
 | `key_generate(X25519, purpose = ecdh)` | `IK` at onboarding; `GK` at group creation | once per identity, once per group |
 | `key_import(pub)` | a contact's `IK_pub`; a member's `GK_pub` (§8.6) | once per contact, once per group |
 | `key_delete(kid)` | contact removal, group leave, IK rotation | rare |
@@ -135,7 +136,7 @@ GROUP  the marker of §8.6, on the GK_pub entry
 
 Signing and the HSM's own ML-KEM/ML-DSA are not used. Everything else (HMAC, AES-GCM, ML-KEM, ratchet, every HKDF) is client-side.
 
-**Consequence of client-side HKDF:** the pair secret `ss = ECDH(IK_a, IK_b)` sits in client RAM, memoised per contact per session. It is rendezvous-only material, disjoint from the message-key DHs; what a compromised client leaks from it is pair-linkability metadata until an IK rotates, never content (§11.3, S13). EH-2 needs raw mode regardless: its DH outputs are concatenated client-side and wiped after `SK` is derived.
+The client never holds a pair secret: what it memoises are the derived values of a day (a topic, an Announce key, an offset, an epoch's MAC key). On a backend that derives in-device, `ECDH(IK_a, IK_b)` never leaves the device; on one that derives in the client (the current HEM firmware, a software identity) the raw output exists for the duration of one HKDF and is wiped. Either way the material is rendezvous-only and disjoint from the message-key DHs: what a compromised client can leak is pair-linkability for the days whose keys it holds, never content (§11.3, S13). EH-2 needs raw mode: its DH outputs are concatenated client-side and wiped after `SK` is derived.
 
 ### 4.4 Contact integrity
 
@@ -654,7 +655,7 @@ Numbers are stable identifiers; the retired ones are listed in `RATIONALE.md`.
 - **S9 — classical authentication.** Confidentiality is PQ-hybrid; authentication rests on X25519. A future active quantum MITM is the one unaddressed threat (`RATIONALE.md`, PQ roadmap). Retrospective impersonation proof is impossible even with a broken `IK` (no signatures).
 - **S11 — the file store sees file metadata.** The store and its gateway observe blob size, timing, uploader and downloader addresses, and the fetch pattern of a CID for the blob's ~5-minute life (§7.5). Content is covered by the AEAD.
 - **S12 — software-identity assurance.** A password-sealed `IK` on disk is offline-guessable after theft, has no hardware bound on §9.3, and travels whole in the §10 export. The HEM path is the assurance tier.
-- **S13 — the pair secret transits client RAM.** Rendezvous-only material (§4.3); exposure is pair-linkability, not content. Closes when HKDF-in-HSM firmware moves the derivations in-device.
+- **S13 — the pair secret transits client RAM on firmware without in-device HKDF.** On the current HEM firmware each rendezvous derivation runs in the client over the raw `ECDH(IK_a, IK_b)` for the duration of one HKDF (§4.3); the client memoises only derived values. Rendezvous-only material; exposure is pair-linkability for the days derived, not content. Closes when the firmware derives in-device.
 - **S14 — a published invite topic is public.** Anyone who read the link can subscribe and publish (§5.7). An observer learns that a 348-byte frame was published and when, never by whom; cover traffic (§5.9) removes the signal in "a knock happened". Seeding the decoy schedule from the invite secret would destroy this.
 
 ### 11.4 What each party can see

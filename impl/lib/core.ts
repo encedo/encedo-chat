@@ -12,7 +12,8 @@
  * here (openConversation) without touching a single UI.
  */
 
-import { topicFromSecret, announceMacKey, todayUTC, rotationOffsetSec, type RvParams } from './rendezvous.ts'
+import { topicFromSecret, announceMacKey, todayUTC, paramsInfo, rotationCtx, topicFromMaterial, announceKeyFromMaterial, offsetFromMaterial, RV_LABEL, ANNOUNCE_LABEL, ROTATION_LABEL, type RvParams } from './rendezvous.ts'
+import { deriveWith, deriveOverEcdh, type Derive } from './derive.ts'
 import { nowMs } from './time.ts'
 import { joinChat, type RoomKeys, type ChatOpts, type Eh2Options } from './room.ts'
 import type { SkdFields, FileMeta } from './envelope.ts'
@@ -42,6 +43,10 @@ export interface Identity {
   handle: string
   pub: string // base64
   ecdh(peerPubB64: string, peerKid?: string): Promise<Uint8Array> // raw 32-byte shared secret; peerKid -> in-HSM two-KID ECDH
+  /** HKDF(ECDH(IK, peer), salt = ctx, info = label, L) where the backend runs it
+   *  (lib/derive.ts). Every rendezvous, announce, rotation and group-MAC key
+   *  comes through here; absent, the client derives over `ecdh`. */
+  derive?: Derive
 }
 export type RoomParams = RvParams
 /** A chat peer: raw pubkey, plus an in-HSM `kid` when it's a HEM (imported) contact. */
@@ -49,15 +54,23 @@ export interface Peer { pub: string; kid?: string }
 
 /** Build an Identity from an already-authenticated HEM session (browser-safe — no fs). */
 export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: string): Identity {
+  const ecdh = async (peerPubB64: string, peerKid?: string) => {
+    const t = await hem.authorizePassword(null, `keymgmt:use:${kid}`) // cached derived key -> no re-prompt
+    // HEM contact (imported -> has a kid): two-KID ECDH, both operands in-device.
+    // Local / one-off contact (no kid): raw peer pubkey.
+    return peerKid ? hem.ecdhKid(t, kid, peerKid) : hem.ecdh(t, kid, peerPubB64)
+  }
   return {
     handle,
     pub,
-    async ecdh(peerPubB64: string, peerKid?: string) {
-      const t = await hem.authorizePassword(null, `keymgmt:use:${kid}`) // cached derived key -> no re-prompt
-      // HEM contact (imported -> has a kid): two-KID ECDH, both operands in-device.
-      // Local / one-off contact (no kid): raw peer pubkey.
-      return peerKid ? hem.ecdhKid(t, kid, peerKid) : hem.ecdh(t, kid, peerPubB64)
-    },
+    ecdh,
+    // FIRMWARE SEAM (SPEC.md 4.3, S13): the current firmware exposes raw ecdh
+    // only, so the derivation runs here over its output. When the SDK exposes
+    // ecdh+HKDF in one call, this line becomes that call - the label, the
+    // context and L go to the device, and the raw secret never comes back:
+    //   derive: (label, peerPubB64, ctx, len, peerKid) =>
+    //     hem.ecdhDerive(await use(kid), kid, peerKid ?? peerPubB64, ctx, label, len)
+    derive: deriveOverEcdh(ecdh),
   }
 }
 
@@ -106,10 +119,14 @@ export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
   const use = (kid: string) => hem.authorizePassword(null, `keymgmt:use:${kid}`)
   const readPub = pubKeyReader(hem)
   const asB64 = (s: string) => b64(new TextEncoder().encode(s)) // DESCRs go to the HEM base64'd
-  const fromKid = (kid: string): AdminGk => ({
-    kid,
-    async dh(peerPub: Uint8Array) { return new Uint8Array(await hem.ecdh(await use(kid), kid, b64(peerPub))) },
-  })
+  const fromKid = (kid: string): AdminGk => {
+    const dh = async (peerPub: Uint8Array) => new Uint8Array(await hem.ecdh(await use(kid), kid, b64(peerPub)))
+    // FIRMWARE SEAM: the roster-MAC key rk_i = HKDF(ECDH(GK, IK_i), gid||epoch,
+    // label) derives here today; with ecdh+HKDF in firmware it is one device
+    // call and ECDH(GK, IK_i) never leaves the HSM (same note as hemIdentityFrom).
+    const derive = deriveOverEcdh((peerPubB64) => dh(unb64(peerPubB64)))
+    return { kid, dh, derive: (label, peerPub, ctx, len) => derive(label, b64(peerPub), ctx, len) }
+  }
   return {
     adminKid,
     fromKid,
@@ -184,14 +201,11 @@ export async function browserSoftwareIdentity(handleHint: string, load: () => st
     save(JSON.stringify({ handle, pub, priv: privJwk }))
   }
   const priv = await subtle.importKey('jwk', privJwk, { name: 'X25519' }, false, ['deriveBits'])
-  return {
-    handle,
-    pub,
-    async ecdh(peerPubB64: string) {
-      const peerPub = await subtle.importKey('raw', unb64(peerPubB64), { name: 'X25519' }, false, [])
-      return new Uint8Array(await subtle.deriveBits({ name: 'X25519', public: peerPub }, priv, 256))
-    },
+  const ecdh = async (peerPubB64: string) => {
+    const peerPub = await subtle.importKey('raw', unb64(peerPubB64), { name: 'X25519' }, false, [])
+    return new Uint8Array(await subtle.deriveBits({ name: 'X25519', public: peerPub }, priv, 256))
   }
+  return { handle, pub, ecdh, derive: deriveOverEcdh(ecdh) }
 }
 
 // ---- contact book (peer pubkeys) ----------------------------------------
@@ -409,36 +423,45 @@ export function localOnlyManager(local: ContactBook): ContactManager {
 /**
  * Derive the day's room for a pair: the topic (§5) plus the content keys.
  *
- * Rendezvous and content use the pair secret differently: topic and Announce MAC
- * key come from `ss = ECDH(IK_a, IK_b)`, while content is sealed by a per-peer
- * EH-2 handshake + ratchet negotiated inside the room (§6–7). So `ss` is used
- * ONLY for rendezvous; the message keys never derive from it.
+ * Rendezvous and content use the identity differently: topic and Announce MAC
+ * key are derived through the identity backend from `ECDH(IK_a, IK_b)`
+ * (lib/derive.ts), while content is sealed by a per-peer EH-2 handshake +
+ * ratchet negotiated inside the room (§6–7). The pair secret is used ONLY for
+ * rendezvous; the message keys never derive from it.
  */
 export async function deriveRoom(
   id: Identity,
   peer: Peer,
   p: RoomParams,
-  eh2: { onState?: Eh2Options['onState']; ratchet?: Eh2Options['ratchet']; ss?: Uint8Array } = {},
+  eh2: { onState?: Eh2Options['onState']; ratchet?: Eh2Options['ratchet']; rv?: { topic: string; macKey: CryptoKey } } = {},
 ): Promise<{ topic: string; keys: RoomKeys }> {
-  // `ss` may be supplied by a caller that already holds it: on a HEM every one
-  // of these is a device round trip of one to two seconds, and the same pair
-  // secret is wanted by the presence watch, the rotation offset and the room.
-  const ss = eh2.ss ?? await id.ecdh(peer.pub, peer.kid)
-  const topic = await topicFromSecret(ss, p)
-  const macKey = await announceMacKey(ss, p)
+  // `rv` may be supplied by a caller that already derived the day's keys (the
+  // session memoises them per contact and day, so the presence watch, the
+  // rotation offset and the room share one set of device calls).
+  const { topic, macKey } = eh2.rv ?? await derivePresence(id, peer, p)
   // The EH-2 DHs run against the peer's EPHEMERAL keys, so no contact `kid`
   // here — just our IK against raw public keys (HEM raw ecdh, §4.3).
   const ik = dhFromEcdh(id.pub, (peerPubB64) => id.ecdh(peerPubB64))
-  return { topic, keys: { macKey, eh2: { ik, peerIkPub: unb64(peer.pub), ...eh2 } } }
+  const { rv: _rv, ...rest } = eh2
+  return { topic, keys: { macKey, eh2: { ik, peerIkPub: unb64(peer.pub), ...rest } } }
 }
 
 /**
  * The rendezvous half of a pair room, without the EH-2 keys — all the light
  * presence layer needs (`lib/presence.ts`): the pair topic to subscribe to and
- * the Announce MAC key. One `ecdh`, no handshake material.
+ * the Announce MAC key. Two derivations through the identity backend, no raw
+ * pair secret in the caller's hands.
  */
 export async function derivePresence(id: Identity, peer: Peer, p: RoomParams): Promise<{ topic: string; macKey: CryptoKey }> {
-  return presenceFromSecret(await id.ecdh(peer.pub, peer.kid), p)
+  const ctx = paramsInfo(p)
+  const topic = topicFromMaterial(await deriveWith(id, RV_LABEL, peer.pub, ctx, 32, peer.kid))
+  const macKey = await announceKeyFromMaterial(await deriveWith(id, ANNOUNCE_LABEL, peer.pub, ctx, 32, peer.kid))
+  return { topic, macKey }
+}
+
+/** The pair's rotation instant (§5.4), through the identity backend. */
+export async function deriveRotationOffset(id: Identity, peer: Peer, p: RoomParams): Promise<number> {
+  return offsetFromMaterial(await deriveWith(id, ROTATION_LABEL, peer.pub, rotationCtx(p.networkId), 4, peer.kid))
 }
 
 /**
@@ -458,8 +481,7 @@ export async function presenceFromSecret(ss: Uint8Array, p: RoomParams): Promise
  * anything valid on it another window of *us* (§9.1).
  */
 export async function deriveSelfRoom(id: Identity, p: RoomParams): Promise<{ topic: string; macKey: CryptoKey }> {
-  const ss = await id.ecdh(id.pub)
-  return { topic: await topicFromSecret(ss, p), macKey: await announceMacKey(ss, p) }
+  return derivePresence(id, { pub: id.pub }, p)
 }
 
 const TYPING_STOP_MS = 4_000 // stop "typing" after this idle gap
@@ -748,8 +770,8 @@ export interface SessionOpts {
    *  attested roster, and `skdFor` refuses an outsider on its own as well. `from`
    *  is the sender's IK pub, as for `onGroupSkd` and for the same reason. */
   onGroupSkdReq?: ChatOpts['onGroupSkdReq']
-  /** The pair secret, when the caller already holds it — see `deriveRoom`. */
-  ss?: Uint8Array
+  /** The day's rendezvous keys, when the caller already derived them — see `deriveRoom`. */
+  rv?: { topic: string; macKey: CryptoKey }
   /** Our own transport state — see `LinkState`. */
   onLink?: (state: LinkState) => void
   /**
@@ -1037,7 +1059,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     const o = openConvs.get(pub); if (!o || closed) return
     const off = await offsetSecFor(o.peer)
     const day = dateUTC ?? rendezvousDay(nowMs(), off * 1000)
-    const { topic, macKey } = await presenceFromSecret(await pairSecret(o.peer), { ...params, dateUTC: day })
+    const { topic, macKey } = await pairDay(o.peer, day)
     const old = o.conv.topic
     if (topic === old || openConvs.get(pub) !== o) return
     if (o.conv.retarget(topic, macKey)) {
@@ -1066,28 +1088,28 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // (`?rot=<hour>`) skips the derivation entirely so both test ends share it.
   const offsetCache = new Map<string, number>()
   /**
-   * `ss = ECDH(IK_me, IK_peer)`, once per contact per session.
+   * The day's rendezvous keys of a pair - topic and Announce MAC key - once per
+   * contact per day, through the identity backend (lib/derive.ts). No raw pair
+   * secret is held by the session: what is memoised is the material of a day,
+   * so a leak of this memory costs that day's linkability, not every day's
+   * until the identity key rotates.
    *
-   * Three things want it — the presence watch, the rotation offset and opening
-   * the room — and on a HEM each derivation was a separate device round trip of
-   * one to two seconds. A trace of one sign-in showed the identical secret being
-   * fetched three times.
-   *
-   * The PROMISE is cached, not the result, so callers that arrive while the
-   * device is still working share that call instead of starting another; that
-   * race is what produced two of the three.
-   *
-   * Holding it for the session widens nothing: `ss` is rendezvous-only and
-   * disjoint from every message-key DH (§4.3 note in CLAUDE.md), and the
-   * presence watch already keeps it alive for exactly as long.
+   * Three things want the keys - the presence watch, the rotation offset and
+   * opening the room - and on a HEM every derivation is a device round trip,
+   * so the PROMISE is cached, not the result: callers that arrive while the
+   * device is still working share that call instead of starting another.
    */
-  const ssCache = new Map<string, Promise<Uint8Array>>()
-  const pairSecret = (peer: Peer): Promise<Uint8Array> => {
-    let p = ssCache.get(peer.pub)
+  const dayCache = new Map<string, Promise<{ topic: string; macKey: CryptoKey }>>()
+  const pairDay = (peer: Peer, dateUTC: string): Promise<{ topic: string; macKey: CryptoKey }> => {
+    const key = `${peer.pub}|${dateUTC}`
+    let p = dayCache.get(key)
     if (!p) {
-      p = id.ecdh(peer.pub, peer.kid)
-      p.catch(() => ssCache.delete(peer.pub)) // a failed call must not be remembered as an answer
-      ssCache.set(peer.pub, p)
+      p = derivePresence(id, peer, { ...params, dateUTC })
+      p.catch(() => dayCache.delete(key)) // a failed call must not be remembered as an answer
+      dayCache.set(key, p)
+      // A day's keys are wanted for two days at most (the rotation guard);
+      // keep the map from growing with the calendar.
+      if (dayCache.size > 512) { const first = dayCache.keys().next().value; if (first) dayCache.delete(first) }
     }
     return p
   }
@@ -1095,7 +1117,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     if (opts.forcedRotationSec != null) return opts.forcedRotationSec
     const cached = offsetCache.get(peer.pub)
     if (cached != null) return cached
-    const off = await rotationOffsetSec(await pairSecret(peer), params)
+    const off = await deriveRotationOffset(id, peer, params)
     offsetCache.set(peer.pub, off)
     return off
   }
@@ -1107,13 +1129,11 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   const startWatch = async (peer: Peer) => {
     if (closed || presence.has(peer.pub)) return
     try {
-      // One ecdh for the pair; the rotating watch derives each day's topic from
-      // this secret (date only changes the HKDF info), never a second HSM call.
-      // The rotation offset comes from the same secret (or the forced override).
-      const ss = await pairSecret(peer)
-      const offsetSec = opts.forcedRotationSec ?? await rotationOffsetSec(ss, params)
-      offsetCache.set(peer.pub, offsetSec)
-      const watch = watchPresenceRotating(node, self, (dateUTC) => presenceFromSecret(ss, { ...params, dateUTC }), {
+      // The rotating watch asks for each active day's keys; the session memo
+      // (pairDay) makes that one set of device calls per contact per day,
+      // shared with the room that may open on the same topic.
+      const offsetSec = await offsetSecFor(peer)
+      const watch = watchPresenceRotating(node, self, (dateUTC) => pairDay(peer, dateUTC), {
         offsetMs: offsetSec * 1000,
         heartbeatMs: opts.presenceHeartbeatMs,
         onOnline: () => presenceHandlers.onOnline?.(peer),
@@ -1169,12 +1189,9 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // from the pair secret (§5.4) — every window computes the same one.
   if (opts.onSessionTakenOver) {
     try {
-      const selfSs = await id.ecdh(id.pub)
-      const selfOffsetMs = (await rotationOffsetSec(selfSs, params)) * 1000
-      selfWatch = watchSelfSessionRotating(node, async (dateUTC) => {
-        const p = { ...params, dateUTC }
-        return { topic: await topicFromSecret(selfSs, p), macKey: await announceMacKey(selfSs, p) }
-      }, self, {
+      const selfPeer: Peer = { pub: id.pub }
+      const selfOffsetMs = (await deriveRotationOffset(id, selfPeer, params)) * 1000
+      selfWatch = watchSelfSessionRotating(node, (dateUTC) => pairDay(selfPeer, dateUTC), self, {
         onLog: opts.onLog,
         offsetMs: selfOffsetMs,
         onTakenOver: (byPeer) => {
@@ -1215,9 +1232,9 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       const heard = presence.get(peer.pub)?.watch.seen?.() ?? []
       presence.get(peer.pub)?.watch.stop(false) // false = handoff, do not unsubscribe
       presence.delete(peer.pub)
-      const ss = await pairSecret(peer) // paid for once; the watch and the offset used the same one
+      const rv = await pairDay(peer, dateUTC) // paid for once; the watch used the same derivation
       const conv = await openRoom(id, peer, node, self, liveParams, {
-        ss,
+        rv,
         ...roomOpts,
         // A group SKD on this 1:1 room feeds the group manager (§8), then the app
         // is told — but only AFTER applySkd resolves: the app's handler calls
@@ -1298,13 +1315,15 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       })
     },
     watchInbox(inboxSecret, handlers) {
-      // The identity is both halves: it opens the knocks, and `dh(dh.pub)` is
-      // the self-ECDH that seeds the decoy schedule (§4.6). Nothing else needs
-      // passing in, and nothing about the schedule is stored.
+      // The identity is both halves: it opens the knocks (a raw DH with each
+      // knocker's one-shot ephemeral - lib/derive.ts says why that stays raw),
+      // and the self-derivation seeds the decoy schedule. Nothing about the
+      // schedule is stored.
       const dh = dhFromEcdh(id.pub, (peerPubB64) => id.ecdh(peerPubB64))
       const inner = startInboxWatch(node, inboxSecret, dh, params, {
         onKnock: handlers.onKnock,
         onLog: handlers.onLog ?? log,
+        deriveSelf: (label, ctx, len) => deriveWith(id, label, id.pub, ctx, len),
       })
       const w: InboxWatch = {
         decoy: () => inner.decoy(),
@@ -1367,7 +1386,7 @@ async function openRoom(
     opts.onSecurity?.(p, state)
     if (state === 'established') plane?.onPeer(p)
   }
-  const { topic, keys } = await deriveRoom(id, peer, params, { onState: onSecurity, ss: opts.ss })
+  const { topic, keys } = await deriveRoom(id, peer, params, { onState: onSecurity, rv: opts.rv })
   log(`room derived: topic ${topic.slice(0, 16)}...`)
 
   const room = joinChat(node, topic, keys, {

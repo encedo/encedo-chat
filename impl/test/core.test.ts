@@ -6,7 +6,8 @@ import { buildPeerDescr, buildSelfDescr, peerSearchPrefix, hemKid } from '../lib
 import { unb64 } from '../lib/wc.ts'
 
 const P = { networkId: 'main', dateUTC: '2026-07-27' }
-const fakeId = (ss: Uint8Array): Identity => ({ handle: 'x', pub: '', ecdh: async () => ss })
+// A fresh buffer per call, as a real backend returns: the seam wipes the secret after deriving.
+const fakeId = (ss: Uint8Array): Identity => ({ handle: 'x', pub: '', ecdh: async () => ss.slice() })
 
 test('deriveRoom topic == the direct rendezvous derivation (no drift)', async () => {
   const ss = new Uint8Array(32).fill(9)
@@ -182,16 +183,16 @@ test('the pair secret is fetched once per contact, however many derivations want
   assert.equal(calls, 2, 'a different contact is a different secret')
 })
 
-test('deriveRoom accepts a secret already paid for, and derives the same room', async () => {
+test('deriveRoom accepts the day\'s keys already derived, and builds the same room', async () => {
   const ss = new Uint8Array(32).fill(9)
   let calls = 0
-  const id: Identity = { handle: 'x', pub: '', ecdh: async () => { calls++; return ss } }
+  const id: Identity = { handle: 'x', pub: '', ecdh: async () => { calls++; return ss.slice() } }
   const peer = { pub: Buffer.from(new Uint8Array(32).fill(7)).toString('base64') }
   const fresh = await deriveRoom(id, peer, P)
   const callsAfterFresh = calls
-  const reused = await deriveRoom(id, peer, P, { ss })
-  assert.equal(reused.topic, fresh.topic, 'the same room, whoever computed the secret')
-  assert.equal(calls, callsAfterFresh, 'and no further ecdh for the topic')
+  const reused = await deriveRoom(id, peer, P, { rv: { topic: fresh.topic, macKey: fresh.keys.macKey } })
+  assert.equal(reused.topic, fresh.topic, 'the same room, whoever derived the keys')
+  assert.equal(calls, callsAfterFresh, 'and no further backend call for the topic')
 })
 
 test('one broad token reads every public key, and a device that refuses it still works', async () => {

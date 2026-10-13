@@ -67,23 +67,27 @@ whole per-contact term; see §6 for what the newer firmware removes.
 
 ### §5 — Rendezvous
 
-Every topic and Announce key comes from **one** pair secret, `ss = ECDH(IK_me,
-IK_peer)`, and that is the only device call in this section.
+Every topic and Announce key is a derivation `HKDF(ECDH(IK_me, IK_peer), ctx,
+label)` asked of the identity backend (`lib/derive.ts`). On the current
+firmware the backend answers with one raw `ecdh` per derivation and the HKDF
+runs in the client; the raw secret is wiped after each.
 
-| derivation | device |
-|---|---|
-| pair topic (§5.1) | no — HKDF over `ss`, client-side |
-| self topic (§5.2/§9.1) | one `ecdh` against our own public key |
-| group topic (§5.3) | no — HKDF over `group_secret`, which never leaves the client |
-| rotation offset (§5.4) | no — HKDF over `ss`, and date-independent |
-| Announce MAC key (§5.5) | no — HKDF over `ss` |
+| derivation | device, current firmware | device, firmware with in-device HKDF |
+|---|---|---|
+| pair topic (§5.1) | one `ecdh` per contact per day | one `derive` per contact per day |
+| Announce MAC key (§5.5) | one `ecdh` per contact per day | one `derive` per contact per day |
+| rotation offset (§5.4) | one `ecdh` per contact, once (date-independent) | one `derive`, once |
+| self topic + MAC (§5.2/§9.1) | two `ecdh` per day + one for the offset | the same, as `derive` |
+| group topic (§5.3) | no — HKDF over `group_secret`, which never leaves the client | no |
 
-`ss` is computed **once per contact per session** and shared by the presence
-watch, the rotation offset and the room (`pairSecret` in `lib/core.ts`). The
-promise is memoised, not the result, so callers racing each other share one
-device call rather than starting three — which is what they used to do.
-
-**The daily rollover is free.** `ss` carries no date; only the HKDF `info` does.
+The session memoises the **derived values** of a day per contact (`pairDay` in
+`lib/core.ts`), shared by the presence watch, the room and the realignment
+after a rotation; the promise is memoised, so callers racing each other share
+one device call. No pair secret is cached. Inside the ±30 min rotation guard a
+second day is derived; otherwise **the daily rollover costs two calls per
+contact**, spread over the day by the per-pair instant. A batch form of the
+firmware call (one ECDH, a list of `(ctx, label, L)`) would bring a contact's
+day back to one call.
 
 ### §6 — EH-2 handshake
 
@@ -107,14 +111,14 @@ without the device being present at all.
 | send / receive a group message | **no** |
 | sender key distribution | no — it rides the 1:1 ratchet |
 | group topic, epoch rotation | no |
-| **per-recipient MAC key `mk_ij`** | one `ecdh` per member, **memoised for the session** |
-| creating a group | `createKeyPair` (GK) + read its public half + one `ecdh` per member for the roster MAC |
-| membership change | `updateKey` (the marker) + one `ecdh` per **new** member; existing members cost nothing, because `ECDH(GK, IK_i)` does not depend on the epoch |
+| **per-recipient MAC key `mk_ij`** | one derivation per member **per epoch**, memoised for the session |
+| creating a group | `createKeyPair` (GK) + read its public half + one derivation per member for the roster MAC |
+| membership change | `updateKey` (the marker) + one derivation per member of the new epoch (the epoch is the derivation's context, so the device answers it; the raw `ECDH(GK, IK_i)` is not kept) |
 | a member's own record | `importPublicKey` of `GK_pub` at joining, `updateKey` on rename, `deleteKey` on leaving |
 | reading the device's group list | `searchKeys("ETSEIC:chan")` + one `getPubKey` per group |
 
-So a group of five costs four `ecdh` on the first message of a session, and
-nothing thereafter.
+So a group of five costs four derivations on the first message of a session and
+four more on each membership change, nothing per message.
 
 ### §10 — Local cache
 
@@ -232,22 +236,12 @@ every public key instead of one token per key. The client tries it once and
 remembers the answer (`pubKeyReader` in `lib/core.ts`), so a device that wanted
 the narrow scope would still work.
 
-**HKDF inside the HSM** (the §4.3 target) changes the shape of §5, and not
-entirely for the better:
-
-- messages stay at **zero** — the ratchet does not care where HKDF runs;
-- EH-2 keeps its one raw `ecdh` — §4.3 keeps raw mode for the handshake;
-- but the pair topic and the Announce MAC key become **device calls**, per
-  contact **per day**, where today they are free HKDFs over a cached `ss`.
-
-So the daily rollover stops being free, and sign-in needs two calls per contact
-instead of one — unless the client caches the **derived per-day values** (the
-topic string, the Announce key). That is the cache to build when the firmware
-lands, and it is a much easier one to justify than caching `ss`: a topic is a
-public identifier and the Announce key authenticates presence, not content.
-
-Caching `ss` itself is deliberately **not** done. It is the secret whose entire
-security story is that it stays rendezvous-only and short-lived in RAM, and the
+**HKDF inside the HSM** (the §4.3 target) changes only where the HKDF of §5
+and §8 runs; the client already asks for derived values and caches those (§5
+above). Messages stay at **zero**; EH-2 keeps its one raw `ecdh`; a contact's
+day costs two device calls (one with a batch form of the call), a group rekey
+one per member. Caching a pair secret is deliberately **not** done: it is the
+secret whose entire security story is that it stays rendezvous-only, and the
 newer firmware exists precisely to stop it reaching the client at all.
 
 ---
