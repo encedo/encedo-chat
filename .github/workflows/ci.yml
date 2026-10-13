@@ -47,6 +47,29 @@ jobs:
         run: npm run web:build
         working-directory: impl
 
+  # core-rs: the Rust engine behind eh2/wasm.ts. Its tests reproduce the
+  # known-answer vectors of docs/kat/; then the WASM module is rebuilt from the
+  # pinned toolchain (core-rs/rust-toolchain.toml, which rustup installs by
+  # itself) and must be byte-identical to the committed impl/core-wasm/core.wasm.
+  # A source change without a rebuilt module, or a module nobody can
+  # reproduce, fails here.
+  core-rs:
+    name: core-rs tests + reproducible wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tests (known-answer vectors, negatives)
+        run: cargo test --quiet
+        working-directory: core-rs
+      - name: Rebuild the module and compare with the committed bytes
+        run: |
+          set -euo pipefail
+          ./core-rs/build.sh
+          if ! git diff --exit-code --stat -- impl/core-wasm/core.wasm; then
+            echo "impl/core-wasm/core.wasm is not what core-rs/ builds on the pinned toolchain: run core-rs/build.sh and commit the result"
+            exit 1
+          fi
+
   browser:
     name: two-browser harness
     runs-on: ubuntu-latest

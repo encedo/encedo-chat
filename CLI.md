@@ -571,6 +571,7 @@ Bez demona nie ma kolejki: `--key` i `--ttl` nic wtedy nie zmieniają.
 | `--debug` | w kliencie: dziennik silnika w oknie statusu |
 | `--libp2p` | w kliencie: pełny transport GossipSub zamiast lekkiego (diagnostyka) |
 | `--network <id>` | sieć, dla której liczone są tematy (`SPEC.md` §5.1); domyślnie `main`, czyli sieć operatora. Własna sieć = własne węzły i własny identyfikator; klienci na różnych id nigdy się nie spotkają, nawet na jednym węźle |
+| `--core wasm` | handshake EH‑2 i ratchet liczone w module `core-rs` (Rust → WASM, `impl/core-wasm/core.wasm`): klucze efemeryczne poza stertą JS. Te same ramki na drucie, więc druga strona nie widzi różnicy; domyślnie silnik TypeScript |
 | `ONCHATO_HOME` | katalog danych (domyślnie `$XDG_CONFIG_HOME/onchato`, czyli `~/.config/onchato`) |
 
 Hasło bez terminala (potok): `onchato` czyta pierwszą linię ze standardowego wejścia.

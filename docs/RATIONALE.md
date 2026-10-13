@@ -262,7 +262,7 @@ Two problems on different horizons: PQ confidentiality (needed now, against harv
   4. S13 in `SPEC.md` §11.3 closes and §4.3 loses its sentence about the raw output;
   5. `hem_usage.md` is re-measured: topic and Announce key become one device call each per contact per day (a batch form of the SDK call, one ECDH with a list of `(ctx, label, L)`, would keep it at one), and a group rekey one call per member per epoch.
   What stays raw by decision: the one DH with `IK` inside EH-2 (four components under one HKDF), the knock key (a DH with a stranger's one-shot ephemeral, one per received frame on a public topic), and the §10 cache base.
-- **Hardened tier** — `core-rs` (EH-2, ratchet and ephemeral keys in WASM, keys outside the JS heap; then native in the Tauri host; then transport behind a trait) narrows S1 and S5.
+- **Hardened tier** — stage 1 is built: `core-rs` (EH-2, the ratchet and the hybrid step in Rust, built to WASM, the same frames and the same known-answer vectors as the TypeScript engine; `?core=wasm`, `--core wasm`). What it buys: ephemeral keys and ratchet state out of the JS heap and zeroed deterministically, a smaller and typed surface for review. What it does not buy: a boundary against a fully compromised page — WASM memory is a JS object of the same realm. Stage 2 (the same crate native in the Tauri host, the webview holding only ciphertext and results) is the boundary that narrows S1 and S5; stage 3 puts the transport behind a trait. The default flips to WASM after the live two-browser run.
 - **Decoy subscriptions** on the node path would narrow what section 9 describes; for a self-hosted deployment, own nodes are trusted (`THREAT-MODELS.md`).
 
 ---
@@ -274,7 +274,8 @@ Two problems on different horizons: PQ confidentiality (needed now, against harv
 ```
 impl/
 ├── eh2/        wire.ts (msg1/2/3 + transcript) · handshake.ts (state machines, SK) · mlkem.ts (ML-KEM-768)
-│               · ratchet.ts (Double Ratchet, hybrid step) · establish.ts
+│               · ratchet.ts (Double Ratchet, hybrid step) · establish.ts (the backend switch) · wasm.ts (core-rs behind the same seam)
+├── core-wasm/  core.wasm, built from /core-rs (Rust: the same §6–§7, KATs in core-rs/tests)
 ├── lib/        wc.ts (WebCrypto, kdf, aeadNonce) · rendezvous · announce · origin (§13 envelope) · presence
 │               · room (delivery contract, EH-2 seam) · envelope · session (crypto seam) · core (facade) · x25519 (the Dh capability)
 │               · senderkey/group/grouproom/gmarker (§8) · gcache/pincache/bookmac/localbook/localstore/sealedstore/seen/gleft/prefs (§10)

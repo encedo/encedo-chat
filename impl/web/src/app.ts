@@ -15,6 +15,7 @@
  */
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
+import { setCoreBackend } from '../../eh2/establish.ts'
 import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import { exportProfile, openBundle, applyBundle, conflictsWith, localKV, FILE_EXT, type KV } from '../../lib/migrate.ts'
@@ -196,6 +197,11 @@ const USE_LIGHT = LIGHT_PARAM !== '0'
 // Load-aware node choice (lib/nodepick.ts, wired in core): on by default,
 // `?lb=0` turns it off -- e.g. to stay on a node picked by hand for a test.
 const USE_LB = new URLSearchParams(location.search).get('lb') !== '0'
+// `?core=wasm` computes the EH-2 handshake and the ratchet in core-rs
+// (eh2/wasm.ts): every ephemeral key outside the JS heap. Same frames on the
+// wire, so the peer does not know; the TS engine stays the default until the
+// live two-browser run says otherwise.
+if (new URLSearchParams(location.search).get('core') === 'wasm') setCoreBackend('wasm')
 // `?rot=<hour>` forces every pair's topic rotation to that UTC time-of-day, so
 // two test tabs can share a known rollover instant instead of waiting for each
 // pair's real offset (§5.4). Absent or `0` = the real per-pair offset algorithm

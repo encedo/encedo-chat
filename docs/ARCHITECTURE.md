@@ -196,7 +196,7 @@ Running your own network is not merely tolerated — it is **encouraged**. Today
 - Android: a **foreground service** (`specialUse`) keeps the process alive so a phone in a pocket stays reachable — the honest price of no store-and-forward, paid as a permanent notification; local notifications, no FCM (no Google server between two people).
 - Desktop, measured (2026-09-14): the packaged app has the direct plane on Windows (WebView2) and macOS (WKWebView) natively; on **Linux** WebKitGTK as shipped by Ubuntu is built without a WebRTC backend and exposes no `RTCPeerConnection`, so there the **Tauri host opens the DataChannel** (`webrtc-rs`, since 0.5.78) behind the same link interface — the Linux build has the direct plane too, through the host rather than the webview (`SPEC.md` §3.2/§13).
 
-**Roadmap — the hardened tier:** a Rust `core-rs` (native for Tauri, WASM for the web) holding keys, ratchet state and the HEM client outside the webview, with transport behind a trait. That is the isolation story earlier drafts described; it is not the build, and claims about webview-compromise resistance must not be made until it is.
+**The hardened tier — `core-rs`:** a Rust crate (`/core-rs`) implementing the EH-2 handshake and the Double Ratchet with the hybrid step, built to one 140 KB WASM module (`impl/core-wasm/core.wasm`, reproducible from the pinned toolchain, checked by CI) and selectable in every client (`?core=wasm`, `--core wasm`). Every ephemeral key and every ratchet key then lives in the module's memory and is zeroed deterministically; the identity key's one DH per handshake stays with the identity backend. The TypeScript engine remains the default until the live two-browser run has been through it. Still roadmap: the native form in the Tauri host (keys outside the webview process, which WASM in the same page cannot give), and moving the HEM client and the ratchet state there with it.
 
 ### Build & release pipeline
 
@@ -238,7 +238,7 @@ Look & feel is open; a reference skin beyond the shipped web UI is a question to
 | 4 | Self-hosting recipe (Docker image + manual + $5-VPS guide) | today: `relay/README.md` |
 | 5 | ~~Reproducible builds~~ — **resolved for the web**: two independent CI builds per tag must agree and the host must serve that CID; report per release (`docs/REPRODUCIBLE.md`). Desktop/Android bundles stay unreproducible by packaging | — |
 | 6 | Relay-blind data plane (hides the address from the NODE; the peer-facing switch already ships) | GossipSub release for libp2p v3 (Transport) |
-| 7 | Hardened tier (`core-rs` outside the webview) | roadmap (`SPEC.md` §3.2) |
+| 7 | Hardened tier: `core-rs` ships as the WASM engine behind `?core=wasm` / `--core wasm` (`SPEC.md` §3.2); the native host form and the default flip are the remaining steps | opt-in since 0.7.19 |
 | 8 | ~~Identity backend for the open channel~~ — **resolved: the software profile ships** (`SPEC.md` §4.5) | — |
 | 9 | Spec open questions (`RATIONALE.md` — the remaining ones: device enrollment, IK rotation, lib audit, serialization) | pre-1.0 |
 | 10 | HEM side-items: `x25519` dual key type (decided: ships) + attestation PoP variant; **HKDF-in-HSM firmware** (closes S13) | HEM firmware roadmap |

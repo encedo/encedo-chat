@@ -57,6 +57,9 @@ module.exports = (_env, argv) => {
           use: { loader: 'babel-loader', options: { plugins: ['@babel/plugin-transform-block-scoping'], compact: prod } },
           resolve: { fullySpecified: false },
         },
+        // core-rs (eh2/wasm.ts): the module is fetched by URL and instantiated
+        // by hand, so it is an emitted file, not a webpack WebAssembly module.
+        { test: /\.wasm$/, type: 'asset/resource', generator: { filename: prod ? 'core.[contenthash].wasm' : 'core.wasm' } },
       ],
     },
     plugins: [

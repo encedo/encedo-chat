@@ -77,7 +77,7 @@ The protocol assumes no security property of libp2p beyond hop-to-hop transport 
 
 One TypeScript engine is consumed by the web app, the terminal client and the Tauri 2 shells (Linux, Windows, macOS, Android, iOS). The shells wrap the same web bundle: all crypto and transport run in the webview on every platform, and a shell adds platform reach, not isolation. Crypto comes from WebCrypto (X25519, HKDF, HMAC, SHA-256, AES-GCM, PBKDF2) and from `@noble/post-quantum` for ML-KEM-768, the single third-party crypto dependency on the message path. On the Linux desktop the webview exposes no `RTCPeerConnection`; there the Tauri host opens the DataChannel (`webrtc-rs`) behind the same link interface the browser implements, and because the host advertises no `a=max-message-size`, every DataChannel frame is bounded at 65 536 bytes (§13.1).
 
-A hardened tier keeping keys and ratchet state outside the webview (`core-rs`, native and WASM) is roadmap, not the build (`RATIONALE.md`).
+The hardened tier is `core-rs`: a Rust implementation of §6–§7 (the handshake, the ratchet, the hybrid step) that the clients can run as a WASM module in place of the TypeScript engine (`?core=wasm`, `--core wasm`; the TypeScript engine is the default). Both produce and accept the same frames, and the known-answer vectors of §12 pin both. In the module, `EK`, the ML-KEM keys, `SK` and every ratchet key live in its linear memory and are zeroed there; the identity key's one DH per handshake stays with the identity backend. The native form in the Tauri host, which would put those keys outside the webview altogether, is roadmap (`RATIONALE.md`).
 
 ### 3.3 No application server
 

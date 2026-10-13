@@ -51,12 +51,17 @@ const APP_URL = process.env.APP_URL ?? `http://127.0.0.1:${LOCAL_PORT}/?eh2=1&de
 // talking to a new one looks like; GOSSIP=1 puts both there (the old path).
 const withParam = (url: string, p: string) => `${url}${url.includes('?') ? '&' : '?'}${p}`
 const ALL_GOSSIP = !!process.env.GOSSIP && process.env.GOSSIP !== '0'
-const A_URL = ALL_GOSSIP ? withParam(APP_URL, 'light=0') : APP_URL
+// CORE=wasm puts both browsers on core-rs (eh2/wasm.ts): the handshake and the
+// ratchet in the WASM module, the same frames on the wire. CORE_B=wasm only B,
+// the mixed case a fleet in mid-rollout looks like.
+const CORE_WASM = process.env.CORE === 'wasm'
+const CORE_B_WASM = CORE_WASM || process.env.CORE_B === 'wasm'
+const A_URL = withParam(ALL_GOSSIP ? withParam(APP_URL, 'light=0') : APP_URL, CORE_WASM ? 'core=wasm' : 'core=ts')
 // B_APP_URL: browser B on ANOTHER build (serve an old tag's web/dist on a
 // second port) - what a tab left open over a release looks like to a peer
 // that already reloaded. Only the opening scenarios mean anything then.
 const B_APP = process.env.B_APP_URL ?? APP_URL
-const B_BASE = ALL_GOSSIP || (process.env.GOSSIP_B && process.env.GOSSIP_B !== '0') ? withParam(B_APP, 'light=0') : B_APP
+const B_BASE = withParam(ALL_GOSSIP || (process.env.GOSSIP_B && process.env.GOSSIP_B !== '0') ? withParam(B_APP, 'light=0') : B_APP, CORE_B_WASM ? 'core=wasm' : 'core=ts')
 // B always runs the wire dump (`?debug=2`): the route scenario reads it back as
 // the evidence that what crossed each plane was ciphertext. A later `debug=2`
 // in the query wins over the harness's `debug=1`.

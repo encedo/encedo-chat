@@ -1011,6 +1011,43 @@ on the one transport, **not** twenty handshakes.
   (4), the live `npm run presence-test` (presence-only visibility → upgrade), and
   exercised on login by `browser-test`.
 
+### core-rs — the same EH-2 + ratchet in Rust, as a WASM module (since 0.7.19)
+
+`/core-rs` is a Rust crate implementing SPEC.md §6–§7 (wire, handshake,
+ratchet with the hybrid step) with RustCrypto (`x25519-dalek`, `ml-kem`,
+`aes-gcm`, `hkdf`, `hmac`, `sha2`); its tests (`cargo test` in `core-rs/`)
+reproduce `docs/kat/eh2-handshake-mlkem.json` and `docs/kat/ratchet-hybrid.json`
+byte for byte. `core-rs/build.sh` builds it to **`impl/core-wasm/core.wasm`
+(140 KB, COMMITTED)**; `eh2/wasm.ts` loads it and offers the same
+`Eh2Handshake`/`Session` contracts as `eh2/establish.ts`; `setCoreBackend('wasm')`
+(`?core=wasm` in the web app, `--core wasm` in the CLI) routes every new
+handshake to it. `test/eh2-wasm.test.ts` pins TS<->WASM interop in both roles,
+through a hybrid step and out of order. The TS engine is the default.
+
+Things that will bite:
+
+- **The module is a committed artifact, and CI rebuilds it** (`ci.yml`, job
+  `core-rs`): any change under `core-rs/src` must be followed by
+  `./core-rs/build.sh` and a commit of the new `core.wasm`, or CI fails on
+  the byte comparison. The toolchain is pinned in `core-rs/rust-toolchain.toml`
+  (rustup installs it by itself); the build is deterministic on that pin.
+- **CSP needs `'wasm-unsafe-eval'`** in `script-src` (index.html) or
+  `WebAssembly.instantiate` is refused with a CompileError that reads like a
+  broken file. It allows WASM compilation only, not `eval`.
+- **No wasm-bindgen.** The ABI is flat C (`core-rs/src/ffi.rs`): `ec_alloc`/
+  `ec_free` for inputs, one per-call output buffer (`ec_out_ptr/len`), a
+  negative return + `ec_err_ptr/len` for errors, handles for state. The host
+  supplies randomness (`env.random_fill`) and **the identity key's one DH per
+  handshake** (`ec_hs_peer_ek` / `ec_hs_respond` say which public key to DH
+  against; the 32 bytes go back in). Re-create memory views after every call:
+  memory can grow.
+- **A KAT with an injected KEM runs the TS path** whatever the switch
+  (`startHandshake` with `opts.kem` set): the module draws its own randomness.
+- **What it buys, honestly:** ephemeral keys and ratchet state out of the JS
+  heap and zeroed deterministically. Not a boundary against a compromised
+  page (WASM memory is a JS object of the same realm). The boundary is stage 2:
+  the same crate native in the Tauri host.
+
 ### Content crypto — EH-2 only (the interim box is gone)
 
 - The interim static-AES-GCM box (`lib/msgcrypto.ts`, `interimSession`, `?eh2=0`

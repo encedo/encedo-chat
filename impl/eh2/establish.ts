@@ -63,7 +63,25 @@ export function isHandshakeFrame(frame: Uint8Array): boolean {
   return frame.length > 2 && (frame[0] === T_MSG1 || frame[0] === T_MSG2 || frame[0] === T_MSG3)
 }
 
+/**
+ * Which engine computes the handshake and the ratchet: this TypeScript one, or
+ * core-rs in WASM (eh2/wasm.ts) with every ephemeral key outside the JS heap.
+ * One switch for the whole process, set by the front-end (`?core=wasm`,
+ * `--core wasm`) before any room opens; the frames are identical either way,
+ * so the peer does not know and does not care.
+ */
+export type CoreBackend = 'ts' | 'wasm'
+let backend: CoreBackend = 'ts'
+export function setCoreBackend(b: CoreBackend): void { backend = b }
+export function coreBackend(): CoreBackend { return backend }
+
 export async function startHandshake(opts: StartOpts): Promise<Eh2Handshake> {
+  // A KEM injected for a known-answer test is the TS engine's seam; the module
+  // has its own randomness, so such a test runs the TS path whatever the switch.
+  if (backend === 'wasm' && !opts.kem) {
+    const { startHandshakeWasm } = await import('./wasm.ts')
+    return startHandshakeWasm(opts)
+  }
   const kem = opts.kem ?? mlkem768
   const now = opts.now
   let authenticated = false
