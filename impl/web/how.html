@@ -231,12 +231,15 @@
     <div class="col">
       <p>The session key is not used to encrypt anything. It seeds a ratchet: a
         chain that steps forward for every message and, periodically, mixes in a
-        fresh Diffie&ndash;Hellman from both sides. Each message is sealed under a
-        key derived once and then thrown away.</p>
+        fresh exchange from both sides &mdash; a Diffie&ndash;Hellman, and every
+        so often a post-quantum key alongside it, the same hybrid the handshake
+        uses. Each message is sealed under a key derived once and then thrown away.</p>
       <p>The consequence is the point. Compromise a device now and you get what it
         currently holds. You do not get last week, because those keys are gone and
         cannot be recomputed. You do not get next week either, because the next
-        exchange heals the chain past the point you saw.</p>
+        exchange heals the chain past the point you saw &mdash; and because that
+        exchange is post-quantum too, a future quantum attacker who captured the
+        chain is locked out at the next mix, not merely at the next full handshake.</p>
     </div>
 
     <figure>
