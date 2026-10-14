@@ -268,6 +268,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Zmień nazwę tożsamości': 'Rename this identity',
     'Zmieni się u Ciebie i w nowych zaproszeniach. Kontakty, które już Cię mają, dalej widzą nazwę, którą sami Ci nadali.': 'It changes here and in invites sent from now on. Contacts who already have you go on seeing the name they gave you themselves.',
     'Potwierdź hasłem': 'Confirm with your password',
+    'Kontakty i grupy tego profilu są zapisane pod jego kluczem, a klucz jest zamknięty jego hasłem. Bez hasła usunie je tylko Wipeout.': 'This profile\'s contacts and groups are stored under its key, and the key is locked by its password. Without the password only Wipeout removes them.',
+    'Ta tożsamość już tu jest, pod inną nazwą — nie nadpiszę jej': 'This identity is already here under another name — I will not overwrite it',
     'Nazwa siedzi w zapieczętowanym profilu, więc zmiana wymaga hasła.': 'The name lives inside the sealed profile, so changing it needs the password.',
     'Nazwa jest za długa — limit to {n} bajtów': 'That name is too long — the limit is {n} bytes',
     'Profil o tej nazwie już tu jest — wybierz inną.': 'A profile with that name is already here — pick another.',

@@ -3557,6 +3557,63 @@ async function main() {
     }
     step('renamed, same key, same fingerprint, and no per-identity record moved with it')
 
+    // ---- deleting a profile takes its state with it --------------------------
+    // Everything an identity owns hangs off its KID, and "Usun profil" used to
+    // remove `prefix + NAME` - which matched nothing but the sealed blob, so the
+    // contact book, groups, invites and pins stayed behind for good. The profile
+    // deleted here is NOT the open one, the case that needs its password.
+    scenario('deleting a profile takes everything under its key, and only that')
+    const victimKid = await B.eval<string>(`
+      const k = Object.keys(localStorage).find((k) => /^ec-gcache-emp-[0-9a-f]{32}$/.test(k));
+      return k ? k.slice('ec-gcache-emp-'.length) : '';`)
+    if (!victimKid) throw new Error('precondition: the renamed profile has no KID-keyed state')
+    // Stand-ins for what a lived-in profile holds; the rule under test is "by KID".
+    await B.eval(`
+      localStorage.setItem('ec-pins-${victimKid}-somebody', 'x');
+      localStorage.setItem('ec-gcache-${victimKid}-00112233445566778899aabbccddeeff', 'x');
+      return 1;`)
+    await B.eval(`location.reload(); return 1`).catch(() => {})
+    await B.waitFor('B back at the login form', `return !!document.getElementById('go-soft') && document.getElementById('app').hidden`, 15_000)
+    const second = await createProfile('drugi-profil')
+    if (!second.entered) throw new Error(`the second profile was not created: ${JSON.stringify(second)}`)
+    const keptKeys = await B.eval<string[]>(`
+      return Object.keys(localStorage).filter((k) => k.startsWith('ec-') && !k.includes('${victimKid}') && k !== 'ec-soft-id-nowa-nazwa').sort()`)
+    const deleteVictim = async (pass: string) => {
+      await B.eval(`if (!document.getElementById('drawer').classList.contains('open')) document.getElementById('btn-settings').click(); return 1`)
+      await B.waitFor('the profile list', `
+        return [...document.querySelectorAll('#profiles-list .prof-row')].some((r) => r.querySelector('.p-name').textContent === 'nowa-nazwa')`, 10_000)
+      await B.eval(`
+        const row = [...document.querySelectorAll('#profiles-list .prof-row')].find((r) => r.querySelector('.p-name').textContent === 'nowa-nazwa');
+        row.querySelector('.p-del').click(); return 1;`)
+      await B.waitFor('the confirmation', `return document.getElementById('ask-modal')?.classList.contains('open')`, 5_000)
+      await B.eval(`document.getElementById('ask-yes').click(); return 1`)
+      await B.waitFor('the password window', `
+        return document.getElementById('rename-modal').classList.contains('open')
+          && document.getElementById('rename-input').type === 'password';`, 10_000)
+      await B.eval(`
+        document.getElementById('rename-input').value = ${'PLACEHOLDER_PASS'};
+        document.getElementById('rename-save').click();
+        return 1;`.replace('PLACEHOLDER_PASS', JSON.stringify(pass)))
+      await sleep(2000)
+      return B.eval<any>(`return {
+        victim: Object.keys(localStorage).filter((k) => k.includes('${victimKid}') || k === 'ec-soft-id-nowa-nazwa'),
+        kept: Object.keys(localStorage).filter((k) => k.startsWith('ec-') && !k.includes('${victimKid}') && k !== 'ec-soft-id-nowa-nazwa').sort(),
+        signedIn: !document.getElementById('app').hidden,
+      }`)
+    }
+    const wrong = await deleteVictim('to-nie-jest-haslo')
+    if (!wrong.victim.includes('ec-soft-id-nowa-nazwa') || wrong.victim.length < 4) {
+      throw new Error(`a wrong password deleted something anyway: ${JSON.stringify(wrong.victim)}`)
+    }
+    step('a wrong password deletes nothing')
+    const deleted = await deleteVictim(SOFT_PASS)
+    if (deleted.victim.length) throw new Error(`the deleted profile left ${deleted.victim.length} key(s) behind: ${deleted.victim.join(', ')}`)
+    if (deleted.kept.join('|') !== keptKeys.join('|')) {
+      throw new Error(`deleting one profile touched another: ${JSON.stringify(keptKeys)} -> ${JSON.stringify(deleted.kept)}`)
+    }
+    if (!deleted.signedIn) throw new Error('deleting another profile signed the open one out')
+    step('its sealed identity and every key under its KID are gone; the open profile is untouched')
+
     // ---- the published node list, fetched by its compiled-in CID -------------
     // LAST, on A, and only with a node to read from: it replaces the relay list
     // and re-dials, so anything after it would be running against production

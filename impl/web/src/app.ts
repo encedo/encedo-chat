@@ -18,7 +18,7 @@ import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { setCoreBackend, coreStatus, onCoreFallback, type CoreBackend } from '../../eh2/establish.ts'
 import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
-import { exportProfile, openBundle, applyBundle, conflictsWith, localKV, FILE_EXT, type KV } from '../../lib/migrate.ts'
+import { exportProfile, openBundle, applyBundle, conflictsWith, identityHere, keysOfProfile, localKV, FILE_EXT, type KV } from '../../lib/migrate.ts'
 import { decodeInvite, inviteLink, inviteFromPaste, type Invite } from '../../lib/invite.ts'
 import { pickFirst, orderFrom, nodeKey } from '../../lib/nodepick.ts'
 import jsQR from './vendor/jsqr.cjs'
@@ -3317,16 +3317,6 @@ $('scan-cancel').addEventListener('click', closeScan)
  */
 let activeSoftProfile = ''
 
-/**
- * Every localStorage namespace keyed by a profile's name.
- *
- * Deleting an identity has to take these with it. Contacts and group state
- * outliving the key that owned them would leave the names and public keys of
- * everyone that identity spoke to sitting under a prefix nobody owns any more —
- * and no way to reach them, since the identity that could is gone.
- */
-const PROFILE_KEYS = ['ec-soft-id-', 'ec-local-contacts-', 'ec-gcache-', 'ec-gcache-emp-', 'ec-groups-', 'ec-seen-']
-
 function listSoftProfiles(): string[] {
   const out: string[] = []
   for (let i = 0; i < localStorage.length; i++) {
@@ -3371,7 +3361,29 @@ async function removeProfile(name: string) {
       : tr('Znikną klucze tego profilu, jego kontakty i grupy. Nieodwracalne — klucza nie da się odtworzyć.'),
     tr('Usuń'))
   if (!ok) return
-  for (const p of PROFILE_KEYS) localStorage.removeItem(p + name)
+  // Deleting an identity has to take everything keyed by it: contacts and group
+  // state outliving the key that owned them leave the names and public keys of
+  // everyone it spoke to under a prefix nobody can open or remove any more. That
+  // state hangs off the KID, and the KID of a profile that is not open is inside
+  // its seal - so deleting one costs its password. Without it, Wipeout.
+  let kid = self ? session?.idKey ?? '' : ''
+  if (!kid) {
+    const blob = JSON.parse(localStorage.getItem(softKey(name)) ?? 'null')
+    if (isSealedProfile(blob)) {
+      const pw = await promptName(tr('Potwierdź hasłem'),
+        tr('Kontakty i grupy tego profilu są zapisane pod jego kluczem, a klucz jest zamknięty jego hasłem. Bez hasła usunie je tylko Wipeout.'), '', tr('Hasło'), true)
+      if (pw === null) return
+      try {
+        const plain = await unseal(pw, blob)
+        kid = await identityKey((await browserSoftwareIdentity(name, () => plain, () => {})).pub)
+      } catch (e: any) {
+        toast(e instanceof BadPassword ? tr('Złe hasło.') : tr('Błąd tożsamości software: ') + (e?.message ?? e))
+        return
+      }
+    }
+  }
+  // A profile in the pre-password format has no KID to find; only its blob goes.
+  for (const k of kid ? keysOfProfile(localKV(), name, kid) : [softKey(name)]) localStorage.removeItem(k)
   if (localStorage.getItem(LAST_PROFILE) === name) localStorage.removeItem(LAST_PROFILE)
   // Deleting the identity you are holding leaves a session with nothing behind
   // it — reload rather than let the app run on a key that no longer exists.
@@ -6290,6 +6302,7 @@ async function runImport(password: string): Promise<string> {
   // Refused, never merged and never overwritten: what would be overwritten is
   // an identity, and one wrong click would end every conversation it has.
   if (clash) throw new Error(tr('Profil o nazwie „{name}” już tu jest — nie nadpiszę go', { name: clash }))
+  if (identityHere(localKV(), bundle)) throw new Error(tr('Ta tożsamość już tu jest, pod inną nazwą — nie nadpiszę jej'))
   applyBundle(localKV(), bundle)
   return bundle.name
 }

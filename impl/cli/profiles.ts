@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { browserSoftwareIdentity, type Identity } from '../lib/core.ts'
 import { seal, unseal, isSealedProfile } from '../lib/profile.ts'
 import { assessPassword, ENFORCE_MIN } from '../lib/passmeter.ts'
-import { exportProfile, openBundle, applyBundle, conflictsWith, type KV } from '../lib/migrate.ts'
+import { exportProfile, openBundle, applyBundle, conflictsWith, identityHere, type KV } from '../lib/migrate.ts'
 import { kidOf } from '../lib/descr.ts'
 
 export const softKey = (name: string) => 'ec-soft-id-' + name
@@ -62,5 +62,6 @@ export async function importProfileFile(kv: KV, path: string, password: string):
   const bundle = await openBundle(JSON.parse(readFileSync(path, 'utf8')), password)
   const clash = conflictsWith(kv, bundle)
   if (clash) throw new Error(`profil "${clash}" już tu jest - usuń go albo zmień nazwę przed importem`)
+  if (identityHere(kv, bundle)) throw new Error('ta tożsamość już tu jest, pod inną nazwą - nie nadpiszę jej')
   return { name: bundle.name, keys: applyBundle(kv, bundle) }
 }

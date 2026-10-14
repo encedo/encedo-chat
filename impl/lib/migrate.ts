@@ -122,6 +122,22 @@ export function collectProfile(store: KV, name: string, kid: string): Record<str
   return out
 }
 
+/**
+ * Everything a deleted profile leaves behind: its sealed identity and every key
+ * hanging off its KID - the same rule an export uses, so "what moves" and
+ * "what goes" cannot drift apart. Browser-level settings are not in it; they
+ * belong to the device, not the identity.
+ *
+ * Without the KID only the sealed identity can be found, and deleting just that
+ * is what the app used to do: the contact book, groups, invites and pins stayed
+ * behind under a prefix nobody could open or remove any more.
+ */
+export function keysOfProfile(store: KV, name: string, kid: string): string[] {
+  if (!/^[0-9a-f]{32}$/.test(kid)) throw new Error('not a KID: ' + kid)
+  const identity = 'ec-soft-id-' + name
+  return store.keys().filter((k) => k === identity || (k.startsWith('ec-') && k.includes(kid)))
+}
+
 /** Build the file. Throws if there is no identity to move — an export with no
  *  key in it is a file that looks like a rescue and is not one. */
 export async function exportProfile(
@@ -157,11 +173,24 @@ export function conflictsWith(store: KV, bundle: Bundle): string | null {
   return store.get(identity) !== null ? bundle.name : null
 }
 
+/**
+ * Is this IDENTITY already here, under whatever name?
+ *
+ * A rename makes it possible: export "Ala", rename the profile, import the file
+ * and no name clashes - while every key of the identity is written over with
+ * the older copy from the file, and two profiles end up sharing one KID, so
+ * deleting either takes the other's contacts. Refused like a name clash.
+ */
+export function identityHere(store: KV, bundle: Bundle): boolean {
+  return !!bundle.kid && store.keys().some((k) => k.startsWith('ec-') && k.includes(bundle.kid))
+}
+
 /** Write the profile in. Refuses on a conflict rather than trusting the caller
  *  to have asked. */
 export function applyBundle(store: KV, bundle: Bundle): number {
   const clash = conflictsWith(store, bundle)
   if (clash) throw new Error('a profile named ' + clash + ' is already here')
+  if (identityHere(store, bundle)) throw new Error('this identity is already here under another name')
   let n = 0
   for (const [k, v] of Object.entries(bundle.keys)) {
     if (!k.startsWith('ec-') || NOT_PORTABLE.includes(k)) continue // a file is not to be trusted about this

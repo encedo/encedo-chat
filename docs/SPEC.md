@@ -631,11 +631,11 @@ base = ECDH(IK_priv, emp_pub)          // one identity-backend call per session,
 
 The terminal client keeps the same records under the same keys in `~/.config/onchato/store.json` (mode 0600).
 
-**Lock vs wipe.** Sign-out keeps the cache. A wipeout deletes every `ec-*` key including `emp_pub`, after which the cached data is cryptographically dead.
+**Lock vs wipe.** Sign-out keeps the cache. A wipeout deletes every `ec-*` key including `emp_pub`, after which the cached data is cryptographically dead. Deleting one software profile deletes its sealed identity and every `ec-*` key carrying its KID, the same set an export takes minus the device-level settings; the KID of a profile that is not open is inside its seal, so deleting it takes its password, and without the password only a wipeout removes its state.
 
 **Connection diary (desktop shell).** The packaged desktop app, unless built with `EC_DIARY=0`, appends lifecycle lines with a wall clock to `connection.log` in its log directory (512 KiB, rotated once): link state, a contact's presence lighting or going dark (the contact named by the first 12 characters of its public key), rotation ticks, hidden/visible transitions. Lines are admitted by an allowlist of connection vocabulary; it never holds message text; it is plain; a wipeout removes it with its rotated half.
 
-**Profile export** (software identities): the whole profile — identity, contacts, groups, pins, the sealed stores and the plain preferences — as one blob (`.ocmig`, marker `onchato-migration`) sealed under the profile password. The owner's name is inside the seal; import refuses a name collision and verifies the source before writing; it is a move, not a copy. The file is offline-attackable: file plus guessed password is the identity.
+**Profile export** (software identities): the whole profile — identity, contacts, groups, pins, the sealed stores and the plain preferences — as one blob (`.ocmig`, marker `onchato-migration`) sealed under the profile password. The owner's name is inside the seal; import refuses a name collision, and an identity already present under another name (its KID found in any key), and verifies the source before writing; it is a move, not a copy. The file is offline-attackable: file plus guessed password is the identity.
 
 ---
 

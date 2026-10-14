@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  collectProfile, exportProfile, openBundle, applyBundle, conflictsWith,
+  collectProfile, exportProfile, openBundle, applyBundle, conflictsWith, keysOfProfile, identityHere,
   isMigrationFile, type KV,
 } from '../lib/migrate.ts'
 import { BadPassword } from '../lib/profile.ts'
@@ -105,4 +105,39 @@ test('a doctored file cannot write outside our own storage', async () => {
   applyBundle(target, bundle)
   assert.equal('evil' in target.data, false)
   assert.equal('ec-idkey-swept' in target.data, false)
+})
+
+test('deleting a profile takes everything under its KID, and nothing of anybody else', () => {
+  const A = '5954eb6d5a1dd906ec78fe9dae5645e3', B = '0123456789abcdef0123456789abcdef'
+  const store = kv({
+    'ec-soft-id-Ala': '{}', 'ec-soft-id-Ola': '{}',
+    [`ec-local-contacts-${A}`]: '[]', [`ec-local-contacts-${A}-signed`]: '1', [`ec-gcache-emp-${A}`]: 'pub',
+    [`ec-gcache-${A}-g1`]: 'x', [`ec-pins-${A}-peer`]: 'x', [`ec-invites-${A}`]: 'x', [`ec-waiting-${A}`]: 'x',
+    [`ec-ignored-${A}`]: 'x', [`ec-seen-${A}`]: 'x', [`ec-gleft-${A}`]: 'x', [`ec-prefs-${A}`]: 'x', [`ec-outbox-${A}`]: 'x',
+    [`ec-local-contacts-${B}`]: '[]', [`ec-gcache-emp-${B}`]: 'pub', [`ec-pins-${B}-peer`]: 'x',
+    'ec-lang': 'pl', 'ec-last-profile': 'Ala', 'ec-idkey-swept': '1',
+  })
+  const gone = keysOfProfile(store, 'Ala', A)
+  assert.equal(gone.length, 13, gone.join(' '))
+  assert.ok(gone.includes('ec-soft-id-Ala'))
+  for (const k of gone) assert.ok(k === 'ec-soft-id-Ala' || k.includes(A), k)
+  for (const k of ['ec-soft-id-Ola', `ec-local-contacts-${B}`, `ec-gcache-emp-${B}`, `ec-pins-${B}-peer`, 'ec-lang', 'ec-idkey-swept'])
+    assert.ok(!gone.includes(k), 'must stay: ' + k)
+})
+
+test('without a real KID nothing but a refusal comes back - an empty one would match every key', () => {
+  const store = kv({ 'ec-soft-id-Ala': '{}', 'ec-lang': 'pl' })
+  for (const bad of ['', 'a1b2', 'x'.repeat(32)]) assert.throws(() => keysOfProfile(store, 'Ala', bad), /not a KID/)
+})
+
+test('the same identity under a new name is refused, not written over its own state', async () => {
+  const file = await exportProfile(full(), 'Lab1', KID, PASS, 1_700_000_000_000)
+  const bundle = await openBundle(file, PASS)
+  // the profile was renamed after the export: no name clashes, the KID does
+  const here = kv({ 'ec-soft-id-Lab2': '{}', [`ec-local-contacts-${KID}`]: '[{"name":"nowsze"}]' })
+  assert.equal(conflictsWith(here, bundle), null)
+  assert.equal(identityHere(here, bundle), true)
+  assert.throws(() => applyBundle(here, bundle), /already here under another name/)
+  assert.equal(here.data[`ec-local-contacts-${KID}`], '[{"name":"nowsze"}]', 'the newer book is untouched')
+  assert.equal(identityHere(kv({ 'ec-lang': 'pl' }), bundle), false, 'an empty browser takes it')
 })
