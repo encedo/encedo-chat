@@ -19,6 +19,7 @@ import { Hub } from '../cli/hub.ts'
 import { Queue } from '../cli/queue.ts'
 import { serve, connectDaemon, ask } from '../cli/daemon.ts'
 import { cacheBaseOf } from '../lib/localbook.ts'
+import { namesFor } from '../lib/storenames.ts'
 import { identityKey } from '../cli/profiles.ts'
 import type { KV } from '../lib/migrate.ts'
 
@@ -41,12 +42,12 @@ let failed = false
 try {
   const ala = await browserSoftwareIdentity('ala', () => null, () => {})
   const bob = await browserSoftwareIdentity('bob', () => null, () => {})
-  const kv = memKV(), kid = await identityKey(ala.pub), base = await cacheBaseOf(ala, kid, kv)
+  const kv = memKV(), names = await namesFor(ala, await identityKey(ala.pub)), base = await cacheBaseOf(ala, names, kv)
   const logs: string[] = []
   async function daemon() {
     const hub = hubFor(ala, [{ name: 'bob', pub: bob.pub }])
     await hub.start()
-    const queue = new Queue({ hub, kv, base, kid, log: (m) => logs.push(m) })
+    const queue = new Queue({ hub, kv, base, names, log: (m) => logs.push(m) })
     await queue.load()
     const srv = await serve(hub, sockPath, () => {}, queue)
     return { hub, queue, srv, stop: async () => { queue.stop(); await queue.save(); srv.close(); await hub.close() } }
@@ -63,7 +64,7 @@ try {
   if (q1.length !== 3 || q1[0].merged !== 2 || q1[0].text !== 'login z 3.3.3.3') throw new Error('queue: ' + JSON.stringify(q1))
   step('offline: three "ssh" logins merge into one entry (+2), a plain one and a short-TTL one wait beside it')
 
-  if (kv.get('ec-outbox-' + kid)?.includes('login z')) throw new Error('the queue on disk is not sealed')
+  if (kv.get(names.fixed.outbox)?.includes('login z')) throw new Error('the queue on disk is not sealed')
   await D.stop(); await sleep(2500)
   D = await daemon()
   const q2 = (await req({ op: 'queue' })).entries

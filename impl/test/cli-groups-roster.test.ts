@@ -12,6 +12,7 @@
  * `Groups` is the same orchestration written for a terminal, and it is testable.
  */
 
+import { namesFromKey } from '../lib/storenames.ts'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateX25519 } from '../lib/x25519.ts'
@@ -36,7 +37,7 @@ async function client() {
   const room = { stop() {}, sendText: async () => 'id', sendReaction: async () => {}, sendFile: async () => 'id' } as any
   const session = { groups: mgr, openGroup: async () => room } as any
   const groups = new Groups({
-    session, me: id.pub, kv: memKV(), base: randomBytes(32), kid: id.pub.slice(0, 8),
+    session, me: id.pub, kv: memKV(), base: randomBytes(32), names: await namesFromKey(randomBytes(32), 'c'.repeat(32)),
     conv: async (pub) => ({ sendGroupSkd: (skd: SkdFields) => { sent.push({ to: pub, skd }) }, sendGroupSkdReq: () => {} }) as any,
     contacts: () => [],
     handlers: {},

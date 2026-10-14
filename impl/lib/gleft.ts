@@ -16,8 +16,7 @@
 
 import { SALTS } from './sealedstore.ts'
 
-export const LEFT_SALT = SALTS.left
-export const LEFT_PREFIX = 'ec-gleft-'
+export const LEFT_SALT = SALTS.gleft
 /** Enough for a lifetime of leaving; the oldest entries go first past it. */
 export const LEFT_MAX = 256
 

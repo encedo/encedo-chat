@@ -15,7 +15,8 @@
  *     has no ack, and one sent on a 1:1 that the distribution itself just
  *     opened can beat the handshake's msg3 to the member, who drops it;
  *   - state is sealed in the store under the app's keys and format
- *     (`ec-gcache-<kid>-<gidHex>`, {snap, name, owed} through lib/gcache.ts),
+ *     (`names.scoped('group', gidHex)` with the ids in the group index of
+ *     lib/storenames.ts, {snap, name, owed} through lib/gcache.ts),
  *     so a profile moved between the app and the terminal keeps its groups.
  * Sender keys ride the 1:1, so a member who is not one of our contacts cannot
  * be reached either way (the app says the same thing in its member list).
@@ -26,6 +27,7 @@ import type { GroupRoom } from '../lib/grouproom.ts'
 import type { MsgEnv, FileEnv, ReactionEnv } from '../lib/envelope.ts'
 import { clampGroupName } from '../lib/envelope.ts'
 import { sealCache, openCache } from '../lib/gcache.ts'
+import type { Names } from '../lib/storenames.ts'
 import { closeMentions } from '../lib/mentions.ts'
 import { OwedInvites } from '../web/src/groupview.ts'
 import type { KV } from '../lib/migrate.ts'
@@ -46,7 +48,7 @@ export interface GroupHandlers {
 }
 
 export class Groups {
-  private session: ClientSession; private me: string; private kv: KV; private base: Uint8Array | null; private kid: string
+  private session: ClientSession; private me: string; private kv: KV; private base: Uint8Array | null; private names: Names
   private conv: (pub: string) => Promise<Conversation | null>
   private contacts: () => Contact[]
   private h: GroupHandlers
@@ -54,13 +56,13 @@ export class Groups {
   private infos = new Map<string, GroupInfo>()
 
   constructor(o: {
-    session: ClientSession; me: string; kv: KV; base: Uint8Array | null; kid: string
+    session: ClientSession; me: string; kv: KV; base: Uint8Array | null; names: Names
     /** The 1:1 with a member, opened if they are a contact; null otherwise. */
     conv: (pub: string) => Promise<Conversation | null>
     contacts: () => Contact[]
     handlers: GroupHandlers
   }) {
-    this.session = o.session; this.me = o.me; this.kv = o.kv; this.base = o.base; this.kid = o.kid
+    this.session = o.session; this.me = o.me; this.kv = o.kv; this.base = o.base; this.names = o.names
     this.conv = o.conv; this.contacts = o.contacts; this.h = o.handlers
   }
 
@@ -68,7 +70,6 @@ export class Groups {
   get(gid: string) { return this.infos.get(gid) }
   isAdmin(g: GroupInfo) { return g.members[0] === this.me }
   private log(m: string) { this.h.log?.(m) }
-  private prefix() { return 'ec-gcache-' + this.kid + '-' }
 
   private async open(g: GroupInfo) {
     g.room?.stop()
@@ -84,10 +85,10 @@ export class Groups {
   /** Bring every group back from the sealed cache. */
   async restore() {
     if (!this.base) return
-    for (const k of this.kv.keys()) {
-      if (!k.startsWith(this.prefix())) continue
-      const gid = k.slice(this.prefix().length)
-      const pt = await openCache(this.base, gid, this.kv.get(k)!)
+    for (const gid of await this.names.groups(this.kv)) {
+      const blob = this.kv.get(await this.names.scoped('group', gid))
+      if (!blob) continue
+      const pt = await openCache(this.base, gid, blob)
       if (!pt) { this.log(`grupa ${gid.slice(0, 8)}…: nie da się otworzyć zapisu`); continue }
       let parsed: any; try { parsed = JSON.parse(td.decode(pt)) } catch { continue }
       try {
@@ -123,8 +124,9 @@ export class Groups {
       const gid = this.session.groups.gidHexOf(unb64((snap as any).gid))
       const g = this.infos.get(gid); if (!g) continue
       const blob = await sealCache(this.base, gid, te.encode(JSON.stringify({ snap, name: g.name, owed: this.owed.toJSON(gid) })))
-      this.kv.set(this.prefix() + gid, blob)
+      this.kv.set(await this.names.scoped('group', gid), blob)
     }
+    await this.names.setGroups(this.kv, [...await this.names.groups(this.kv), ...this.infos.keys()])
   }
 
   /** Hand my sender key for `g` to every member (or to `only`), over the 1:1. */

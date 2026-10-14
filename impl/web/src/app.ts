@@ -84,9 +84,10 @@ import {
 import { enableProtoLog } from '../../lib/protolog.ts'
 import { cachePubKeys, traceHem } from '../../lib/hemwrap.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
-import { sealPins, openPins, pinsName, migrateLegacyPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../../lib/pincache.ts'
-import { readSealedKV, writeSealedKV, sealPlainStores, SALTS } from '../../lib/sealedstore.ts'
-import { markLeft, unmarkLeft, leftCovers, isLeftMap, LEFT_SALT, LEFT_PREFIX, type LeftMap } from '../../lib/gleft.ts'
+import { sealPins, openPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../../lib/pincache.ts'
+import { readSealedKV, writeSealedKV, sealPlainStores, type Store } from '../../lib/sealedstore.ts'
+import { namesFor, migrateToNames, type Names } from '../../lib/storenames.ts'
+import { markLeft, unmarkLeft, leftCovers, isLeftMap, type LeftMap } from '../../lib/gleft.ts'
 import { loadPrefs, savePrefs, type Prefs } from '../../lib/prefs.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
@@ -747,13 +748,14 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   const renameOnHem = hemRenameIdentity(hem, id.kid)
   renameIdentity = async (next: string) => { await renameOnHem(next); return true }
   const idKey = await identityKey(pubkey, id.kid)
-  const local = await makeLocalBook(idKey, localStorage, hemId)
+  const names = await openNames(hemId, idKey)
+  const local = await makeLocalBook(names, localStorage, hemId)
   if (local.verdict === 'tampered') warnTampered()
-  await loadSeen(idKey, await cacheBaseFor(hemId, idKey)) // per identity, sealed; the base is already cached by the book's open
-  await loadLeft(idKey, await cacheBaseFor(hemId, idKey))
-  await loadPrefsFor(idKey, await cacheBaseFor(hemId, idKey))
-  await movePinNames(idKey, await cacheBaseFor(hemId, idKey))
-  await sealPlainStores(localKV(), await cacheBaseFor(hemId, idKey), idKey, (m) => ecLog(m, 'debug'))
+  const base = await cacheBaseFor(hemId, names) // per identity, sealed; the base is already cached by the book's open
+  await loadSeen(names, base)
+  await loadLeft(names, base)
+  await loadPrefsFor(names, base)
+  await sealPlainStores(localKV(), base, names, (m) => ecLog(m, 'debug'))
   await enterApp(
     hemId,
     mergedContactBook(hemContactBook(hem, id.kid), local.verdict === 'tampered' ? taintedBook() : local.book),
@@ -1220,13 +1222,14 @@ async function softLogin() {
     rememberMethod('soft')
     localStorage.setItem(LAST_PROFILE, name)
     const idKey2 = await identityKey(id.pub)
-    const local = await makeLocalBook(idKey2, localStorage, id)
+    const names = await openNames(id, idKey2)
+    const local = await makeLocalBook(names, localStorage, id)
     if (local.verdict === 'tampered') warnTampered()
-    await loadSeen(idKey2, await cacheBaseFor(id, idKey2))
-    await loadLeft(idKey2, await cacheBaseFor(id, idKey2))
-    await loadPrefsFor(idKey2, await cacheBaseFor(id, idKey2))
-    await movePinNames(idKey2, await cacheBaseFor(id, idKey2))
-    await sealPlainStores(localKV(), await cacheBaseFor(id, idKey2), idKey2, (m) => ecLog(m, 'debug'))
+    const base = await cacheBaseFor(id, names)
+    await loadSeen(names, base)
+    await loadLeft(names, base)
+    await loadPrefsFor(names, base)
+    await sealPlainStores(localKV(), base, names, (m) => ecLog(m, 'debug'))
     await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
@@ -1415,13 +1418,13 @@ $('nodes-toggle').addEventListener('click', () => {
  *               is evidence, and overwriting it with an empty sealed book
  *               would destroy both the evidence and the contacts.
  */
-async function makeLocalBook(idKey: string, storage: Storage, id: Identity): Promise<{ book: ContactBook; verdict: Verdict }> {
+async function makeLocalBook(names: Names, storage: Storage, id: Identity): Promise<{ book: ContactBook; verdict: Verdict }> {
   // The book itself lives in lib/localbook.ts, shared with the CLI, so a profile
   // carried between the two opens with the same contacts and the same verdict.
   // The §10 secret is computed here once per session (cacheBaseFor caches it):
   // on a HEM one ECDH is a device round trip.
   const kv: KV = { keys: () => Object.keys(storage), get: (k) => storage.getItem(k), set: (k, v) => storage.setItem(k, v) }
-  return openLocalBook(idKey, kv, await cacheBaseFor(id, idKey), (m) => ecLog(m, 'debug'))
+  return openLocalBook(names, kv, await cacheBaseFor(id, names), (m) => ecLog(m, 'debug'))
 }
 
 /**
@@ -1802,29 +1805,24 @@ document.addEventListener('click', (e) => {
  * for what the states mean and why the app refuses to guess between "switched
  * off" and "holding the wrong key".
  */
-const SEEN_PREFIX = 'ec-seen-'
 /** Sealed on the §10 schedule like the invite stores (lib/localstore.ts):
  *  who you talk to and when you last heard them is metadata this product
  *  exists to keep off a disk, and it used to sit here as plain JSON
  *  (audit 2026-10-11, 1.3). */
-const SEEN_SALT = SALTS.seen
 let seenMap: Record<string, Seen> = {}
-let seenKey = ''
-let seenIdKey = ''
+let seenNames: Names | null = null
 let seenBase: Uint8Array | null = null
 
 /** Read the record for this identity; a pre-seal plain record is accepted
- *  once and re-sealed on the spot, exactly as the invite stores migrate. */
-async function loadSeen(idKey: string, base: Uint8Array | null) {
-  seenKey = SEEN_PREFIX + idKey; seenIdKey = idKey; seenBase = base
-  const raw = localStorage.getItem(seenKey)
-  const v = await readSealedKV<Record<string, Seen>>(localKV(), base, idKey, seenKey, SEEN_SALT,
+ *  once and sealed at sign-in (sealPlainStores), like every sealed store. */
+async function loadSeen(names: Names, base: Uint8Array | null) {
+  seenNames = names; seenBase = base
+  const v = await readSealedKV<Record<string, Seen>>(localKV(), base, names, 'seen',
     (x) => !!x && typeof x === 'object' && !Array.isArray(x), (m) => ecLog(m, 'debug'))
   seenMap = v ?? {}
-  if (v && raw && raw.trimStart().startsWith('{')) saveSeen() // plain JSON from an older build: seal it now
 }
 /** No base, no write (lib/sealedstore.ts): the record then lives in RAM for the session. */
-const saveSeen = () => { if (seenKey) void writeSealedKV(localKV(), seenBase, seenIdKey, seenKey, SEEN_SALT, seenMap, (m) => ecLog(m, 'debug')) }
+const saveSeen = () => { if (seenNames) void writeSealedKV(localKV(), seenBase, seenNames, 'seen', seenMap, (m) => ecLog(m, 'debug')) }
 
 /**
  * Groups this identity left, with the epoch it left at (lib/gleft.ts): sealed
@@ -1833,21 +1831,21 @@ const saveSeen = () => { if (seenKey) void writeSealedKV(localKV(), seenBase, se
  * later, the admin's own re-send - does not quietly put the group back.
  */
 let leftMap: LeftMap = {}
-let leftKey = '', leftIdKey = '', leftBase: Uint8Array | null = null
-async function loadLeft(idKey: string, base: Uint8Array | null) {
-  leftKey = LEFT_PREFIX + idKey; leftIdKey = idKey; leftBase = base
-  leftMap = (await readSealedKV<LeftMap>(localKV(), base, idKey, leftKey, LEFT_SALT, isLeftMap, (m) => ecLog(m, 'debug'))) ?? {}
+let leftNames: Names | null = null, leftBase: Uint8Array | null = null
+async function loadLeft(names: Names, base: Uint8Array | null) {
+  leftNames = names; leftBase = base
+  leftMap = (await readSealedKV<LeftMap>(localKV(), base, names, 'gleft', isLeftMap, (m) => ecLog(m, 'debug'))) ?? {}
 }
-const saveLeft = () => { if (leftKey) void writeSealedKV(localKV(), leftBase, leftIdKey, leftKey, LEFT_SALT, leftMap, (m) => ecLog(m, 'debug')) }
+const saveLeft = () => { if (leftNames) void writeSealedKV(localKV(), leftBase, leftNames, 'gleft', leftMap, (m) => ecLog(m, 'debug')) }
 
 /** The identity's preferences (lib/prefs.ts): one sealed blob, read at sign-in beside `seen`. */
 let prefs: Prefs = {}
-let prefsIdKey = '', prefsBase: Uint8Array | null = null
-async function loadPrefsFor(idKey: string, base: Uint8Array | null) {
-  prefsIdKey = idKey; prefsBase = base
-  prefs = await loadPrefs(localKV(), base, idKey, (m) => ecLog(m, 'debug'))
+let prefsNames: Names | null = null, prefsBase: Uint8Array | null = null
+async function loadPrefsFor(names: Names, base: Uint8Array | null) {
+  prefsNames = names; prefsBase = base
+  prefs = await loadPrefs(localKV(), base, names, (m) => ecLog(m, 'debug'))
 }
-const persistPrefs = () => { if (prefsIdKey) void savePrefs(localKV(), prefsBase, prefsIdKey, prefs, (m) => ecLog(m, 'debug')) }
+const persistPrefs = () => { if (prefsNames) void savePrefs(localKV(), prefsBase, prefsNames, prefs, (m) => ecLog(m, 'debug')) }
 
 /** They announced: they are here, and they hold our key. */
 function markSeen(pub: string, at = nowMs()) {
@@ -3372,6 +3370,7 @@ async function removeProfile(name: string) {
   // state hangs off the KID, and the KID of a profile that is not open is inside
   // its seal - so deleting one costs its password. Without it, Wipeout.
   let kid = self ? session?.idKey ?? '' : ''
+  let prefix = self ? storeNames?.prefix ?? '' : ''
   if (!kid) {
     const blob = JSON.parse(localStorage.getItem(softKey(name)) ?? 'null')
     if (isSealedProfile(blob)) {
@@ -3380,7 +3379,9 @@ async function removeProfile(name: string) {
       if (pw === null) return
       try {
         const plain = await unseal(pw, blob)
-        kid = await identityKey((await browserSoftwareIdentity(name, () => plain, () => {})).pub)
+        const victim = await browserSoftwareIdentity(name, () => plain, () => {})
+        kid = await identityKey(victim.pub)
+        prefix = (await namesFor(victim, kid)).prefix
       } catch (e: any) {
         toast(e instanceof BadPassword ? tr('Złe hasło.') : tr('Błąd tożsamości software: ') + (e?.message ?? e))
         return
@@ -3388,7 +3389,7 @@ async function removeProfile(name: string) {
     }
   }
   // A profile in the pre-password format has no KID to find; only its blob goes.
-  for (const k of kid ? keysOfProfile(localKV(), name, kid) : [softKey(name)]) localStorage.removeItem(k)
+  for (const k of kid ? keysOfProfile(localKV(), name, kid, prefix) : [softKey(name)]) localStorage.removeItem(k)
   if (localStorage.getItem(LAST_PROFILE) === name) localStorage.removeItem(LAST_PROFILE)
   // Deleting the identity you are holding leaves a session with nothing behind
   // it — reload rather than let the app run on a key that no longer exists.
@@ -4340,15 +4341,12 @@ for (const [tab, pane] of TABS) {
 /** `key` is the invite's `k` - what the knock is sealed to. A record without
  *  one is from before knocks were sealed to it and is not knocked on. */
 interface Waiting { inbox: string; key?: string; name: string; since: number; note?: string }
-const waitingKey = () => 'ec-waiting-' + (session?.idKey ?? '')
 let waiting = new Map<string, Waiting>()
 let knockTimer: any = null
 /** When each contact was last knocked by hand (the CZEKAM badge), to throttle presses. */
 const manualKnockAt = new Map<string, number>()
 /** Under a minute would be rude to the relay; over a few makes a Source wait. */
 const KNOCK_EVERY_MS = 90_000
-
-const WAITING_SALT = SALTS.waiting
 
 /**
  * Read a store that may still be in the plain JSON this app wrote before §10
@@ -4360,20 +4358,21 @@ const WAITING_SALT = SALTS.waiting
  * A sealed blob is base64 of iv||ct and never parses as JSON, so the two
  * formats tell themselves apart without a version byte or a second key.
  */
-async function readSealed<T>(key: string, salt: string, isMine: (v: any) => boolean): Promise<T | null> {
+async function readSealed<T>(store: Store, isMine: (v: any) => boolean): Promise<T | null> {
   // lib/sealedstore.ts, shared with the CLI: a profile carried between the two
   // keeps listening on the same invites.
-  if (!localStorage.getItem(key)) return null
-  return readSealedKV<T>(localKV(), await ensureCacheBase(), session?.idKey ?? '', key, salt, isMine, (m) => ecLog(m, 'debug'))
+  if (!storeNames || !localStorage.getItem(storeNames.fixed[store])) return null
+  return readSealedKV<T>(localKV(), await ensureCacheBase(), storeNames, store, isMine, (m) => ecLog(m, 'debug'))
 }
 
-async function writeSealed(key: string, salt: string, value: unknown): Promise<void> {
+async function writeSealed(store: Store, value: unknown): Promise<void> {
   // No base, no write (inside): the record stays in memory and the log says why.
-  await writeSealedKV(localKV(), await ensureCacheBase(), session?.idKey ?? '', key, salt, value, (m) => ecLog(m, 'debug'))
+  if (!storeNames) return
+  await writeSealedKV(localKV(), await ensureCacheBase(), storeNames, store, value, (m) => ecLog(m, 'debug'))
 }
 
 async function loadWaiting() {
-  const v = await readSealed<any[]>(waitingKey(), WAITING_SALT, Array.isArray)
+  const v = await readSealed<any[]>('waiting', Array.isArray)
   waiting = new Map(Array.isArray(v) ? v : [])
   // A knock sealed to the identity key is opened by nobody since knocks are
   // sealed to the invite's key; such a record would say CZEKAM forever.
@@ -4382,7 +4381,7 @@ async function loadWaiting() {
   if (stale.length) ecLog(`knock: dropped ${stale.length} waiting record(s) from links without an invite key`)
   if (v) void saveWaiting()   // re-seals a plain list the moment it is read
 }
-function saveWaiting() { void writeSealed(waitingKey(), WAITING_SALT, [...waiting]) }
+function saveWaiting() { void writeSealed('waiting', [...waiting]) }
 
 async function knockOnce(pub: string, w: Waiting) {
   if (!client || !session) return
@@ -4473,8 +4472,6 @@ interface PendingKnock { ik: string; name: string; note: string; at: number; inv
  * says so rather than implying a block list that is not there.
  */
 const IGNORED_MAX = 512
-const IGNORED_SALT = SALTS.ignored
-const ignoredKey = () => 'ec-ignored-' + (session?.idKey ?? '')
 
 /**
  * Two fields and no more (the user's call): the FINGERPRINT of the key, and
@@ -4493,12 +4490,12 @@ let ignoredReady: Promise<void> | null = null
 
 function loadIgnored(): Promise<void> {
   if (!ignoredReady) ignoredReady = (async () => {
-    const v = await readSealed<Ignored[]>(ignoredKey(), IGNORED_SALT, Array.isArray)
+    const v = await readSealed<Ignored[]>('ignored', Array.isArray)
     ignored = Array.isArray(v) ? v.filter((r) => r && typeof r.fp === 'string') : []
   })()
   return ignoredReady
 }
-function saveIgnored() { void writeSealed(ignoredKey(), IGNORED_SALT, ignored) }
+function saveIgnored() { void writeSealed('ignored', ignored) }
 
 async function ignoreKnock(ik: string) {
   const fp = await fingerprint(ik)
@@ -4588,12 +4585,10 @@ const inviteExpired = (inv: PubInvite) => !!inv.expires && nowMs() >= inv.expire
 const inviteWhen = (t: number) => new Date(t).toLocaleString(getLocale() === 'en' ? 'en-GB' : 'pl-PL',
   { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 
-const invitesKey = () => 'ec-invites-' + (session?.idKey ?? '')
 let pubInvites: PubInvite[] = []
 let pendingKnocks: PendingKnock[] = []
 const inboxWatches = new Map<string, { stop(): void }>()
 
-const INVITES_SALT = SALTS.invites
 
 /**
  * Loaded ONCE per session, then memory is the truth. Re-reading on every call
@@ -4603,13 +4598,13 @@ const INVITES_SALT = SALTS.invites
 let invitesReady: Promise<void> | null = null
 function loadInvites(): Promise<void> {
   if (!invitesReady) invitesReady = (async () => {
-    const v = await readSealed<PubInvite[]>(invitesKey(), INVITES_SALT, Array.isArray)
+    const v = await readSealed<PubInvite[]>('invites', Array.isArray)
     pubInvites = Array.isArray(v) ? v : []
-    if (v) void writeSealed(invitesKey(), INVITES_SALT, pubInvites)
+    if (v) void writeSealed('invites', pubInvites)
   })()
   return invitesReady
 }
-function saveInvites() { void writeSealed(invitesKey(), INVITES_SALT, pubInvites) }
+function saveInvites() { void writeSealed('invites', pubInvites) }
 
 /** The button only exists when there is something behind it. */
 function paintIgnoredButton() {
@@ -5814,21 +5809,12 @@ const roomPins = (roomId: string | null): Pin[] => (roomId ? pins.get(roomId) ??
 const isPinned = (id: string): boolean => roomPins(pinRoomId()).some((p) => p.id === id)
 const activeLog = (): Ev[] | null => (activeGid ? groupsUI.get(activeGid)?.log ?? null : activeRoom()?.log ?? null)
 
-/** Pins stored under the old name, which carried the room id (a contact's key) in the clear. */
-async function movePinNames(idKey: string, base: Uint8Array | null) {
-  if (!base) return
-  try {
-    const n = await migrateLegacyPins(localKV(), base, idKey)
-    if (n) ecLog(`pins: moved ${n} room(s) to keyed names`, 'debug')
-  } catch (e: any) { ecLog('pins: rename failed - ' + (e?.message ?? e)) }
-}
-
 /** Read a room's pins once per page-load and put them at the head of its log. */
 async function loadPins(roomId: string, log: Ev[]) {
   if (pinsLoaded.has(roomId)) return
   pinsLoaded.add(roomId) // claimed BEFORE the awaits: two fast entries must not both read
-  const base = await ensureCacheBase(); if (!base) return
-  const blob = localStorage.getItem(await pinsName(base, session?.idKey ?? '', roomId)); if (!blob) return
+  const base = await ensureCacheBase(); if (!base || !storeNames) return
+  const blob = localStorage.getItem(await storeNames.scoped('pin', roomId)); if (!blob) return
   const kept = await openPins(base, roomId, blob)
   if (!kept?.length) return
   pins.set(roomId, kept)
@@ -5842,8 +5828,8 @@ async function persistPins(roomId: string) {
   if (wiping) return
   const kept = roomPins(roomId)
   const base = await ensureCacheBase()
-  if (!base) { toast(tr('Nie udało się zapisać — brak klucza tej tożsamości')); return }
-  const name = await pinsName(base, session?.idKey ?? '', roomId)
+  if (!base || !storeNames) { toast(tr('Nie udało się zapisać — brak klucza tej tożsamości')); return }
+  const name = await storeNames.scoped('pin', roomId)
   if (!kept.length) { localStorage.removeItem(name); return }
   try { localStorage.setItem(name, await sealPins(base, roomId, kept)) }
   catch (e: any) {
@@ -6299,7 +6285,7 @@ async function runExport(password: string): Promise<boolean> {
   const blob = raw ? JSON.parse(raw) : null
   if (!isSealedProfile(blob)) throw new Error(tr('To nie jest profil software — tożsamości z HEM nie da się przenieść plikiem'))
   await unseal(password, blob) // throws BadPassword
-  const file = await exportProfile(localKV(), name, session?.idKey ?? '', password, nowMs())
+  const file = await exportProfile(localKV(), name, session?.idKey ?? '', password, nowMs(), storeNames?.prefix ?? '')
   const sink = await beginSave(`onchato-${name}-${new Date(nowMs()).toISOString().slice(0, 10)}.${FILE_EXT}`, saveEnv)
   if (!sink) return false   // the dialog was closed: nothing written, and the modal stays for another try
   await sink.write(new Blob([JSON.stringify(file)], { type: 'application/json' }))
@@ -8986,7 +8972,7 @@ async function leaveGroup(gid: string) {
   // from anybody does not re-create it.
   client?.groups.dropGroup(gid)
   owedInvites.forget(gid)
-  try { localStorage.removeItem(gcachePrefix() + gid) } catch {}
+  await dropGroupCache(gid)
   leftMap = markLeft(leftMap, gid, gu.epoch); saveLeft()
   groupsUI.delete(gid)
   // Same reset the 1:1 path uses when the room on screen goes away.
@@ -9019,7 +9005,7 @@ async function deleteGroup(gid: string) {
     await client.groups.deleteGroup(gid)   // rekey to me alone, then destroy the GK
     gu.room?.stop()
     owedInvites.forget(gid)
-    try { localStorage.removeItem(gcachePrefix() + gid) } catch {} // or a reload restores the pre-dissolution state
+    await dropGroupCache(gid) // or a reload restores the pre-dissolution state
     groupsUI.delete(gid)
     if (activeGid === gid) { activeGid = null; $('chat-view').hidden = true; $('chat-empty').hidden = false; showChatPane(false) }
     await persistGroups()
@@ -9129,24 +9115,45 @@ function recordGroup(gu: GroupUI, ev: Ev) {
 // key) is sealed to its own §10-encrypted blob, so a reload continues without
 // re-distribution. The at-rest key is anchored to the identity: base = ECDH(IK,
 // emp_pub) (one id.ecdh per session; IK stays in the HEM), per-group AES key =
-// HKDF(base, gid) — see lib/gcache.ts. One blob per gid: ec-gcache-<handle>-<gid>.
+// HKDF(base, gid) — see lib/gcache.ts. One blob per gid, under
+// `storeNames.scoped('group', gid)` (lib/storenames.ts), with the gids in the
+// identity's sealed group index: the name says neither whose nor which group.
 const genc = new TextEncoder()
-// Keyed by the identity's KID, never by its handle. A handle is a caption: two
+// Scoped by the identity's KID, never by its handle. A handle is a caption: two
 // identities may share one (the KID tells them apart), and editing it would
 // orphan everything stored under the old spelling — which is what used to
 // happen to a renamed profile's contacts and group cache.
-const empKey = () => 'ec-gcache-emp-' + (session?.idKey ?? '')
-const gcachePrefix = () => 'ec-gcache-' + (session?.idKey ?? '') + '-'
 const legacyGroupsKey = () => 'ec-groups-' + (session?.idKey ?? '') // B1 plaintext (migrated away)
 let cacheBase: Uint8Array | null = null
+/** Set at sign-in by openNames: where this identity's records are stored. */
+let storeNames: Names | null = null
 let persistTimer: any
 
 /** The §10 cache master secret ECDH(IK, emp_pub), computed once and cached. The
  *  emp public key is random and kept in localStorage; IK never leaves the HEM. */
 async function ensureCacheBase(): Promise<Uint8Array | null> {
   if (cacheBase) return cacheBase
-  if (!session) return null
-  return cacheBaseFor(session.id, session.idKey)
+  if (!session || !storeNames) return null
+  return cacheBaseFor(session.id, storeNames)
+}
+
+/**
+ * The storage names of the identity signing in (lib/storenames.ts), and its
+ * records moved off the names that carried its KID. One derivation through
+ * the identity backend - on a HEM a device call, made once per sign-in.
+ */
+async function openNames(id: Identity, idKey: string): Promise<Names> {
+  const names = await namesFor(id, idKey)
+  try {
+    const n = await migrateToNames(localKV(), names)
+    if (n) ecLog(`storage: moved ${n} record(s) off names that carried the KID`, 'debug')
+  } catch (e: any) { ecLog('storage: moving to the new names failed - ' + (e?.message ?? e)) }
+  storeNames = names
+  // Like `__pub`, a hook for the browser harness: the page holds these names
+  // anyway, and without them the harness could only find a record by the very
+  // KID the names exist to hide.
+  ;(window as any).__storeNames = names
+  return names
 }
 
 /**
@@ -9157,9 +9164,9 @@ async function ensureCacheBase(): Promise<Uint8Array | null> {
  * HEM one ECDH is a device round trip of a second or two, and this is the same
  * `emp_pub` either way.
  */
-async function cacheBaseFor(id: Identity, idKey: string): Promise<Uint8Array | null> {
+async function cacheBaseFor(id: Identity, names: Names): Promise<Uint8Array | null> {
   if (cacheBase) return cacheBase
-  cacheBase = await cacheBaseOf(id, idKey, localKV(), (m) => ecLog(m, 'debug'))
+  cacheBase = await cacheBaseOf(id, names, localKV(), (m) => ecLog(m, 'debug'))
   return cacheBase
 }
 
@@ -9167,16 +9174,30 @@ async function cacheBaseFor(id: Identity, idKey: string): Promise<Uint8Array | n
  *  schedulePersist (debounced) for receives, immediate for my own sends. */
 async function persistGroups() {
   if (!client || !session || wiping) return // a wipeout must not be undone by the unload flush
-  const base = await ensureCacheBase(); if (!base) return
+  const base = await ensureCacheBase(); const names = storeNames; if (!base || !names) return
+  const written: string[] = []
   for (const snap of client.groups.snapshot()) {
     const gidHex = client.groups.gidHexOf(unb64(snap.gid))
     const name = groupsUI.get(gidHex)?.name ?? ''
     try {
       const owed = owedInvites.toJSON(gidHex) // sealed with the group, never beside it
       const blob = await sealCache(base, gidHex, genc.encode(JSON.stringify({ snap, name, owed })))
-      localStorage.setItem(gcachePrefix() + gidHex, blob)
+      localStorage.setItem(await names.scoped('group', gidHex), blob)
+      written.push(gidHex)
     } catch (e: any) { ecLog('group persist failed: ' + (e?.message ?? e), 'debug') }
   }
+  // The names hide the group ids, so the ids are kept in one sealed index.
+  try { await names.setGroups(localKV(), [...await names.groups(localKV()), ...written]) }
+  catch (e: any) { ecLog('group index: write failed - ' + (e?.message ?? e), 'debug') }
+}
+
+/** A group's sealed state and its line in the index go together. */
+async function dropGroupCache(gid: string) {
+  const names = storeNames; if (!names) return
+  try {
+    localStorage.removeItem(await names.scoped('group', gid))
+    await names.setGroups(localKV(), (await names.groups(localKV())).filter((g) => g !== gid))
+  } catch (e: any) { ecLog('group cache: drop failed - ' + (e?.message ?? e), 'debug') }
 }
 function schedulePersist() { clearTimeout(persistTimer); persistTimer = setTimeout(() => void persistGroups(), 1500) }
 
@@ -9278,13 +9299,10 @@ async function offerToForgetGroup(g: { gidHex: string; name: string; kid: string
 
 async function restoreGroups() {
   if (!client || !session) return
-  const base = await ensureCacheBase(); if (!base) return
+  const base = await ensureCacheBase(); const names = storeNames; if (!base || !names) return
   const seen = new Set<string>()
-  const prefix = gcachePrefix()
-  for (const k of Object.keys(localStorage)) {
-    if (!k.startsWith(prefix)) continue
-    const gidHex = k.slice(prefix.length)
-    const blob = localStorage.getItem(k); if (!blob) continue
+  for (const gidHex of await names.groups(localKV())) {
+    const blob = localStorage.getItem(await names.scoped('group', gidHex)); if (!blob) continue
     const pt = await openCache(base, gidHex, blob)
     if (!pt) { ecLog('group cache: decrypt failed for ' + gidHex.slice(0, 8) + '…', 'debug'); continue }
     let parsed: any; try { parsed = JSON.parse(dec.decode(pt)) } catch { continue }

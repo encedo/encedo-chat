@@ -20,6 +20,7 @@ import { runClient } from '../cli/client.ts'
 import { Hub, type HubEvent } from '../cli/hub.ts'
 import { serve, connectDaemon, ask } from '../cli/daemon.ts'
 import { cacheBaseOf } from '../lib/localbook.ts'
+import { namesFor } from '../lib/storenames.ts'
 import { identityKey } from '../cli/profiles.ts'
 import type { KV } from '../lib/migrate.ts'
 import { VT } from '../test/vt.ts'
@@ -35,7 +36,7 @@ const memKV = (): KV => { const m = new Map<string, string>(); return { keys: ()
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')
 const book = (contacts: Array<{ name: string; pub: string }>) => { let b = contacts.slice(); return localOnlyManager(localContactBook(() => b, (l) => { b = l })) }
 
-async function vaultFor(id: Identity) { const kv = memKV(), kid = await identityKey(id.pub); return { kv, kid, base: await cacheBaseOf(id, kid, kv) } }
+async function vaultFor(id: Identity) { const kv = memKV(), names = await namesFor(id, await identityKey(id.pub)); return { kv, names, base: await cacheBaseOf(id, names, kv) } }
 async function terminal(id: Identity, contacts: Array<{ name: string; pub: string }>, debug = false) {
   const vt = new VT(26, 150)
   let feed: (s: string) => void = () => {}

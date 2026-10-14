@@ -6,9 +6,12 @@
  * two implementations: a profile carried between the browser and the terminal
  * has to open with the same contacts and the same verdict on it.
  *
- *   ec-local-contacts-<idKey>          the book, sealed (lib/localstore.ts)
- *   ec-local-contacts-<idKey>-signed   '1' once a protected book has ever been written
- *   ec-gcache-emp-<idKey>              the public half of the §10 cache secret's emp key
+ *   names.fixed.book          the book, sealed (lib/localstore.ts)
+ *   names.fixed['book-signed'] '1' once a protected book has ever been written
+ *   names.fixed.emp           the public half of the §10 cache secret's emp key
+ *
+ * (names from lib/storenames.ts; they were `ec-local-contacts-<kid>`,
+ * `…-signed` and `ec-gcache-emp-<kid>` before 2026-10-14.)
  *
  * ## Sealed, not only signed (2026-10-14)
  *
@@ -52,6 +55,7 @@ import { checkBook, type Verdict } from './bookmac.ts'
 import { sealLocal, openLocal } from './localstore.ts'
 import { generateX25519 } from './x25519.ts'
 import type { KV } from './migrate.ts'
+import type { Names } from './storenames.ts'
 
 const b64 = (u: Uint8Array) => btoa(String.fromCharCode(...u))
 
@@ -71,19 +75,20 @@ function isPlain(raw: string): boolean {
  * the store; IK never leaves its backend. Null when the identity will not do
  * ECDH (a refusing HSM): the book then runs unsealed rather than not at all.
  */
-export async function cacheBaseOf(id: Identity, idKey: string, kv: KV, log?: (m: string) => void): Promise<Uint8Array | null> {
-  const key = 'ec-gcache-emp-' + idKey
+export async function cacheBaseOf(id: Identity, names: Names, kv: KV, log?: (m: string) => void): Promise<Uint8Array | null> {
+  const key = names.fixed.emp
   let empPub = kv.get(key)
   if (!empPub) { empPub = b64((await generateX25519()).pub); kv.set(key, empPub) }
   try { return await id.ecdh(empPub) } catch (e: any) { log?.('cache base: ecdh failed - ' + (e?.message ?? e)); return null }
 }
 
-/** Open (or start) the book for `idKey`, sealed under `base`. */
+/** Open (or start) the book of the identity `names` belongs to, sealed under `base`. */
 export async function openLocalBook(
-  idKey: string, kv: KV, base: Uint8Array | null, log?: (m: string) => void,
+  names: Names, kv: KV, base: Uint8Array | null, log?: (m: string) => void,
 ): Promise<{ book: ContactBook; verdict: Verdict }> {
-  const lsKey = 'ec-local-contacts-' + idKey
-  const signedKey = lsKey + '-signed'
+  const idKey = names.kid
+  const lsKey = names.fixed.book
+  const signedKey = names.fixed['book-signed']
   if (!base) {
     log?.('contact book: no ECDH base, running unsealed')
     const readRaw = () => { try { const v = JSON.parse(kv.get(lsKey) || '[]'); return isList(v) ? v : [] } catch { return [] } }

@@ -13,6 +13,7 @@
  */
 
 import { readSealedKV, writeSealedKV, SALTS } from '../lib/sealedstore.ts'
+import type { Names } from '../lib/storenames.ts'
 import type { KV } from '../lib/migrate.ts'
 import { Outbox, outgoingText, type Entry } from './outbox.ts'
 import type { Hub } from './hub.ts'
@@ -22,20 +23,19 @@ export const OUTBOX_SALT = SALTS.outbox
 export interface Submitted { ok: true; status: 'delivered' | 'queued' | 'merged'; to: string; id?: string; ms?: number; qid?: string }
 
 export class Queue {
-  private hub: Hub; private kv: KV; private base: Uint8Array | null; private kid: string
+  private hub: Hub; private kv: KV; private base: Uint8Array | null; private names: Names
   private log: (m: string) => void
   outbox = new Outbox()
   private inflight = new Map<string, string>()   // message id -> qid
   private flushing = new Set<string>()
   private timer: any = null
 
-  constructor(o: { hub: Hub; kv: KV; base: Uint8Array | null; kid: string; log?: (m: string) => void }) {
-    this.hub = o.hub; this.kv = o.kv; this.base = o.base; this.kid = o.kid; this.log = o.log ?? (() => {})
+  constructor(o: { hub: Hub; kv: KV; base: Uint8Array | null; names: Names; log?: (m: string) => void }) {
+    this.hub = o.hub; this.kv = o.kv; this.base = o.base; this.names = o.names; this.log = o.log ?? (() => {})
   }
-  private get key() { return 'ec-outbox-' + this.kid }
 
   async load() {
-    const v = await readSealedKV<Entry[]>(this.kv, this.base, this.kid, this.key, OUTBOX_SALT, Array.isArray)
+    const v = await readSealedKV<Entry[]>(this.kv, this.base, this.names, 'outbox', Array.isArray)
     this.outbox = new Outbox(Array.isArray(v) ? v : [])
     this.hub.on((e) => {
       if (e.t === 'presence' && e.state === 'online') void this.flush(e.pub)
@@ -51,7 +51,7 @@ export class Queue {
     if (this.outbox.entries.length) this.log(`w kolejce: ${this.outbox.entries.length}`)
   }
   stop() { clearInterval(this.timer) }
-  save() { return writeSealedKV(this.kv, this.base, this.kid, this.key, OUTBOX_SALT, this.outbox.entries) }
+  save() { return writeSealedKV(this.kv, this.base, this.names, 'outbox', this.outbox.entries) }
 
   private async tick() {
     const gone = this.outbox.expire(Date.now())

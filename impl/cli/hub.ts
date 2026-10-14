@@ -10,6 +10,7 @@
  * meaning of exit 3 ("queued"): it waits HERE, nowhere else (instant-only).
  */
 
+import type { Names } from '../lib/storenames.ts'
 import { startSession, type ClientSession, type Conversation, type ContactManager, type Contact, type Identity } from '../lib/core.ts'
 import { prepareFile, saveFile, downloadDir } from './files.ts'
 import type { FileMeta } from '../lib/envelope.ts'
@@ -36,7 +37,7 @@ export class Hub {
   private transport: 'light' | 'libp2p'
   private networkId?: string
   private log: (m: string) => void
-  private vault?: { kv: KV; base: Uint8Array | null; kid: string }
+  private vault?: { kv: KV; base: Uint8Array | null; names: Names }
   groups: Groups | null = null
   session!: ClientSession
   contactList: Contact[] = []
@@ -47,7 +48,7 @@ export class Hub {
   /** Received files by message id - the key stays in memory, never in an event. */
   files = new Map<string, FileMeta>()
 
-  constructor(o: { id: Identity; contacts: ContactManager; relays: string[]; transport?: 'light' | 'libp2p'; networkId?: string; log?: (m: string) => void; vault?: { kv: KV; base: Uint8Array | null; kid: string } }) {
+  constructor(o: { id: Identity; contacts: ContactManager; relays: string[]; transport?: 'light' | 'libp2p'; networkId?: string; log?: (m: string) => void; vault?: { kv: KV; base: Uint8Array | null; names: Names } }) {
     this.id = o.id; this.contacts = o.contacts; this.relays = o.relays; this.vault = o.vault; this.networkId = o.networkId
     this.transport = o.transport ?? 'light'; this.log = o.log ?? (() => {})
   }

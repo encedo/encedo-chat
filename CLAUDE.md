@@ -505,6 +505,16 @@ Firefox then silently falls back to the user's real profile and hits its lock),
 and BiDi answers with structured RemoteValues rather than JSON, so results need
 converting back to plain data.
 
+**Storage names say nothing since 2026-10-14** (`lib/storenames.ts`): every
+per-identity record sits under `ec-<idTag>-<tag>`, HMACs under `nk`, a key
+derived through the identity backend with its own public key (one derivation
+per sign-in, a device call on a HEM). Code that stores per-identity state takes
+a `Names` (`names.fixed.book`, `await names.scoped('group', gid)`), never builds
+a name from the KID; group ids are listed by `names.groups(kv)`, a sealed
+index. `migrateToNames` moves KID-named records at sign-in. The page exposes
+`window.__storeNames` for the harness (like `__pub`), which also checks that no
+name carries a KID, a contact key or a group id.
+
 **The harness seeds localStorage directly, so a change to a STORAGE KEY breaks it
 as surely as a change to the login flow.** Per-identity state moved from the
 handle to the identity's KID (§4) and `browser-test` went on seeding
@@ -514,8 +524,7 @@ harness now derives the id with the app's own `hemKid`, so the two cannot drift.
 Same rule as the login flow: change it and change the harness in the same commit.
 
 **Pins are the only thing allowed to outlive a reload** (`lib/pincache.ts`,
-`ec-pin-<kid>-<HMAC tag of roomId>`; roomId = peer pub for a 1:1, gidHex for a group -
-the name used to carry the roomId itself, i.e. the contact's key; `migrateLegacyPins` moves those at sign-in). The
+stored under `storeNames.scoped('pin', roomId)`; roomId = peer pub for a 1:1, gidHex for a group). The
 key schedule is §10's with its own salt — `base = ECDH(IK, emp_pub)`,
 `k_room = HKDF(base, "encedo-chat-pin-cache-v1", roomId)` — so it works
 identically for a HEM identity and a software profile, and a pin blob cannot be

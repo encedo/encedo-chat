@@ -19,6 +19,7 @@ import { InviteStore, publishedLink, type Waiting } from '../cli/invites.ts'
 import { decodeInvite } from '../lib/invite.ts'
 import { fingerprint } from '../cli/fp.ts'
 import { cacheBaseOf } from '../lib/localbook.ts'
+import { namesFor } from '../lib/storenames.ts'
 import { identityKey } from '../cli/profiles.ts'
 import type { KV } from '../lib/migrate.ts'
 import { VT } from '../test/vt.ts'
@@ -34,7 +35,8 @@ const memKV = (): KV => { const m = new Map<string, string>(); return { keys: ()
 
 async function storeFor(id: Identity) {
   const kv = memKV(), kid = await identityKey(id.pub)
-  return new InviteStore(kv, await cacheBaseOf(id, kid, kv), kid)
+  const names = await namesFor(id, kid)
+  return new InviteStore(kv, await cacheBaseOf(id, names, kv), names)
 }
 async function terminal(id: Identity, contacts: Array<{ name: string; pub: string }>, store: InviteStore) {
   const vt = new VT(24, 120)

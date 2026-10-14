@@ -7,19 +7,21 @@ import { inviteKey } from '../lib/inbox.ts'
 import { generateX25519 } from '../lib/x25519.ts'
 import { kdf } from '../lib/wc.ts'
 import type { KV } from '../lib/migrate.ts'
+import { namesFromKey } from '../lib/storenames.ts'
 
 const memKV = (): KV => { const m = new Map<string, string>(); return { keys: () => [...m.keys()], get: (k) => m.get(k) ?? null, set: (k, v) => { m.set(k, v) } } }
 const base = crypto.getRandomValues(new Uint8Array(32)), kid = 'a1b2c3d4e5f60718'
+const N = await namesFromKey(crypto.getRandomValues(new Uint8Array(32)), kid)
 
 test('an invite the app sealed is read by the CLI, and one the CLI made is read the way the app reads it', async () => {
   const kv = memKV()
   const appInv: PubInvite = { id: 'app00001', label: 'z aplikacji', secret: 'c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0c2VjcmV0MDA=', created: 1 }
-  await writeSealedKV(kv, base, kid, 'ec-invites-' + kid, INVITES_SALT, [appInv])   // app.ts writeSealed
-  assert.ok(!kv.get('ec-invites-' + kid)!.includes('z aplikacji'), 'sealed, not plain')
-  const store = new InviteStore(kv, base, kid)
+  await writeSealedKV(kv, base, N, 'invites', [appInv])   // app.ts writeSealed
+  assert.ok(!kv.get(N.fixed.invites)!.includes('z aplikacji'), 'sealed, not plain')
+  const store = new InviteStore(kv, base, N)
   assert.deepEqual((await store.invites()).map((i) => i.label), ['z aplikacji'])
   await store.create('z terminala', 3_600_000, 1000)
-  const asApp = await readSealedKV<PubInvite[]>(kv, base, kid, 'ec-invites-' + kid, INVITES_SALT, Array.isArray) // app.ts readSealed
+  const asApp = await readSealedKV<PubInvite[]>(kv, base, N, 'invites', Array.isArray) // app.ts readSealed
   assert.deepEqual(asApp!.map((i) => i.label), ['z terminala', 'z aplikacji'], 'newest first, as the app lists them')
   assert.equal(asApp![0].expires, 1000 + 3_600_000)
   assert.equal(await store.revoke(asApp![1].id), true)
@@ -29,16 +31,16 @@ test('an invite the app sealed is read by the CLI, and one the CLI made is read 
 
 test('a store from before sealing (plain JSON) is still read; another identity\'s key cannot open it', async () => {
   const kv = memKV()
-  kv.set('ec-invites-' + kid, JSON.stringify([{ id: 'old', label: 'stare', secret: 'x', created: 1 }]))
-  assert.equal((await new InviteStore(kv, base, kid).invites())[0].label, 'stare')
+  kv.set(N.fixed.invites, JSON.stringify([{ id: 'old', label: 'stare', secret: 'x', created: 1 }]))
+  assert.equal((await new InviteStore(kv, base, N).invites())[0].label, 'stare')
   const kv2 = memKV()
-  await writeSealedKV(kv2, base, kid, 'ec-invites-' + kid, INVITES_SALT, [{ id: 'z', label: 'tajne', secret: 's', created: 1 }])
+  await writeSealedKV(kv2, base, N, 'invites', [{ id: 'z', label: 'tajne', secret: 's', created: 1 }])
   const other = crypto.getRandomValues(new Uint8Array(32))
-  assert.deepEqual(await new InviteStore(kv2, other, kid).invites(), [], 'a different §10 key opens nothing')
+  assert.deepEqual(await new InviteStore(kv2, other, N).invites(), [], 'a different §10 key opens nothing')
 })
 
 test('the waiting knocks and the ignore list round-trip in the app\'s shapes', async () => {
-  const store = new InviteStore(memKV(), base, kid)
+  const store = new InviteStore(memKV(), base, N)
   await store.saveWaiting(new Map([['pubA', { inbox: 'in', name: 'ala', since: 5 }]]))
   assert.deepEqual([...(await store.waiting())], [['pubA', { inbox: 'in', name: 'ala', since: 5 }]])
   await store.ignore('AA:BB'); await store.ignore('AA:BB')

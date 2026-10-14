@@ -9,6 +9,14 @@ import { browserSoftwareIdentity } from '../lib/core.ts'
 import { seal, BadPassword } from '../lib/profile.ts'
 import { exportProfile, openBundle, applyBundle, type KV } from '../lib/migrate.ts'
 import { openLocalBook, cacheBaseOf } from '../lib/localbook.ts'
+import { namesFor } from '../lib/storenames.ts'
+import type { Identity } from '../lib/core.ts'
+
+/** The book as both clients open it: names derived from the identity, then the §10 base under them. */
+async function bookOf(id: Identity, key: string, kv: KV) {
+  const names = await namesFor(id, key)
+  return openLocalBook(names, kv, await cacheBaseOf(id, names, kv))
+}
 
 const PW = 'kot pies dom lampa'          // clears the full meter, like the harness password
 const tmp = () => mkdtempSync(join(process.env.TMPDIR || tmpdir(), 'onchato-cli-'))
@@ -48,11 +56,11 @@ test('a browser profile with contacts moves to the CLI and opens with the same k
   const wid = await browserSoftwareIdentity('ewa', () => null, (v) => { generated = v })
   web.set(softKey('ewa'), JSON.stringify(await seal(PW, generated)))
   const wkey = await identityKey(wid.pub)
-  const wbook = await openLocalBook(wkey, web, await cacheBaseOf(wid, wkey, web))
+  const wbook = await bookOf(wid, wkey, web)
   await wbook.book.add('vostro1', 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=')
   await settle()
   const file = join(tmp(), 'ewa.ocmig')
-  writeFileSync(file, JSON.stringify(await exportProfile(web, 'ewa', wkey, PW, Date.now())))
+  writeFileSync(file, JSON.stringify(await exportProfile(web, 'ewa', wkey, PW, Date.now(), (await namesFor(wid, wkey)).prefix)))
 
   // The CLI side.
   const kv = fileKV(tmp())
@@ -60,7 +68,7 @@ test('a browser profile with contacts moves to the CLI and opens with the same k
   const id = await openProfile(kv, 'ewa', PW)
   assert.equal(id.pub, wid.pub, 'the same identity, not a new key')
   const key = await identityKey(id.pub)
-  const { book, verdict } = await openLocalBook(key, kv, await cacheBaseOf(id, key, kv))
+  const { book, verdict } = await bookOf(id, key, kv)
   assert.equal(verdict, 'ok', 'the signature made in the browser checks in the terminal')
   assert.deepEqual((await book.list()).map((c) => c.name), ['vostro1'])
   await assert.rejects(importProfileFile(kv, file, PW), /już tu jest/, 'a second import does not merge')
@@ -71,7 +79,7 @@ test('and back: a CLI profile exported to a file opens in the browser with its c
   const kv = fileKV(tmp())
   const id = await createProfile(kv, 'ops', PW)
   const key = await identityKey(id.pub)
-  const { book } = await openLocalBook(key, kv, await cacheBaseOf(id, key, kv))
+  const { book } = await bookOf(id, key, kv)
   await book.add('admin', 'QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU=')
   await settle()
   const file = join(tmp(), 'ops.ocmig')
@@ -85,7 +93,7 @@ test('and back: a CLI profile exported to a file opens in the browser with its c
   const inner = JSON.parse(await unseal(PW, sealed))
   assert.equal(inner.pub, id.pub, 'the browser holds the CLI identity')
   const opened = await browserSoftwareIdentity('ops', () => JSON.stringify(inner), () => {})
-  const wbook = await openLocalBook(key, web, await cacheBaseOf(opened, key, web))
+  const wbook = await bookOf(opened, key, web)
   assert.equal(wbook.verdict, 'ok')
   assert.deepEqual((await wbook.book.list()).map((c) => c.name), ['admin'])
 })
@@ -94,17 +102,18 @@ test('a contact book edited in the file behind the CLI is caught, not believed',
   const kv = fileKV(tmp())
   const id = await createProfile(kv, 'ala', PW)
   const key = await identityKey(id.pub)
-  const { book } = await openLocalBook(key, kv, await cacheBaseOf(id, key, kv))
+  const { book } = await bookOf(id, key, kv)
   await book.add('vostro1', 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=')
   await settle()
   // The book is sealed, so the file shows no key to swap - the contact's key is
   // not in it at all. Someone with write access to store.json can still change
   // bytes; one flipped bit must not be believed.
-  const raw = kv.get('ec-local-contacts-' + key)!
+  const bookName = (await namesFor(id, key)).fixed.book
+  const raw = kv.get(bookName)!
   assert.ok(!raw.includes('MTIzNDU2') && !raw.includes('vostro1'), 'nobody reading store.json learns the contact')
   const bytes = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0)); bytes[20] ^= 1
-  kv.set('ec-local-contacts-' + key, btoa(String.fromCharCode(...bytes)))
-  const again = await openLocalBook(key, kv, await cacheBaseOf(id, key, kv))
+  kv.set(bookName, btoa(String.fromCharCode(...bytes)))
+  const again = await bookOf(id, key, kv)
   assert.equal(again.verdict, 'tampered')
   await assert.rejects(again.book.add('x', 'QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU='), /refusing to write over it/, 'the evidence is not overwritten')
 })

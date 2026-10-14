@@ -141,3 +141,18 @@ test('the same identity under a new name is refused, not written over its own st
   assert.equal(here.data[`ec-local-contacts-${KID}`], '[{"name":"nowsze"}]', 'the newer book is untouched')
   assert.equal(identityHere(kv({ 'ec-lang': 'pl' }), bundle), false, 'an empty browser takes it')
 })
+
+test('since the names hide the KID, a profile\'s keys are found by its storage prefix as well', async () => {
+  const A = '5954eb6d5a1dd906ec78fe9dae5645e3', PRE = 'ec-0011223344556677-', OTHERPRE = 'ec-8899aabbccddeeff-'
+  const store = kv({
+    'ec-soft-id-Ala': '{}', [PRE + 'a'.repeat(32)]: 'book', [PRE + 'b'.repeat(32)]: 'emp',
+    [`ec-pins-${A}-peer`]: 'not moved yet', [OTHERPRE + 'c'.repeat(32)]: 'cudze', 'ec-lang': 'pl',
+  })
+  assert.deepEqual(keysOfProfile(store, 'Ala', A, PRE).sort(), ['ec-soft-id-Ala', PRE + 'a'.repeat(32), PRE + 'b'.repeat(32), `ec-pins-${A}-peer`].sort())
+  const file = await exportProfile(store, 'Ala', A, PASS, 1, PRE)
+  const bundle = await openBundle(file, PASS)
+  assert.equal(bundle.prefix, PRE)
+  assert.ok(!(OTHERPRE + 'c'.repeat(32) in bundle.keys), 'another identity does not travel')
+  assert.equal(identityHere(kv({ [PRE + 'f'.repeat(32)]: 'x' }), { ...bundle, kid: 'ffffffffffffffffffffffffffffffff' }), true, 'found by the prefix alone')
+  assert.throws(() => keysOfProfile(store, 'Ala', A, 'ec-zz-'), /not a storage prefix/)
+})

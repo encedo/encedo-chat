@@ -671,6 +671,18 @@ async function softError(b: Page): Promise<string> {
  *
  * The harness walks whichever surface appears rather than assuming one.
  */
+/**
+ * Storage names say nothing (lib/storenames.ts): no key in this browser may
+ * carry a KID, a public key or a group id - in full or as the 8- and 12-character
+ * prefixes the app prints. `extra` adds what only a scenario knows (group ids).
+ */
+async function noIdentityInNames(b: Page, needles: string[]) {
+  const bad = await b.eval<string[]>(`
+    const needles = ${JSON.stringify(needles.flatMap((n) => [n, n.slice(0, 12), n.slice(0, 8)]))};
+    return Object.keys(localStorage).filter((k) => k.startsWith('ec-') && needles.some((n) => k.includes(n)));`)
+  if (bad.length) throw new Error(`storage names still carry an identity: ${JSON.stringify(bad)}`)
+}
+
 async function softProfile(b: Page, handle: string) {
   // A browser that already holds this profile must OFFER it on the card, and be
   // driven the way a person would drive it — by clicking the row. That is the
@@ -860,16 +872,21 @@ async function main() {
     // in must have sealed it on the spot (lib/localbook.ts): nobody reading
     // this browser's storage learns whom sim-a knows.
     const atRest = await A.eval<any>(`
-      const raw = localStorage.getItem('ec-local-contacts-${idA}') || '';
+      const n = window.__storeNames;
+      const raw = localStorage.getItem(n.fixed.book) || '';
       let json = true; try { JSON.parse(raw) } catch { json = false }
       return { json, len: raw.length, names: /sim-b|ghost/.test(raw), key: raw.includes(${JSON.stringify(pubB)}) || raw.includes(${JSON.stringify(ghostPub)}),
-               marker: localStorage.getItem('ec-local-contacts-${idA}-signed'),
-               sealedOnly: localStorage.getItem('ec-sealed-${idA}') }`)
+               marker: localStorage.getItem(n.fixed['book-signed']),
+               sealedOnly: localStorage.getItem(n.fixed.sealed),
+               legacy: localStorage.getItem('ec-local-contacts-${idA}') }`)
     // ...and sign-in closed the plain-JSON door of every other sealed store (lib/sealedstore.ts).
-    if (atRest.json || atRest.names || atRest.key || atRest.marker !== '1' || atRest.sealedOnly !== '1') {
+    if (atRest.json || atRest.names || atRest.key || atRest.marker !== '1' || atRest.sealedOnly !== '1' || atRest.legacy !== null) {
       throw new Error(`the contact book is not sealed at rest after sign-in: ${JSON.stringify(atRest)}`)
     }
     step('the contact book seeded in the clear was sealed at sign-in, and the sealed stores take no plain JSON from now on')
+    await noIdentityInNames(A, [idA, idB, pubA, pubB, ghostPub])
+    await noIdentityInNames(B, [idA, idB, pubA, pubB])
+    step('no storage name carries a KID or a contact key: the seeded book moved off its KID-named key')
 
     // The FIRST room after sign-in, and only the first: `#chat-view` starts
     // hidden, and `focus()` on an element inside a `display:none` ancestor does
@@ -2696,16 +2713,22 @@ async function main() {
     step('the group reappeared from cache after reload')
     // §10: the group state on disk must be encrypted — an ec-gcache blob, not the
     // readable ec-groups plaintext, and not JSON we can eyeball group_secret out of.
-    const cacheShape = await A.eval<{ enc: boolean; plaintext: boolean; readable: boolean }>(`
-      const keys = Object.keys(localStorage);
-      const encK = keys.find((k) => k.startsWith('ec-gcache-${idA}-'));
-      return { enc: !!encK, plaintext: keys.includes('ec-groups-${idA}'),
-               readable: encK ? localStorage.getItem(encK).trim().startsWith('{') : false };
+    const cacheShape = await A.eval<{ enc: boolean; plaintext: boolean; readable: boolean; gids: string[] }>(`
+      return (async () => {
+      const n = window.__storeNames;
+      const kv = { keys: () => Object.keys(localStorage), get: (k) => localStorage.getItem(k), set: () => {}, remove: () => {} };
+      const gids = await n.groups(kv);
+      const blobs = await Promise.all(gids.map(async (g) => localStorage.getItem(await n.scoped('group', g))));
+      const encK = blobs.find((b) => !!b);
+      return { enc: !!encK, plaintext: Object.keys(localStorage).includes('ec-groups-${idA}'),
+               readable: encK ? encK.trim().startsWith('{') : false, gids };
+      })();
     `)
     if (!cacheShape.enc) throw new Error('no encrypted ec-gcache blob after reload')
     if (cacheShape.plaintext) throw new Error('a B1 plaintext ec-groups blob is still present')
     if (cacheShape.readable) throw new Error('the group cache blob is readable JSON — not encrypted')
-    step('the group cache on disk is §10-encrypted (no plaintext group_secret at rest)')
+    await noIdentityInNames(A, [idA, pubB, ...cacheShape.gids])
+    step('the group cache on disk is §10-encrypted (no plaintext group_secret at rest), and no name says which group')
     const gmsg2 = `po-reload-${Date.now().toString(36)}`
     // A now has two groups; target "Testowa" by exact name on BOTH sides so the two
     // browsers are provably in the same room (a bare .contact could pick different ones).
@@ -2744,29 +2767,27 @@ async function main() {
 
     // The key NAME is checked as well as the blob: it used to be
     // `ec-pins-<kid>-<roomId>`, and a 1:1 room id is the contact's public key.
-    // This pin is in the group, so the room id to look for is its group id -
-    // which this browser's group cache names in its own keys.
-    const pinShape = await A.eval<{ enc: boolean; readable: boolean; names: string[]; rooms: string[] }>(`
-      const ks = Object.keys(localStorage).filter((k) => k.startsWith('ec-pin-${idA}-') || k.startsWith('ec-pins-'));
-      const k = ks.find((k) => k.startsWith('ec-pin-${idA}-'));
-      const rooms = Object.keys(localStorage).filter((k) => k.startsWith('ec-gcache-${idA}-')).map((k) => k.slice('ec-gcache-${idA}-'.length));
-      return { enc: !!k, readable: k ? localStorage.getItem(k).trim().startsWith('{') : false, names: ks, rooms };
+    // This pin is in the group, so the room is one of the group ids in the index.
+    const pinShape = await A.eval<{ enc: boolean; readable: boolean; gids: string[] }>(`
+      return (async () => {
+      const n = window.__storeNames;
+      const kv = { keys: () => Object.keys(localStorage), get: (k) => localStorage.getItem(k), set: () => {}, remove: () => {} };
+      const gids = await n.groups(kv);
+      const blobs = (await Promise.all(gids.map(async (g) => localStorage.getItem(await n.scoped('pin', g))))).filter(Boolean);
+      return { enc: blobs.length > 0, readable: blobs.some((b) => b.trim().startsWith('{')), gids };
+      })();
     `)
-    if (!pinShape.enc) throw new Error(`no ec-pin blob after pinning (nothing was kept): ${JSON.stringify(pinShape.names)}`)
+    if (!pinShape.enc) throw new Error(`no pin blob after pinning (nothing was kept) in groups ${JSON.stringify(pinShape.gids)}`)
     if (pinShape.readable) throw new Error('the pin blob is readable JSON — not encrypted at rest')
-    if (!pinShape.rooms.length) throw new Error('precondition: no group id to compare the pin name against')
-    const roomIds = [...pinShape.rooms, pubB]
-    if (pinShape.names.some((k) => k.startsWith('ec-pins-') || roomIds.some((r) => k.includes(r) || k.includes(r.slice(0, 12))))) {
-      throw new Error(`a pin key name points at its room: ${JSON.stringify(pinShape.names)} vs ${JSON.stringify(roomIds)}`)
-    }
+    await noIdentityInNames(A, [idA, pubB, ...pinShape.gids])
     step('the pin store on disk is encrypted, keyed by the identity, and its name does not say whose room it is')
 
     // §10 (audit 2026-10-11, 1.3): who was last heard and when is metadata, and
     // it sat on disk as plain JSON. B announced to A long ago in this run, so
     // the record exists; it must not read as JSON.
     const seenShape = await A.eval<{ enc: boolean; readable: boolean }>(`
-      const k = Object.keys(localStorage).find((k) => k.startsWith('ec-seen-${idA}'));
-      return { enc: !!k, readable: k ? localStorage.getItem(k).trim().startsWith('{') : false };
+      const v = localStorage.getItem(window.__storeNames.fixed.seen);
+      return { enc: !!v, readable: v ? v.trim().startsWith('{') : false };
     `)
     if (!seenShape.enc) throw new Error('no ec-seen record although a contact announced')
     if (seenShape.readable) throw new Error('the last-seen record is readable JSON — not sealed at rest')
@@ -3589,21 +3610,24 @@ async function main() {
     // contact book, groups, invites and pins stayed behind for good. The profile
     // deleted here is NOT the open one, the case that needs its password.
     scenario('deleting a profile takes everything under its key, and only that')
-    const victimKid = await B.eval<string>(`
-      const k = Object.keys(localStorage).find((k) => /^ec-gcache-emp-[0-9a-f]{32}$/.test(k));
-      return k ? k.slice('ec-gcache-emp-'.length) : '';`)
-    if (!victimKid) throw new Error('precondition: the renamed profile has no KID-keyed state')
-    // Stand-ins for what a lived-in profile holds; the rule under test is "by KID".
+    const victim = await B.eval<{ kid: string; prefix: string }>(`return { kid: window.__storeNames.kid, prefix: window.__storeNames.prefix }`)
+    const victimKid = victim.kid
+    if (!victimKid || Object.keys(await B.eval<Record<string, 1>>(`return Object.fromEntries(Object.keys(localStorage).filter((k) => k.startsWith(${JSON.stringify(victim.prefix)})).map((k) => [k, 1]))`)).length < 2) {
+      throw new Error('precondition: the renamed profile has no state under its storage names')
+    }
+    // Stand-ins for what a lived-in profile holds: two more records under its
+    // names, and one an older build left under its KID that was never moved.
     await B.eval(`
-      localStorage.setItem('ec-pin-${victimKid}-somebody', 'x');
-      localStorage.setItem('ec-gcache-${victimKid}-00112233445566778899aabbccddeeff', 'x');
+      localStorage.setItem(${JSON.stringify(victim.prefix + 'a'.repeat(32))}, 'x');
+      localStorage.setItem(${JSON.stringify(victim.prefix + 'b'.repeat(32))}, 'x');
+      localStorage.setItem('ec-pins-${victimKid}-somebody', 'x');
       return 1;`)
     await B.eval(`location.reload(); return 1`).catch(() => {})
     await B.waitFor('B back at the login form', `return !!document.getElementById('go-soft') && document.getElementById('app').hidden`, 15_000)
     const second = await createProfile('drugi-profil')
     if (!second.entered) throw new Error(`the second profile was not created: ${JSON.stringify(second)}`)
     const keptKeys = await B.eval<string[]>(`
-      return Object.keys(localStorage).filter((k) => k.startsWith('ec-') && !k.includes('${victimKid}') && k !== 'ec-soft-id-nowa-nazwa').sort()`)
+      return Object.keys(localStorage).filter((k) => k.startsWith('ec-') && !k.includes('${victimKid}') && !k.startsWith(${JSON.stringify(victim.prefix)}) && k !== 'ec-soft-id-nowa-nazwa').sort()`)
     const deleteVictim = async (pass: string) => {
       await B.eval(`if (!document.getElementById('drawer').classList.contains('open')) document.getElementById('btn-settings').click(); return 1`)
       await B.waitFor('the profile list', `
@@ -3622,8 +3646,8 @@ async function main() {
         return 1;`.replace('PLACEHOLDER_PASS', JSON.stringify(pass)))
       await sleep(2000)
       return B.eval<any>(`return {
-        victim: Object.keys(localStorage).filter((k) => k.includes('${victimKid}') || k === 'ec-soft-id-nowa-nazwa'),
-        kept: Object.keys(localStorage).filter((k) => k.startsWith('ec-') && !k.includes('${victimKid}') && k !== 'ec-soft-id-nowa-nazwa').sort(),
+        victim: Object.keys(localStorage).filter((k) => k.includes('${victimKid}') || k.startsWith(${JSON.stringify(victim.prefix)}) || k === 'ec-soft-id-nowa-nazwa'),
+        kept: Object.keys(localStorage).filter((k) => k.startsWith('ec-') && !k.includes('${victimKid}') && !k.startsWith(${JSON.stringify(victim.prefix)}) && k !== 'ec-soft-id-nowa-nazwa').sort(),
         signedIn: !document.getElementById('app').hidden,
       }`)
     }

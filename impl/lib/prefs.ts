@@ -12,10 +12,10 @@
  */
 
 import { readSealedKV, writeSealedKV, isSealedOnly, SALTS } from './sealedstore.ts'
+import type { Names } from './storenames.ts'
 import type { KV } from './migrate.ts'
 
 export const PREFS_SALT = SALTS.prefs
-export const PREFS_PREFIX = 'ec-prefs-'
 /** The plain keys of earlier builds, by field. */
 export const LEGACY = { notify: 'ec-notify-', mediaAuto: 'ec-autoimg-' } as const
 
@@ -36,12 +36,12 @@ export const isPrefs = (v: unknown): v is Prefs =>
  * of an earlier build. Without a base nothing can be sealed: the legacy
  * values are still honoured for the session, and left where they are.
  */
-export async function loadPrefs(kv: KV, base: Uint8Array | null, idKey: string, log?: (m: string) => void): Promise<Prefs> {
-  const key = PREFS_PREFIX + idKey
-  const sealed = (await readSealedKV<Prefs>(kv, base, idKey, key, PREFS_SALT, isPrefs, log)) ?? {}
+export async function loadPrefs(kv: KV, base: Uint8Array | null, names: Names, log?: (m: string) => void): Promise<Prefs> {
+  const idKey = names.kid
+  const sealed = (await readSealedKV<Prefs>(kv, base, names, 'prefs', isPrefs, log)) ?? {}
   const out: Prefs = { ...sealed }
   let migrated = false
-  if (isSealedOnly(kv, idKey)) {
+  if (isSealedOnly(kv, names)) {
     // After sign-in has sealed this identity's stores, a plain key here was not
     // written by an older build of ours - it is someone setting a preference.
     kv.remove?.(LEGACY.notify + idKey); kv.remove?.(LEGACY.mediaAuto + idKey)
@@ -52,7 +52,7 @@ export async function loadPrefs(kv: KV, base: Uint8Array | null, idKey: string, 
   const a = kv.get(LEGACY.mediaAuto + idKey)
   if (a !== null) { if (out.mediaAuto === undefined) out.mediaAuto = a === '1'; migrated = true }
   if (migrated && base) {
-    await writeSealedKV(kv, base, idKey, key, PREFS_SALT, out, log)
+    await writeSealedKV(kv, base, names, 'prefs', out, log)
     kv.remove?.(LEGACY.notify + idKey)
     kv.remove?.(LEGACY.mediaAuto + idKey)
     log?.('prefs: plain keys from an older build sealed and removed')
@@ -60,6 +60,6 @@ export async function loadPrefs(kv: KV, base: Uint8Array | null, idKey: string, 
   return out
 }
 
-export async function savePrefs(kv: KV, base: Uint8Array | null, idKey: string, prefs: Prefs, log?: (m: string) => void): Promise<void> {
-  await writeSealedKV(kv, base, idKey, PREFS_PREFIX + idKey, PREFS_SALT, prefs, log)
+export async function savePrefs(kv: KV, base: Uint8Array | null, names: Names, prefs: Prefs, log?: (m: string) => void): Promise<void> {
+  await writeSealedKV(kv, base, names, 'prefs', prefs, log)
 }

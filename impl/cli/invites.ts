@@ -14,6 +14,7 @@
  */
 
 import { readSealedKV, writeSealedKV, SALTS } from '../lib/sealedstore.ts'
+import type { Names } from '../lib/storenames.ts'
 import { newInboxSecret, inviteLink, inboxSecretBytes } from '../lib/invite.ts'
 import { inviteKey } from '../lib/inbox.ts'
 import { deriveWith, type Deriving } from '../lib/derive.ts'
@@ -50,14 +51,14 @@ export async function publishedLink(origin: string, path: string, me: Deriving &
 }
 
 export class InviteStore {
-  private kv: KV; private base: Uint8Array | null; private kid: string
-  constructor(kv: KV, base: Uint8Array | null, kid: string) { this.kv = kv; this.base = base; this.kid = kid }
+  private kv: KV; private base: Uint8Array | null; private names: Names
+  constructor(kv: KV, base: Uint8Array | null, names: Names) { this.kv = kv; this.base = base; this.names = names }
 
-  private read<T>(key: string, salt: string) { return readSealedKV<T>(this.kv, this.base, this.kid, key + this.kid, salt, Array.isArray) }
-  private write(key: string, salt: string, v: unknown) { return writeSealedKV(this.kv, this.base, this.kid, key + this.kid, salt, v) }
+  private read<T>(store: 'invites' | 'waiting' | 'ignored') { return readSealedKV<T>(this.kv, this.base, this.names, store, Array.isArray) }
+  private write(store: 'invites' | 'waiting' | 'ignored', v: unknown) { return writeSealedKV(this.kv, this.base, this.names, store, v) }
 
-  async invites(): Promise<PubInvite[]> { return (await this.read<PubInvite[]>('ec-invites-', INVITES_SALT)) ?? [] }
-  saveInvites(list: PubInvite[]) { return this.write('ec-invites-', INVITES_SALT, list) }
+  async invites(): Promise<PubInvite[]> { return (await this.read<PubInvite[]>('invites')) ?? [] }
+  saveInvites(list: PubInvite[]) { return this.write('invites', list) }
 
   /** A new invite, newest first - the app's btn-new-invite. */
   async create(label: string, ttlMs?: number, now = Date.now()): Promise<PubInvite> {
@@ -80,17 +81,17 @@ export class InviteStore {
   }
 
   async waiting(): Promise<Map<string, Waiting>> {
-    const v = await this.read<Array<[string, Waiting]>>('ec-waiting-', WAITING_SALT)
+    const v = await this.read<Array<[string, Waiting]>>('waiting')
     return new Map(Array.isArray(v) ? v : [])
   }
-  saveWaiting(m: Map<string, Waiting>) { return this.write('ec-waiting-', WAITING_SALT, [...m]) }
+  saveWaiting(m: Map<string, Waiting>) { return this.write('waiting', [...m]) }
 
-  async ignored(): Promise<Array<{ fp: string; at: number }>> { return (await this.read<Array<{ fp: string; at: number }>>('ec-ignored-', IGNORED_SALT)) ?? [] }
+  async ignored(): Promise<Array<{ fp: string; at: number }>> { return (await this.read<Array<{ fp: string; at: number }>>('ignored')) ?? [] }
   async ignore(fp: string, now = Date.now()) {
     const list = await this.ignored()
     if (list.some((r) => r.fp === fp)) return
     list.unshift({ fp, at: now })
     if (list.length > IGNORED_MAX) list.length = IGNORED_MAX
-    await this.write('ec-ignored-', IGNORED_SALT, list)
+    await this.write('ignored', list)
   }
 }

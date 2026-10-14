@@ -20,6 +20,7 @@ import { serve, connectDaemon, ask, lineReader } from '../cli/daemon.ts'
 import { fileKV } from '../cli/store.ts'
 import { createProfile, identityKey } from '../cli/profiles.ts'
 import { openLocalBook, cacheBaseOf } from '../lib/localbook.ts'
+import { namesFor } from '../lib/storenames.ts'
 
 const relays = JSON.parse(readFileSync(new URL('../../infra/nodes.json', import.meta.url), 'utf8')).nodes.map((n: any) => n.addr)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -54,7 +55,8 @@ try {
   const ceeKV = fileKV(ceeHome)
   const cee = await createProfile(ceeKV, 'cee', PW)
   const ceeKey = await identityKey(cee.pub)
-  const { book: ceeBook } = await openLocalBook(ceeKey, ceeKV, await cacheBaseOf(cee, ceeKey, ceeKV))
+  const ceeNames = await namesFor(cee, ceeKey)
+  const { book: ceeBook } = await openLocalBook(ceeNames, ceeKV, await cacheBaseOf(cee, ceeNames, ceeKV))
   await ceeBook.add('bob', bob.pub); await sleep(150)
 
   const A = hubFor(ala, [{ name: 'bob', pub: bob.pub }])

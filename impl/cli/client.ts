@@ -8,6 +8,7 @@
  * terminal; `onchato` passes process.stdin/stdout.
  */
 
+import type { Names } from '../lib/storenames.ts'
 import { startSession, type ClientSession, type Conversation, type ContactManager, type Contact, type Identity } from '../lib/core.ts'
 import { localHHMM } from '../lib/time.ts'
 import { safetyNumber, safetyGroups } from '../lib/safety.ts'
@@ -52,7 +53,7 @@ export interface ClientOpts {
   /** Published invites, pending knocks, ignore list (the app's sealed records). */
   store?: InviteStore
   /** Where group state is sealed (the store, its §10 key, the identity's KID). */
-  vault?: { kv: KV; base: Uint8Array | null; kid: string }
+  vault?: { kv: KV; base: Uint8Array | null; names: Names }
   io: Io
 }
 

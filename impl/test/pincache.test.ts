@@ -12,7 +12,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes } from '../lib/wc.ts'
-import { sealPins, openPins, pinsName, migrateLegacyPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../lib/pincache.ts'
+import { sealPins, openPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../lib/pincache.ts'
 import { sealCache } from '../lib/gcache.ts'
 
 const BASE = randomBytes(32)
@@ -70,42 +70,3 @@ test('unpinning something that is not pinned is not an error', () => {
   assert.deepEqual(withoutPin(pins, 'never-pinned'), pins)
 })
 
-const KID = '5954eb6d5a1dd906ec78fe9dae5645e3'
-const PEER = 'iv3Q1qyn2LhfwPVy7UvnKi/f0yiqZLeY4GALWq5ilzA='
-const GID = '00112233445566778899aabbccddeeff'
-const mem = (seed: Record<string, string> = {}) => {
-  const m = new Map(Object.entries(seed))
-  return { m, keys: () => [...m.keys()], get: (k: string) => m.get(k) ?? null, set: (k: string, v: string) => { m.set(k, v) }, remove: (k: string) => { m.delete(k) } }
-}
-
-test('a room\'s storage name says nothing about the room, and is the same every time', async () => {
-  const n1 = await pinsName(BASE, KID, PEER)
-  assert.match(n1, new RegExp('^ec-pin-' + KID + '-[0-9a-f]{32}$'))
-  assert.ok(!n1.includes(PEER) && !n1.includes(PEER.slice(0, 8)), 'no trace of the contact key')
-  assert.equal(await pinsName(BASE, KID, PEER), n1)
-  assert.notEqual(await pinsName(BASE, KID, GID), n1, 'two rooms, two names')
-  assert.notEqual(await pinsName(randomBytes(32), KID, PEER), n1, 'without the identity\'s base the name cannot be computed')
-})
-
-test('pins under the old name move to the keyed one, and the old name is gone', async () => {
-  const kv = mem({
-    [`ec-pins-${KID}-${PEER}`]: await sealPins(BASE, PEER, [pin('m1', 1)]),
-    [`ec-pins-${KID}-${GID}`]: await sealPins(BASE, GID, [pin('g1', 2), pin('g2', 3)]),
-    [`ec-pins-${KID}-junk`]: 'AAAA',
-    [`ec-pins-ffffffffffffffffffffffffffffffff-${PEER}`]: 'not ours',
-  })
-  assert.equal(await migrateLegacyPins(kv, BASE, KID), 2)
-  assert.deepEqual(kv.keys().filter((k) => k.startsWith('ec-pins-' + KID)), [], 'every old name of this identity is gone, the unreadable one too')
-  assert.ok(kv.get('ec-pins-ffffffffffffffffffffffffffffffff-' + PEER), 'another identity\'s is not ours to touch')
-  assert.deepEqual((await openPins(BASE, PEER, kv.get(await pinsName(BASE, KID, PEER))!))!.map((p) => p.id), ['m1'])
-  assert.deepEqual((await openPins(BASE, GID, kv.get(await pinsName(BASE, KID, GID))!))!.map((p) => p.id), ['g1', 'g2'])
-  assert.equal(await migrateLegacyPins(kv, BASE, KID), 0, 'a second run has nothing to do')
-})
-
-test('a keyed name already written wins over an old copy', async () => {
-  const name = await pinsName(BASE, KID, PEER)
-  const kv = mem({ [name]: await sealPins(BASE, PEER, [pin('new', 9)]), [`ec-pins-${KID}-${PEER}`]: await sealPins(BASE, PEER, [pin('old', 1)]) })
-  await migrateLegacyPins(kv, BASE, KID)
-  assert.deepEqual((await openPins(BASE, PEER, kv.get(name)!))!.map((p) => p.id), ['new'])
-  assert.equal(kv.get(`ec-pins-${KID}-${PEER}`), null)
-})

@@ -88,6 +88,9 @@ export interface Bundle {
   kid: string
   /** When the export was made (UTC ms), for the "this file is from ..." line. */
   made: number
+  /** The identity's storage-name prefix (lib/storenames.ts), so an import can
+   *  tell this identity is already here without opening anything. */
+  prefix?: string
   keys: Record<string, string>
 }
 
@@ -104,17 +107,17 @@ export const isMigrationFile = (v: any): v is MigrationFile =>
 /**
  * Which keys belong to this profile.
  *
- * `kid` matching is a substring test on purpose: state is keyed
- * `ec-<thing>-<kid>` and sometimes `ec-<thing>-<kid>-<room>`, and a rule that
- * had to know every shape would be a rule that misses the next one.
+ * Since 2026-10-14 an identity's records sit under its storage-name prefix
+ * (lib/storenames.ts); the `kid` substring test stays for records an older
+ * build wrote that sign-in has not moved yet.
  */
-export function collectProfile(store: KV, name: string, kid: string): Record<string, string> {
+export function collectProfile(store: KV, name: string, kid: string, prefix = ''): Record<string, string> {
   const out: Record<string, string> = {}
   const identity = 'ec-soft-id-' + name
   for (const k of store.keys()) {
     if (!k.startsWith('ec-')) continue
     if (NOT_PORTABLE.includes(k)) continue
-    const mine = k === identity || (!!kid && k.includes(kid)) || BROWSER_KEYS.includes(k)
+    const mine = k === identity || ownedBy(k, kid, prefix) || BROWSER_KEYS.includes(k)
     if (!mine) continue
     const v = store.get(k)
     if (v !== null) out[k] = v
@@ -132,20 +135,29 @@ export function collectProfile(store: KV, name: string, kid: string): Record<str
  * is what the app used to do: the contact book, groups, invites and pins stayed
  * behind under a prefix nobody could open or remove any more.
  */
-export function keysOfProfile(store: KV, name: string, kid: string): string[] {
+export function keysOfProfile(store: KV, name: string, kid: string, prefix = ''): string[] {
   if (!/^[0-9a-f]{32}$/.test(kid)) throw new Error('not a KID: ' + kid)
   const identity = 'ec-soft-id-' + name
-  return store.keys().filter((k) => k === identity || (k.startsWith('ec-') && k.includes(kid)))
+  return store.keys().filter((k) => k === identity || ownedBy(k, kid, prefix))
+}
+
+/**
+ * A key of this identity: under its storage-name prefix (lib/storenames.ts),
+ * or - written before the names, and not moved yet - carrying its KID.
+ */
+function ownedBy(k: string, kid: string, prefix: string): boolean {
+  if (prefix && !/^ec-[0-9a-f]{16}-$/.test(prefix)) throw new Error('not a storage prefix: ' + prefix)
+  return k.startsWith('ec-') && ((!!kid && k.includes(kid)) || (!!prefix && k.startsWith(prefix)))
 }
 
 /** Build the file. Throws if there is no identity to move — an export with no
  *  key in it is a file that looks like a rescue and is not one. */
 export async function exportProfile(
-  store: KV, name: string, kid: string, password: string, made: number,
+  store: KV, name: string, kid: string, password: string, made: number, prefix = '',
 ): Promise<MigrationFile> {
-  const keys = collectProfile(store, name, kid)
+  const keys = collectProfile(store, name, kid, prefix)
   if (!keys['ec-soft-id-' + name]) throw new Error('no sealed identity for ' + name)
-  const bundle: Bundle = { v: 1, name, kid, made, keys }
+  const bundle: Bundle = { v: 1, name, kid, made, keys, ...(prefix ? { prefix } : {}) }
   return { mark: FILE_MARK, v: 1, sealed: await seal(password, JSON.stringify(bundle)) }
 }
 
@@ -182,7 +194,7 @@ export function conflictsWith(store: KV, bundle: Bundle): string | null {
  * deleting either takes the other's contacts. Refused like a name clash.
  */
 export function identityHere(store: KV, bundle: Bundle): boolean {
-  return !!bundle.kid && store.keys().some((k) => k.startsWith('ec-') && k.includes(bundle.kid))
+  return store.keys().some((k) => ownedBy(k, bundle.kid, bundle.prefix ?? ''))
 }
 
 /** Write the profile in. Refuses on a conflict rather than trusting the caller

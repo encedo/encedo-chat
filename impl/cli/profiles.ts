@@ -15,6 +15,7 @@ import { seal, unseal, isSealedProfile } from '../lib/profile.ts'
 import { assessPassword, ENFORCE_MIN } from '../lib/passmeter.ts'
 import { exportProfile, openBundle, applyBundle, conflictsWith, identityHere, type KV } from '../lib/migrate.ts'
 import { kidOf } from '../lib/descr.ts'
+import { namesFor } from '../lib/storenames.ts'
 
 export const softKey = (name: string) => 'ec-soft-id-' + name
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
@@ -53,7 +54,8 @@ export async function openProfile(kv: KV, name: string, password: string): Promi
 /** Write the app's own move file (.ocmig). Needs the password: the KID is inside the seal. */
 export async function exportProfileFile(kv: KV, name: string, password: string, path: string): Promise<void> {
   const id = await openProfile(kv, name, password)
-  const file = await exportProfile(kv, name, await identityKey(id.pub), password, Date.now())
+  const key = await identityKey(id.pub)
+  const file = await exportProfile(kv, name, key, password, Date.now(), (await namesFor(id, key)).prefix)
   writeFileSync(path, JSON.stringify(file), { mode: 0o600 })
 }
 

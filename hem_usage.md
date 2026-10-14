@@ -171,6 +171,7 @@ my own public key           0.58 s
 key search ETSEIC:peer1,…   0.71 s     the contact book, scoped to this identity
 token keymgmt:use:<myIK>    2.35 s     for the ECDHs; the only per-key token left
 ecdh (self-topic §9.1)      0.63 s
+ecdh (storage names §10)    not measured yet - one more DH with IK's own key, the same shape as the self-topic (since 2026-10-14)
 ecdh (cache base §10)       1.25 s
   per contact:  public key 0.6–1.1 s + ecdh (pair secret) 1.25 s
 ecdh (EH-2, per conversation opened) 0.62 s
@@ -181,6 +182,10 @@ and the group's marker read is not in it at all, because recovery now runs
 twenty seconds after sign-in rather than competing with the room.
 
 As a formula:
+
+(The storage-name derivation of 2026-10-14 adds one device call, expected
+around 0.6 s like the self-topic's, to every sign-in below; re-measure on a
+device.)
 
 ```
 sign-in ≈ 12.3 s + 2.4 s × contacts        (today)

@@ -42,6 +42,7 @@ import { humanSize } from './files.ts'
 import { readFileSync } from 'node:fs'
 import { openLocalBook, cacheBaseOf } from '../lib/localbook.ts'
 import { sealPlainStores } from '../lib/sealedstore.ts'
+import { namesFor, migrateToNames, type Names } from '../lib/storenames.ts'
 import { hemContactBook, mergedContactBook, localOnlyManager, type ContactManager, type Identity } from '../lib/core.ts'
 import { setCoreBackend } from '../eh2/establish.ts'
 import { BadPassword } from '../lib/profile.ts'
@@ -147,17 +148,20 @@ async function chooseIdentity(ids: HemChoice[]): Promise<HemChoice | null> {
 }
 
 /** The identity this command runs as, and its contact book (signed, §4.4). */
-async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactManager; kind: string; store: InviteStore; key: string; base: Uint8Array | null }> {
+async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactManager; kind: string; store: InviteStore; key: string; names: Names; base: Uint8Array | null }> {
   const hemUrl = opt('--hem')
   if (hemUrl) {
     const { id, hem, kid } = await hemSignIn(hemUrl, await secret('Hasło HEM: '), opt('--handle'), chooseIdentity)
     const key = await identityKey(id.pub, kid)
-    // One ECDH for the whole sign-in: on a HEM it is a device call.
-    const base = await cacheBaseOf(id, key, kv)
-    const local = await openLocalBook(key, kv, base)
+    // Two derivations for the whole sign-in (on a HEM each is a device call):
+    // the storage names, then the §10 base under the name they give emp_pub.
+    const names = await namesFor(id, key)
+    await migrateToNames(kv, names)
+    const base = await cacheBaseOf(id, names, kv)
+    const local = await openLocalBook(names, kv, base)
     if (local.verdict === 'tampered') console.error('onchato: UWAGA - lokalna książka kontaktów nie przeszła weryfikacji (pokazuję tylko kontakty z HEM)')
-    await sealPlainStores(kv, base, key)
-    return { id, kind: 'HEM', key, base, store: new InviteStore(kv, base, key), contacts: mergedContactBook(hemContactBook(hem, kid), local.verdict === 'tampered' ? emptyBook() : local.book) }
+    await sealPlainStores(kv, base, names)
+    return { id, kind: 'HEM', key, names, base, store: new InviteStore(kv, base, names), contacts: mergedContactBook(hemContactBook(hem, kid), local.verdict === 'tampered' ? emptyBook() : local.book) }
   }
   const names = listProfiles(kv)
   const name = opt('--profile') ?? (names.length === 1 ? names[0] : undefined)
@@ -166,11 +170,13 @@ async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactMana
   try { id = await openProfile(kv, name!, await secret(`Hasło profilu ${name}: `)) }
   catch (e) { die(e instanceof BadPassword ? 'złe hasło' : (e as Error).message) }
   const key = await identityKey(id!.pub)
-  const base = await cacheBaseOf(id!, key, kv)
-  const local = await openLocalBook(key, kv, base)
+  const names = await namesFor(id!, key)
+  await migrateToNames(kv, names)
+  const base = await cacheBaseOf(id!, names, kv)
+  const local = await openLocalBook(names, kv, base)
   if (local.verdict === 'tampered') die('książka kontaktów nie przeszła weryfikacji - ktoś zmienił ' + kv.path + ' (nic nie nadpisuję)')
-  await sealPlainStores(kv, base, key)
-  return { id: id!, kind: 'software', key, base, store: new InviteStore(kv, base, key), contacts: localOnlyManager(local.book) }
+  await sealPlainStores(kv, base, names)
+  return { id: id!, kind: 'software', key, names, base, store: new InviteStore(kv, base, names), contacts: localOnlyManager(local.book) }
 }
 const emptyBook = () => ({ list: async () => [], add: async () => { throw new Error('książka zablokowana') }, remove: async () => {}, rename: async () => {} })
 
@@ -327,10 +333,10 @@ try {
     }
     case 'chat': {
       if (!process.stdin.isTTY || !process.stdout.isTTY) die('klient interaktywny wymaga terminala')
-      const { id, contacts, kind, store, key, base } = await signIn(kv)
+      const { id, contacts, kind, store, names, base } = await signIn(kv)
       const stdin = process.stdin
       await runClient({
-        id, kind, contacts, store, vault: { kv, base, kid: key }, relays: relayList(kv), openFirst: args[0], debug: rest.includes('--debug'),
+        id, kind, contacts, store, vault: { kv, base, names }, relays: relayList(kv), openFirst: args[0], debug: rest.includes('--debug'),
         transport: rest.includes('--libp2p') ? 'libp2p' : 'light', networkId: NETWORK,
         io: {
           out: process.stdout,
@@ -367,8 +373,8 @@ try {
         if (!r.ok) die(r.error)
         out({ ...r, via: 'daemon' })
       }
-      const { id, contacts, key, base } = await signIn(kv)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, kid: key } })
+      const { id, contacts, names, base } = await signIn(kv)
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names } })
       await hub.start()
       try { out({ ...(await hub.send(to, text, waitMs)), via: 'direct' }) } finally { await hub.close() }
       break
@@ -387,8 +393,8 @@ try {
       }
       const sock = await connectDaemon()
       if (sock) { const r = await ask(sock, { op: 'sendfile', to, path, wait: waitMs }); sock.end(); if (!r.ok) die(r.error); out({ ...r, via: 'daemon' }) }
-      const { id, contacts, key, base } = await signIn(kv)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, kid: key } })
+      const { id, contacts, names, base } = await signIn(kv)
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names } })
       await hub.start()
       try { out({ ...(await hub.sendFile(to, path, waitMs)), via: 'direct' }) } finally { await hub.close() }
       break
@@ -431,8 +437,8 @@ try {
         sock.write(JSON.stringify({ op: 'listen' }) + '\n')
         await new Promise(() => {})
       }
-      const { id, contacts, key, base } = await signIn(kv)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, kid: key } })
+      const { id, contacts, names, base } = await signIn(kv)
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names } })
       hub.on(show)
       if (saveDir) hub.on((e) => { if (e.t === 'file') hub.getFile(e.id, saveDir).then((p) => saved(e.name, p), (err) => failed(e.name, err?.message ?? String(err))) })
       await hub.start()
@@ -451,12 +457,12 @@ try {
       break
     }
     case 'daemon': {
-      const { id, contacts, kind, key, base } = await signIn(kv)
+      const { id, contacts, kind, names, base } = await signIn(kv)
       const say = (m: string) => console.log(`[onchato] ${m}`)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, kid: key }, log: rest.includes('--debug') ? say : undefined })
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names }, log: rest.includes('--debug') ? say : undefined })
       hub.on((e) => { if (e.t === 'link') say(`łącze: ${e.state}`); if (e.t === 'presence') say(`${e.from}: ${e.state}`) })
       await hub.start()
-      const queue = new Queue({ hub, kv, base, kid: key, log: say })
+      const queue = new Queue({ hub, kv, base, names, log: say })
       await queue.load()
       const path = socketPath()
       const srv = await serve(hub, path, say, queue)

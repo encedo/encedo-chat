@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs'
 import { browserSoftwareIdentity, localContactBook, localOnlyManager, type Identity } from '../lib/core.ts'
 import { runClient } from '../cli/client.ts'
 import { cacheBaseOf } from '../lib/localbook.ts'
+import { namesFor } from '../lib/storenames.ts'
 import { identityKey } from '../cli/profiles.ts'
 import type { KV } from '../lib/migrate.ts'
 import { VT } from '../test/vt.ts'
@@ -39,7 +40,7 @@ async function until(what: string, cond: () => boolean, ms = 120_000) {
 }
 const memKV = (): KV => { const m = new Map<string, string>(); return { keys: () => [...m.keys()], get: (k) => m.get(k) ?? null, set: (k, v) => { m.set(k, v) } } }
 
-async function vaultFor(id: Identity) { const kv = memKV(), kid = await identityKey(id.pub); return { kv, kid, base: await cacheBaseOf(id, kid, kv) } }
+async function vaultFor(id: Identity) { const kv = memKV(), names = await namesFor(id, await identityKey(id.pub)); return { kv, names, base: await cacheBaseOf(id, names, kv) } }
 async function terminal(id: Identity, contacts: Array<{ name: string; pub: string }>, vault: any) {
   const vt = new VT(26, 150)
   let feed: (s: string) => void = () => {}
