@@ -174,7 +174,9 @@ if (DRY) { console.log(`\nDRY RUN: manifest written to ${out}/manifest.json, not
 
 // ---- 5. sign, check, upload, check again --------------------------------------
 step('5/5 sign (PIN, then touch the key), upload, check')
-const sig = signFileYubikey(join(out, 'manifest.json'), { slot: host.slot ?? '9c', module: opt('--module') })
+let sig
+try { sig = signFileYubikey(join(out, 'manifest.json'), { slot: host.slot ?? '9c', module: opt('--module') }) }
+catch (e) { fail(`${e.message}\n       The build is done and the manifest is ready; run this again with the key in to sign - nothing was uploaded.`) }
 const mine = verifyManifest(raw, sig, host.root_pub, Date.now())
 if (!mine.ok) fail(`the fresh signature does not verify under ${hostName}'s root key (${mine.why}) - wrong token or wrong slot; nothing was uploaded`)
 writeFileSync(join(out, 'manifest.sig'), sig + '\n')

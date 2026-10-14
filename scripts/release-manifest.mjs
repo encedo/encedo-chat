@@ -91,7 +91,8 @@ if (has('--unsigned')) { console.log('unsigned: sign manifest.json elsewhere (pu
 
 let sig
 if (has('--sign-yubikey')) {
-  sig = signFileYubikey(join(out, 'manifest.json'), { slot: opt('--slot', '9c'), module: opt('--module') })
+  try { sig = signFileYubikey(join(out, 'manifest.json'), { slot: opt('--slot', '9c'), module: opt('--module') }) }
+  catch (e) { console.error(`[fail] ${e.message}`); process.exit(1) }
 } else {
   const priv = readFileSync(opt('--sign'), 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !/\s/.test(l)).pop()
   if (rootPubOf(priv) !== rootPub) { console.error('this key is not the one behind infra/root.pub'); process.exit(1) }
