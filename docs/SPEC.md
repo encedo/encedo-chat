@@ -120,7 +120,7 @@ GROUP  the marker of §8.6, on the GK_pub entry
 - **A public key is held once per device**: the device refuses to import a key it already holds under any DESCR. The client predicts this from the KID (one broad `key_search("ETSEIC:peer1,")` on the add path) and names the identity that already holds the contact.
 - All per-identity client state is keyed by the KID, never by the handle. The one record keyed by name is the sealed software identity itself (`ec-soft-id-<name>`, §4.5).
 - **Fingerprint** = `SHA-256(pub)[0:8]`, shown as sixteen uppercase hex digits in colon-separated pairs. It identifies a key (telling entries apart, keying local records such as §5.7's ignore list); it does not verify one — verification is the safety number of §4.4.1.
-- **Invite link**: URL fragment `#i=base64url(JSON { p, n, r?, s?, k? })` — `p` the public key (base64, exactly 32 bytes), `n` a display name (≤ 64 characters, control and format characters stripped), `r: 1` marks a reply to an invite (the receiver adds the contact without sending its own key back), `s` the 32-byte `invite_secret` of a published invite (§5.7, base64), `k` that invite's 32-byte `invite_pub` (§5.8, base64). `s` and `k` come together or not at all; either without the other, or either of another length, rejects the whole link. A link without them is an ordinary one-to-one invite.
+- **Invite link**: URL fragment `#i=base64url(JSON { p, n, r?, s?, k? })` — `p` the public key (base64, exactly 32 bytes), `n` a display name (≤ 64 characters, with control, format and line/paragraph-separator characters stripped; empty after that rejects the link), `r` marks a reply to an invite when present and truthy (clients write `1`) (the receiver adds the contact without sending its own key back), `s` the 32-byte `invite_secret` of a published invite (§5.7, base64), `k` that invite's 32-byte `invite_pub` (§5.8, base64). `s` and `k` come together or not at all; either without the other, or either of another length, rejects the whole link. A link without them is an ordinary one-to-one invite.
 
 ### 4.3 Identity-backend operations
 
@@ -238,7 +238,7 @@ mac = base64( HMAC-SHA256(announce_mac_key, ASCII("<v>|<peer>|<nonce>|<ts>")) )
 
 The MAC input is the ASCII string of the four fields joined with `|`. The receiver checks `v` and shape, then `|ts − now| ≤ 5 min`, then the MAC (constant time), then deduplicates by nonce (a per-watch cache pruned past twice the replay window); on success it maps the contact to `peer`. `IK_pub` never appears on the wire.
 
-**Presence without a conversation.** Each contact gets a light watch on the pair topic: subscribe, Announce on the heartbeat, report whether the contact announces. The watch also hears an incoming EH-2 msg1 and hands the topic over to a full room. A watch knows announcing, and gone after ~90 s of silence; a room adds `quiet` after ~35 s (2.5 missed heartbeats).
+**Presence without a conversation.** Each contact gets a light watch on the pair topic: subscribe, Announce on the heartbeat, report whether the contact announces. The watch also hears an incoming EH-2 msg1 and hands the topic over to a full room. A watch knows announcing, and gone after ~90 s of silence; a room adds `quiet` after 2.5 missed heartbeats (37.5 s, never under 35 s).
 
 ### 5.6 Discovery nodes
 
@@ -786,7 +786,7 @@ node → client   0x11 DELIVER  u8 len ‖ from ‖ u8 len ‖ topic ‖ data
 | Clock | ±5 min tolerance on Announce and handshake timestamps; anchor from a node's `Date` header, clamped ±10 min, hourly (§5.4) |
 | Rotation (§5.4) | the instant derives from the topic's own key; ±30 min guard, two topics, 60 s re-check |
 | Announce (§5.5) | 15 s heartbeat on the session's radio phase, beacons 1 s/3 s/7 s (pair topics; a light watch 60 s while hidden off the desktop shell; a newcomer answered at once, ≤ 1 per 3 s in a watch); 10 s on the self-topic, no beacons |
-| Presence thresholds | `quiet` after 2.5 heartbeats (~37 s); gone after ~90 s |
+| Presence thresholds | `quiet` after 2.5 heartbeats (37.5 s, floor 35 s); gone after ~90 s |
 | Inbox (§5.7–5.9) | 60 frames/min opened, counted before opening; own decoys never opened; 20 knocks/min surfaced; 512 ephemerals remembered; 512 dismissed; decoy every 45 s slot at a derived instant; the answerer listens ~8 s and re-knocks every 90 s |
 | Handshake retry (§6) | attempt silent 6 s; msg1 + 3 repeats 700 ms apart; retry after random 200 ms–1.6 s; 3 s after 16 and 10 s after 24 silent attempts for a peer never established; crossed-msg1 window 2 s; mismatched-tag ignore 5 min |
 | Pre-establishment queue (§6) | 32 envelopes |
