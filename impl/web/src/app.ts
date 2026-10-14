@@ -5514,7 +5514,7 @@ function refuse(rep: Awaited<ReturnType<typeof probeCapabilities>>) {
     // `error` is the platform's own words. It is the difference between "your
     // browser cannot" and "your browser would not, this time" — and without it
     // the last report of this could not be diagnosed at all.
-    + rep.missing.map((m) => `<div class="msg err" style="display:block">${escapeHtml(m.id)} — ${escapeHtml(m.note ?? '')}`
+    + rep.missing.map((m) => `<div class="msg err" style="display:block">${escapeHtml(tr(m.id))} — ${escapeHtml(capNote(m))}`
       + (m.error ? `<br><span style="opacity:.75;font-family:var(--mono);font-size:11px">${escapeHtml(m.error)}</span>` : '')
       + `</div>`).join('')
     + `<button class="btn" id="cap-retry" style="margin-top:12px">${escapeHtml(tr('Spróbuj ponownie'))}</button>`
@@ -6475,11 +6475,16 @@ function engineReport(): string[] {
   return [`${mark} ${e.text}`, ...coreStatus().fallbacks.map((f) => `[fail] ${f.from} -> ${f.to}: ${f.reason}`)]
 }
 
+/** A capability's note in the UI language, sentence by sentence. */
+function capNote(c: { note?: string; noteParts?: string[] }): string {
+  return (c.noteParts ?? (c.note ? [c.note] : [])).map((p) => tr(p)).join(' ')
+}
+
 function paintCaps() {
   const box = $('diag-caps'); if (!box || !capReport) return
   const rows = capReport.caps.map((c) => diagLine(
     c.ok ? 'ok' : c.required ? 'bad' : 'meh',
-    c.id + (c.tries ? ` (${tr('{n} próby', { n: c.tries })})` : '') + (c.ok ? '' : ` — ${c.note ?? ''}${c.error ? ` [${c.error}]` : ''}`),
+    tr(c.id) + (c.tries ? ` (${tr('{n} próby', { n: c.tries })})` : '') + (c.ok ? '' : ` — ${capNote(c)}${c.error ? ` [${c.error}]` : ''}`),
   ))
   // The user agent is the first thing anyone reading a bug report wants and the
   // last thing they can get out of a packaged app.

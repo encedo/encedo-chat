@@ -79,6 +79,9 @@ export interface Capability {
   tries?: number
   /** What the user loses. Empty when it is fine. */
   note?: string
+  /** The note as separate sentences, each a translation key - the UI translates
+   *  them one by one (a note is sometimes two sentences put together). */
+  noteParts?: string[]
 }
 
 export interface CapabilityReport {
@@ -96,8 +99,10 @@ export interface CapabilityReport {
  */
 export async function probeCapabilities(opts: { hostRtc?: boolean } = {}): Promise<CapabilityReport> {
   const caps: Capability[] = []
-  const add = (id: string, required: boolean, ok: boolean, note?: string, error?: string, tries?: number) =>
-    caps.push({ id, required, ok, note: ok ? undefined : note, error, tries: tries && tries > 1 ? tries : undefined })
+  const add = (id: string, required: boolean, ok: boolean, note?: string | string[], error?: string, tries?: number) => {
+    const parts = note === undefined ? undefined : (Array.isArray(note) ? note : [note])
+    caps.push({ id, required, ok, note: ok ? undefined : parts?.join(' '), noteParts: ok ? undefined : parts, error, tries: tries && tries > 1 ? tries : undefined })
+  }
 
   /**
    * Try a probe more than once before calling the platform unfit.
@@ -197,12 +202,12 @@ export async function probeCapabilities(opts: { hostRtc?: boolean } = {}): Promi
    * WebKitGTK is the other place the two halves come apart.
    */
   const canCapture = typeof navigator === 'object' && !!navigator.mediaDevices?.getUserMedia
-  const noCapture = ' Brak dostępu do mikrofonu i kamery (navigator.mediaDevices) — w paczce zwykle znaczy, że aplikacja go nie zadeklarowała.'
+  const noCapture = 'Brak dostępu do mikrofonu i kamery (navigator.mediaDevices) — w paczce zwykle znaczy, że aplikacja go nie zadeklarowała.'
 
   const hasRecorder = typeof (globalThis as any).MediaRecorder === 'function'
   add('MediaRecorder', false, hasRecorder && canCapture,
-    'Ta platforma nie umie nagrywać dźwięku — głosówek nie da się nagrać, ale przysłane można odsłuchać.'
-    + (hasRecorder ? noCapture : ' Brak MediaRecorder.'))
+    ['Ta platforma nie umie nagrywać dźwięku — głosówek nie da się nagrać, ale przysłane można odsłuchać.',
+      hasRecorder ? noCapture : 'Brak MediaRecorder.'])
 
   // Showing a code always works — it is scanning that is conditional, and the
   // app says so instead of opening a viewfinder that can never resolve
@@ -234,8 +239,10 @@ export async function probeCapabilities(opts: { hostRtc?: boolean } = {}): Promi
   // not. WHICH reader ran is not shown here — it goes to the diary through
   // `ecLog('qr reader: ...')`, which is where somebody debugging a misbehaving
   // scan will be looking anyway, and this line has one job.
+  // The one descriptive name on this list: the UI translates it (i18n.ts),
+  // the API names above stay as they are.
   add('Skaner QR', false, canCapture,
-    'Nie da się zeskanować kodu QR — kod można pokazać, zostaje wklejenie linku.' + noCapture)
+    ['Nie da się zeskanować kodu QR — kod można pokazać, zostaje wklejenie linku.', noCapture])
 
   const missing = caps.filter((c) => c.required && !c.ok)
   const degraded = caps.filter((c) => !c.required && !c.ok)
