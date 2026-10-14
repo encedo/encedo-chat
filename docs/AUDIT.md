@@ -6,7 +6,7 @@ Where to start, what is normative, how to run the checks, and which code file an
 
 1. **`SPEC.md`** — the normative protocol: identity, rendezvous, EH-2 handshake, Double Ratchet with the hybrid step, groups, sessions, local persistence, security considerations, constants. Flat, no history. Section numbers §4–§10, §13, §14 are the ones the code cites.
 2. **`RATIONALE.md`** — why each choice was made, the alternatives rejected, the decision record, the PQ roadmap, the open questions, the implementation map, and the **review checklist** (§15, common pitfalls). Read §4 there first: it maps EH-2 onto Noise KKhfs and states the three deviations (no `ss`, one HKDF over the concatenation, MAC confirmation).
-3. **`EH2-PROVERIF.md`** — the symbolic model of EH-2 (ProVerif 2.05, `docs/proverif/`, `run.sh` checks every result and a mutant): what is proved, under which abstractions, and what is not modelled.
+3. **`EH2-PROVERIF.md`** and **`GROUPS-PROVERIF.md`** — the symbolic models of EH-2 and of Sender-Key groups (ProVerif 2.05, `docs/proverif/`; `run.sh` checks every result, the negative controls and the mutants): what is proved, under which abstractions, and what is not modelled.
 4. **`THREAT-MODELS.md`** — deployment profiles P1–P3; the crypto-layer threat model lives in `SPEC.md` §2 and §11.
 5. **This guide** — the section→code table and how to run the vectors.
 
@@ -53,7 +53,7 @@ Each `docs/kat/` file carries the fixed scalars, seeds and a `note` naming the c
 | §7 Double Ratchet, hybrid step | `impl/eh2/ratchet.ts`; Rust: `core-rs/src/ratchet.rs`; `test/eh2-ratchet.test.ts` |
 | §7.4 application envelope | `impl/lib/envelope.ts`, `impl/lib/{quote,edits,mentions,linkify}.ts` |
 | §7.5 files | `impl/lib/{filecrypto,fileenvelope,cid}.ts`, `impl/net/file-decrypt.ts` |
-| §8 groups, sender keys, MAC, repair | `impl/lib/{senderkey,group,grouproom,gmarker}.ts`, `test/group*.ts` |
+| §8 groups, sender keys, MAC, repair | `impl/lib/{senderkey,group,grouproom,gmarker}.ts`, `test/group*.ts`; symbolic model: `docs/proverif/groups.pvl` (`GROUPS-PROVERIF.md`) |
 | §9 session management, self-topic | `impl/lib/selfsession.ts`, `impl/lib/core.ts` |
 | §10 local persistence | `impl/lib/{localstore,sealedstore,gcache,pincache,bookmac,localbook,seen,gleft,prefs}.ts` |
 | §13 transport, origin envelope, pick stream | `impl/lib/origin.ts`, `impl/net/{onchato,peer,light}.ts` |

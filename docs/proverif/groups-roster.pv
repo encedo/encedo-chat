@@ -1,0 +1,6 @@
+(* groups-roster.pv - admin authority (8.3): the attacker holds member C. No
+   member takes a roster for THIS group (gid = H(GK_pub)) that the admin did
+   not attest to it, whoever sends it. (C may found a group of its own and be
+   its admin; that is a different gid, and legitimate.) *)
+query x: G, R: bitstring, e: bitstring; event(AcceptRoster(x, sha(g2b(exp(g, gk))), R, e)) ==> event(IssueRoster(x, sha(g2b(exp(g, gk))), R, e)) || event(Corrupt(x)).
+process Group(false, false) | Hand(ikC)

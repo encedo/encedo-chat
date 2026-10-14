@@ -1,0 +1,5 @@
+(* groups-secrecy.pv - every member honest: what a member sends to the group of
+   an epoch is secret from everyone outside it. *)
+query attacker(secret0).
+query attacker(secret1).
+process Group(true, true)

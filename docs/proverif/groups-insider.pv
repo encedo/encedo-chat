@@ -1,0 +1,7 @@
+(* groups-insider.pv - the load-bearing property of 8.2: B is a member and the
+   attacker holds B (identity key, every 1:1 of B, so every chain key handed to
+   B). B cannot make C accept a message as A's: that needs mk_AC, which B does
+   not have. Only a corrupt sender or a corrupt receiver excuses an accept. *)
+query x: G, y: G, m: bitstring, e: bitstring; event(Accept(x, y, m, e)) ==> event(Sent(y, m, e)) || event(Corrupt(y)) || event(Corrupt(x)).
+query m: bitstring, e: bitstring; event(Accept(exp(g, ikC), exp(g, ikA), m, e)) ==> event(Sent(exp(g, ikA), m, e)).
+process Group(false, false) | Hand(ikB)

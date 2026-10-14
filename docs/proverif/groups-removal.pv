@@ -1,0 +1,8 @@
+(* groups-removal.pv - membership change (8.3): the attacker holds D, a member
+   of epoch 0 removed in epoch 1. Epoch 1 stays secret from D, and no member
+   but D itself accepts anything from D in epoch 1. (D still computes its
+   pairwise MACs; it is the attested roster that refuses its sender key. D can
+   fool its own client - it knows its own rk_D - which deceives nobody.) *)
+query attacker(secret1).
+query m: bitstring, x: G; event(Accept(x, exp(g, ikD), m, e1)) ==> event(Corrupt(x)).
+process Group(false, true) | Hand(ikD)

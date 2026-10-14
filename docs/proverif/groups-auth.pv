@@ -1,0 +1,8 @@
+(* groups-auth.pv - every member honest. Reachability first (expected FALSE:
+   the events happen, so the other results are not vacuous), then sender
+   authentication: a member accepts m from y only if y sent m in that epoch. *)
+query m: bitstring; event(Accept(exp(g, ikC), exp(g, ikA), m, e0)).
+query m: bitstring; event(Accept(exp(g, ikB), exp(g, ikC), m, e1)).
+query e: bitstring, R: bitstring; event(AcceptRoster(exp(g, ikB), sha(g2b(exp(g, gk))), R, e)).
+query x: G, y: G, m: bitstring, e: bitstring; event(Accept(x, y, m, e)) ==> event(Sent(y, m, e)).
+process Group(true, true)

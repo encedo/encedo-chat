@@ -1,0 +1,203 @@
+(* groups.pvl - Sender-Key groups of SPEC.md section 8, for ProVerif 2.05.
+
+   One library, one scenario per file (groups-*.pv); the scenarios differ only
+   in which member the attacker holds and what is asked.
+
+   What is modelled, against SPEC.md 8:
+     group_id  = H(GK_pub)                                        8.1
+     sender_id = H(IK_pub)                    (recipient_id likewise)
+     mk_ij = HKDF(ECDH(IK_i, IK_j), salt = gid || epoch, "encedo-group-msg-mac")
+     rk_i  = HKDF(ECDH(GK,   IK_i), salt = gid || epoch, "encedo-chat-group-roster-mac")
+     frame: header = (gid, sender_id, epoch, ctr)                 8.2
+            ct     = AEAD(MK, envelope, aad = header)
+            one (recipient_id, HMAC(mk_ij, header || ct)) per other member
+     a receiver verifies ITS MAC first, then decrypts with the sender's chain
+     group-skd { gid, GK_pub, epoch, chain, roster, rmac? }       8.3
+       rmac = HMAC(rk_i, roster) over the roster IN ORDER, roster[0] the admin;
+       a member takes a roster only under an rmac that verifies with its own
+       rk_i, from an SKD whose sender is roster[0], for gid == H(GK_pub);
+       a sender key only from a sender the attested roster holds.
+     membership change = new epoch, fresh chains, distributed to those who remain.
+
+   The world: admin A (holds GK) and members B, C, D. Epoch 0 is {A, B, C, D};
+   epoch 1 removes D: {A, B, C}. Every member sends any number of messages in
+   every epoch it belongs to.
+
+   Abstractions, stated so a reviewer can judge them:
+   - The 1:1 sessions an SKD rides are authenticated private channels, one per
+     ordered pair; their properties are what the EH-2 model proves
+     (EH2-PROVERIF.md). A corrupt member's channels, both directions, are
+     handed to the attacker together with its identity key.
+   - The per-message key is HKDF(chain, ctr) for a fresh public ctr: the chain
+     walk and its forward secrecy within an epoch are not modelled (SPEC 8.2
+     claims none against a held chain key anyway).
+   - X25519 a DH group; HKDF, HMAC, H random oracles; AEAD ideal.
+   - Not modelled: the topic and group_secret (they address, not protect), the
+     repair path and held frames (8.4), the keepalive, deniability.
+*)
+
+type G.
+type exponent.
+type key.
+
+free c: channel.
+const g: G [data].
+fun exp(G, exponent): G.
+equation forall x: exponent, y: exponent; exp(exp(g, x), y) = exp(exp(g, y), x).
+
+fun hkdf(bitstring, bitstring, bitstring): key.     (* hkdf(salt, ikm, info) *)
+fun hmac(key, bitstring): bitstring.
+fun sha(bitstring): bitstring.
+fun g2b(G): bitstring [typeConverter].
+fun k2b(key): bitstring [typeConverter].
+
+fun aenc(bitstring, key, bitstring): bitstring.     (* aenc(plaintext, key, aad) *)
+reduc forall m: bitstring, k: key, ad: bitstring; adec(aenc(m, k, ad), k, ad) = m.
+
+const L_MSGMAC: bitstring [data].       (* "encedo-group-msg-mac" *)
+const L_ROSTER: bitstring [data].       (* "encedo-chat-group-roster-mac" *)
+const L_MK: bitstring [data].           (* the per-message key off the chain *)
+const e0: bitstring [data].
+const e1: bitstring [data].
+
+(* the 1:1 sessions: one private channel per ordered pair *)
+fun ch(G, G): channel [private].
+
+(* identities: free names, so scenarios can name them and hand one over *)
+free ikA: exponent [private].
+free ikB: exponent [private].
+free ikC: exponent [private].
+free ikD: exponent [private].
+free gk:  exponent [private].
+letfun pk(x: exponent) = exp(g, x).
+letfun gid() = sha(g2b(exp(g, gk))).
+letfun sndid(p: G) = sha(g2b(p)).
+
+letfun mk(myik: exponent, peer: G, e: bitstring) = hkdf((gid(), e), g2b(exp(peer, myik)), L_MSGMAC).
+letfun rk(myik: exponent, e: bitstring) = hkdf((gid(), e), g2b(exp(exp(g, gk), myik)), L_ROSTER).
+
+(* the two rosters, in order, roster[0] the admin *)
+letfun roster0() = (pk(ikA), pk(ikB), pk(ikC), pk(ikD)).
+letfun roster1() = (pk(ikA), pk(ikB), pk(ikC)).
+
+event IssueRoster(G, bitstring, bitstring, bitstring).   (* admin attests to member: gid, roster R, epoch *)
+event AcceptRoster(G, bitstring, bitstring, bitstring).  (* member took: gid, roster R, epoch *)
+event Sent(G, bitstring, bitstring).                 (* sender, message, epoch *)
+event Accept(G, G, bitstring, bitstring).            (* receiver, believed sender, message, epoch *)
+event Corrupt(G).
+
+(* Keyed by group id as the client keys them (a GroupSession per gid,
+   GroupManager): without gid a member's own group would share a drawer with
+   every other group it is in. *)
+table chains(G, G, bitstring, bitstring, key).       (* receiver, sender, gid, epoch, the sender's chain *)
+table rosterOf(G, bitstring, bitstring, bitstring).  (* member, gid, epoch, attested roster *)
+
+(* secrets a sender seals to the group when every member of that epoch is honest *)
+free secret0: bitstring [private].
+free secret1: bitstring [private].
+
+(* ---- the admin attests a roster to one member, with rmac under that member's rk ---- *)
+let AdminSKD(e: bitstring, R: bitstring, to: G, chainA: key) =
+  let rmac = hmac(hkdf((gid(), e), g2b(exp(to, gk)), L_ROSTER), R) in
+  event IssueRoster(to, gid(), R, e);
+  out(ch(pk(ikA), to), (gid(), exp(g, gk), e, chainA, R, rmac)).
+
+(* ---- a member's own sender key to one other member (no rmac) ---- *)
+let MemberSKD(me: G, e: bitstring, to: G, chain: key) =
+  out(ch(me, to), (gid(), exp(g, gk), e, chain, (), ())).
+
+(* ---- a member receiving an SKD from `from` over their 1:1 ---- *)
+let ReceiveSKD(myik: exponent, from: G) =
+  let me = pk(myik) in
+  !in(ch(from, me), (gidx: bitstring, gkpub: G, e: bitstring, chain: key, R: bitstring, rmac: bitstring));
+  if gidx = sha(g2b(gkpub)) then
+  if rmac <> () then (
+    (* an rmac-bearing SKD: the roster, attested by roster[0] = its sender *)
+    let (adm: G, r1: G, r2: G, r3: G) = R in (
+      if adm = from then
+      if rmac = hmac(hkdf((gidx, e), g2b(exp(gkpub, myik)), L_ROSTER), R) then
+      event AcceptRoster(me, gidx, R, e);
+      insert rosterOf(me, gidx, e, R);
+      insert chains(me, from, gidx, e, chain))
+    else let (adm: G, r1: G, r2: G) = R in (
+      if adm = from then
+      if rmac = hmac(hkdf((gidx, e), g2b(exp(gkpub, myik)), L_ROSTER), R) then
+      event AcceptRoster(me, gidx, R, e);
+      insert rosterOf(me, gidx, e, R);
+      insert chains(me, from, gidx, e, chain))
+  ) else (
+    (* a member's sender key: only from a sender the attested roster holds *)
+    get rosterOf(=me, =gidx, =e, R2) in
+    let inRoster = (let (a: G, b: G, cc: G, d: G) = R2 in (from = a || from = b || from = cc || from = d)
+                    else let (a: G, b: G, cc: G) = R2 in (from = a || from = b || from = cc)
+                    else false) in
+    if inRoster then insert chains(me, from, gidx, e, chain)).
+
+(* ---- one message from a sender to the group of epoch e ---- *)
+let Send(myik: exponent, e: bitstring, chain: key, m: bitstring, recips: bitstring) =
+  let me = pk(myik) in
+  new ctr: bitstring;
+  let header = (gid(), sndid(me), e, ctr) in
+  let ct = aenc(m, hkdf(ctr, k2b(chain), L_MK), header) in
+  event Sent(me, m, e);
+  (* one MAC per other member *)
+  let (p1: G, p2: G, p3: G) = recips in (
+    out(c, (header, ct, sndid(p1), hmac(mk(myik, p1, e), (header, ct))));
+    out(c, (header, ct, sndid(p2), hmac(mk(myik, p2, e), (header, ct))));
+    out(c, (header, ct, sndid(p3), hmac(mk(myik, p3, e), (header, ct)))))
+  else let (p1: G, p2: G) = recips in (
+    out(c, (header, ct, sndid(p1), hmac(mk(myik, p1, e), (header, ct))));
+    out(c, (header, ct, sndid(p2), hmac(mk(myik, p2, e), (header, ct))))).
+
+(* ---- a receiver: its own MAC first, then the sender's chain ---- *)
+let Receive(myik: exponent, from: G) =
+  let me = pk(myik) in
+  !in(c, (header: bitstring, ct: bitstring, rid: bitstring, mac: bitstring));
+  let (gidx: bitstring, sidx: bitstring, e: bitstring, ctr: bitstring) = header in
+  if gidx = gid() then if rid = sndid(me) then if sidx = sndid(from) then
+  if mac = hmac(mk(myik, from, e), (header, ct)) then
+  get chains(=me, =from, =gidx, =e, chain) in
+  let m = adec(ct, hkdf(ctr, k2b(chain), L_MK), header) in
+  event Accept(me, from, m, e).
+
+(* every member's role in one epoch: own chain out to the others, sends, receives *)
+let MemberEpoch(myik: exponent, e: bitstring, others: bitstring, secretE: bitstring, honestGroup: bool) =
+  new chain: key;
+  let me = pk(myik) in
+  ( (let (p1: G, p2: G, p3: G) = others in (MemberSKD(me, e, p1, chain) | MemberSKD(me, e, p2, chain) | MemberSKD(me, e, p3, chain))
+     else let (p1: G, p2: G) = others in (MemberSKD(me, e, p1, chain) | MemberSKD(me, e, p2, chain)))
+  | (!new m: bitstring; Send(myik, e, chain, m, others))
+  | (if honestGroup then Send(myik, e, chain, secretE, others)) ).
+
+let AdminEpoch(e: bitstring, R: bitstring, others: bitstring, secretE: bitstring, honestGroup: bool) =
+  new chainA: key;
+  ( (let (p1: G, p2: G, p3: G) = others in (AdminSKD(e, R, p1, chainA) | AdminSKD(e, R, p2, chainA) | AdminSKD(e, R, p3, chainA))
+     else let (p1: G, p2: G) = others in (AdminSKD(e, R, p1, chainA) | AdminSKD(e, R, p2, chainA)))
+  | (!new m: bitstring; Send(ikA, e, chainA, m, others))
+  | (if honestGroup then Send(ikA, e, chainA, secretE, others)) ).
+
+(* all SKD and frame receivers of one member, from every possible sender *)
+let Inbox(myik: exponent) =
+  ( ReceiveSKD(myik, pk(ikA)) | ReceiveSKD(myik, pk(ikB)) | ReceiveSKD(myik, pk(ikC)) | ReceiveSKD(myik, pk(ikD))
+  | Receive(myik, pk(ikA)) | Receive(myik, pk(ikB)) | Receive(myik, pk(ikC)) | Receive(myik, pk(ikD)) ).
+
+(* hand a member to the attacker: identity key and its 1:1 channels both ways *)
+let Hand(ik: exponent) =
+  let p = pk(ik) in
+  event Corrupt(p);
+  out(c, ik);
+  out(c, (ch(p, pk(ikA)), ch(p, pk(ikB)), ch(p, pk(ikC)), ch(p, pk(ikD))));
+  out(c, (ch(pk(ikA), p), ch(pk(ikB), p), ch(pk(ikC), p), ch(pk(ikD), p))).
+
+(* the group: epoch 0 {A,B,C,D}, epoch 1 {A,B,C}. honest0/honest1: whether
+   every member of that epoch is honest (only then is the secret sent) *)
+let Group(honest0: bool, honest1: bool) =
+  out(c, (pk(ikA), pk(ikB), pk(ikC), pk(ikD), exp(g, gk)));
+  ( AdminEpoch(e0, roster0(), (pk(ikB), pk(ikC), pk(ikD)), secret0, honest0)
+  | MemberEpoch(ikB, e0, (pk(ikA), pk(ikC), pk(ikD)), secret0, honest0)
+  | MemberEpoch(ikC, e0, (pk(ikA), pk(ikB), pk(ikD)), secret0, honest0)
+  | MemberEpoch(ikD, e0, (pk(ikA), pk(ikB), pk(ikC)), secret0, honest0)
+  | AdminEpoch(e1, roster1(), (pk(ikB), pk(ikC)), secret1, honest1)
+  | MemberEpoch(ikB, e1, (pk(ikA), pk(ikC)), secret1, honest1)
+  | MemberEpoch(ikC, e1, (pk(ikA), pk(ikB)), secret1, honest1)
+  | Inbox(ikA) | Inbox(ikB) | Inbox(ikC) | Inbox(ikD) ).

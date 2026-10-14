@@ -1,6 +1,7 @@
-# The symbolic model of EH-2 (docs/EH2-PROVERIF.md), checked by ProVerif.
+# The symbolic models of EH-2 and of groups (docs/EH2-PROVERIF.md,
+# docs/GROUPS-PROVERIF.md), checked by ProVerif.
 #
-# Not on every push: the eight scenarios take about thirty minutes. Who runs it:
+# Not on every push: the scenarios take about forty minutes. Who runs it:
 #   - GitHub's scheduler, every Monday at 03:00 UTC (the `schedule` trigger;
 #     nobody has to press anything);
 #   - anyone with write access, by hand (Actions -> ProVerif -> Run workflow);
@@ -20,7 +21,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['docs/proverif/**', 'docs/EH2-PROVERIF.md', '.github/workflows/proverif.yml']
+    paths: ['docs/proverif/**', 'docs/EH2-PROVERIF.md', 'docs/GROUPS-PROVERIF.md', '.github/workflows/proverif.yml']
 
 concurrency:
   group: proverif-${{ github.ref }}
@@ -31,7 +32,7 @@ permissions:
 
 jobs:
   eh2:
-    name: EH-2 model (ProVerif 2.05)
+    name: EH-2 and group models (ProVerif 2.05)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
