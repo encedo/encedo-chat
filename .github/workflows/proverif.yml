@@ -1,0 +1,45 @@
+# The symbolic model of EH-2 (docs/EH2-PROVERIF.md), checked by ProVerif.
+#
+# Not on every push: the eight scenarios take about thirty minutes. Who runs it:
+#   - GitHub's scheduler, every Monday at 03:00 UTC (the `schedule` trigger;
+#     nobody has to press anything);
+#   - anyone with write access, by hand (Actions -> ProVerif -> Run workflow);
+#   - a push to main that touches the model itself.
+# A failure of the scheduled run is mailed by GitHub to whoever last changed
+# the cron line here. GitHub suspends scheduled workflows in a repository with
+# no activity for 60 days; a push re-enables them.
+#
+# run.sh compares every result with what it must be, including the negative
+# controls and the mutant, so a red run means a property no longer holds or a
+# control stopped catching its attack - not merely that ProVerif ran.
+name: ProVerif
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['docs/proverif/**', 'docs/EH2-PROVERIF.md', '.github/workflows/proverif.yml']
+
+concurrency:
+  group: proverif-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  eh2:
+    name: EH-2 model (ProVerif 2.05)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ocaml/setup-ocaml@v3
+        with:
+          ocaml-compiler: '4.14'
+      - name: Install ProVerif
+        run: opam install -y proverif.2.05
+      - name: Run every scenario and check its result
+        run: opam exec -- ./docs/proverif/run.sh

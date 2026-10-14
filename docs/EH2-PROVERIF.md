@@ -87,6 +87,8 @@ A model that never finds an attack proves nothing, so three results are expected
 
 ## Running it
 
+In CI: `.github/workflows/proverif.yml` runs `run.sh` every Monday at 03:00 UTC (GitHub's scheduler), on demand from the Actions tab, and on any push that changes the model.
+
 ```bash
 # ProVerif 2.05 on PATH:
 ./docs/proverif/run.sh
