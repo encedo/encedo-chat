@@ -6,7 +6,7 @@
  *
  * ala hangs up an invite (cli/invites.ts, the app's sealed record) and runs the
  * client; cee has opened that invite - holds ala as a contact and a waiting
- * knock, exactly what `onchato add <invite>` leaves - and runs the client too.
+ * knock, exactly what `onchato-cli add <invite>` leaves - and runs the client too.
  * Read off the screens: cee's client knocks by itself, ala sees the knock with
  * cee's fingerprint, /accept 1 adds cee, and cee is told the knock was accepted
  * once ala announces. Then they talk.
@@ -56,8 +56,8 @@ try {
   const cee = await browserSoftwareIdentity('cee', () => null, () => {})
   const alaStore = await storeFor(ala), ceeStore = await storeFor(cee)
   const inv = await alaStore.create('biuro')
-  // What `onchato add <ala's invite>` leaves behind on cee's side.
-  // The key comes off the link, the way `onchato add` reads it.
+  // What `onchato-cli add <ala's invite>` leaves behind on cee's side.
+  // The key comes off the link, the way `onchato-cli add` reads it.
   const link = decodeInvite((await publishedLink('https://app.onchato.com', '/', ala, inv)).split('#')[1])!
   await ceeStore.saveWaiting(new Map<string, Waiting>([[ala.pub, { inbox: inv.secret, key: link.key, name: 'ala', since: Date.now() }]]))
 

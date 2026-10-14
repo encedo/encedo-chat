@@ -2,26 +2,26 @@
 /**
  * onchato.ts - the terminal client (CLI-PLAN.md, stage 1: the foundation).
  *
- *   onchato profile new <name>                 a software identity, sealed (browser format)
- *   onchato profile list
- *   onchato hem new <name> --hem <url>          a new onchato identity on a HEM (sign-in never creates one)
- *   onchato profile import <file.ocmig>        the app's "move profile" file
- *   onchato profile export <name> <file>
- *   onchato whoami | pubkey | contacts
- *   onchato invite [--qr]                     my identity link (and the code, drawn in the terminal)
- *   onchato invites [new [label] [--expires 24h] [--qr] | qr <n> | revoke <n>]
+ *   onchato-cli profile new <name>                 a software identity, sealed (browser format)
+ *   onchato-cli profile list
+ *   onchato-cli hem new <name> --hem <url>          a new onchato identity on a HEM (sign-in never creates one)
+ *   onchato-cli profile import <file.ocmig>        the app's "move profile" file
+ *   onchato-cli profile export <name> <file>
+ *   onchato-cli whoami | pubkey | contacts
+ *   onchato-cli invite [--qr]                     my identity link (and the code, drawn in the terminal)
+ *   onchato-cli invites [new [label] [--expires 24h] [--qr] | qr <n> | revoke <n>]
  *                                              invites that answer themselves: whoever opens one knocks,
- *                                              and the client (onchato chat) shows the knock to accept
- *   onchato add <link|code> [--name n] [--yes] a contact from an invite - fingerprint shown, confirmed
- *   onchato add <name> <pubB64>                a contact by raw key
- *   onchato verify <name> [--qr] [<number>]    the pair's safety number; compare one read out to you
- *   onchato chat [<name>] [--debug]           the irssi-style client (windows, Alt+N, /help)
- *   onchato send <name> <text|-> [--wait s] [--ttl 24h] [--key k] [--json]   exit 0 delivered, 3 queued
- *   onchato send-file <name> <path> [--wait s] [--json]   a file (the store keeps it ~5 min)
- *   onchato listen [--json] [--save-files <dir>]   incoming messages and files as lines
- *   onchato get <id> [--dir <dir>]             save a received file (through the daemon)
- *   onchato daemon                             keep the session up; send/listen go through its socket
- *   onchato queue                              what waits in the daemon for whom
+ *                                              and the client (onchato-cli chat) shows the knock to accept
+ *   onchato-cli add <link|code> [--name n] [--yes] a contact from an invite - fingerprint shown, confirmed
+ *   onchato-cli add <name> <pubB64>                a contact by raw key
+ *   onchato-cli verify <name> [--qr] [<number>]    the pair's safety number; compare one read out to you
+ *   onchato-cli chat [<name>] [--debug]           the irssi-style client (windows, Alt+N, /help)
+ *   onchato-cli send <name> <text|-> [--wait s] [--ttl 24h] [--key k] [--json]   exit 0 delivered, 3 queued
+ *   onchato-cli send-file <name> <path> [--wait s] [--json]   a file (the store keeps it ~5 min)
+ *   onchato-cli listen [--json] [--save-files <dir>]   incoming messages and files as lines
+ *   onchato-cli get <id> [--dir <dir>]             save a received file (through the daemon)
+ *   onchato-cli daemon                             keep the session up; send/listen go through its socket
+ *   onchato-cli queue                              what waits in the daemon for whom
  *
  * Which identity: --profile <name> (a software profile here), or --hem <url>
  * [--handle h] (a HEM). With neither, the only profile there is.
@@ -158,7 +158,7 @@ async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactMana
   }
   const names = listProfiles(kv)
   const name = opt('--profile') ?? (names.length === 1 ? names[0] : undefined)
-  if (!name) die(names.length ? `kilka profili (${names.join(', ')}) - wybierz --profile <nazwa>` : 'brak profilu - onchato profile new <nazwa> albo profile import <plik>')
+  if (!name) die(names.length ? `kilka profili (${names.join(', ')}) - wybierz --profile <nazwa>` : 'brak profilu - onchato-cli profile new <nazwa> albo profile import <plik>')
   let id: Identity
   try { id = await openProfile(kv, name!, await secret(`Hasło profilu ${name}: `)) }
   catch (e) { die(e instanceof BadPassword ? 'złe hasło' : (e as Error).message) }
@@ -217,7 +217,7 @@ try {
     case 'pubkey': console.log((await signIn(kv)).id.pub); break
     case 'contacts': {
       const list = await (await signIn(kv)).contacts.list()
-      console.log(list.length ? (await Promise.all(list.map(async (c) => `  ${c.name.padEnd(16)} ${await fingerprint(c.pub)}  ${c.source}`))).join('\n') : '(brak kontaktów - onchato add <nazwa> <klucz>)')
+      console.log(list.length ? (await Promise.all(list.map(async (c) => `  ${c.name.padEnd(16)} ${await fingerprint(c.pub)}  ${c.source}`))).join('\n') : '(brak kontaktów - onchato-cli add <nazwa> <klucz>)')
       break
     }
     case 'invite': {
@@ -231,12 +231,12 @@ try {
       const [sub, ...more] = args
       const { id, store } = await signIn(kv)
       const list = await store.invites()
-      const pick = (n: string) => list[Number(n) - 1] ?? die(`nie ma zaproszenia nr ${n} (onchato invites)`)
+      const pick = (n: string) => list[Number(n) - 1] ?? die(`nie ma zaproszenia nr ${n} (onchato-cli invites)`)
       const when = (t: number) => new Date(t).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
       if (!sub || sub === 'list') {
-        if (!list.length) { console.log('(brak zaproszeń - onchato invites new <etykieta>)'); break }
+        if (!list.length) { console.log('(brak zaproszeń - onchato-cli invites new <etykieta>)'); break }
         for (const [i, inv] of list.entries()) console.log(`  ${i + 1}) ${inv.label.padEnd(16)} od ${when(inv.created)}  ${inv.expires ? (expired(inv) ? 'WYGASŁO' : 'do ' + when(inv.expires)) : 'bez terminu'}\n     ${await publishedLink(APP_ORIGIN, APP_PATH, id, inv)}`)
-        console.log('Pukanie widać w kliencie (onchato chat) - zaproszenie słucha tylko, gdy klient działa.')
+        console.log('Pukanie widać w kliencie (onchato-cli chat) - zaproszenie słucha tylko, gdy klient działa.')
         break
       }
       if (sub === 'new') {
@@ -245,7 +245,7 @@ try {
         const link = await publishedLink(APP_ORIGIN, APP_PATH, id, inv)
         console.log(`zaproszenie „${inv.label}”${inv.expires ? ' do ' + when(inv.expires) : ' bez terminu'}:\n${link}`)
         if (rest.includes('--qr')) console.log('\n' + qrForTerminal(link))
-        console.log('Kto je otworzy, zapuka - zobaczysz to w onchato chat (/knocks, /accept N).')
+        console.log('Kto je otworzy, zapuka - zobaczysz to w onchato-cli chat (/knocks, /accept N).')
         break
       }
       if (sub === 'qr') { const inv = pick(more[0]); console.log(qrForTerminal(await publishedLink(APP_ORIGIN, APP_PATH, id, inv))); break }
@@ -285,8 +285,8 @@ try {
           waiting.set(inv.pub, { inbox: inv.inbox, key: inv.key, name, since: Date.now(), note: opt('--note') } as Waiting)
           await store.saveWaiting(waiting)
           console.log(reach === 0
-            ? `zapukano, ale nikt teraz nie słucha tego zaproszenia - onchato chat będzie pukać co 90 s, aż ${name} przyjmie`
-            : `zapukano do ${name} - gdy przyjmie, zobaczysz go/ją online (onchato chat)`)
+            ? `zapukano, ale nikt teraz nie słucha tego zaproszenia - onchato-cli chat będzie pukać co 90 s, aż ${name} przyjmie`
+            : `zapukano do ${name} - gdy przyjmie, zobaczysz go/ją online (onchato-cli chat)`)
         } else if (!inv.reply) {
           console.log(`Odeślij ${name} swój link (już oznaczony jako odpowiedź):\n${inviteLink(APP_ORIGIN, APP_PATH, { pub: id.pub, name: id.handle, reply: true })}`)
         }
@@ -352,7 +352,7 @@ try {
         else if (r.status === 'merged') console.error(`połączono z czekającą wiadomością do ${r.to} o tym samym kluczu - wyjdzie jedna`)
         else console.error(r.via === 'daemon'
           ? `${r.to} nie potwierdził(a) w ${waitMs / 1000} s - wiadomość czeka w demonie (na dysku) i wyjdzie, gdy będzie online`
-          : `${r.to} nie potwierdził(a) w ${waitMs / 1000} s - bez demona wiadomość NIE czeka (onchato daemon)`)
+          : `${r.to} nie potwierdził(a) w ${waitMs / 1000} s - bez demona wiadomość NIE czeka (onchato-cli daemon)`)
         process.exit(r.status === 'delivered' || r.status === 'sent' ? 0 : 3)
       }
       const sock = await connectDaemon()
@@ -391,7 +391,7 @@ try {
     }
     case 'get': {
       const [fid] = args
-      if (!fid) die('użycie: get <id> [--dir <katalog>]  (id z onchato listen)')
+      if (!fid) die('użycie: get <id> [--dir <katalog>]  (id z onchato-cli listen)')
       const sock = await connectDaemon()
       if (!sock) die('get działa przez demona (pliki zna ten, kto je odebrał) - bez demona użyj listen --save-files')
       const r = await ask(sock!, { op: 'get', id: fid, dir: opt('--dir') ? resolve(opt('--dir')!) : undefined }); sock!.end()
@@ -406,7 +406,7 @@ try {
         if (e.t === 'msg') console.log(`${new Date(e.ts).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })} ${e.group ? `[${e.group}] ` : ''}<${e.from}> ${e.text}`)
         if (e.t === 'group') console.log(`-!- grupa „${e.name}” (${e.members} osób)${e.how === 'invite' ? ' - dołączono' : ''}`)
         if (e.t === 'presence') console.log(`-!- ${e.from} ${e.state === 'online' ? 'online' : 'offline'}`)
-        if (e.t === 'file') console.log(`${new Date(e.ts).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })} <${e.from}> plik ${e.name} (${humanSize(e.size)}) - onchato get ${e.id.slice(0, 8)}`)
+        if (e.t === 'file') console.log(`${new Date(e.ts).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })} <${e.from}> plik ${e.name} (${humanSize(e.size)}) - onchato-cli get ${e.id.slice(0, 8)}`)
       }
       // --save-files: every incoming file is fetched at once (the store keeps it ~5 min).
       const saveDir = opt('--save-files') ? resolve(opt('--save-files')!) : null
@@ -439,7 +439,7 @@ try {
     }
     case 'queue': {
       const sock = await connectDaemon()
-      if (!sock) die('demon nie działa - kolejka istnieje tylko w demonie (onchato daemon)')
+      if (!sock) die('demon nie działa - kolejka istnieje tylko w demonie (onchato-cli daemon)')
       const r = await ask(sock!, { op: 'queue' }); sock!.end()
       if (rest.includes('--json')) { console.log(JSON.stringify(r.entries)); break }
       if (!r.entries.length) { console.log('(kolejka pusta)'); break }
@@ -463,7 +463,7 @@ try {
       break
     }
     default:
-      console.log('użycie: onchato profile new|list|import|export · hem new <nazwa> --hem <url> · send · send-file · listen · get · daemon · queue · whoami · pubkey · contacts · invite [--qr]\n         add <link|kod> | add <nazwa> <klucz> · verify <nazwa> [--qr] [numer] · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
+      console.log('użycie: onchato-cli profile new|list|import|export · hem new <nazwa> --hem <url> · send · send-file · listen · get · daemon · queue · whoami · pubkey · contacts · invite [--qr]\n         add <link|kod> | add <nazwa> <klucz> · verify <nazwa> [--qr] [numer] · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
   }
 } catch (e: any) {
   // Nodes refuse the sanctioned regions with 451 (GEOBLOKADA.md), and a refused

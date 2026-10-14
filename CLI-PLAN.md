@@ -45,7 +45,7 @@ exported from the app cannot be used here. Today it is a developer tool.
   jsQR (and a swapped mapping does not); a screenshot of the real output
   decodes too.
 - **Stage 3 - done 2026-10-07** (3a windows/keys/editor, 3b screen, 3c client).
-  `onchato chat [<name>]` is the irssi-style client (`cli/client.ts`): one
+  `onchato-cli chat [<name>]` is the irssi-style client (`cli/client.ts`): one
   session over the published node list with failover (or the profile's own
   `ec-nodes`), light transport, a presence watch for every contact, an
   incoming conversation opening in a background window (told on status,
@@ -56,7 +56,7 @@ exported from the app cannot be used here. Today it is a developer tool.
   relays, every assertion read off the screen. Not yet: PgUp scrollback,
   typing indicators, files (stage 5), group windows (stage 6).
 - **Stage 2b - done 2026-10-07: invites that answer themselves** (asked the
-  same day). `onchato invites [new [label] [--expires 24h] [--qr] | qr N |
+  same day). `onchato-cli invites [new [label] [--expires 24h] [--qr] | qr N |
   revoke N]` keeps the app's sealed records (`ec-invites-`, `ec-waiting-`,
   `ec-ignored-<kid>`, via the new `lib/sealedstore.ts`, which the app now
   uses too), so invites move with the profile. The client listens on every
@@ -75,7 +75,7 @@ exported from the app cannot be used here. Today it is a developer tool.
   its own short session), `listen [--json]`, `daemon`; passwords from
   `--password-file` or systemd `LoadCredential`. Proved live by
   `net/cli-daemon-test.ts`: delivered through the socket, a listen stream,
-  `onchato send` as a process via the daemon and without one, and a send to an
+  `onchato-cli send` as a process via the daemon and without one, and a send to an
   offline recipient that reaches him by itself when he is back.
 - **Stage 4b - done 2026-10-08: the notification queue.** `cli/outbox.ts` (the
   rules, pure: oldest first, TTL - expired entries dropped and reported, never
@@ -84,7 +84,7 @@ exported from the app cannot be used here. Today it is a developer tool.
   (sealed to `ec-outbox-<kid>`, flushed when presence lights and every 30 s;
   a message handed to a room but not yet confirmed is tracked by its id, not
   sent twice; an entry only waiting for its key's window does not hold up
-  others). `send --ttl --key`, `onchato queue`. Proved live by
+  others). `send --ttl --key`, `onchato-cli queue`. Proved live by
   `net/cli-queue-test.ts`: merging while offline, a TTL expiry, the queue
   surviving a daemon restart, delivery by itself when bob comes online
   (merged, in order), the per-key window while online.
@@ -114,7 +114,7 @@ exported from the app cannot be used here. Today it is a developer tool.
   messages from each member, a mention, /who, a restart restoring the group).
   Then (2026-10-08) the admin's side and scripts: `/add` `/kick` (a rekey -
   new epoch, keys only to the new roster) and `/rename` (same-epoch handoff,
-  markers rewritten); the Hub runs the same Groups, so `onchato send <group>`
+  markers rewritten); the Hub runs the same Groups, so `onchato-cli send <group>`
   goes through the daemon (status `sent`, a group has no acks, never queued)
   and `listen` carries `group` on msg/file events. Owed invitations are also
   re-sent 10/30/90 s after they go out: a `group-skd` has no ack, and one sent
@@ -148,7 +148,7 @@ exported from the app cannot be used here. Today it is a developer tool.
   warning was the last word. Decided with the user: **only the daemon has a
   persistent queue**; whether messages wait on disk is the admin's choice
   (running the daemon), never the chat client's. cli-client-test covers both lines.
-- **HEM**: sign-in never creates an identity (`onchato hem new <name>` does),
+- **HEM**: sign-in never creates an identity (`onchato-cli hem new <name>` does),
   and several identities on one device are offered as a numbered list.
 
 ## Principles
@@ -200,9 +200,9 @@ Plain ANSI: a scrolling area and a fixed status line, no heavy TUI library.
 Scripting:
 
 ```
-$ onchato send ops-oncall "dysk 92% na db1"      # exit 0: delivered
-$ onchato send antek3a "backup gotowy"           # exit 3: offline, waits (daemon)
-$ onchato listen --json | jq -c 'select(.t=="msg")'
+$ onchato-cli send ops-oncall "dysk 92% na db1"      # exit 0: delivered
+$ onchato-cli send antek3a "backup gotowy"           # exit 3: offline, waits (daemon)
+$ onchato-cli listen --json | jq -c 'select(.t=="msg")'
 $ systemctl --user status onchato                # the daemon, its own profile
 ```
 
@@ -219,7 +219,7 @@ admin or a group. The motivating case is a login alert:
 session optional pam_exec.so /usr/local/bin/onchato-login-notify
 
 # /usr/local/bin/onchato-login-notify
-onchato send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
+onchato-cli send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
 ```
 
 The same hook fits cron, `systemd OnFailure=`, a monitoring alarm, or a
@@ -242,7 +242,7 @@ The same hook fits cron, `systemd OnFailure=`, a monitoring alarm, or a
      with a line in the bot's own log;
    - a size cap per recipient, so an absent admin cannot make the bot grow
      without bound;
-   - `onchato queue` lists what waits and for whom; `send` returns exit `3`
+   - `onchato-cli queue` lists what waits and for whom; `send` returns exit `3`
      ("queued") when the recipient is not online right now, `0` when delivered.
 3. **Coalescing.** A brute-force run is hundreds of failed logins a minute.
    Messages with the same `--key` inside a window merge into one ("12 failed

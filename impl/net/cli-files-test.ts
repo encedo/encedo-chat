@@ -8,7 +8,7 @@
  *    screen shows it with its size and `/get` saves it - byte for byte.
  * 2. The daemon: `sendfile` through the socket reaches a second hub, which
  *    saves it - byte for byte.
- * 3. `onchato listen --json --save-files <dir>` as a process, through the
+ * 3. `onchato-cli listen --json --save-files <dir>` as a process, through the
  *    daemon: an incoming file is saved by itself - byte for byte.
  */
 
@@ -82,7 +82,7 @@ try {
   if (!same(src, got2)) throw new Error('the daemon\'s file differs')
   step(`daemon sendfile: delivered in ${r.ms} ms, saved by the recipient - identical`)
 
-  // 3 - `onchato listen --json --save-files` through the daemon
+  // 3 - `onchato-cli listen --json --save-files` through the daemon
   const saveDir = join(dir, 'auto')
   const lines: any[] = []
   const p = spawn('node', [new URL('../cli/onchato.ts', import.meta.url).pathname, 'listen', '--json', '--save-files', saveDir], { env: { ...process.env, ONCHATO_SOCKET: sockPath } })
@@ -95,7 +95,7 @@ try {
   const saved = lines.find((l) => l.t === 'saved')
   if (!same(back, saved.path)) throw new Error('the auto-saved file differs')
   if (!lines.some((l) => l.t === 'file' && l.name === 'odpowiedz.txt' && !('key' in l))) throw new Error('the file event is missing, or carries the key')
-  step('`onchato listen --json --save-files` saves an incoming file by itself; the event carries no key')
+  step('`onchato-cli listen --json --save-files` saves an incoming file by itself; the event carries no key')
   p.kill()
 
   srv.close(); await D.close(); await H.close()

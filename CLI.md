@@ -33,14 +33,19 @@ demon, powiadomienia, pliki, grupy) jest w [CLI-PLAN.md](CLI-PLAN.md).
 
 Wymagany **Node.js 24** lub nowszy (uruchamia kod TypeScript bezpośrednio).
 
-Na razie `onchato` uruchamia się z repozytorium. Najwygodniej podlinkować je jako
+Na razie `onchato-cli` uruchamia się z repozytorium. Najwygodniej podlinkować je jako
 zwykłą komendę:
 
 ```sh
 mkdir -p ~/.local/bin
-ln -s <repo>/impl/cli/onchato.ts ~/.local/bin/onchato
-onchato            # bez argumentów: krótka ściągawka
+ln -s <repo>/impl/cli/onchato.ts ~/.local/bin/onchato-cli
+onchato-cli        # bez argumentów: krótka ściągawka
 ```
+
+Komenda nazywa się `onchato-cli`, bo `onchato` to aplikacja desktopowa z paczki
+(`/usr/bin/onchato`). Dowiązanie `~/.local/bin/onchato` z wcześniejszych wersji
+przesłaniało ją w `PATH` i ikona uruchamiała CLI zamiast okna - zmień jego nazwę:
+`mv ~/.local/bin/onchato ~/.local/bin/onchato-cli`.
 
 `~/.local/bin` jest w `PATH` na większości dystrybucji (po ponownym zalogowaniu).
 Dowiązanie wskazuje na repozytorium, więc `git pull` od razu daje nową wersję.
@@ -66,8 +71,8 @@ docker run -d --name onchato --restart unless-stopped -v onchato:/data \
   onchato daemon
 
 # skrypty na hoście rozmawiają z demonem przez docker exec
-docker exec onchato onchato send ewa "backup gotowy"
-docker exec onchato onchato listen --json
+docker exec onchato onchato-cli send ewa "backup gotowy"
+docker exec onchato onchato-cli listen --json
 docker logs -f onchato
 ```
 
@@ -87,11 +92,11 @@ tożsamość to jedna sesja (rozdział 12).
 Pięć minut od zera do rozmowy z kimś, kto ma aplikację:
 
 ```sh
-onchato profile new ala                      # 1. tożsamość (hasło, dwa razy)
-onchato invite --qr                          # 2. Twój kod - druga osoba skanuje go w aplikacji
-onchato add 'https://app.onchato.com/#i=…'   # 3. albo dodajesz jej link (pokaże odcisk, zapyta)
-onchato verify ewa                           # 4. porównajcie numer bezpieczeństwa
-onchato chat                                 # 5. klient: lista kontaktów, /query 1, piszesz
+onchato-cli profile new ala                      # 1. tożsamość (hasło, dwa razy)
+onchato-cli invite --qr                          # 2. Twój kod - druga osoba skanuje go w aplikacji
+onchato-cli add 'https://app.onchato.com/#i=…'   # 3. albo dodajesz jej link (pokaże odcisk, zapyta)
+onchato-cli verify ewa                           # 4. porównajcie numer bezpieczeństwa
+onchato-cli chat                                 # 5. klient: lista kontaktów, /query 1, piszesz
 ```
 
 Rozmowa zaczyna się dopiero wtedy, gdy **obie strony mają nawzajem swoje klucze**.
@@ -107,8 +112,8 @@ Para kluczy wygenerowana na tym komputerze, zapieczętowana hasłem — ten sam
 format co profil w aplikacji.
 
 ```sh
-onchato profile new <nazwa>      # hasło podajesz dwa razy
-onchato profile list
+onchato-cli profile new <nazwa>      # hasło podajesz dwa razy
+onchato-cli profile list
 ```
 
 Hasło musi być mocne (pełny miernik, około 60 bitów) — ta sama zasada co
@@ -118,8 +123,8 @@ w aplikacji. Najprościej: dwa, trzy zwykłe słowa (`kot pies dom lampa`).
 ### Przeniesienie profilu z aplikacji i z powrotem
 
 ```sh
-onchato profile import ala.ocmig             # plik z aplikacji: Ustawienia → Przenieś profil
-onchato profile export ala ala.ocmig         # i odwrotnie
+onchato-cli profile import ala.ocmig             # plik z aplikacji: Ustawienia → Przenieś profil
+onchato-cli profile export ala ala.ocmig         # i odwrotnie
 ```
 
 Przenoszone są tożsamość, kontakty, zaproszenia i lista węzłów. To jest
@@ -131,8 +136,8 @@ zamyka obie sesje (zob. rozdział 12).
 Klucz siedzi w urządzeniu i go nie opuszcza. Do każdej komendy dodajesz `--hem <url>`:
 
 ```sh
-onchato whoami --hem https://my.ence.do
-onchato chat --hem https://my.ence.do
+onchato-cli whoami --hem https://my.ence.do
+onchato-cli chat --hem https://my.ence.do
 ```
 
 - Jeśli HEM ma **kilka tożsamości**, `onchato` wyświetli ponumerowaną listę i zapyta,
@@ -140,10 +145,10 @@ onchato chat --hem https://my.ence.do
 - Logowanie **nigdy nie tworzy** tożsamości. Nową tworzysz świadomie:
 
   ```sh
-  onchato hem new <nazwa> --hem https://my.ence.do
+  onchato-cli hem new <nazwa> --hem https://my.ence.do
   ```
 
-- Kontakty zapisane w HEM pojawiają się razem z lokalnymi (`onchato contacts`
+- Kontakty zapisane w HEM pojawiają się razem z lokalnymi (`onchato-cli contacts`
   pokazuje źródło: `hem` albo `local`).
 
 ### Który profil
@@ -156,15 +161,15 @@ ich kilka, wybierasz `--profile <nazwa>`.
 ## 4. Kontakty
 
 ```sh
-onchato contacts                 # nazwa, odcisk klucza, źródło
+onchato-cli contacts                 # nazwa, odcisk klucza, źródło
 ```
 
 Trzy sposoby dodania kontaktu:
 
 | sposób | jak | co dalej |
 |---|---|---|
-| **link tożsamości** | `onchato add '<link>'` (link z aplikacji: „Udostępnij swój profil”) | `onchato` wypisze **link zwrotny** — odeślij go tej osobie, żeby miała też Twój klucz |
-| **Twój kod QR** | `onchato invite --qr`, druga osoba skanuje go w aplikacji | ona dodaje Ciebie; Ty dodajesz ją jej linkiem zwrotnym |
+| **link tożsamości** | `onchato-cli add '<link>'` (link z aplikacji: „Udostępnij swój profil”) | `onchato` wypisze **link zwrotny** — odeślij go tej osobie, żeby miała też Twój klucz |
+| **Twój kod QR** | `onchato-cli invite --qr`, druga osoba skanuje go w aplikacji | ona dodaje Ciebie; Ty dodajesz ją jej linkiem zwrotnym |
 | **zaproszenie ze skrzynką** | rozdział 5 | puka i po `/accept` macie się nawzajem — bez odsyłania linków |
 
 `add` przyjmuje link w każdej postaci: cały adres, sam fragment `#i=…` albo goły
@@ -172,8 +177,8 @@ kod. Pokazuje **nazwę i odcisk klucza** i pyta `t/N` — porównaj odcisk z tym
 osoba podała Ci innym kanałem (rozmowa, telefon). W skrypcie: `--yes`.
 
 ```sh
-onchato add '<link>' --name "Ewa z biura"    # własna nazwa zamiast tej z linku
-onchato add ewa <kluczB64>                   # surowy klucz publiczny (32 bajty, base64)
+onchato-cli add '<link>' --name "Ewa z biura"    # własna nazwa zamiast tej z linku
+onchato-cli add ewa <kluczB64>                   # surowy klucz publiczny (32 bajty, base64)
 ```
 
 Nazwa w linku to tylko deklaracja — o tożsamości decyduje klucz.
@@ -187,13 +192,13 @@ Kto je otworzy, **puka** swoim kluczem; Ty widzisz pukanie z odciskiem i decyduj
 Po przyjęciu macie się nawzajem w kontaktach.
 
 ```sh
-onchato invites new biuro --expires 24h --qr   # nowe zaproszenie (czas: 30m, 24h, 7d; bez --expires - bez terminu)
-onchato invites                                # lista z linkami
-onchato invites qr 1                           # kod QR zaproszenia nr 1
-onchato invites revoke 1                       # wycofanie - nikt o tym nie jest informowany
+onchato-cli invites new biuro --expires 24h --qr   # nowe zaproszenie (czas: 30m, 24h, 7d; bez --expires - bez terminu)
+onchato-cli invites                                # lista z linkami
+onchato-cli invites qr 1                           # kod QR zaproszenia nr 1
+onchato-cli invites revoke 1                       # wycofanie - nikt o tym nie jest informowany
 ```
 
-**Pukanie widać w kliencie** (`onchato chat`) — zaproszenie „słucha” tylko wtedy,
+**Pukanie widać w kliencie** (`onchato-cli chat`) — zaproszenie „słucha” tylko wtedy,
 gdy klient działa:
 
 ```
@@ -209,8 +214,8 @@ gdy klient działa:
 Przyjęcie jest zawsze ręczne. Zaproszenie jest publiczne i żyje, dopóki go nie
 wycofasz — zapukać może każdy, kto kiedykolwiek widział ten kod.
 
-**W drugą stronę:** `onchato add '<link zaproszenia>'` dodaje kontakt i puka.
-Jeśli zapraszający jest akurat offline, klient (`onchato chat`) puka dalej co 90 s,
+**W drugą stronę:** `onchato-cli add '<link zaproszenia>'` dodaje kontakt i puka.
+Jeśli zapraszający jest akurat offline, klient (`onchato-cli chat`) puka dalej co 90 s,
 aż przyjmie — wtedy zobaczysz „… przyjął(a) Twoje pukanie”.
 
 Zaproszenia przenoszą się razem z profilem między aplikacją a terminalem.
@@ -220,9 +225,9 @@ Zaproszenia przenoszą się razem z profilem między aplikacją a terminalem.
 ## 6. Weryfikacja: numer bezpieczeństwa
 
 ```sh
-onchato verify ewa               # 60 cyfr, u obojga identyczne
-onchato verify ewa --qr          # to samo jako kod QR
-onchato verify ewa 38421 99404 … # porównanie z numerem przeczytanym przez drugą osobę
+onchato-cli verify ewa               # 60 cyfr, u obojga identyczne
+onchato-cli verify ewa --qr          # to samo jako kod QR
+onchato-cli verify ewa 38421 99404 … # porównanie z numerem przeczytanym przez drugą osobę
 ```
 
 Porównajcie numer osobiście albo przez telefon (w aplikacji jest w oknie pod 🔐,
@@ -235,8 +240,8 @@ tam można też zeskanować kod QR). Zgodny numer znaczy, że nikt nie podszywa 
 ## 7. Klient rozmów
 
 ```sh
-onchato chat               # start od listy kontaktów
-onchato chat ewa           # od razu z otwartą rozmową z ewa
+onchato-cli chat               # start od listy kontaktów
+onchato-cli chat ewa           # od razu z otwartą rozmową z ewa
 ```
 
 Klient wymaga prawdziwego terminala. Zajmuje cały ekran (jak irssi czy `less`)
@@ -341,7 +346,7 @@ poczeka, aż okno się otworzy.
   temat, a nowe klucze dostaje tylko nowy skład. Usunięta osoba nie przeczyta niczego,
   co pada od tej chwili (wcześniejszych wiadomości to nie cofa). `/rename` nie zmienia
   kluczy. Skład i nazwę zmienia tylko admin, czyli twórca grupy.
-- Do grupy można pisać ze skryptów: `onchato send <grupa> "tekst"` (rozdział 8).
+- Do grupy można pisać ze skryptów: `onchato-cli send <grupa> "tekst"` (rozdział 8).
 
 ---
 
@@ -354,9 +359,9 @@ bezpieczeństwa jak każdego.
 ### Wysyłanie
 
 ```sh
-onchato send ewa "backup gotowy"                 # 0 = doręczono, 3 = nie doręczono w czasie
-echo "dysk 92% na db1" | onchato send ewa -      # tekst ze standardowego wejścia
-onchato send ewa "deploy OK" --wait 60 --json    # dłużej czekaj, wynik jako JSON
+onchato-cli send ewa "backup gotowy"                 # 0 = doręczono, 3 = nie doręczono w czasie
+echo "dysk 92% na db1" | onchato-cli send ewa -      # tekst ze standardowego wejścia
+onchato-cli send ewa "deploy OK" --wait 60 --json    # dłużej czekaj, wynik jako JSON
 ```
 
 `send` czeka na **potwierdzenie od klienta odbiorcy** (domyślnie 20 s, `--wait`).
@@ -369,7 +374,7 @@ Co dalej z wiadomością, zależy od tego, czy działa demon:
 | odbiorca online | doręczona w ok. sekundę | doręczona po zestawieniu sesji (kilka sekund) |
 | odbiorca offline | **czeka w kolejce demona** (na dysku, przeżywa restart) i wychodzi sama, gdy odbiorca wróci | **przepada** (komunikat o tym na stderr) |
 
-W **kliencie rozmów** (`onchato chat`) wiadomość do kogoś, kto wyszedł, od razu dostaje
+W **kliencie rozmów** (`onchato-cli chat`) wiadomość do kogoś, kto wyszedł, od razu dostaje
 „nie doręczono … wyślę sama, gdy wróci”: klient trzyma ją w pamięci i wysyła, gdy
 rozmówca wróci, a wtedy pisze „wiadomość … dotarła jednak do ewa (po 2 min)”. Ta
 pamięć żyje tylko do zamknięcia klienta. **Trwałą kolejkę ma wyłącznie demon** — to
@@ -380,7 +385,7 @@ rozmów za plecami użytkownika.
 Wynik `--json`: `{"ok":true,"status":"delivered","id":"…","ms":412,"to":"ewa","via":"daemon"}`
 (`status` = `delivered` albo `queued`, `via` = `daemon` albo `direct`).
 
-**Do grupy** — nazwa grupy zamiast kontaktu: `onchato send zespol "deploy OK"`. Grupa
+**Do grupy** — nazwa grupy zamiast kontaktu: `onchato-cli send zespol "deploy OK"`. Grupa
 nie potwierdza doręczenia, więc wynik to `status: "sent"` i kod `0`, bez kolejki: co
 wysłane, idzie od razu do członków, którzy są w sieci. `--key` i `--ttl` grupy nie
 dotyczą.
@@ -388,8 +393,8 @@ dotyczą.
 ### Odbieranie
 
 ```sh
-onchato listen                       # 22:41 <ewa> restart nginx?
-onchato listen --json | jq -c 'select(.t=="msg")'
+onchato-cli listen                       # 22:41 <ewa> restart nginx?
+onchato-cli listen --json | jq -c 'select(.t=="msg")'
 ```
 
 Zdarzenia JSON (jedna linia = jedno zdarzenie):
@@ -408,7 +413,7 @@ Z działającym demonem `listen` podłącza się do niego; bez demona otwiera w�
 ### Demon
 
 ```sh
-onchato daemon --profile ops-bot     # na pierwszym planie; zatrzymanie: Ctrl+C / SIGTERM
+onchato-cli daemon --profile ops-bot     # na pierwszym planie; zatrzymanie: Ctrl+C / SIGTERM
 ```
 
 Demon trzyma połączenie, obecność kontaktów i otwarte rozmowy, i odpowiada na
@@ -422,11 +427,11 @@ w pliku jednostki ani w zmiennej środowiskowej:
 ```ini
 # ~/.config/systemd/user/onchato.service
 [Unit]
-Description=onchato daemon (ops-bot)
+Description=onchato-cli daemon (ops-bot)
 After=network-online.target
 
 [Service]
-ExecStart=%h/.local/bin/onchato daemon --profile ops-bot
+ExecStart=%h/.local/bin/onchato-cli daemon --profile ops-bot
 LoadCredential=onchato-password:%h/.config/onchato/ops-bot.pass
 Restart=on-failure
 RestartSec=10
@@ -452,9 +457,9 @@ session optional pam_exec.so /usr/local/bin/onchato-login-notify
 #!/bin/sh
 [ "$PAM_TYPE" = open_session ] || exit 0
 # root nie ma ~/.local/bin w PATH - pełna ścieżka; root łączy się z gniazdem 0600 innego użytkownika
-ONCHATO_SOCKET=/run/user/1000/onchato.sock /home/bot/.local/bin/onchato send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
+ONCHATO_SOCKET=/run/user/1000/onchato.sock /home/bot/.local/bin/onchato-cli send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
 # albo, gdy demon jest w kontenerze (rozdział 1, „Docker”):
-# docker exec onchato onchato send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
+# docker exec onchato onchato-cli send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
 ```
 
 ### Pliki
@@ -476,9 +481,9 @@ W kliencie:
 W skryptach:
 
 ```sh
-onchato send-file ewa ./backup.log           # 0 = doręczono, 3 = nie potwierdzono w czasie
-onchato listen --json --save-files ~/przyjete   # każdy przychodzący plik zapisywany od razu
-onchato get rMS5 --dir ~/przyjete            # zapis pliku, który odebrał demon
+onchato-cli send-file ewa ./backup.log           # 0 = doręczono, 3 = nie potwierdzono w czasie
+onchato-cli listen --json --save-files ~/przyjete   # każdy przychodzący plik zapisywany od razu
+onchato-cli get rMS5 --dir ~/przyjete            # zapis pliku, który odebrał demon
 ```
 
 - Pliki zapisują się w `$ONCHATO_DOWNLOADS`, a bez niej w `~/Pobrane` albo `~/Downloads`.
@@ -497,8 +502,8 @@ Sieć niczego nie przechowuje, więc powiadomienie dla kogoś, kto jest offline,
 i serwera). Wychodzi samo, gdy odbiorca pojawi się online.
 
 ```sh
-onchato send admin "login: $PAM_USER z $PAM_RHOST" --key ssh --ttl 24h
-onchato queue                        # co czeka i na kogo (--json do skryptów)
+onchato-cli send admin "login: $PAM_USER z $PAM_RHOST" --key ssh --ttl 24h
+onchato-cli queue                        # co czeka i na kogo (--json do skryptów)
 ```
 
 | zasada | jak działa |
@@ -521,26 +526,26 @@ Bez demona nie ma kolejki: `--key` i `--ttl` nic wtedy nie zmieniają.
 
 | komenda | opis |
 |---|---|
-| `onchato profile new <nazwa>` | nowy profil programowy |
-| `onchato profile list` | profile na tym komputerze |
-| `onchato profile import <plik.ocmig>` | profil przeniesiony z aplikacji |
-| `onchato profile export <nazwa> <plik.ocmig>` | profil do przeniesienia do aplikacji |
-| `onchato hem new <nazwa> --hem <url>` | nowa tożsamość na HEM (z potwierdzeniem) |
-| `onchato whoami` | tożsamość, klucz, odcisk |
-| `onchato pubkey` | sam klucz publiczny (do skryptów) |
-| `onchato contacts` | kontakty z odciskami |
-| `onchato add <link\|kod> [--name n] [--yes] [--note tekst]` | kontakt z linku; przy zaproszeniu ze skrzynką — puka (`--note` dołącza krótką notatkę) |
-| `onchato add <nazwa> <kluczB64>` | kontakt z surowego klucza |
-| `onchato invite [--qr]` | Twój link tożsamości (i kod QR) |
-| `onchato invites` · `invites new [etykieta] [--expires 24h] [--qr]` · `invites qr <nr>` · `invites revoke <nr>` | zaproszenia ze skrzynką |
-| `onchato verify <nazwa> [--qr] [numer]` | numer bezpieczeństwa; porównanie z podanym |
-| `onchato chat [<nazwa>] [--debug]` | klient rozmów |
-| `onchato send <kontakt\|grupa> <tekst \| -> [--wait s] [--ttl 24h] [--key k] [--json]` | jedna wiadomość (rozdział 8) |
-| `onchato queue [--json]` | co czeka w kolejce demona |
-| `onchato send-file <kontakt> <plik> [--wait s] [--json]` | plik (magazyn trzyma go ok. 5 min) |
-| `onchato listen [--json] [--save-files <katalog>]` | z `--save-files` zapisuje przychodzące pliki od razu |
-| `onchato get <id> [--dir <katalog>]` | zapis pliku odebranego przez demona |
-| `onchato daemon` | demon z gniazdem lokalnym |
+| `onchato-cli profile new <nazwa>` | nowy profil programowy |
+| `onchato-cli profile list` | profile na tym komputerze |
+| `onchato-cli profile import <plik.ocmig>` | profil przeniesiony z aplikacji |
+| `onchato-cli profile export <nazwa> <plik.ocmig>` | profil do przeniesienia do aplikacji |
+| `onchato-cli hem new <nazwa> --hem <url>` | nowa tożsamość na HEM (z potwierdzeniem) |
+| `onchato-cli whoami` | tożsamość, klucz, odcisk |
+| `onchato-cli pubkey` | sam klucz publiczny (do skryptów) |
+| `onchato-cli contacts` | kontakty z odciskami |
+| `onchato-cli add <link\|kod> [--name n] [--yes] [--note tekst]` | kontakt z linku; przy zaproszeniu ze skrzynką — puka (`--note` dołącza krótką notatkę) |
+| `onchato-cli add <nazwa> <kluczB64>` | kontakt z surowego klucza |
+| `onchato-cli invite [--qr]` | Twój link tożsamości (i kod QR) |
+| `onchato-cli invites` · `invites new [etykieta] [--expires 24h] [--qr]` · `invites qr <nr>` · `invites revoke <nr>` | zaproszenia ze skrzynką |
+| `onchato-cli verify <nazwa> [--qr] [numer]` | numer bezpieczeństwa; porównanie z podanym |
+| `onchato-cli chat [<nazwa>] [--debug]` | klient rozmów |
+| `onchato-cli send <kontakt\|grupa> <tekst \| -> [--wait s] [--ttl 24h] [--key k] [--json]` | jedna wiadomość (rozdział 8) |
+| `onchato-cli queue [--json]` | co czeka w kolejce demona |
+| `onchato-cli send-file <kontakt> <plik> [--wait s] [--json]` | plik (magazyn trzyma go ok. 5 min) |
+| `onchato-cli listen [--json] [--save-files <katalog>]` | z `--save-files` zapisuje przychodzące pliki od razu |
+| `onchato-cli get <id> [--dir <katalog>]` | zapis pliku odebranego przez demona |
+| `onchato-cli daemon` | demon z gniazdem lokalnym |
 
 ### Kody wyjścia
 
@@ -603,7 +608,7 @@ Na serwerze lepszy jest HEM: klucz nie opuszcza urządzenia, a kradzież pliku n
 - **Jedna tożsamość, jedna sesja.** Ta sama tożsamość otwarta jednocześnie w aplikacji
   i w terminalu (albo w dwóch terminalach) zamyka obie sesje. Do rozmowy z samym sobą
   użyj dwóch różnych tożsamości.
-- **Zaproszenie słucha tylko, gdy klient działa.** Bez uruchomionego `onchato chat`
+- **Zaproszenie słucha tylko, gdy klient działa.** Bez uruchomionego `onchato-cli chat`
   pukanie nie ma dokąd dojść.
 - **Pliki żyją ok. 5 minut** w magazynie — kto ich nie pobierze w tym czasie, prosi
   o ponowne wysłanie.
@@ -619,13 +624,13 @@ akcentem). Ustaw w terminalu „Meta wysyła Escape” (GNOME Terminal, Konsole,
 „Option as Meta”) albo używaj `/win N`.
 
 **Pukanie do zaproszenia nie przychodzi.**
-1. Czy `onchato chat` działa i w statusie widać „słucham N zaproszeń”?
+1. Czy `onchato-cli chat` działa i w statusie widać „słucham N zaproszeń”?
 2. Czy ta osoba nie ma Cię już w kontaktach? Aplikacja wtedy nie puka — pokazuje
    „Ten sam klucz, który masz zapisany”. Pukanie od istniejącego kontaktu klient
    zgłasza w statusie jedną linią.
 3. Aplikacja ponawia pukanie co 90 s — daj jej chwilę.
 
-**„złe hasło” przy pewnym haśle.** Hasło jest per profil. Sprawdź `onchato profile list`
+**„złe hasło” przy pewnym haśle.** Hasło jest per profil. Sprawdź `onchato-cli profile list`
 i `--profile`.
 
 **„książka kontaktów nie przeszła weryfikacji podpisu”.** Ktoś (albo coś) zmienił

@@ -43,7 +43,7 @@ export async function createProfile(kv: KV, name: string, password: string): Pro
 
 export async function openProfile(kv: KV, name: string, password: string): Promise<Identity> {
   const raw = kv.get(softKey(name))
-  if (raw === null) throw new Error(`nie ma profilu "${name}" (onchato profile list)`)
+  if (raw === null) throw new Error(`nie ma profilu "${name}" (onchato-cli profile list)`)
   const blob = JSON.parse(raw)
   if (!isSealedProfile(blob)) throw new Error(`profil "${name}" jest w starym, niezaszyfrowanym formacie`)
   const plain = await unseal(password, blob) // BadPassword on a wrong password

@@ -5,7 +5,7 @@
  *   node net/cli-group-admin-test.ts
  *
  * ala (admin) and bob in emulated terminals; cee is a script: a Hub with the
- * daemon on a socket, as `onchato daemon` runs it. Read off the screens and the
+ * daemon on a socket, as `onchato-cli daemon` runs it. Read off the screens and the
  * hub's events: /group new with bob; /add cee reaches cee's hub as a `group`
  * event and ala's words as `msg` events carrying the group; `send <group>`
  * through the daemon reaches ala's screen (status 'sent' - a group has no acks);

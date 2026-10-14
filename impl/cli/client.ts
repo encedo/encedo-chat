@@ -46,7 +46,7 @@ export interface ClientOpts {
   transport?: 'light' | 'libp2p'
   /** The network id topics are derived for (`--network`; `main` by default). */
   networkId?: string
-  /** Open this contact's window at start (onchato chat <name>). */
+  /** Open this contact's window at start (onchato-cli chat <name>). */
   openFirst?: string
   debug?: boolean
   /** Published invites, pending knocks, ignore list (the app's sealed records). */
@@ -324,7 +324,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   if (inboxWatches.size) status(sys(`słucham ${inboxWatches.size} zaproszeń (pukanie pojawi się tutaj)`))
   const invTimer = setInterval(() => void watchInvites(), 30_000); (invTimer as any).unref?.()
 
-  // Knocks we are still making (onchato add <invite>), until they accept.
+  // Knocks we are still making (onchato-cli add <invite>), until they accept.
   const knockAll = () => {
     for (const [pub, wt] of waiting) {
       const raw = inboxSecretBytes({ pub: '', name: '', inbox: wt.inbox }); if (!raw || !wt.key) continue
@@ -341,7 +341,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
     return contactList.find((c) => c.name.toLowerCase() === q.toLowerCase())
   }
   const showList = () => {
-    if (!contactList.length) { print(w.active, sys('brak kontaktów - onchato add <link>')); return }
+    if (!contactList.length) { print(w.active, sys('brak kontaktów - onchato-cli add <link>')); return }
     print(w.active, sys('kontakty (/query <nr> albo <nazwa>, Tab dopełnia):'))
     contactList.forEach((c, i) => {
       const r = rooms.get(c.pub)
@@ -490,7 +490,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
       case 'invite': print(w.active, sys(`Twój link: ${inviteLink(APP_ORIGIN, '/', { pub: o.id.pub, name: o.id.handle })}`)); break
       case 'clear': w.current().lines.length = 0; sc.drawWindow(w.current()); repaintStatus(); break
       case 'help':
-        for (const h of ['/win N (Alt+N) · /query <nr|kontakt|grupa> · /close · /list · /who', '/groups · /group new <nazwa> <kontakt|nr>… - grupy; w oknie grupy piszesz do wszystkich, @Imię wzmiankuje', 'admin, w oknie grupy: /add <kontakt|nr> · /kick <kto> · /rename <nazwa>', '/me <akcja> · /react <emoji> · /verify · /invite · /clear · /quit', '/send <plik> · /get [id] - pliki (odbiorca ma ok. 5 min na pobranie)', '/knocks · /accept N · /ignore N - pukanie do Twoich zaproszeń (onchato invites new)'])
+        for (const h of ['/win N (Alt+N) · /query <nr|kontakt|grupa> · /close · /list · /who', '/groups · /group new <nazwa> <kontakt|nr>… - grupy; w oknie grupy piszesz do wszystkich, @Imię wzmiankuje', 'admin, w oknie grupy: /add <kontakt|nr> · /kick <kto> · /rename <nazwa>', '/me <akcja> · /react <emoji> · /verify · /invite · /clear · /quit', '/send <plik> · /get [id] - pliki (odbiorca ma ok. 5 min na pobranie)', '/knocks · /accept N · /ignore N - pukanie do Twoich zaproszeń (onchato-cli invites new)'])
           print(w.active, sys(h))
         break
       case 'quit': case 'exit': await quit(); break

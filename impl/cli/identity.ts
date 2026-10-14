@@ -48,8 +48,8 @@ export async function hemSignIn(
   const ids: HemChoice[] = keys.map((k) => ({ kid: String(k.kid), handle: parseSelfDescr(k.description)?.handle || '(?)' }))
   const chosen = await selectIdentity(ids, handleHint, choose)
   // Signing in never creates: a typo in a command must not mint an identity in
-  // somebody's hardware. That is `onchato hem new <name>` (hemCreate), on purpose.
-  if (!chosen) throw new Error('this HEM holds no onchato identity - create one with: onchato hem new <name> --hem <url>')
+  // somebody's hardware. That is `onchato-cli hem new <name>` (hemCreate), on purpose.
+  if (!chosen) throw new Error('this HEM holds no onchato identity - create one with: onchato-cli hem new <name> --hem <url>')
   const { kid, handle } = chosen
   const useTok = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
   const { pubkey } = await hem.getPubKey(useTok, kid)

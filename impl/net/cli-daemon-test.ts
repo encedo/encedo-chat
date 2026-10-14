@@ -7,7 +7,7 @@
  * a second Hub. Checked: send through the socket (delivered), listen through
  * the socket (bob's message arrives as a JSON line), a send to an offline bob
  * (queued) that reaches him by itself when he comes back - while the daemon
- * runs - and the real `onchato send` command as a separate process, both
+ * runs - and the real `onchato-cli send` command as a separate process, both
  * through the daemon and without one (its own short session, its own profile).
  */
 
@@ -49,7 +49,7 @@ let failed = false
 try {
   const ala = await browserSoftwareIdentity('ala', () => null, () => {})
   const bob = await browserSoftwareIdentity('bob', () => null, () => {})
-  // cee: a real CLI profile on disk, for `onchato send` without a daemon.
+  // cee: a real CLI profile on disk, for `onchato-cli send` without a daemon.
   const ceeHome = join(dir, 'cee')
   const ceeKV = fileKV(ceeHome)
   const cee = await createProfile(ceeKV, 'cee', PW)
@@ -84,9 +84,9 @@ try {
 
   const r3 = await cli(['send', 'bob', 'z procesu', '--json'], { ONCHATO_SOCKET: sockPath, ONCHATO_HOME: join(dir, 'nobody') })
   const j3 = JSON.parse(r3.stdout.trim() || '{}')
-  if (r3.status !== 0 || j3.status !== 'delivered' || j3.via !== 'daemon') throw new Error(`onchato send via daemon: rc ${r3.status} ${r3.stdout} ${r3.stderr}`)
+  if (r3.status !== 0 || j3.status !== 'delivered' || j3.via !== 'daemon') throw new Error(`onchato-cli send via daemon: rc ${r3.status} ${r3.stdout} ${r3.stderr}`)
   await until('bob got the process message', () => bobGot.includes('z procesu'))
-  step('`onchato send … --json` as a process hands off to the daemon: exit 0, delivered')
+  step('`onchato-cli send … --json` as a process hands off to the daemon: exit 0, delivered')
 
   await B.close()
   await sleep(2000)
@@ -103,9 +103,9 @@ try {
 
   const r5 = await cli(['send', 'bob', 'bez demona', '--json', '--wait', '60'], { ONCHATO_SOCKET: join(dir, 'none.sock'), ONCHATO_HOME: ceeHome, ONCHATO_PASSWORD: PW })
   const j5 = JSON.parse(r5.stdout.trim() || '{}')
-  if (r5.status !== 0 || j5.status !== 'delivered' || j5.via !== 'direct') throw new Error(`onchato send without a daemon: rc ${r5.status} ${r5.stdout} ${r5.stderr}`)
+  if (r5.status !== 0 || j5.status !== 'delivered' || j5.via !== 'direct') throw new Error(`onchato-cli send without a daemon: rc ${r5.status} ${r5.stdout} ${r5.stderr}`)
   await until('bob got the direct message', () => bobGot.includes('bez demona'))
-  step('`onchato send` with no daemon: its own short session, exit 0, delivered')
+  step('`onchato-cli send` with no daemon: its own short session, exit 0, delivered')
 
   srv.close(); await A.close(); await B.close()
   console.log('PASS - script mode and daemon over the real relays')

@@ -7,7 +7,7 @@
 #   docker run -d --name onchato -v onchato:/data \
 #     --mount type=bind,src=$PWD/pass,dst=/run/secrets/onchato-password,ro \
 #     onchato daemon
-#   docker exec onchato onchato send ewa "backup gotowy"
+#   docker exec onchato onchato-cli send ewa "backup gotowy"
 #
 # Node 24 runs the TypeScript sources directly (type stripping) - there is no
 # build step, so the image carries the same files the repo does.
@@ -37,7 +37,7 @@ COPY impl/net impl/net
 COPY impl/eh2 impl/eh2
 COPY impl/web/src/groupview.ts impl/web/src/
 
-RUN chmod 755 impl/cli/onchato.ts && ln -s /app/impl/cli/onchato.ts /usr/local/bin/onchato \
+RUN chmod 755 impl/cli/onchato.ts && ln -s /app/impl/cli/onchato.ts /usr/local/bin/onchato-cli \
  && mkdir -p /data && chown node:node /data
 
 # Not root: the profile is the identity, and nothing here needs privileges.
@@ -45,5 +45,5 @@ RUN chmod 755 impl/cli/onchato.ts && ln -s /app/impl/cli/onchato.ts /usr/local/b
 # is a bind mount rather than a named volume.
 USER node
 VOLUME ["/data"]
-ENTRYPOINT ["onchato"]
+ENTRYPOINT ["onchato-cli"]
 CMD ["help"]
