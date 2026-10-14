@@ -163,9 +163,9 @@ async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactMana
     await sealPlainStores(kv, base, names)
     return { id, kind: 'HEM', key, names, base, store: new InviteStore(kv, base, names), contacts: mergedContactBook(hemContactBook(hem, kid), local.verdict === 'tampered' ? emptyBook() : local.book) }
   }
-  const names = listProfiles(kv)
-  const name = opt('--profile') ?? (names.length === 1 ? names[0] : undefined)
-  if (!name) die(names.length ? `kilka profili (${names.join(', ')}) - wybierz --profile <nazwa>` : 'brak profilu - onchato-cli profile new <nazwa> albo profile import <plik>')
+  const profiles = listProfiles(kv)
+  const name = opt('--profile') ?? (profiles.length === 1 ? profiles[0] : undefined)
+  if (!name) die(profiles.length ? `kilka profili (${profiles.join(', ')}) - wybierz --profile <nazwa>` : 'brak profilu - onchato-cli profile new <nazwa> albo profile import <plik>')
   let id: Identity
   try { id = await openProfile(kv, name!, await secret(`Hasło profilu ${name}: `)) }
   catch (e) { die(e instanceof BadPassword ? 'złe hasło' : (e as Error).message) }
