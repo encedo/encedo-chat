@@ -14,7 +14,9 @@
  * a list of group ids is a list of relationships.
  */
 
-export const LEFT_SALT = 'encedo-chat-group-left-v1'
+import { SALTS } from './sealedstore.ts'
+
+export const LEFT_SALT = SALTS.left
 export const LEFT_PREFIX = 'ec-gleft-'
 /** Enough for a lifetime of leaving; the oldest entries go first past it. */
 export const LEFT_MAX = 256

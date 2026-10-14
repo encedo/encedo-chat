@@ -11,10 +11,10 @@
  * one last time and removed.
  */
 
-import { readSealedKV, writeSealedKV } from './sealedstore.ts'
+import { readSealedKV, writeSealedKV, isSealedOnly, SALTS } from './sealedstore.ts'
 import type { KV } from './migrate.ts'
 
-export const PREFS_SALT = 'encedo-chat-prefs-v1'
+export const PREFS_SALT = SALTS.prefs
 export const PREFS_PREFIX = 'ec-prefs-'
 /** The plain keys of earlier builds, by field. */
 export const LEGACY = { notify: 'ec-notify-', mediaAuto: 'ec-autoimg-' } as const
@@ -41,6 +41,12 @@ export async function loadPrefs(kv: KV, base: Uint8Array | null, idKey: string, 
   const sealed = (await readSealedKV<Prefs>(kv, base, idKey, key, PREFS_SALT, isPrefs, log)) ?? {}
   const out: Prefs = { ...sealed }
   let migrated = false
+  if (isSealedOnly(kv, idKey)) {
+    // After sign-in has sealed this identity's stores, a plain key here was not
+    // written by an older build of ours - it is someone setting a preference.
+    kv.remove?.(LEGACY.notify + idKey); kv.remove?.(LEGACY.mediaAuto + idKey)
+    return out
+  }
   const n = kv.get(LEGACY.notify + idKey)
   if (n !== null) { if (out.notify === undefined) out.notify = n; migrated = true }
   const a = kv.get(LEGACY.mediaAuto + idKey)

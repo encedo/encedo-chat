@@ -12,12 +12,12 @@
  * the queue when its ack arrives, instead of being sent a second time.
  */
 
-import { readSealedKV, writeSealedKV } from '../lib/sealedstore.ts'
+import { readSealedKV, writeSealedKV, SALTS } from '../lib/sealedstore.ts'
 import type { KV } from '../lib/migrate.ts'
 import { Outbox, outgoingText, type Entry } from './outbox.ts'
 import type { Hub } from './hub.ts'
 
-export const OUTBOX_SALT = 'encedo-chat-outbox-v1'
+export const OUTBOX_SALT = SALTS.outbox
 
 export interface Submitted { ok: true; status: 'delivered' | 'queued' | 'merged'; to: string; id?: string; ms?: number; qid?: string }
 

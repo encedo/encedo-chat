@@ -13,16 +13,16 @@
  *   ec-ignored-<kid>   [{ fp, at }]                                     keys whose knocks you dismissed
  */
 
-import { readSealedKV, writeSealedKV } from '../lib/sealedstore.ts'
+import { readSealedKV, writeSealedKV, SALTS } from '../lib/sealedstore.ts'
 import { newInboxSecret, inviteLink, inboxSecretBytes } from '../lib/invite.ts'
 import { inviteKey } from '../lib/inbox.ts'
 import { deriveWith, type Deriving } from '../lib/derive.ts'
 import { b64 } from '../lib/wc.ts'
 import type { KV } from '../lib/migrate.ts'
 
-export const INVITES_SALT = 'encedo-chat-invites-v1'
-export const WAITING_SALT = 'encedo-chat-waiting-v1'
-export const IGNORED_SALT = 'encedo-chat-ignored-v1'
+export const INVITES_SALT = SALTS.invites
+export const WAITING_SALT = SALTS.waiting
+export const IGNORED_SALT = SALTS.ignored
 const IGNORED_MAX = 512
 
 export interface PubInvite { id: string; label: string; secret: string; created: number; expires?: number }

@@ -863,11 +863,13 @@ async function main() {
       const raw = localStorage.getItem('ec-local-contacts-${idA}') || '';
       let json = true; try { JSON.parse(raw) } catch { json = false }
       return { json, len: raw.length, names: /sim-b|ghost/.test(raw), key: raw.includes(${JSON.stringify(pubB)}) || raw.includes(${JSON.stringify(ghostPub)}),
-               marker: localStorage.getItem('ec-local-contacts-${idA}-signed') }`)
-    if (atRest.json || atRest.names || atRest.key || atRest.marker !== '1') {
+               marker: localStorage.getItem('ec-local-contacts-${idA}-signed'),
+               sealedOnly: localStorage.getItem('ec-sealed-${idA}') }`)
+    // ...and sign-in closed the plain-JSON door of every other sealed store (lib/sealedstore.ts).
+    if (atRest.json || atRest.names || atRest.key || atRest.marker !== '1' || atRest.sealedOnly !== '1') {
       throw new Error(`the contact book is not sealed at rest after sign-in: ${JSON.stringify(atRest)}`)
     }
-    step('the contact book seeded in the clear was sealed at sign-in: no name and no key left in storage')
+    step('the contact book seeded in the clear was sealed at sign-in, and the sealed stores take no plain JSON from now on')
 
     // The FIRST room after sign-in, and only the first: `#chat-view` starts
     // hidden, and `focus()` on an element inside a `display:none` ancestor does

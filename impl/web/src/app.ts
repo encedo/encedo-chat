@@ -85,7 +85,7 @@ import { enableProtoLog } from '../../lib/protolog.ts'
 import { cachePubKeys, traceHem } from '../../lib/hemwrap.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import { sealPins, openPins, pinsName, migrateLegacyPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../../lib/pincache.ts'
-import { readSealedKV, writeSealedKV } from '../../lib/sealedstore.ts'
+import { readSealedKV, writeSealedKV, sealPlainStores, SALTS } from '../../lib/sealedstore.ts'
 import { markLeft, unmarkLeft, leftCovers, isLeftMap, LEFT_SALT, LEFT_PREFIX, type LeftMap } from '../../lib/gleft.ts'
 import { loadPrefs, savePrefs, type Prefs } from '../../lib/prefs.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
@@ -753,6 +753,7 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   await loadLeft(idKey, await cacheBaseFor(hemId, idKey))
   await loadPrefsFor(idKey, await cacheBaseFor(hemId, idKey))
   await movePinNames(idKey, await cacheBaseFor(hemId, idKey))
+  await sealPlainStores(localKV(), await cacheBaseFor(hemId, idKey), idKey, (m) => ecLog(m, 'debug'))
   await enterApp(
     hemId,
     mergedContactBook(hemContactBook(hem, id.kid), local.verdict === 'tampered' ? taintedBook() : local.book),
@@ -1225,6 +1226,7 @@ async function softLogin() {
     await loadLeft(idKey2, await cacheBaseFor(id, idKey2))
     await loadPrefsFor(idKey2, await cacheBaseFor(id, idKey2))
     await movePinNames(idKey2, await cacheBaseFor(id, idKey2))
+    await sealPlainStores(localKV(), await cacheBaseFor(id, idKey2), idKey2, (m) => ecLog(m, 'debug'))
     await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
@@ -1805,7 +1807,7 @@ const SEEN_PREFIX = 'ec-seen-'
  *  who you talk to and when you last heard them is metadata this product
  *  exists to keep off a disk, and it used to sit here as plain JSON
  *  (audit 2026-10-11, 1.3). */
-const SEEN_SALT = 'encedo-chat-seen-v1'
+const SEEN_SALT = SALTS.seen
 let seenMap: Record<string, Seen> = {}
 let seenKey = ''
 let seenIdKey = ''
@@ -4346,7 +4348,7 @@ const manualKnockAt = new Map<string, number>()
 /** Under a minute would be rude to the relay; over a few makes a Source wait. */
 const KNOCK_EVERY_MS = 90_000
 
-const WAITING_SALT = 'encedo-chat-waiting-v1'
+const WAITING_SALT = SALTS.waiting
 
 /**
  * Read a store that may still be in the plain JSON this app wrote before §10
@@ -4471,7 +4473,7 @@ interface PendingKnock { ik: string; name: string; note: string; at: number; inv
  * says so rather than implying a block list that is not there.
  */
 const IGNORED_MAX = 512
-const IGNORED_SALT = 'encedo-chat-ignored-v1'
+const IGNORED_SALT = SALTS.ignored
 const ignoredKey = () => 'ec-ignored-' + (session?.idKey ?? '')
 
 /**
@@ -4591,7 +4593,7 @@ let pubInvites: PubInvite[] = []
 let pendingKnocks: PendingKnock[] = []
 const inboxWatches = new Map<string, { stop(): void }>()
 
-const INVITES_SALT = 'encedo-chat-invites-v1'
+const INVITES_SALT = SALTS.invites
 
 /**
  * Loaded ONCE per session, then memory is the truth. Re-reading on every call
