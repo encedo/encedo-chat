@@ -6459,12 +6459,20 @@ const ENGINE_WORDS: Record<CoreBackend, string> = {
   wasm: 'moduł WASM (Rust) — klucze w pamięci strony',
   ts: 'TypeScript — klucze w pamięci strony',
 }
-function engineLine(): string {
+/** The engine line, as a mark and words - one source for the screen and the report. */
+function engineState(): { mark: 'ok' | 'bad' | 'meh'; text: string } {
   const s = coreStatus()
   const words = (b: CoreBackend) => tr(ENGINE_WORDS[b])
-  if (!s.used) return diagLine('meh', tr('Silnik szyfrowania: {e} (jeszcze nieużyty)', { e: words(s.asked) }))
+  if (!s.used) return { mark: 'meh', text: tr('Silnik szyfrowania: {e} (jeszcze nieużyty)', { e: words(s.asked) }) }
   const shellWithoutHost = isDesktopShell() && s.used !== 'native'
-  return diagLine(shellWithoutHost ? 'bad' : 'ok', tr('Silnik szyfrowania: {e}', { e: words(s.used) }))
+  return { mark: shellWithoutHost ? 'bad' : 'ok', text: tr('Silnik szyfrowania: {e}', { e: words(s.used) }) }
+}
+function engineLine(): string { const e = engineState(); return diagLine(e.mark, e.text) }
+/** The same, for the copied report: the marks the capability list uses there. */
+function engineReport(): string[] {
+  const e = engineState()
+  const mark = e.mark === 'ok' ? '[ok]' : e.mark === 'bad' ? '[fail]' : '|'
+  return [`${mark} ${e.text}`, ...coreStatus().fallbacks.map((f) => `[fail] ${f.from} -> ${f.to}: ${f.reason}`)]
 }
 
 function paintCaps() {
@@ -6526,6 +6534,10 @@ $('btn-diag-copy')?.addEventListener('click', async () => {
     // platform where the host carries it (the first Linux report did).
     ...(rustRtc && typeof RTCPeerConnection === 'undefined'
       ? ['[ok] ' + tr('Kanał bezpośredni: przez hosta (Rust, webrtc-rs) — webview nie ma WebRTC')] : []),
+    // The screen shows where the handshake keys live; a report without that
+    // line could not tell a native shell from one that fell back to WASM (the
+    // first 0.7.31 report from macOS had the screen line and not this one).
+    ...engineReport(),
     lastWebrtcProbe ? formatWebrtcProbe(lastWebrtcProbe) : 'webrtc: (nie sprawdzano)',
     `build: ${$('build-id-settings')?.textContent ?? '?'}`,
   ].join('\n')
