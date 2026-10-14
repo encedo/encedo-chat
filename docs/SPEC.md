@@ -140,10 +140,10 @@ The client never holds a pair secret: what it memoises are the derived values of
 
 ### 4.4 Contact integrity
 
-A swapped contact key is a complete MITM, so integrity of the stored key is critical while its confidentiality is not. Per store:
+A swapped contact key is a complete MITM, so integrity of the stored key is critical; the list of contacts is also who the identity knows, so where it is stored on the device it is sealed as well. Per store:
 
 - **HEM-held contacts**: modification is a privileged HSM operation behind a scoped token; the KID indexes key content.
-- **The local contact book** (software identities; the local cache for HEM ones) carries a keyed MAC over its stored text, `HMAC(k)` with `k = HKDF(base, salt = "encedo-chat-contact-book-v1", info = idKey, L = 32)` and `base` from §10, verified at sign-in. A book without a MAC is accepted and upgraded once: a marker records that a signed book has been written for the identity, after which a bare list in its place is `tampered`. The plain text is never written ahead of its MAC. A `tampered` book is not used and not overwritten.
+- **The local contact book** (software identities; contacts a HEM identity keeps on this device rather than in the HEM) is sealed with AES-256-GCM under `k = HKDF(base, salt = "encedo-chat-contact-book-v2", info = idKey, L = 32)`, `base` from §10, and opened at sign-in. A book that does not open is `tampered`, never empty: it is not used and not overwritten. A book in an older format is judged as it was then and sealed at once, before it is used: a bare list from before any protection is accepted (`unsigned`), and a signed one (`{v:1, mac, body}`, `HMAC-SHA-256` under `HKDF(base, salt = "encedo-chat-contact-book-v1", info = idKey, L = 32)` over the stored body) is accepted if its MAC verifies and is `tampered` if not. A marker records that a protected book has been written for the identity, after which a bare list in its place is `tampered`. The plain list is never written. Without `base` (an identity that refuses ECDH) the book is kept plain and unprotected.
 - **At import**: out-of-band verification (§4.4.1) and pinning of what was verified.
 
 #### 4.4.1 Safety number
@@ -616,7 +616,7 @@ base = ECDH(IK_priv, emp_pub)          // one identity-backend call per session,
 |---|---|---|
 | group state | `HKDF(base, salt = "encedo-chat-group-cache-v1", info = group_id as hex, L = 32)` → AES-256-GCM per group | `group_secret`, sender chains, roster with member device KIDs, epoch, name, the admin's `GK` scalar for a software identity, the device KIDs of `GK_pub`, owed invitations (§8.3) |
 | pinned messages | `HKDF(base, salt = "encedo-chat-pin-cache-v1", info = roomId, L = 32)` → AES-256-GCM per room | messages the user kept; 32 per room, refused not evicted; files not pinnable |
-| contact book | `HKDF(base, salt = "encedo-chat-contact-book-v1", info = idKey, L = 32)` → HMAC-SHA-256 key | integrity of the stored book (§4.4) |
+| contact book | `HKDF(base, salt = "encedo-chat-contact-book-v2", info = idKey, L = 32)` → AES-256-GCM | names and public keys of the identity's local contacts, and their integrity (§4.4) |
 | published invites | `HKDF(base, salt = "encedo-chat-invites-v1", info = idKey, L = 32)` → AES-256-GCM | the `invite_secret` of every published link (§5.7) |
 | knocks in progress | `HKDF(base, salt = "encedo-chat-waiting-v1", info = idKey, L = 32)` → AES-256-GCM | whom this client is knocking, with `name` and `note` (§5.7) |
 | dismissed knocks | `HKDF(base, salt = "encedo-chat-ignored-v1", info = idKey, L = 32)` → AES-256-GCM | fingerprints (§4.2) of dismissed knockers, capped at 512 |

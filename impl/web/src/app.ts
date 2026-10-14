@@ -749,7 +749,7 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   const idKey = await identityKey(pubkey, id.kid)
   const local = await makeLocalBook(idKey, localStorage, hemId)
   if (local.verdict === 'tampered') warnTampered()
-  await loadSeen(idKey, await cacheBaseFor(hemId, idKey)) // per identity, sealed; the base is already cached by the book's MAC check
+  await loadSeen(idKey, await cacheBaseFor(hemId, idKey)) // per identity, sealed; the base is already cached by the book's open
   await loadLeft(idKey, await cacheBaseFor(hemId, idKey))
   await loadPrefsFor(idKey, await cacheBaseFor(hemId, idKey))
   await enterApp(
@@ -1385,29 +1385,30 @@ $('nodes-toggle').addEventListener('click', () => {
 })
 
 /**
- * The local contact book, with a signature over it.
+ * The local contact book, sealed.
  *
- * WARNING: The book is the TRUST ANCHOR and it was the one piece of state with nothing
- * guarding it. Reading the file tells somebody who you talk to; WRITING it is
- * the attack — swap a contact's `pub` and the app derives the rendezvous with
- * the attacker, handshakes with the attacker and encrypts to the attacker,
- * while every layer underneath works perfectly on the key it was handed. No
- * badge turns red, because nothing failed.
+ * WARNING: The book is the TRUST ANCHOR. WRITING it is the attack — swap a
+ * contact's `pub` and the app derives the rendezvous with the attacker,
+ * handshakes with the attacker and encrypts to the attacker, while every layer
+ * underneath works perfectly on the key it was handed. No badge turns red,
+ * because nothing failed. And READING it tells somebody who this identity
+ * knows, which every other local record about people already hides.
  *
- * So it is signed (`lib/bookmac.ts`), and the shape here follows from where the
- * crypto can afford to be: **verify once at sign-in, hold the verified list in
- * memory, re-sign on every write.** The UI reads contacts synchronously on the
- * render path, and that stays true.
+ * So it is sealed under the §10 base (`lib/localbook.ts`; AES-GCM gives both
+ * properties), and the shape here follows from where the crypto can afford to
+ * be: **open once at sign-in, hold the list in memory, re-seal on every
+ * write.** The UI reads contacts synchronously on the render path, and that
+ * stays true.
  *
  * Three outcomes, and the middle one is the reason this can ship at all:
  *
- *   ok        — signed by this identity, and the signature matches.
- *   unsigned  — a book from before this existed. ACCEPTED, and signed on the
- *               next write. Locking somebody out of their own contacts to
- *               introduce a security feature is worse than the risk it closes.
- *   tampered  — signed, and the signature does not match. The list is NOT used
- *               and writes are refused, so the file is left exactly as found:
- *               it is evidence, and overwriting it with an empty signed book
+ *   ok        — sealed (or signed, in the older format) by this identity, and it opens.
+ *   unsigned  — a book from before any of this. ACCEPTED, and sealed at once.
+ *               Locking somebody out of their own contacts to introduce a
+ *               security feature is worse than the risk it closes.
+ *   tampered  — it does not open or does not verify. The list is NOT used and
+ *               writes are refused, so the file is left exactly as found: it
+ *               is evidence, and overwriting it with an empty sealed book
  *               would destroy both the evidence and the contacts.
  */
 async function makeLocalBook(idKey: string, storage: Storage, id: Identity): Promise<{ book: ContactBook; verdict: Verdict }> {
@@ -1420,7 +1421,7 @@ async function makeLocalBook(idKey: string, storage: Storage, id: Identity): Pro
 }
 
 /**
- * A book whose signature did not check out: empty, and it refuses to be edited.
+ * A book that did not open or verify: empty, and it refuses to be edited.
  * Not merely a precaution — every write would overwrite the evidence.
  */
 function taintedBook(): ContactBook {
@@ -1431,7 +1432,7 @@ function taintedBook(): ContactBook {
 /** Tell the user, once, in a way that cannot be mistaken for a network hiccup. */
 function warnTampered() {
   toast(tr('⚠️ Książka kontaktów została zmieniona poza aplikacją — nie została wczytana'))
-  ecLog('contact book FAILED its MAC — refusing to load or overwrite it')
+  ecLog('contact book FAILED its check — refusing to load or overwrite it')
 }
 
 /** Short form of an HSM key id — the full one is long and adds no meaning here. */

@@ -460,7 +460,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         // Accepting IS adding the contact: they hold our key from the invite, now
         // we hold theirs, and both sides can compute the pair topic (§5.8).
         await o.contacts.add(k.name, k.ik, o.kind === 'HEM')
-        await new Promise((r) => setTimeout(r, 150)) // the book's signature follows the write
+        await new Promise((r) => setTimeout(r, 150)) // the book's seal follows the write
         contactList.splice(0, contactList.length, ...(await o.contacts.list()))
         await session.watchContacts([{ pub: k.ik }], presence)
         print(w.active, sys(`${SGR.green}dodano ${k.name}${SGR.reset}${SGR.grey} - /query ${k.name}`))

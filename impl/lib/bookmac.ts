@@ -11,11 +11,13 @@
  * perfectly on the key it was handed. The book is the trust anchor and it was
  * the one piece of state with no protection at all.
  *
- * So this signs it. Deliberately a MAC and not encryption (the user's call, and
- * the right one): confidentiality here buys a little, integrity is what the
- * crypto rests on, and a book that stays readable keeps every read on the UI
- * path synchronous — verify once at sign-in, hold the verified list in memory,
- * re-sign on write.
+ * So this signed it - a MAC and not encryption, on the reasoning that
+ * integrity is what the crypto rests on. **Since 2026-10-14 the book is sealed
+ * instead** (`lib/localbook.ts`, AES-GCM under the same §10 base): reading the
+ * book was the social graph in the clear, the one record about people that
+ * was. Nothing writes this format any more; it stays so that a book written by
+ * an older build is verified once, exactly as it was then, and sealed - and so
+ * that one which does not verify is still caught.
  *
  * ## Key schedule — the §10 secret, no new material at rest
  *

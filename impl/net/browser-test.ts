@@ -856,6 +856,19 @@ async function main() {
 
     await Promise.all([openContact(A, 'sim-b'), openContact(B, 'sim-a')])
 
+    // The book was seeded as a bare array, the oldest format there is. Signing
+    // in must have sealed it on the spot (lib/localbook.ts): nobody reading
+    // this browser's storage learns whom sim-a knows.
+    const atRest = await A.eval<any>(`
+      const raw = localStorage.getItem('ec-local-contacts-${idA}') || '';
+      let json = true; try { JSON.parse(raw) } catch { json = false }
+      return { json, len: raw.length, names: /sim-b|ghost/.test(raw), key: raw.includes(${JSON.stringify(pubB)}) || raw.includes(${JSON.stringify(ghostPub)}),
+               marker: localStorage.getItem('ec-local-contacts-${idA}-signed') }`)
+    if (atRest.json || atRest.names || atRest.key || atRest.marker !== '1') {
+      throw new Error(`the contact book is not sealed at rest after sign-in: ${JSON.stringify(atRest)}`)
+    }
+    step('the contact book seeded in the clear was sealed at sign-in: no name and no key left in storage')
+
     // The FIRST room after sign-in, and only the first: `#chat-view` starts
     // hidden, and `focus()` on an element inside a `display:none` ancestor does
     // nothing and reports nothing, so calling focusComposer before the reveal

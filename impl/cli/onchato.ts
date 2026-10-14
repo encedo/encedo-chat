@@ -152,7 +152,7 @@ async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactMana
     const { id, hem, kid } = await hemSignIn(hemUrl, await secret('Hasło HEM: '), opt('--handle'), chooseIdentity)
     const key = await identityKey(id.pub, kid)
     const local = await openLocalBook(key, kv, await cacheBaseOf(id, key, kv))
-    if (local.verdict === 'tampered') console.error('onchato: UWAGA - lokalna książka kontaktów nie przeszła weryfikacji podpisu (pokazuję tylko kontakty z HEM)')
+    if (local.verdict === 'tampered') console.error('onchato: UWAGA - lokalna książka kontaktów nie przeszła weryfikacji (pokazuję tylko kontakty z HEM)')
     const base = await cacheBaseOf(id, key, kv)
     return { id, kind: 'HEM', key, base, store: new InviteStore(kv, base, key), contacts: mergedContactBook(hemContactBook(hem, kid), local.verdict === 'tampered' ? emptyBook() : local.book) }
   }
@@ -164,7 +164,7 @@ async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactMana
   catch (e) { die(e instanceof BadPassword ? 'złe hasło' : (e as Error).message) }
   const key = await identityKey(id!.pub)
   const local = await openLocalBook(key, kv, await cacheBaseOf(id!, key, kv))
-  if (local.verdict === 'tampered') die('książka kontaktów nie przeszła weryfikacji podpisu - ktoś zmienił ' + kv.path + ' (nic nie nadpisuję)')
+  if (local.verdict === 'tampered') die('książka kontaktów nie przeszła weryfikacji - ktoś zmienił ' + kv.path + ' (nic nie nadpisuję)')
   const base = await cacheBaseOf(id!, key, kv)
   return { id: id!, kind: 'software', key, base, store: new InviteStore(kv, base, key), contacts: localOnlyManager(local.book) }
 }
@@ -271,7 +271,7 @@ try {
         console.log(`kontakt:  ${name}\nodcisk:   ${await fingerprint(inv.pub)}\nPorównaj odcisk z tym, co ta osoba podała Ci innym kanałem (rozmowa, telefon).`)
         if (!await confirm('Zapisać?')) die('nie zapisano')
         await contacts.add(name, inv.pub, false)
-        await new Promise((r) => setTimeout(r, 150)) // the book's signature follows the write
+        await new Promise((r) => setTimeout(r, 150)) // the book's seal follows the write
         console.log(`zapisano kontakt ${name}`)
         // Until they hold our key too, neither side can compute the pair topic.
         if (inv.inbox && inv.key) {

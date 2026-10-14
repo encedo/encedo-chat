@@ -66,3 +66,10 @@ The module boundaries that keep a review of `eh2/` independent of the transport 
 
 - **`from` is never identity.** The origin envelope's sender field (§13) is the key a receiver files a frame under, not a claim of who sent it; identity is proven by EH-2 and integrity by the AEAD and the group MAC. `SPEC.md` §11.4 states it.
 - **A development switch prints secrets.** `?keys=1` narrates key material to the console (`impl/lib/protolog.ts`); it is in the audited bundle on purpose, and a release build compiles it out with `EC_ALLOW_KEYS=0`. Use it on your own session to watch the schedule.
+
+## Changed after the freeze: local storage hardening (2026-10-14)
+
+Local-only changes (nothing on the wire moved), made to shrink what a copied device or profile directory reveals. Each is normative in `SPEC.md` and reasoned in `RATIONALE.md` §8; listed here so the review can find them.
+
+- **The local contact book is sealed** (`SPEC.md` §4.4, §10): AES-256-GCM under `HKDF(base, "encedo-chat-contact-book-v2", idKey)` replaces the v1 HMAC over plain JSON. A blob that does not open is `tampered`; the v1 and pre-MAC formats are verified as before and sealed at sign-in. Code: `impl/lib/localbook.ts`; tests: `impl/test/localbook.test.ts`.
+- **Deleting a software profile removes its state** (`SPEC.md` §10, "Lock vs wipe"): every key carrying its KID, not just the sealed identity; an import refuses an identity already present under another name. Code: `impl/lib/migrate.ts` (`keysOfProfile`, `identityHere`).

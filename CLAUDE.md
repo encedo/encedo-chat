@@ -205,7 +205,7 @@ Working end-to-end, verified live:
   `net/meet.ts` PASS: two peers meet via the real relay.
 - **The terminal client** is `cli/onchato.ts` (`npm run onchato`; CLI-PLAN.md has the
   stages). It keeps the browser's `ec-*` keys in `~/.config/onchato/store.json`, so a profile
-  moves between the app and the terminal through `lib/migrate.ts` unchanged, and the signed
+  moves between the app and the terminal through `lib/migrate.ts` unchanged, and the sealed
   contact book is ONE implementation for both (`lib/localbook.ts`).
 - **Interactive CLI chat** — `lib/room.ts` (joinChat), `cli/repl.ts` +
   `cli/chat-session.ts` (IRC-style, /who /me /react /quit). `bob join` /
@@ -1617,7 +1617,7 @@ subscription"** — `pubsub.getSubscribers(topic)` on the client answers it, and
   it sits behind the Diagnostyka button at the bottom of Settings, not `?debug=1`.
 - Shipped since these notes' earlier eras, with their stories in `git log` and
   the protocol truth in `docs/SPEC.md`: files over IPFS + voice notes
-  (§7.5), notifications (`lib/notify.ts`), contact-book MAC (`lib/bookmac.ts`,
+  (§7.5), notifications (`lib/notify.ts`), contact-book seal (`lib/localbook.ts`; the v1 MAC in `lib/bookmac.ts`,
   §4.4), profile export/import (`lib/migrate.ts`, §10), software profiles
   (`lib/profile.ts`, §4.5), group keepalive + repair (§8), the Tauri desktop +
   Android shell with updater and foreground service (`src-tauri/`,

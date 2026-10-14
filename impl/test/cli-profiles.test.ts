@@ -97,9 +97,13 @@ test('a contact book edited in the file behind the CLI is caught, not believed',
   const { book } = await openLocalBook(key, kv, await cacheBaseOf(id, key, kv))
   await book.add('vostro1', 'MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=')
   await settle()
-  // Someone with write access to store.json swaps the contact's key.
+  // The book is sealed, so the file shows no key to swap - the contact's key is
+  // not in it at all. Someone with write access to store.json can still change
+  // bytes; one flipped bit must not be believed.
   const raw = kv.get('ec-local-contacts-' + key)!
-  kv.set('ec-local-contacts-' + key, raw.replace('MTIzNDU2', 'QUFBQUFB'))
+  assert.ok(!raw.includes('MTIzNDU2') && !raw.includes('vostro1'), 'nobody reading store.json learns the contact')
+  const bytes = Uint8Array.from(atob(raw), (c) => c.charCodeAt(0)); bytes[20] ^= 1
+  kv.set('ec-local-contacts-' + key, btoa(String.fromCharCode(...bytes)))
   const again = await openLocalBook(key, kv, await cacheBaseOf(id, key, kv))
   assert.equal(again.verdict, 'tampered')
   await assert.rejects(again.book.add('x', 'QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU='), /refusing to write over it/, 'the evidence is not overwritten')
