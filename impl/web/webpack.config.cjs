@@ -57,9 +57,12 @@ module.exports = (_env, argv) => {
           use: { loader: 'babel-loader', options: { plugins: ['@babel/plugin-transform-block-scoping'], compact: prod } },
           resolve: { fullySpecified: false },
         },
-        // core-rs (eh2/wasm.ts): the module is fetched by URL and instantiated
-        // by hand, so it is an emitted file, not a webpack WebAssembly module.
-        { test: /\.wasm$/, type: 'asset/resource', generator: { filename: prod ? 'core.[contenthash].wasm' : 'core.wasm' } },
+        // core-rs (eh2/wasm.ts): INLINED into the bundle as a data: URL, so the
+        // encryption engine is covered by the bundle's SRI like every line of
+        // JS. As a separate file it was fetched and instantiated with nothing
+        // checking it: a host could swap core.wasm and leave index.html - and
+        // its signed CID - unchanged. ~140 KB of module, ~190 KB as base64.
+        { test: /\.wasm$/, type: 'asset/inline' },
       ],
     },
     plugins: [
@@ -110,6 +113,15 @@ module.exports = (_env, argv) => {
         __EC_COMMIT__: JSON.stringify(COMMIT),
       }),
       new webpack.NormalModuleReplacementPlugin(/^node:/, (r) => { r.request = r.request.replace(/^node:/, '') }),
+      // ONE bundle, no lazily loaded chunks. The SRI below pins only the
+      // <script> tags of index.html; a chunk the webpack runtime fetches later
+      // carries no integrity, and `script-src 'self'` lets any file from this
+      // origin run. The engines' glue (eh2/wasm.ts, eh2/native.ts) was exactly
+      // such a chunk, so a host could swap the encryption engine and leave
+      // index.html - and its signed CID - byte for byte the same. With one
+      // bundle, index.html's CID covers every line of JS. Cost: ~7 KB loaded
+      // up front that used to load on demand.
+      new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
       new HtmlWebpackPlugin({ template: './index.html', filename: 'index.html', chunks: ['app'] }),
       // The CSP in index.html names the inline script by HASH, and the hash has
       // to be of what is EMITTED: html-webpack-plugin minifies the page, so a

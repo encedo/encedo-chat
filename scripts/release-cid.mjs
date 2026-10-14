@@ -6,10 +6,12 @@
  *   node scripts/release-cid.mjs                          # z impl/web/dist
  *   node scripts/release-cid.mjs --check https://app.onchato.com/
  *
- * Łańcuch jest krótki, bo aplikacja ma tylko trzy pliki, które przeglądarka
- * może pobrać: `index.html`, bundle i ikonę. A odkąd bundle jest nazwany w
- * HTML-u przez SRI, wystarczy opublikować CID **samego index.html** — on
- * kryptograficznie ręczy za resztę. Ikona się nie wykonuje.
+ * Łańcuch jest krótki, bo na originie aplikacji wykonuje się tylko
+ * `index.html` i JEDEN bundle, nazwany w HTML-u przez SRI, z wbudowanym
+ * `core.wasm` (webpack.config.cjs: maxChunks 1, wasm jako asset/inline).
+ * Dlatego CID **samego index.html** kryptograficznie ręczy za całość. Do 0.7.31
+ * tak nie było: chunki ładowane leniwie i `core.wasm` szły bez SRI. Ikony się
+ * nie wykonują.
  *
  * `--check` robi to, co robiłby strażnik: pobiera stronę z produkcji i mówi,
  * czy jej CID zgadza się z tym, co właśnie zbudowano. Build jest powtarzalny

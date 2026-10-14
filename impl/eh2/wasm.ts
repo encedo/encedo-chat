@@ -83,6 +83,12 @@ async function instantiate(bytes?: Uint8Array): Promise<Core> {
     if (typeof process !== 'undefined' && (process as any).versions?.node) {
       const fs = await import('node:fs')
       bytes = new Uint8Array(fs.readFileSync(url))
+    } else if (url.protocol === 'data:') {
+      // The web bundle inlines the module (webpack.config.cjs), so it is under
+      // the bundle's SRI. Decoded here rather than fetched: the page's CSP
+      // allows no data: in connect-src, and does not need to.
+      const b64 = url.href.slice(url.href.indexOf(',') + 1)
+      bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
     } else {
       bytes = new Uint8Array(await (await fetch(url)).arrayBuffer())
     }
