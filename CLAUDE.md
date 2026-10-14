@@ -1281,9 +1281,23 @@ sits in any CI runner. Clone lives at **`/opt/github/encedo-chat`**.
 git push && git tag v0.X.Y && git push --tags
 ```
 
-**The release manifest is NOT a per-release step.** It names the node list's
+**Every release ends with the operator's approval of the web build** (since
+0.7.32): after the tag has built and deployed, on the machine with the YubiKey
+(this one or VOSTRO; `opensc` + `ykcs11` installed):
+
+```bash
+node scripts/approve-web.mjs --host onchato vX.Y.Z     # builds the tag, 3 CIDs must agree, PIN + touch, uploads, checks
+```
+
+It re-signs the release manifest with the new `web` entry and nothing else
+(a different node list or updater key at the tag aborts it). The host config is
+outside the repo, `~/.config/onchato-ops/hosts/onchato.json`. Until it runs, the
+hourly web monitor reports PENDING, red once every 8 hours. `--dry-run` does
+every check without the token.
+
+**The manifest's OTHER fields are not a per-release step.** It names the node list's
 CID and the CI updater key with a 120-day expiry, and is re-signed when either
-changes or before it expires. The root key lives in the user's YubiKey (PIV
+changes or before it expires - with `release-manifest.mjs`, below. The root key lives in the user's YubiKey (PIV
 slot 9c, Ed25519, firmware >= 5.7), on no machine that builds; `infra/root.pub`
 is compiled into every client. Signing needs `opensc` + `ykcs11` and the token:
 

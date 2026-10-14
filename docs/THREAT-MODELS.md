@@ -15,7 +15,7 @@ Layering: `SPEC.md` owns the **crypto-layer threat model** — adversaries in §
 | Long-term identity keys | HEM (HSM) — or, for a **software profile** (`SPEC.md` §4.5), a password-sealed blob on the user's disk: a different assurance tier, named as such |
 | **The contact book — the trust anchor** | on device. Swapping a contact's `pub` re-aims the entire stack at the attacker with nothing failing (`SPEC.md` §4.4); the shipped control is a keyed MAC over the stored book, verified at sign-in, with tampering surfaced and never overwritten |
 | **The profile export file** (§10) | wherever the user puts it — one sealed blob carrying identity + contacts + groups under the profile password; offline-attackable, file + guessed password = the identity |
-| Node list / app integrity | a **manifest signed by the operator's root key in a YubiKey** (Ed25519; the public half is compiled into every client, `infra/root.pub`) names, with an expiry, the node list's CID and the CI updater key — and optionally a bundle's CID, which nothing enforces yet (`lib/manifest.ts`, `ARCHITECTURE.md` Distribution). A node-list refresh verifies the manifest's signature and date first, then fetches the list and checks it against the CID named (`lib/cid.ts`; CIDv1/raw/sha2-256 only — anything it cannot verify is refused). The list arrives through the operator's own `/f`, and the manifest through the operator's `/release/`: whoever shapes those responses without the root key changes nothing. Installers: three CI-held keys (updater minisign, Android keystore, Windows Azure Trusted Signing — behind the `release` environment's reviewer gate); the manifest names the updater key, so a client can tell a rotated one from a replaced one — the desktop updater refuses an installer whose signing key the manifest does not name, and refuses without a manifest at all |
+| Node list / app integrity | a **manifest signed by the operator's root key in a YubiKey** (Ed25519; the public half is compiled into every client, `infra/root.pub`) names, with an expiry, the node list's CID and the CI updater key — and, from the operator's approval of each release (`scripts/approve-web.mjs`), the web app's CID, which an hourly monitor compares with what the host serves (`ARCHITECTURE.md` Distribution). A node-list refresh verifies the manifest's signature and date first, then fetches the list and checks it against the CID named (`lib/cid.ts`; CIDv1/raw/sha2-256 only — anything it cannot verify is refused). The list arrives through the operator's own `/f`, and the manifest through the operator's `/release/`: whoever shapes those responses without the root key changes nothing. Installers: three CI-held keys (updater minisign, Android keystore, Windows Azure Trusted Signing — behind the `release` environment's reviewer gate); the manifest names the updater key, so a client can tell a rotated one from a replaced one — the desktop updater refuses an installer whose signing key the manifest does not name, and refuses without a manifest at all |
 | Service availability | discovery nodes (redundant, replaceable, self-hostable) |
 
 ## Baseline guarantees (all profiles)
@@ -132,6 +132,15 @@ compromise, minus the compromise. Stated because "safe even from its maker" is
 only meaningful if the ways the maker could betray it are written down: the web
 tier can be backdoored per-session, per-user, invisibly. The packaged tier
 cannot, without leaving a signed artifact behind — a copy of the crime.
+What narrows it for the web: the CID of `index.html` pins every byte the app
+origin executes (one bundle under SRI, with the encryption module inlined into
+it), each release's CID is signed with the root key once the operator has built
+the tag independently and found the same CID (`scripts/approve-web.mjs`), and an
+hourly monitor turns red when the served CID is neither the signed one nor one
+CI built for a recent tag. That catches a swap served to everyone. It cannot
+catch a swap served to one chosen person: only a check on the client's side can
+(a verifying extension, the packaged app, or a manager on a device the person
+already trusts), and none is shipped for the web.
 
 **B4. The file store.** Ciphertext for minutes, plus size, timing and fetch IPs
 on a public unauthenticated gateway; the upload door has to stay open (a browser
