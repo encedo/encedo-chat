@@ -30,9 +30,9 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { tmpdir } from 'node:os'
 import { cidV1Raw } from '../impl/lib/cid.ts'
 import { signManifest, verifyManifest, rootPubOf } from '../impl/lib/manifest.ts'
+import { signFileYubikey } from './yubikey-sign.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
@@ -91,15 +91,7 @@ if (has('--unsigned')) { console.log('unsigned: sign manifest.json elsewhere (pu
 
 let sig
 if (has('--sign-yubikey')) {
-  // PIV slot -> ykcs11 object id: 9a=1, 9c=2, 9d=3, 9e=4. 9c (Digital Signature) asks for the PIN every time.
-  const slot = opt('--slot', '9c').toLowerCase()
-  const id = { '9a': '1', '9c': '2', '9d': '3', '9e': '4' }[slot]
-  if (!id) { console.error(`unknown PIV slot ${slot}`); process.exit(2) }
-  const module = opt('--module', ['/usr/lib/x86_64-linux-gnu/libykcs11.so', '/usr/lib/aarch64-linux-gnu/libykcs11.so', '/usr/local/lib/libykcs11.so', '/opt/homebrew/lib/libykcs11.dylib'].find(existsSync) ?? 'libykcs11.so')
-  const tmp = join(tmpdir(), `onchato-manifest-${process.pid}.sig`)
-  // EDDSA = pure Ed25519 over the message, no prehash: exactly what lib/manifest.ts verifies.
-  execFileSync('pkcs11-tool', ['--module', module, '--login', '--sign', '--mechanism', 'EDDSA', '--id', id, '--input-file', join(out, 'manifest.json'), '--output-file', tmp], { stdio: 'inherit' })
-  sig = b64(readFileSync(tmp))
+  sig = signFileYubikey(join(out, 'manifest.json'), { slot: opt('--slot', '9c'), module: opt('--module') })
 } else {
   const priv = readFileSync(opt('--sign'), 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !/\s/.test(l)).pop()
   if (rootPubOf(priv) !== rootPub) { console.error('this key is not the one behind infra/root.pub'); process.exit(1) }
