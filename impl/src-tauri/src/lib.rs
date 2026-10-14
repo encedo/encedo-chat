@@ -665,6 +665,51 @@ mod desk {
         Ok(())
     }
 
+    /// The app's directories are its user's alone.
+    ///
+    /// WebKitGTK writes localStorage - sealed stores, but also the key NAMES
+    /// and the plain preferences - into the app's data directory, and creates
+    /// that directory with the process umask: 775 for the directory and 644 for
+    /// the files, measured on Ubuntu. On a system whose home directories are
+    /// 755, every other local account could read it. A directory that already
+    /// exists keeps its mode when WebKit opens it, so the host creates these
+    /// itself, BEFORE the webview, at 0700; nothing inside needs to change,
+    /// because nobody else can get past the directory. The terminal client does
+    /// the same for `~/.config/onchato` (cli/store.ts).
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(crate) fn private_dir(path: &std::path::Path) -> std::io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::create_dir_all(path)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn private_dirs(app: &AppHandle) {
+        let p = app.path();
+        for dir in [p.app_data_dir(), p.app_local_data_dir(), p.app_cache_dir(), p.app_log_dir()].into_iter().flatten() {
+            if let Err(e) = private_dir(&dir) { eprintln!("onchato: cannot make {} private: {}", dir.display(), e) }
+        }
+    }
+
+    #[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+    mod private_dir_tests {
+        use super::private_dir;
+        use std::os::unix::fs::PermissionsExt;
+        #[test]
+        fn an_open_directory_is_closed_and_a_missing_one_is_made_closed() {
+            let root = std::env::temp_dir().join(format!("onchato-priv-test-{}", std::process::id()));
+            let open = root.join("open");
+            std::fs::create_dir_all(&open).unwrap();
+            std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o775)).unwrap();
+            private_dir(&open).unwrap();
+            assert_eq!(std::fs::metadata(&open).unwrap().permissions().mode() & 0o777, 0o700);
+            let fresh = root.join("a").join("b");
+            private_dir(&fresh).unwrap();
+            assert_eq!(std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777, 0o700);
+            std::fs::remove_dir_all(&root).unwrap();
+        }
+    }
+
     #[cfg(test)]
     mod diag_wipe_tests {
         use super::diag_wipe_at;
@@ -1286,6 +1331,10 @@ mod desk {
                 // place, and it is a desktop concern: WebKitGTK and WKWebView
                 // have no save picker, so the host asks where. Android's
                 // download manager needs none of it.
+                // Before the window: the webview creates its storage in
+                // whatever exists by then, and keeps the mode it finds.
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                private_dirs(app.handle());
                 #[cfg(desktop)]
                 {
                     let main_cfg = app

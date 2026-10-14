@@ -629,7 +629,7 @@ base = ECDH(IK_priv, emp_pub)          // one identity-backend call per session,
 
 **Key names are in the clear**: every store sits under `ec-<store>-<KID>` and, for group state, `…-<group_id>`. Pins sit under a tag only the identity can compute, because a 1:1 room id is the contact's public key; pins stored under the earlier name `ec-pins-<KID>-<roomId>` are moved at sign-in, and an earlier name that does not open is removed. Stores kept plain, because they carry no contact, key or timing: the node list with the user's edits (`ec-nodes`), the transport choice (`ec-transport`), language, theme, layout, the close-to-tray preference, the last profile name and sign-in method.
 
-The terminal client keeps the same records under the same keys in `~/.config/onchato/store.json` (mode 0600).
+The terminal client keeps the same records under the same keys in `~/.config/onchato/store.json` (mode 0600, its directory 0700). The desktop shell on Linux and macOS creates its data, cache and log directories at mode 0700 before the webview opens them, so the webview's storage, which it writes with the process umask, is not reachable by other local accounts.
 
 **Lock vs wipe.** Sign-out keeps the cache. A wipeout deletes every `ec-*` key including `emp_pub`, after which the cached data is cryptographically dead. Deleting one software profile deletes its sealed identity and every `ec-*` key carrying its KID, the same set an export takes minus the device-level settings; the KID of a profile that is not open is inside its seal, so deleting it takes its password, and without the password only a wipeout removes its state.
 
