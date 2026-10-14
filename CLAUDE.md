@@ -514,7 +514,8 @@ harness now derives the id with the app's own `hemKid`, so the two cannot drift.
 Same rule as the login flow: change it and change the harness in the same commit.
 
 **Pins are the only thing allowed to outlive a reload** (`lib/pincache.ts`,
-`ec-pins-<kid>-<roomId>`; roomId = peer pub for a 1:1, gidHex for a group). The
+`ec-pin-<kid>-<HMAC tag of roomId>`; roomId = peer pub for a 1:1, gidHex for a group -
+the name used to carry the roomId itself, i.e. the contact's key; `migrateLegacyPins` moves those at sign-in). The
 key schedule is §10's with its own salt — `base = ECDH(IK, emp_pub)`,
 `k_room = HKDF(base, "encedo-chat-pin-cache-v1", roomId)` — so it works
 identically for a HEM identity and a software profile, and a pin blob cannot be

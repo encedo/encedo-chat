@@ -25,6 +25,20 @@
  * reverse) even by us, by accident, after a refactor. And binding the key to
  * `roomId` means one conversation's pins never open another's.
  *
+ * ## The storage NAME says nothing about the room (2026-10-14)
+ *
+ * The blob was always sealed, but it sat under `ec-pins-<kid>-<roomId>`, and a
+ * 1:1 room id is the contact's public key: the key name alone said "this
+ * identity talks to that key". The name is now `ec-pin-<kid>-<tag>`, with
+ *
+ *   k_name = HKDF(base, salt="encedo-chat-pin-name-v1", info=kid)
+ *   tag    = HMAC-SHA-256(k_name, roomId)[0:16], hex
+ *
+ * so only the identity holder can tell which room a blob belongs to. The blob
+ * and its key schedule are unchanged; `migrateLegacyPins` moves blobs from the
+ * old name at sign-in, and removes an old name that does not open (it leaked the
+ * room id whatever it held).
+ *
  * ## What it refuses
  *
  * A full list refuses the 33rd pin rather than dropping the oldest. Silently
@@ -59,6 +73,43 @@ export const PIN_LIMIT = 32
 
 const enc = new TextEncoder()
 const PIN_SALT = enc.encode('encedo-chat-pin-cache-v1')
+const NAME_SALT = enc.encode('encedo-chat-pin-name-v1')
+
+/** Where pins used to be stored: `ec-pins-<kid>-<roomId>`. */
+export const LEGACY_PINS_PREFIX = 'ec-pins-'
+export const PINS_PREFIX = 'ec-pin-'
+
+/** The storage name of one room's pins: `ec-pin-<kid>-<tag>`, the tag keyed by the identity. */
+export async function pinsName(base: Uint8Array, kid: string, roomId: string): Promise<string> {
+  const raw = await hkdfBits(base, NAME_SALT, enc.encode(kid), 32)
+  const key = await subtle.importKey('raw', raw, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const mac = new Uint8Array(await subtle.sign('HMAC', key, enc.encode(roomId)))
+  return PINS_PREFIX + kid + '-' + [...mac.slice(0, 16)].map((b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** What `migrateLegacyPins` needs of a store - the KV shape of lib/migrate.ts. */
+interface PinKV { keys(): string[]; get(k: string): string | null; set(k: string, v: string): void; remove?(k: string): void }
+
+/**
+ * Move every `ec-pins-<kid>-<roomId>` blob of this identity to its keyed name.
+ * Returns how many moved. An old blob that does not open is removed rather than
+ * kept: its NAME is the leak, and nothing can read what it holds.
+ */
+export async function migrateLegacyPins(kv: PinKV, base: Uint8Array, kid: string): Promise<number> {
+  const prefix = LEGACY_PINS_PREFIX + kid + '-'
+  let moved = 0
+  for (const k of kv.keys().filter((k) => k.startsWith(prefix))) {
+    const roomId = k.slice(prefix.length)
+    const blob = kv.get(k)
+    const pins = blob ? await openPins(base, roomId, blob) : null
+    if (pins?.length) {
+      const name = await pinsName(base, kid, roomId)
+      if (kv.get(name) === null) { kv.set(name, await sealPins(base, roomId, pins)); moved++ }
+    }
+    kv.remove?.(k)
+  }
+  return moved
+}
 
 async function roomKey(base: Uint8Array, roomId: string): Promise<CryptoKey> {
   const raw = await hkdfBits(base, PIN_SALT, enc.encode(roomId), 32)

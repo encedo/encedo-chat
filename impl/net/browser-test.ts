@@ -2740,13 +2740,24 @@ async function main() {
       return !!row && row.classList.contains('pinned')`, 10_000)
     step('a message was pinned, after the once-a-session consent')
 
-    const pinShape = await A.eval<{ enc: boolean; readable: boolean }>(`
-      const k = Object.keys(localStorage).find((k) => k.startsWith('ec-pins-${idA}-'));
-      return { enc: !!k, readable: k ? localStorage.getItem(k).trim().startsWith('{') : false };
+    // The key NAME is checked as well as the blob: it used to be
+    // `ec-pins-<kid>-<roomId>`, and a 1:1 room id is the contact's public key.
+    // This pin is in the group, so the room id to look for is its group id -
+    // which this browser's group cache names in its own keys.
+    const pinShape = await A.eval<{ enc: boolean; readable: boolean; names: string[]; rooms: string[] }>(`
+      const ks = Object.keys(localStorage).filter((k) => k.startsWith('ec-pin-${idA}-') || k.startsWith('ec-pins-'));
+      const k = ks.find((k) => k.startsWith('ec-pin-${idA}-'));
+      const rooms = Object.keys(localStorage).filter((k) => k.startsWith('ec-gcache-${idA}-')).map((k) => k.slice('ec-gcache-${idA}-'.length));
+      return { enc: !!k, readable: k ? localStorage.getItem(k).trim().startsWith('{') : false, names: ks, rooms };
     `)
-    if (!pinShape.enc) throw new Error('no ec-pins blob after pinning (nothing was kept)')
+    if (!pinShape.enc) throw new Error(`no ec-pin blob after pinning (nothing was kept): ${JSON.stringify(pinShape.names)}`)
     if (pinShape.readable) throw new Error('the pin blob is readable JSON — not encrypted at rest')
-    step('the pin store on disk is encrypted and keyed by the identity')
+    if (!pinShape.rooms.length) throw new Error('precondition: no group id to compare the pin name against')
+    const roomIds = [...pinShape.rooms, pubB]
+    if (pinShape.names.some((k) => k.startsWith('ec-pins-') || roomIds.some((r) => k.includes(r) || k.includes(r.slice(0, 12))))) {
+      throw new Error(`a pin key name points at its room: ${JSON.stringify(pinShape.names)} vs ${JSON.stringify(roomIds)}`)
+    }
+    step('the pin store on disk is encrypted, keyed by the identity, and its name does not say whose room it is')
 
     // §10 (audit 2026-10-11, 1.3): who was last heard and when is metadata, and
     // it sat on disk as plain JSON. B announced to A long ago in this run, so
@@ -3582,7 +3593,7 @@ async function main() {
     if (!victimKid) throw new Error('precondition: the renamed profile has no KID-keyed state')
     // Stand-ins for what a lived-in profile holds; the rule under test is "by KID".
     await B.eval(`
-      localStorage.setItem('ec-pins-${victimKid}-somebody', 'x');
+      localStorage.setItem('ec-pin-${victimKid}-somebody', 'x');
       localStorage.setItem('ec-gcache-${victimKid}-00112233445566778899aabbccddeeff', 'x');
       return 1;`)
     await B.eval(`location.reload(); return 1`).catch(() => {})

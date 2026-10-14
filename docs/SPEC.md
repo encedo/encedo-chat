@@ -615,7 +615,7 @@ base = ECDH(IK_priv, emp_pub)          // one identity-backend call per session,
 | store | key schedule | protects |
 |---|---|---|
 | group state | `HKDF(base, salt = "encedo-chat-group-cache-v1", info = group_id as hex, L = 32)` → AES-256-GCM per group | `group_secret`, sender chains, roster with member device KIDs, epoch, name, the admin's `GK` scalar for a software identity, the device KIDs of `GK_pub`, owed invitations (§8.3) |
-| pinned messages | `HKDF(base, salt = "encedo-chat-pin-cache-v1", info = roomId, L = 32)` → AES-256-GCM per room | messages the user kept; 32 per room, refused not evicted; files not pinnable |
+| pinned messages | `HKDF(base, salt = "encedo-chat-pin-cache-v1", info = roomId, L = 32)` → AES-256-GCM per room, stored under `ec-pin-<KID>-<tag>`, `tag = HMAC-SHA-256(HKDF(base, salt = "encedo-chat-pin-name-v1", info = idKey, L = 32), roomId)[0:16]` as hex | messages the user kept; 32 per room, refused not evicted; files not pinnable |
 | contact book | `HKDF(base, salt = "encedo-chat-contact-book-v2", info = idKey, L = 32)` → AES-256-GCM | names and public keys of the identity's local contacts, and their integrity (§4.4) |
 | published invites | `HKDF(base, salt = "encedo-chat-invites-v1", info = idKey, L = 32)` → AES-256-GCM | the `invite_secret` of every published link (§5.7) |
 | knocks in progress | `HKDF(base, salt = "encedo-chat-waiting-v1", info = idKey, L = 32)` → AES-256-GCM | whom this client is knocking, with `name` and `note` (§5.7) |
@@ -627,7 +627,7 @@ base = ECDH(IK_priv, emp_pub)          // one identity-backend call per session,
 
 `idKey` is the identity's KID (§4.2) as 32 lowercase hex characters; `roomId` is the peer's public key for a 1:1 and the group id as hex for a group. A sealed value is stored as `base64(iv(12) ‖ ct)`. A store that predates its seal is read as plain JSON and re-sealed at its next write.
 
-**Key names are in the clear**: every store sits under `ec-<store>-<KID>` and, for pins and group state, `…-<room>`. Stores kept plain, because they carry no contact, key or timing: the node list with the user's edits (`ec-nodes`), the transport choice (`ec-transport`), language, theme, layout, the close-to-tray preference, the last profile name and sign-in method.
+**Key names are in the clear**: every store sits under `ec-<store>-<KID>` and, for group state, `…-<group_id>`. Pins sit under a tag only the identity can compute, because a 1:1 room id is the contact's public key; pins stored under the earlier name `ec-pins-<KID>-<roomId>` are moved at sign-in, and an earlier name that does not open is removed. Stores kept plain, because they carry no contact, key or timing: the node list with the user's edits (`ec-nodes`), the transport choice (`ec-transport`), language, theme, layout, the close-to-tray preference, the last profile name and sign-in method.
 
 The terminal client keeps the same records under the same keys in `~/.config/onchato/store.json` (mode 0600).
 

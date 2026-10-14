@@ -84,7 +84,7 @@ import {
 import { enableProtoLog } from '../../lib/protolog.ts'
 import { cachePubKeys, traceHem } from '../../lib/hemwrap.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
-import { sealPins, openPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../../lib/pincache.ts'
+import { sealPins, openPins, pinsName, migrateLegacyPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../../lib/pincache.ts'
 import { readSealedKV, writeSealedKV } from '../../lib/sealedstore.ts'
 import { markLeft, unmarkLeft, leftCovers, isLeftMap, LEFT_SALT, LEFT_PREFIX, type LeftMap } from '../../lib/gleft.ts'
 import { loadPrefs, savePrefs, type Prefs } from '../../lib/prefs.ts'
@@ -752,6 +752,7 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   await loadSeen(idKey, await cacheBaseFor(hemId, idKey)) // per identity, sealed; the base is already cached by the book's open
   await loadLeft(idKey, await cacheBaseFor(hemId, idKey))
   await loadPrefsFor(idKey, await cacheBaseFor(hemId, idKey))
+  await movePinNames(idKey, await cacheBaseFor(hemId, idKey))
   await enterApp(
     hemId,
     mergedContactBook(hemContactBook(hem, id.kid), local.verdict === 'tampered' ? taintedBook() : local.book),
@@ -1223,6 +1224,7 @@ async function softLogin() {
     await loadSeen(idKey2, await cacheBaseFor(id, idKey2))
     await loadLeft(idKey2, await cacheBaseFor(id, idKey2))
     await loadPrefsFor(idKey2, await cacheBaseFor(id, idKey2))
+    await movePinNames(idKey2, await cacheBaseFor(id, idKey2))
     await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
@@ -5805,18 +5807,26 @@ let unpinConsent = false
 
 // Keyed by KID like every other per-identity store — a second identity on the
 // same HEM must not see the first one's pins.
-const pinsKey = (roomId: string) => 'ec-pins-' + (session?.idKey ?? '') + '-' + roomId
 const pinRoomId = (): string | null => activeGid ?? activePub
 const roomPins = (roomId: string | null): Pin[] => (roomId ? pins.get(roomId) ?? [] : [])
 const isPinned = (id: string): boolean => roomPins(pinRoomId()).some((p) => p.id === id)
 const activeLog = (): Ev[] | null => (activeGid ? groupsUI.get(activeGid)?.log ?? null : activeRoom()?.log ?? null)
 
+/** Pins stored under the old name, which carried the room id (a contact's key) in the clear. */
+async function movePinNames(idKey: string, base: Uint8Array | null) {
+  if (!base) return
+  try {
+    const n = await migrateLegacyPins(localKV(), base, idKey)
+    if (n) ecLog(`pins: moved ${n} room(s) to keyed names`, 'debug')
+  } catch (e: any) { ecLog('pins: rename failed - ' + (e?.message ?? e)) }
+}
+
 /** Read a room's pins once per page-load and put them at the head of its log. */
 async function loadPins(roomId: string, log: Ev[]) {
   if (pinsLoaded.has(roomId)) return
   pinsLoaded.add(roomId) // claimed BEFORE the awaits: two fast entries must not both read
-  const blob = localStorage.getItem(pinsKey(roomId)); if (!blob) return
   const base = await ensureCacheBase(); if (!base) return
+  const blob = localStorage.getItem(await pinsName(base, session?.idKey ?? '', roomId)); if (!blob) return
   const kept = await openPins(base, roomId, blob)
   if (!kept?.length) return
   pins.set(roomId, kept)
@@ -5829,10 +5839,11 @@ async function loadPins(roomId: string, log: Ev[]) {
 async function persistPins(roomId: string) {
   if (wiping) return
   const kept = roomPins(roomId)
-  if (!kept.length) { localStorage.removeItem(pinsKey(roomId)); return }
   const base = await ensureCacheBase()
   if (!base) { toast(tr('Nie udało się zapisać — brak klucza tej tożsamości')); return }
-  try { localStorage.setItem(pinsKey(roomId), await sealPins(base, roomId, kept)) }
+  const name = await pinsName(base, session?.idKey ?? '', roomId)
+  if (!kept.length) { localStorage.removeItem(name); return }
+  try { localStorage.setItem(name, await sealPins(base, roomId, kept)) }
   catch (e: any) {
     // A full quota is the realistic failure, and it must not look like success.
     ecLog('pins: save failed — ' + (e?.message ?? e))
