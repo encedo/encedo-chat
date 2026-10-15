@@ -1332,7 +1332,10 @@ async function loadOfficialNodes(btnId: string, warn: (t: string) => void, redra
       tr('Zastąpi Twoją listę {n} węzłami z publikacji. Twoje własne wpisy znikną.', { n: nodes.length }),
       tr('Zastąp'))
     if (!ok) return
-    saveNodes(nodes.map((n, i) => ({ ...n, enabled: i === 0 })))
+    // Every node on, as in the compiled-in DEFAULT_NODES: failover and the
+    // weighted first pick choose among enabled nodes only, so ticking just the
+    // first (a leftover of the one-relay model) pinned the client to it.
+    saveNodes(nodes.map((n) => ({ ...n, enabled: true })))
     redraw(); onChange()
     toast(tr('Wczytano {n} węzłów', { n: nodes.length }))
   } catch (e: any) {

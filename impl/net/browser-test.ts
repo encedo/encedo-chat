@@ -3690,7 +3690,11 @@ async function main() {
       for (const n of nodes) {
         if (!n.addr?.startsWith('/') || !n.addr.includes('/p2p/')) throw new Error(`a published entry is not a multiaddr: ${n.addr}`)
       }
-      if (!nodes.some((n: any) => n.enabled)) throw new Error('the loaded list has no enabled node — nothing would be dialled')
+      // All of them, as a fresh client's compiled-in list has them: failover
+      // and the weighted first pick only ever choose among ENABLED nodes, so a
+      // list loaded with one ticked pinned everybody to its first entry.
+      const off = nodes.filter((n: any) => !n.enabled).map((n: any) => n.name)
+      if (off.length) throw new Error(`the loaded list left node(s) disabled: ${off.join(', ')} - no failover to them`)
       step(`loaded ${nodes.length} published node(s) by CID, first is ${nodes[0].name}`)
     }
 
