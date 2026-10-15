@@ -174,7 +174,7 @@ depends on it:
 
 | content | what it is | pinned on | who reads it, how |
 |---|---|---|---|
-| the node list | `infra/nodes.json` as a single raw block: `bafkreies7oi6xdeyz7gpqifoa7loas65nu25pp6shdczelkxjbiras77ti` — the `OFFICIAL_NODES_CID` compiled into `impl/web/src/app.ts` (525 B, list dated 2026-09-14) | `ipfs1` on `ipfs.encedo.com` — only there | the app, through its own origin `/f/<cid>` (nginx → `cat` on this RPC) and verified against the CID client-side; our gateway `ipfs.encedo.com/ipfs/<cid>`; a public gateway only while announcing (step 4) is on |
+| the node list | `infra/nodes.json` as a single raw block: `bafkreies7oi6xdeyz7gpqifoa7loas65nu25pp6shdczelkxjbiras77ti` — the CID the signed release manifest names (`relay/DEPLOY.md` step 9; 525 B, list dated 2026-09-14) | `ipfs1` on `ipfs.encedo.com` — only there | the app, through its own origin `/f/<cid>` (nginx → `cat` on this RPC) and verified against the CID client-side; our gateway `ipfs.encedo.com/ipfs/<cid>`; a public gateway only while announcing (step 4) is on |
 | the WebUI | Kubo's console, installed with `ipfs pin add` | `ipfs1` | `webui.ipfs.encedo.com` (HAProxy: IP list + basic auth) |
 | firmware and other published content | Encedo's, not the chat's; per release | `ipfs1` | by CID, from whatever gateway the reader uses |
 
@@ -195,14 +195,14 @@ The flags are not optional. The client accepts **CIDv1 / raw / sha2-256 and
 nothing else** (`impl/lib/cid.ts`): a default `ipfs add` wraps even a small
 file in dag-pb and yields a `bafybei…` the app refuses as unverifiable. The
 CID the command prints must equal what the app computes from the same bytes —
-check it before touching `OFFICIAL_NODES_CID`:
+check it before a manifest names it:
 
 ```bash
 cd impl && node -e "import('./lib/cid.ts').then(async (m) => console.log(await m.cidV1Raw(new Uint8Array((await import('node:fs')).readFileSync('../infra/nodes.json')))))"
 ```
 
-**Do not unpin an old list.** Every build that ever shipped compiles in the
-CID of its day and asks for exactly that; a `pin rm` turns the button into an
+**Do not unpin an old list.** Builds before v0.7.15 compile in the CID of
+their day and ask for exactly that (later ones ask the manifest); a `pin rm` turns the button into an
 error for everyone who has not updated. `docker exec ipfs1 ipfs pin ls
 --type=recursive` shows the set; it should only ever grow by one per release
 of the list.

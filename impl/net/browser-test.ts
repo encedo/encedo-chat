@@ -3664,7 +3664,7 @@ async function main() {
     if (!deleted.signedIn) throw new Error('deleting another profile signed the open one out')
     step('its sealed identity and every key under its KID are gone; the open profile is untouched')
 
-    // ---- the published node list, fetched by its compiled-in CID -------------
+    // ---- the published node list, fetched by the CID the manifest names -----
     // LAST, on A, and only with a node to read from: it replaces the relay list
     // and re-dials, so anything after it would be running against production
     // relays instead of the test one. Parsing is unit-tested; what this covers

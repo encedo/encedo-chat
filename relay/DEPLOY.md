@@ -154,7 +154,8 @@ V6=$(ip -6 addr show scope global | awk '/inet6/{print $2}' | cut -d/ -f1 | head
 PEERS="/ip6/2a03:ec41:0:9::cf/tcp/9002/ws/p2p/12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp /ip6/2a01:7e0:0:164::16c/tcp/9002/ws/p2p/12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y /ip6/2a03:b0c0:2:f0:0:1:ed56:d001/tcp/9002/ws/p2p/12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5"
 SIBLINGS="12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp,12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y,12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5"
 NODE=${HOST%%.*}; MAXC=400; MAXT=1600          # 1-2 vCPU, measured 2026-09-25; 4+ vCPU: 800 / 3200 until tested
-# (or simply: infra/bs-setup.sh, which does all of steps 1-6 and 8 from the same template)
+# (or simply: infra/bs-setup.sh, which does steps 1-6, 4b-4d and the geoblock from the same
+#  template, and prints what step 8 needs on the EXISTING nodes)
 sed -E "/^(ExecStart|Description)=/{s|<NODE>|$NODE|g; s|<V6>|$V6|; s|<PEERS>|$PEERS|; s|<SIBLINGS>|$SIBLINGS|; s|<MAX_TOPICS>|$MAXT|; s|<MAX_CONNS>|$MAXC|}" \
     onchato-relay.service | sudo tee /etc/systemd/system/onchato-relay.service >/dev/null
 grep -cE '^(ExecStart|Description)=.*<' /etc/systemd/system/onchato-relay.service   # must print 0: nothing left unfilled
@@ -241,6 +242,18 @@ sudo systemctl restart redis-server && redis-cli ping               # PONG
 
 Loopback only, no password, no port in ufw: the relay is its only client, and
 `volatile-ttl` evicts the oldest windows first if the 64 MB ever fills.
+
+## 4d. Health push and live numbers
+
+`/health` through nginx proves nginx, TLS and the name — not the relay. The
+health probe (`infra/health/`, a systemd timer) checks that `onchato-relay` is
+active, listening, and still writing its `[stats]` line, and only then pushes
+to Uptime Kuma. Install and the push URL: `infra/health/README.md`
+(`bs-setup.sh` installs it, and enables it when given `--push-url`).
+
+`--metrics-port 9003` (in the unit) serves the live numbers on loopback only;
+`infra/dash/dash.mjs`, run on the operator's machine, reads them from every
+node over SSH and draws them, with the last 24 h from each node's Redis.
 
 ## 5. The certificate
 
@@ -376,15 +389,32 @@ step 7 is green:
    `test/nodelist.test.ts` parses the real file and rejects a copy-paste slip
    (an address that is another node's, two entries with one id) — CI runs the
    same and goes red on `main` otherwise.
-2. Publish the new list to the IPFS store (`ipfs add -Q infra/nodes.json` on
-   the store host — `infra/README.md`) and put the CID in `OFFICIAL_NODES_CID`
-   in `impl/web/src/app.ts`: the in-app "load the official list" button reads
-   that CID and nothing else.
-3. Add the node's address to the `--peers` line in step 4 of this file, so the
-   *next* node dials this one too, and note it in README → "Adding a node"
-   (the precomputed ids live there).
+2. Publish the new list to the IPFS store (`ipfs add` with the flags in
+   `infra/README.md`, "Republishing the list") and check that the CID it prints
+   is the one the app computes from the same bytes. Nothing in the code holds
+   that CID: the in-app "load the official list" button asks the signed release
+   manifest which CID to fetch (`SPEC.md` §5.6).
+3. Add the node's address to the `--peers` and `--siblings` of every other
+   node (step 4 of this file), so the mesh includes it and its load readings
+   are believed, and note it in README → "Adding a node" (the precomputed ids
+   live there).
 4. Version bump + `release:` commit + tag, per the release ritual in the root
    `CLAUDE.md`. The tag ships the list in the web, desktop and Android builds.
+5. Sign a manifest naming the new list, from the TAGGED checkout, then approve
+   that tag's web build — in this order, on the machine with the YubiKey:
+
+   ```bash
+   node scripts/release-manifest.mjs --sign-yubikey --out /tmp/rel   # new nodes CID, NO web entry
+   node scripts/release-manifest.mjs --verify /tmp/rel
+   scp /tmp/rel/manifest.json /tmp/rel/manifest.sig bs1.onchato.com:/var/lib/onchato/release/
+   node scripts/approve-web.mjs --host onchato vX.Y.Z               # puts the web entry back
+   ```
+
+   ⚠️ `release-manifest.mjs` builds the manifest from scratch: without
+   `--with-web` it has no web entry, so uploading it alone un-approves the
+   live web build (the hourly monitor goes PENDING). `approve-web.mjs` refuses
+   a tag whose `infra/nodes.json` is not the list the current manifest names,
+   which is why the manifest comes first.
 
 Until a build with the new list ships, the node serves only clients that add
 its address by hand (the app's Network tab) — which is exactly the right
