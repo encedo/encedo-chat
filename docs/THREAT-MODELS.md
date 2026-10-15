@@ -15,7 +15,7 @@ Layering: `SPEC.md` owns the **crypto-layer threat model** — adversaries in §
 | Long-term identity keys | HEM (HSM) — or, for a **software profile** (`SPEC.md` §4.5), a password-sealed blob on the user's disk: a different assurance tier, named as such |
 | **The contact book — the trust anchor** | on device. Swapping a contact's `pub` re-aims the entire stack at the attacker with nothing failing (`SPEC.md` §4.4); the shipped control is AES-GCM over the stored book under the §10 key (so it is neither readable nor silently changeable at rest), opened at sign-in, with tampering surfaced and never overwritten |
 | **The profile export file** (§10) | wherever the user puts it — one sealed blob carrying identity + contacts + groups under the profile password; offline-attackable, file + guessed password = the identity |
-| Node list / app integrity | a **manifest signed by the operator's root key in a YubiKey** (Ed25519; the public half is compiled into every client, `infra/root.pub`) names, with an expiry, the node list's CID and the CI updater key — and, from the operator's approval of each release (`scripts/approve-web.mjs`), the web app's CID, which an hourly monitor compares with what the host serves (`ARCHITECTURE.md` Distribution). A node-list refresh verifies the manifest's signature and date first, then fetches the list and checks it against the CID named (`lib/cid.ts`; CIDv1/raw/sha2-256 only — anything it cannot verify is refused). The list arrives through the operator's own `/f`, and the manifest through the operator's `/release/`: whoever shapes those responses without the root key changes nothing. Installers: three CI-held keys (updater minisign, Android keystore, Windows Azure Trusted Signing — behind the `release` environment's reviewer gate); the manifest names the updater key, so a client can tell a rotated one from a replaced one — the desktop updater refuses an installer whose signing key the manifest does not name, and refuses without a manifest at all |
+| Node list / app integrity | a **manifest signed by the operator's root key in a YubiKey** (Ed25519; the public half is compiled into every client, `infra/root.pub`) names, with an expiry, the node list's CID and the CI updater key — and, from the operator's approval of each release (`scripts/approve-web.mjs`), the web app's CID, which an hourly monitor compares with what the host serves (`ARCHITECTURE.md` Distribution). A node-list refresh verifies the manifest's signature and date first, then fetches the list and checks it against the CID named (`lib/cid.ts`; CIDv1/raw/sha2-256 only — anything it cannot verify is refused). The list arrives through the operator's own `/f`, and the manifest through the operator's `/release/`: whoever shapes those responses without the root key changes nothing. Installers: three CI-held keys (updater minisign, Android keystore, Windows Azure Artifact Signing — behind the `release` environment's reviewer gate); the manifest names the updater key, so a client can tell a rotated one from a replaced one — the desktop updater refuses an installer whose signing key the manifest does not name, and refuses without a manifest at all |
 | Service availability | discovery nodes (redundant, replaceable, self-hostable) |
 
 ## Baseline guarantees (all profiles)
@@ -62,7 +62,9 @@ is exactly the point. **The HEM is not a control against this**; it confines
 key *theft*, not key *use*. The stale-bundle banner is likewise not a control:
 it compares a content hash to decide "you are out of date", not "you are
 authentic". The packaged builds are signed (updater minisign, Android
-keystore), the web bundle is not — which is the whole argument for
+keystore); the web bundle's CID is signed with the root key only after the
+operator has approved it, and a page is served before that and to whoever the
+server chooses (B3) — which is the whole argument for
 recommending the packaged app where it matters, and the known price of the web
 convenience tier.
 
@@ -123,9 +125,10 @@ so a swapped CI key no longer verifies against what every client carries.
 The desktop updater reads the manifest before it downloads and again before
 it installs: no manifest, no update; a manifest naming another updater key,
 no update. What this leaves: a CI compromise that keeps the CI key and ships a
-backdoor signed with it, on a release whose manifest is current. Closing that
-is the bundle's own CID under the root signature, per release, which is a
-signing step per release and a decision deferred for now.
+backdoor signed with it, on a release whose manifest is current. Closing that for
+the desktop is the installer's own hash under the root signature, per release,
+a decision deferred for now; the web bundle has had exactly that since 0.7.32
+(B3).
 
 **B3. The operator serving A1 deliberately.** The same code path as a
 compromise, minus the compromise. Stated because "safe even from its maker" is

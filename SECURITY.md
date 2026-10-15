@@ -16,7 +16,10 @@ not to.
 
 - `impl/` - the client engine, the web app, the terminal client, the Tauri
   shells (desktop, Android, iOS).
+- `core-rs/` - the Rust core (EH-2, the ratchet), the default engine as WASM
+  and natively in the shells.
 - `relay/` - the discovery node.
+- `scripts/` - release tooling: manifest signing, web approval, CIDs.
 - `infra/` - the operator's nginx, STUN, file-store prefixer, feedback sink,
   geoblock and deploy scripts as versioned here.
 - `docs/SPEC.md`, `docs/RATIONALE.md`, `docs/THREAT-MODELS.md` - the protocol and its
@@ -43,8 +46,9 @@ Releases are signed by three CI-held keys, and each release is described by
 a manifest signed with the operator's offline root key, whose public half is
 `infra/root.pub` (`docs/ARCHITECTURE.md`, Distribution). The desktop updater
 verifies the manifest before it downloads and before it installs, and refuses
-an installer signed by a key the manifest does not name; what the manifest does
-not yet cover is the bundle itself (`docs/THREAT-MODELS.md`, B2).
+an installer signed by a key the manifest does not name. The web bundle's CID
+is in the manifest from the operator's approval of each release; a desktop
+installer's own hash is not (`docs/THREAT-MODELS.md`, B2, B3).
 
 ## Versions
 

@@ -39,6 +39,6 @@ Measured across machines and Node versions (`CLAUDE.md`): the same commit gives 
 
 ## What is not covered
 
-- **Desktop and Android bundles.** Packaging stamps timestamps and signatures (minisign, the Android keystore, Azure Trusted Signing), so two builds differ byte for byte even from one tree. What covers them is the signature under the CI key that the release manifest names (`ARCHITECTURE.md`, Distribution) — a different guarantee: that the bytes came from the pipeline, not that anyone can rebuild them.
+- **Desktop and Android bundles.** Packaging stamps timestamps and signatures (minisign, the Android keystore, Azure Artifact Signing), so two builds differ byte for byte even from one tree. What covers them is the signature under the CI key that the release manifest names (`ARCHITECTURE.md`, Distribution) — a different guarantee: that the bytes came from the pipeline, not that anyone can rebuild them.
 - **The node list and the manifest** are content-addressed and signed respectively; they are not builds.
 - **The relay.** Deployed from the tree by `git pull`; there is no artifact to reproduce.

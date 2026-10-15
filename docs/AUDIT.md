@@ -18,11 +18,11 @@ Out of scope: a compromised HSM, a compromised endpoint, statistical traffic ana
 
 ## Known-answer vectors
 
-Fixed inputs, fixed outputs, in `docs/kat/*.json`. Written only by `scripts/export-kat.mjs`; the tests read them. Two independent implementations reproduce them:
+Fixed inputs, fixed outputs, in `docs/kat/*.json`. Written only by `scripts/export-kat.mjs`; the tests read them. Two independent implementations reproduce them, with two exceptions: `eh2-handshake-classical.json` (the schedule with a seeded stand-in KEM) and `invite-knock.json` (§5.8, not in the Rust crate) have a TypeScript consumer only. The Rust crate reproduces `eh2-handshake-mlkem`, `ratchet-hybrid`, `group-senderkey` and `group-keys`; its sender-key chain (`core-rs/src/senderkey.rs`) is checked against the vectors and called by no client — groups run on the engine in the webview on every platform.
 
 ```
-# TypeScript engine (the default clients run this)
-cd impl && node --test test/eh2-handshake.test.ts test/eh2-mlkem.test.ts test/senderkey.test.ts test/eh2-ratchet.test.ts
+# TypeScript engine (the fallback engine; the groups' engine everywhere)
+cd impl && node --test test/eh2-handshake.test.ts test/eh2-mlkem.test.ts test/senderkey.test.ts test/eh2-ratchet.test.ts test/group-keys-kat.test.ts test/knock.test.ts
 
 # Rust core (the WASM engine in browsers and the terminal since 0.7.21; native in the Tauri host since 0.7.31; its IPC: `NATIVE_IPC=1 node --test test/native-ipc.test.ts` after `cargo build --example core-ipc` in impl/src-tauri)
 cd core-rs && cargo test
@@ -32,7 +32,7 @@ Each `docs/kat/` file carries the fixed scalars, seeds and a `note` naming the c
 
 ## Reproducible build
 
-`docs/REPRODUCIBLE.md`: the chain from a tag's tree hash to the CID two independent builds agree on to the bytes the host serves. CI rebuilds the web bundle in a clean container and the Rust module on a pinned toolchain and fails on any mismatch (`.github/workflows/desktop.yml` jobs `reproduce`/`reproducible`, `ci.yml` job `core-rs`).
+`docs/REPRODUCIBLE.md`: the chain from a tag's tree hash to the CID two independent builds agree on to the bytes the host serves. CI rebuilds the web bundle in a clean container and fails on any byte of difference (`.github/workflows/desktop.yml` jobs `reproduce`/`reproducible`). The Rust module is rebuilt on a pinned toolchain and checked by what it does, not by its bytes: the Rust vectors, then TypeScript↔WASM interop on the rebuilt module (`ci.yml` job `core-rs`) — a ~18-byte toolchain residue differs across machines, so a byte gate flapped.
 
 ## Section → code
 
@@ -73,7 +73,7 @@ The module boundaries that keep a review of `eh2/` independent of the transport 
 Local-only changes (nothing on the wire moved), made to shrink what a copied device or profile directory reveals. Each is normative in `SPEC.md` and reasoned in `RATIONALE.md` §8; listed here so the review can find them.
 
 - **The local contact book is sealed** (`SPEC.md` §4.4, §10): AES-256-GCM under `HKDF(base, "encedo-chat-contact-book-v2", idKey)` replaces the v1 HMAC over plain JSON. A blob that does not open is `tampered`; the v1 and pre-MAC formats are verified as before and sealed at sign-in. Code: `impl/lib/localbook.ts`; tests: `impl/test/localbook.test.ts`.
-- **Deleting a software profile removes its state** (`SPEC.md` §10, "Lock vs wipe"): every key carrying its KID, not just the sealed identity; an import refuses an identity already present under another name. Code: `impl/lib/migrate.ts` (`keysOfProfile`, `identityHere`).
+- **Deleting a software profile removes its state** (`SPEC.md` §10, "Lock vs wipe"): every key under its storage-name tag (or, not yet moved, carrying its KID), not just the sealed identity; an import refuses an identity already present under another name. Code: `impl/lib/migrate.ts` (`keysOfProfile`, `identityHere`).
 - **Storage names carry no KID, room or group** (`SPEC.md` §10, §4.3, §14): every record sits under `ec-<HMAC(nk,"id")[0:8]>-<HMAC(nk, label‖0‖scope)[0:16]>`, `nk` derived through the identity backend with the identity's own key (one derivation per sign-in); the group ids live in a sealed index; KID-named records are moved at sign-in. Before this, a pin's name was the contact's public key and every name was the KID. Code: `impl/lib/storenames.ts`; tests: `impl/test/storenames.test.ts`; the browser harness asserts no name carries a KID, a contact key or a group id.
 - **No plain-JSON downgrade of the sealed stores** (`SPEC.md` §10): sign-in seals what an older build left plain and sets the identity's `sealed` record; after it `readSealedKV` ignores plain JSON, and `loadPrefs` the plain legacy preference keys. Code: `impl/lib/sealedstore.ts` (`sealPlainStores`, `STORES`/`SALTS`, now the one place each salt is written), `impl/lib/prefs.ts`; tests: `impl/test/sealedstore.test.ts`.
 - **Desktop storage directories are 0700** (`SPEC.md` §10): the Linux/macOS shell creates its data, cache and log directories before the webview does (WebKitGTK made them 775 with 644 files). Code: `impl/src-tauri/src/lib.rs` (`private_dir`, `private_dirs`); test: `cargo test --lib private_dir`.
