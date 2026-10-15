@@ -36,13 +36,14 @@ and each has bitten a sweep already:
   goes in the bubble and counts against `QUOTE_MAX`.
 
 Polish text and `§` stay. When a log line changes, the docs that quote it change
-with it — `relay/README.md`, `relay/DEPLOY.md` and this file print the relay banner.
+with it — `relay/README.md` and `relay/DEPLOY.md` print the relay banner, and this file
+names its lines.
 
 ## Repo layout (`encedo/encedo-chat`)
 
 - `docs/` — above.
 - `impl/` — the app: engine (`lib/`, `eh2/`, `net/`), web UI (`web/`), the
-  terminal client (`cli/`, `onchato-cli`; `CLI.md`), Tauri desktop + Android +
+  terminal client (`cli/`, `onchato-cli`; root `CLI.md`), Tauri desktop + Android +
   iOS shell (`src-tauri/`), tests (`test/`), the committed WASM core
   (`core-wasm/core.wasm`).
 - `core-rs/` — the Rust core (EH-2, ratchet, sender keys), built to WASM and
@@ -61,8 +62,8 @@ with it — `relay/README.md`, `relay/DEPLOY.md` and this file print the relay b
   `well-known/`, the IPFS TTL sweeper, and `geoip/` — **the sanctions
   geoblock** (KP IR CU RU BY SY get HTTP 451 on every onchato path of every
   node and no STUN answer; the app/CLI say "not available in your region",
-  `lib/regioncheck.ts`) plus the **abuse list** (`onchato-block`, kept on the
-  operator's machine, never in the repo). The operator note is `GEOBLOKADA.md`
+  `lib/regioncheck.ts`) plus the **abuse list** (the tool `infra/geoip/onchato-block`
+  is here; the list itself is kept on the operator's machine, never in the repo). The operator note is `GEOBLOKADA.md`
   outside the repo.
 - `scripts/` — release tooling (`approve-web.mjs`, `release-manifest.mjs`,
   `release-cid.mjs`, `yubikey-sign.mjs`), `export-kat.mjs`, `web-monitor.mjs`,
@@ -78,7 +79,7 @@ with it — `relay/README.md`, `relay/DEPLOY.md` and this file print the relay b
   `TRANSFER-DESIGN`, `DISCOVERY-PROPOSAL`, `MOBILE-PLAN`, `EMBED-PLAN`, `MVP`,
   `CLI-PLAN`, `performance`) — those are records, SPEC wins where they differ.
 
-Older iterations (v2–v5) live outside the repo, in `dep/` beside it.
+Older iterations (v2–v5) are the separate repo `encedo/onchato.com`.
 
 ## HEM / SDK reality vs. design  ← the important one
 
@@ -145,13 +146,14 @@ or `authorizeRemote` (mobile push); crypto ops need `keymgmt:use:<kid>`.
 In the HSM, unused today: `hmacHash`/`hmacVerify`, `cipher*`,
 `mlkemEncaps`/`Decaps`, `mldsaSign`/`Verify` (de-risks the PQ identity phase).
 
-Gotchas: `createKeyPair`/`deriveKey` need a `mode` (CURVE25519→`ECDH`,
-ED25519→`ExDSA`); `searchKeys` pattern is base64 with a leading `^` — an
+Gotchas: the device API needs a `mode` on `create`/`derive` (CURVE25519→`ECDH`,
+ED25519→`ExDSA`) — the SDK fills it from the type, so a raw REST call must; `searchKeys` pattern is base64 with a leading `^` — an
 anchored prefix, which is the entire scoping mechanism for identities, contacts
 (`ETSEIC:peer1,<ownerKID>,<name>`, name = the whole tail) and group markers;
 `allow_keysearch` matches the **first six bytes** (hence `ETSEIC:`); `label` is
-capped at 32 characters and DESCR at 128 bytes — truncate with `gmarker.ts`'s
-byte-safe helpers, never `String.slice`; the device refuses to hold the same
+capped at 32 characters and DESCR at 128 bytes — truncate with `lib/descr.ts`'s
+byte-safe helpers (`sliceBytes`, `byteLen`; `descr.ts` also builds the
+identity and contact records), never `String.slice`; the device refuses to hold the same
 public key twice under any DESCR (`KID = SHA-1(pub)[0:16]`). The endpoint spec
 of record is the sibling PHP repo `hem-api-tester`.
 
@@ -208,7 +210,8 @@ thumbnail contacts a stranger's server before anyone clicks.
 
 - **A reply is `msg`/`file` with `re = { id, au?, text }`.** The quoted text
   travels (the transcript is ephemeral, so an id-only quote would mostly render
-  as "unavailable"); `QUOTE_MAX` = 160 code points, receiver accepts 400. The
+  as "unavailable"); `QUOTE_MAX` = 160 code points, receiver accepts
+  `QUOTE_MAX_WIRE` = 400 UTF-16 units. The
   author is a 4-byte key hint resolved locally — matching nobody, or two
   people, shows the words **without** a name. A broken `re` costs the quote,
   never the message.
@@ -228,7 +231,7 @@ thumbnail contacts a stranger's server before anyone clicks.
 
 **One transport per client, many rooms on it** (`startSession` → `session.open`).
 A WebSocket per contact would have been the alternative. Measured: 20 full EH-2
-handshakes take 66 ms, a sealed round trip 0.42 ms — rooms are not a CPU problem.
+handshakes take ~50–70 ms (`performance.md`), a sealed round trip 0.42 ms — rooms are not a CPU problem.
 
 - **`seq` restarts per room, PeerIds do not.** `forgetStream(peer)` clears
   dedup + ordering whenever a new ratchet is established and on `forgetPeer`;
@@ -307,7 +310,8 @@ answers `ack`, an unconfirmed message is re-sent at **1.5 s, 4 s, 8 s, 15 s,
 - **Two silences told apart:** `onLink` reports OUR transport
   (`online`/`reconnecting`/`offline`) — two heartbeats in a row reaching zero
   peers means isolated whatever `getConnections()` claims (`onIsolated` → re-dial
-  with backoff); the room reports a peer `quiet` after ~35 s without an Announce,
+  with backoff); the room reports a peer `quiet` after 37.5 s without an Announce
+  (2.5 heartbeats, floor 35 s),
   `leave` at 90 s.
 - **Signalling retries**: the offering side (lower PeerId) re-offers after 10 s
   without a proven channel, three attempts. `test/webrtc-plane.test.ts`
@@ -333,7 +337,7 @@ it fails, and with it off the peer learns no address and no STUN server is asked
 - ⚠️ `browser-test` is the only cover of the direct plane (Node has no
   `RTCPeerConnection`) and seeds `ec-transport=auto` for both browsers; drop that
   line and the WebRTC scenarios pass by negotiating nothing.
-- STUN is ours (Deploy, below). The relay-blind plane (§13) is parked (Directions).
+- STUN is ours (Deploy, below). The relay-blind plane is parked (Directions; not in SPEC).
 
 ### EH-2 + Double Ratchet — `impl/eh2/`
 
@@ -578,18 +582,27 @@ tag the commit you want live. Logs: `journalctl -t onchato-deploy`.
 node scripts/approve-web.mjs --host onchato vX.Y.Z     # builds the tag, 3 CIDs must agree, PIN + touch, uploads, checks
 ```
 
-It re-signs the release manifest with the new `web` entry and nothing else.
+It re-signs the release manifest with the new `web` entry, version, commit and
+dates — so every web approval also renews the 120-day expiry — and refuses to
+change the node list or the updater key.
 Host config: `~/.config/onchato-ops/hosts/onchato.json`. Until it runs, the
 hourly web monitor reports PENDING. `--dry-run` checks without the token.
 
-**The manifest's other fields** (node list CID, CI updater key, 120-day expiry)
-are re-signed when they change or before expiry:
+**The manifest's other fields** (node list CID, CI updater key) are changed with
+`release-manifest.mjs`, from the TAGGED checkout that carries them, and then
+the same tag is approved:
 
 ```bash
 node scripts/release-manifest.mjs --sign-yubikey --out /tmp/rel      # PIN + touch
-scp /tmp/rel/manifest.json /tmp/rel/manifest.sig bs1.onchato.com:/var/lib/onchato/release/
 node scripts/release-manifest.mjs --verify /tmp/rel
+scp /tmp/rel/manifest.json /tmp/rel/manifest.sig bs1.onchato.com:/var/lib/onchato/release/
+node scripts/approve-web.mjs --host onchato vX.Y.Z                   # puts the web entry back
 ```
+
+⚠️ **`release-manifest.mjs` writes from scratch: without `--with-web` there is no
+`web` entry**, so uploading it alone un-approves the live web build (monitor:
+PENDING). `approve-web.mjs` refuses a tag whose node list or updater key is not
+the signed one — hence manifest first, approval second (`relay/DEPLOY.md` step 9).
 
 The root key lives in the user's YubiKey (PIV 9c, Ed25519), on no machine that
 builds; `infra/root.pub` is compiled into every client. **TRAP: the desktop
@@ -605,8 +618,9 @@ sudo systemctl restart onchato-relay
 journalctl -u onchato-relay -n 12 --no-pager
 ```
 
-Four startup lines: the PeerId (**must** stay `12D3KooWP6Sp…cDmp`), the port,
-`Połączenia:` (proves `--max-connections`), `Tematy: limit …`. If the log looks
+Among the startup lines, four prove the config: the PeerId (**must** stay
+`12D3KooWP6Sp…cDmp`), the port, `Tematy: limit …` and `Połączenia:` (proves
+`--max-connections`). If the log looks
 like the previous build: `git log --oneline -1`, `grep -c "max-topics"
 relay/relay.mjs`, `systemctl show onchato-relay -p ExecMainStartTimestamp`,
 `systemctl cat onchato-relay | grep -E 'WorkingDirectory|ExecStart'`. **After
@@ -625,7 +639,7 @@ cache is `impl/.webpack-cache` (outside `node_modules` on purpose). Verify with
 `curl -s https://app.onchato.com/ | grep -o 'app\.[a-z0-9]*\.bundle\.js'` — or
 grep the bundle's own `v<version> (<commit>)` stamp.
 
-**The app has its own origin: `https://app.onchato.com/`** (since 0.7.0;
+**The app has its own origin: `https://app.onchato.com/`** (since 0.6.47;
 `onchato.com/chat` is a 301 keeping `#i=`). Browser storage shares its origin
 with nothing — not the landing, not `/f`. `/f` and `/feedback` stay on
 `onchato.com`; the app calls them cross-origin (`SITE_ORIGIN`; CORS + CORP are
@@ -677,7 +691,7 @@ feature is missing.
 
 ## Directions
 
-- **Data plane §13, relay-blind — parked, blocked on the libp2p ecosystem.** The
+- **Relay-blind data plane (`ARCHITECTURE.md` Transport, `RATIONALE.md`) — parked, blocked on the libp2p ecosystem.** The
   relay supports circuit-relay-v2 (reservations + HOP CONNECT verified live,
   `net/circuit-probe.ts`, `net/circuit-two.ts`), but on the pinned libp2p 2.2.x
   the destination-side STOP handling is broken, and v3 is blocked because
