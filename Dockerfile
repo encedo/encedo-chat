@@ -35,6 +35,9 @@ COPY impl/cli impl/cli
 COPY impl/lib impl/lib
 COPY impl/net impl/net
 COPY impl/eh2 impl/eh2
+# The default engine (eh2/wasm.ts loads it from ../core-wasm/). Without it the
+# CLI still works, on the TypeScript engine, and says nothing about it.
+COPY impl/core-wasm/core.wasm impl/core-wasm/
 COPY impl/web/src/groupview.ts impl/web/src/
 
 RUN chmod 755 impl/cli/onchato.ts && ln -s /app/impl/cli/onchato.ts /usr/local/bin/onchato-cli \

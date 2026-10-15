@@ -7,6 +7,7 @@
 !impl/lib/
 !impl/net/
 !impl/eh2/
+!impl/core-wasm/core.wasm
 !impl/web/src/groupview.ts
 !hem-sdk-js/hem-sdk.js
 !hem-sdk-js/LICENSE
