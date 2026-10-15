@@ -186,7 +186,7 @@ A pair topic can hold more than the two people it was derived for: a second tab 
 
 **What it was chosen against.** Until 3.0 two families coexisted and the spec said so in two places: the rendezvous keys, the group MAC keys and the knock key put the label in the salt and the context in `info`; the handshake output, the ratchet steps and the chain walks put the label in `info`. Both are sound on their own (HKDF with either argument fixed is a PRF in the other), and the split was written down as deliberate, which is exactly the kind of sentence an auditor has to carry through the whole document. The group nonce dropped the counter the 1:1 nonce appended, under one label: one label, two constructions, again both safe and again two things to remember. RFC 5869 itself puts the application-specific string in `info` and keeps `salt` for a value that is ideally independent of the key material, which is what a date or an epoch is.
 
-**Why then.** Before 1.0 the wire moves with the spec and no client reads an older frame, so the cost was one coordinated update, and the known-answer vectors were re-recorded in the same commit. After 1.0 the same change would need a protocol version negotiation it is not worth. A reader of `docs/kat/group-senderkey.json` will notice that the group vector did not move: at `ctr = 0` the salt `u32be(0)` and an empty salt are the same HMAC key once zero-padded.
+**Why then.** Before 1.0 the wire moves with the spec and no client reads an older frame, so the cost was one coordinated update, and the known-answer vectors were re-recorded in the same commit. After 1.0 the same change would need a protocol version negotiation it is not worth. A reader of `docs/kat/group-senderkey.json` will notice that its first vector did not move: at `ctr = 0` the salt `u32be(0)` and an empty salt are the same HMAC key once zero-padded. That is why the file also carries cases at `ctr ≥ 1`, where the two differ: they pin the counter in the salt, in both implementations.
 
 **What stays.** The local stores of §10 keep the label in the salt (section 8 above). The handshake `SK` and the ratchet root step already conformed and did not move.
 
@@ -282,21 +282,20 @@ Two problems on different horizons: PQ confidentiality (needed now, against harv
 ```
 impl/
 ├── eh2/        wire.ts (msg1/2/3 + transcript) · handshake.ts (state machines, SK) · mlkem.ts (ML-KEM-768)
-│               · ratchet.ts (Double Ratchet, hybrid step) · establish.ts (the backend switch) · wasm.ts (core-rs behind the same seam)
+│               · ratchet.ts (Double Ratchet, hybrid step) · establish.ts (the backend switch) · wasm.ts / native.ts (core-rs behind the same seam)
 ├── core-wasm/  core.wasm, built from /core-rs (Rust: the same §6–§7, KATs in core-rs/tests)
 ├── lib/        wc.ts (WebCrypto, kdf, aeadNonce) · rendezvous · announce · origin (§13 envelope) · presence
 │               · room (delivery contract, EH-2 seam) · envelope · session (crypto seam) · core (facade) · x25519 (the Dh capability)
-│               · senderkey/group/grouproom/gmarker (§8) · gcache/pincache/bookmac/localbook/localstore/sealedstore/seen/gleft/prefs (§10)
+│               · senderkey/group/grouproom/gmarker (§8) · gcache/pincache/bookmac/localbook/localstore/sealedstore/storenames/seen/gleft/prefs (§10)
 │               · inbox/knock/invite (§5.7–5.9) · decoy (§5.10) · safety (§4.4.1) · descr (§4.2) · clock (§5.4 anchor) · manifest (§5.6)
 │               · filecrypto/fileenvelope/cid (§7.5) · xfer/xfer-session (§13.1) · msgsize (§7.4) · migrate · profile/passmeter (§4.5)
 │               · selfsession (§9.1) · quote/edits/mentions/linkify (§7.4) · ice (§13 STUN) · nodelist/nodepick (§5.6) · radiophase (§5.5)
 ├── net/        onchato/peer (libp2p) · light (`/onchato/pick/1`) · webrtc, webrtc-plane, webrtc-tauri (§13) · ipfs, file-decrypt (§7.5)
 │               · browser-test (the two-browser live harness) · load tools
 ├── web/        the web UI
-├── cli/        the terminal client · daemon + outbox/queue (§13) · bob (a software test peer, test only)
-├── alice/      the HEM test peer
-├── src-tauri/  the desktop, Android and iOS shell (rtc.rs is the Linux DataChannel host)
-└── test/       KATs (eh2-handshake, eh2-mlkem, eh2-ratchet, senderkey), FS/PCS and forge tests, wire-format pins,
+├── cli/        the terminal client · daemon + outbox/queue (§13) · peer.ts (a software test peer, test only)
+├── src-tauri/  the desktop, Android and iOS shell (core_native.rs is the native engine, rtc.rs the Linux DataChannel host)
+└── test/       KATs (docs/kat/: eh2-handshake classical + ML-KEM, ratchet-hybrid, group-senderkey, group-keys, invite-knock), FS/PCS and forge tests, wire-format pins,
                 §8 repair and roster authority, §9.1, §10 stores
 ```
 

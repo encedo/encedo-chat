@@ -55,17 +55,18 @@ Each `docs/kat/` file carries the fixed scalars, seeds and a `note` naming the c
 | §7.5 files | `impl/lib/{filecrypto,fileenvelope,cid}.ts`, `impl/net/file-decrypt.ts` |
 | §8 groups, sender keys, MAC, repair | `impl/lib/{senderkey,group,grouproom,gmarker}.ts`, `test/group*.ts`; symbolic model: `docs/proverif/groups.pvl` (`GROUPS-PROVERIF.md`) |
 | §9 session management, self-topic | `impl/lib/selfsession.ts`, `impl/lib/core.ts` |
-| §10 local persistence | `impl/lib/{localstore,sealedstore,gcache,pincache,bookmac,localbook,seen,gleft,prefs}.ts` |
+| §10 local persistence | `impl/lib/{localstore,sealedstore,storenames,gcache,pincache,bookmac,localbook,seen,gleft,prefs}.ts` |
 | §13 transport, origin envelope, pick stream | `impl/lib/origin.ts`, `impl/net/{onchato,peer,light}.ts` |
 | §13.1 direct file transfer | `impl/lib/{xfer,xfer-session}.ts` |
 | §14 the one KDF and nonce | `impl/lib/wc.ts` (`kdf`, `aeadNonce`) |
 
 The module boundaries that keep a review of `eh2/` independent of the transport are in `RATIONALE.md` §15 (module contracts).
 
-## Two things to know before reading the code
+## Three things to know before reading the code
 
 - **`from` is never identity.** The origin envelope's sender field (§13) is the key a receiver files a frame under, not a claim of who sent it; identity is proven by EH-2 and integrity by the AEAD and the group MAC. `SPEC.md` §11.4 states it.
 - **A development switch prints secrets.** `?keys=1` narrates key material to the console (`impl/lib/protolog.ts`); it is in the audited bundle on purpose, and a release build compiles it out with `EC_ALLOW_KEYS=0`. Use it on your own session to watch the schedule.
+- **With the native engine, the identity's DH crosses the IPC as text.** The one IK DH per handshake (§6.2) is computed by the identity backend in the webview and handed to the host engine as a base64 string (`impl/eh2/native.ts`, `dh1`/`dh2`): the byte array is zeroed, the string and the IPC message cannot be. This does not widen exposure — a HEM already returns that value to the webview over HTTPS as JSON — and it does not narrow it for this one value either; the ephemerals, `SK` and the ratchet stay in the host.
 
 ## Changed after the freeze: local storage hardening (2026-10-14)
 
