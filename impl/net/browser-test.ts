@@ -2430,6 +2430,41 @@ async function main() {
     }
     }
 
+    scenario('Back on a phone closes what is on top, and only then leaves')
+    // The Android key/gesture walks the webview's history (Tauri's AppPlugin,
+    // no listener) and leaves the app when there is none; in a phone's browser
+    // it leaves the page and the session. So: a window over the conversation,
+    // Back closes the window; Back again returns to the contact list; the page
+    // is still the same signed-in page throughout.
+    {
+      await B.resize(390, 780)
+      if (!(await B.eval<boolean>(`return document.getElementById('app').classList.contains('chat-open')`))) {
+        await openContact(B, 'sim-a')
+        await B.waitFor('the conversation, for Back', `return document.getElementById('app').classList.contains('chat-open')`, 15_000)
+      }
+      const pub0 = await B.eval<string>(`return window.__pub`)
+      await B.eval(`document.getElementById('btn-add-peer').click(); return 1`)
+      await B.waitFor('a window over the conversation', `return document.getElementById('add-modal').classList.contains('open')`, 5_000)
+      await sleep(150) // the history entry is armed on the next microtask
+      await B.eval(`history.back(); return 1`)
+      await B.waitFor('Back closed the window, not the conversation', `
+        return !document.getElementById('add-modal').classList.contains('open')
+          && document.getElementById('app').classList.contains('chat-open');
+      `, 5_000)
+      await sleep(150)
+      await B.eval(`history.back(); return 1`)
+      await B.waitFor('Back again returned to the contact list', `
+        return !document.getElementById('app').classList.contains('chat-open')
+          && getComputedStyle(document.querySelector('.sidebar')).display !== 'none';
+      `, 5_000)
+      const still = await B.eval<any>(`return { pub: window.__pub, state: history.state }`)
+      if (still.pub !== pub0) throw new Error(`Back left the signed-in page: ${JSON.stringify(still)}`)
+      if (still.state?.ecBack) throw new Error('with nothing open, a Back entry is still armed - the next Back would not leave')
+      await openContact(B, 'sim-a') // where the next step expects B
+      await B.waitFor('the conversation again, after Back', `return document.getElementById('app').classList.contains('chat-open')`, 15_000)
+      step('Back closed the window, then the conversation, and the page stayed signed in')
+    }
+
     // The row's hidden actions (2026-09-26: tapping the right of a contact
     // row, where nothing shows, opened "rename"). On a touch phone the
     // invisible pencil must not be hit; after the long-press that reveals it,

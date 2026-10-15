@@ -7370,10 +7370,10 @@ function paintPreview(env: FileEnv): HTMLElement | undefined {
  * the thumbnail is already the decrypted picture, held as a blob URL, and the
  * viewer shows that same URL. Pinch or double-tap to zoom, drag to look
  * around, wheel on a desktop; close with the cross, Escape, the phone's Back
- * (a history entry is pushed for exactly that) or a swipe down.
+ * (the Back stack by btn-back) or a swipe down.
  */
 const thumbEnv = new WeakMap<HTMLElement, FileEnv>()
-let viewing: { env: FileEnv; url: string; pushed: boolean; back: Element | null; list: { env: FileEnv; url: string }[]; at: number } | null = null
+let viewing: { env: FileEnv; url: string; back: Element | null; list: { env: FileEnv; url: string }[]; at: number } | null = null
 let lbS = 1, lbX = 0, lbY = 0
 const LB_MAX = 6
 function lbPaint(fade = 1) {
@@ -7400,21 +7400,17 @@ function lbShow(at: number) {
 const lbGo = (d: number) => { if (viewing && viewing.list.length > 1) lbShow(viewing.at + d) }
 function openViewer(env: FileEnv, url: string, list?: { env: FileEnv; url: string }[]) {
   const all = list?.length ? list : [{ env, url }]
-  viewing = { env, url, pushed: false, back: document.activeElement, list: all, at: Math.max(0, all.findIndex((x) => x.url === url)) }
+  viewing = { env, url, back: document.activeElement, list: all, at: Math.max(0, all.findIndex((x) => x.url === url)) }
   lbShow(viewing.at)
-  $('lightbox').hidden = false
-  // Back on a phone walks the webview's history, so an entry of our own is
-  // what makes Back close the picture rather than leave the app.
-  try { history.pushState({ ecViewer: 1 }, ''); viewing.pushed = true } catch {}
+  $('lightbox').hidden = false // Back on a phone closes it: see "Back", by btn-back
   ;($('lb-close') as HTMLElement).focus()
 }
-function closeViewer(fromHistory = false) {
+function closeViewer() {
   const v = viewing
   if (!v) return
   viewing = null
   $('lightbox').hidden = true
   ;($('lb-img') as HTMLImageElement).removeAttribute('src')
-  if (v.pushed && !fromHistory) history.back()
   ;(v.back as HTMLElement | null)?.focus?.()
 }
 $('messages').addEventListener('click', (e: any) => {
@@ -7430,7 +7426,6 @@ $('messages').addEventListener('click', (e: any) => {
 })
 $('lb-prev').addEventListener('click', () => lbGo(-1))
 $('lb-next').addEventListener('click', () => lbGo(1))
-window.addEventListener('popstate', () => { if (viewing) closeViewer(true) })
 $('lb-close').addEventListener('click', () => closeViewer())
 // Capture, ahead of every other Escape: the viewer sits above all of them.
 document.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -9694,6 +9689,63 @@ window.addEventListener('focus', () => { for (const r of rooms.values()) r.conv?
  */
 const showChatPane = (on: boolean) => $('app').classList.toggle('chat-open', on)
 $('btn-back').addEventListener('click', () => { showChatPane(false); renderContacts(); renderGroups() })
+
+/**
+ * Back - the Android key or gesture, in the packaged app and in a phone's
+ * browser - closes what is on top, and leaves the app only when nothing is.
+ *
+ * The webview answers Back by walking its history and hands it to the system
+ * only when there is none (Tauri's AppPlugin, with no JS listener). The app
+ * kept no history, so Back on an open conversation or an open window left the
+ * app - and in a phone's browser, left the page and the session with it. So
+ * while something can be closed, ONE history entry of ours exists; Back
+ * consumes it and closes the top thing; if more is open, the entry comes
+ * back. When the last thing is closed by other means (its button, Escape),
+ * the entry is taken out again, so the next Back leaves as it should.
+ * The order is what sits over what. A window goes through the same route as
+ * Escape, including its exceptions (the transfer window keeps Back, as it
+ * keeps Escape: a reflex must not abort a transfer).
+ */
+function backTarget(): (() => void) | null {
+  if (viewing) return () => closeViewer()
+  if (!$('emoji-pop').hidden) return closeEmojiPop
+  if (!$('mention-pop').hidden) return closeMentionPop
+  if (document.querySelector('.modal.open')) {
+    return () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+  }
+  if ($('drawer').classList.contains('open')) return closeDrawer
+  if (replyTo || editing) return () => { cancelReply(); cancelEdit() }
+  if ($('app').classList.contains('chat-open') && getComputedStyle($('btn-back')).display !== 'none') return () => $('btn-back').click()
+  return null
+}
+let backArmed = false
+let backPopsToIgnore = 0
+function syncBack() {
+  const want = !!backTarget()
+  if (want && !backArmed) {
+    try { history.pushState({ ecBack: 1 }, ''); backArmed = true } catch {}
+  } else if (!want && backArmed) {
+    backArmed = false
+    backPopsToIgnore++
+    history.back()
+  }
+}
+window.addEventListener('popstate', () => {
+  if (backPopsToIgnore) { backPopsToIgnore--; return }
+  if (!backArmed) return
+  backArmed = false
+  backTarget()?.()
+  queueMicrotask(syncBack)
+})
+// Every one of those states shows as a class or `hidden` somewhere, so one
+// observer keeps the entry honest without a call at every place that opens
+// or closes something.
+let backQueued = false
+new MutationObserver(() => {
+  if (backQueued) return
+  backQueued = true
+  queueMicrotask(() => { backQueued = false; syncBack() })
+}).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] })
 
 /**
  * WARNING: never called. Written with the phone layout (1ed904e, 2026-07-31)

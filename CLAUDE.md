@@ -280,6 +280,12 @@ in landscape (852×393).
   min-aspect-ratio:3/2`); a portrait phone with the keyboard up is ~390x350.
 - **No `min-height` on phones** — it pushes the composer off screen.
 - `@media (pointer:coarse)`: finger-sized targets, 16px inputs (iOS zoom).
+- **Back (Android key/gesture, packaged or in Chrome)** closes what is on top
+  and leaves only when nothing is: while something can be closed, ONE history
+  entry of ours exists (`backTarget` / `syncBack` in `app.ts`, kept in step by a
+  MutationObserver). Tauri's AppPlugin walks the webview history when no JS
+  listens, so without the entry Back leaves the app. A new closable surface
+  goes into `backTarget` in stacking order. browser-test "Back on a phone…".
 - **A bubble's controls are revealed by PRESSING it**, mouse and finger alike
   (`attachReveal`, `.tapped`): a drag that selects text is left alone, one bubble
   open at a time, file/voice bubbles use the same helper. The emoji picker is
