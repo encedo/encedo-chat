@@ -11,7 +11,8 @@
  *     store.json   0600, written atomically (temp file + rename)
  *
  * The directory is 0700. What sits here is what a browser profile holds: a
- * sealed identity, a signed contact book, nothing in plaintext that is secret.
+ * sealed identity, a sealed contact book, records under HMAC names, nothing in
+ * plaintext that is secret.
  */
 
 import { mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync, existsSync } from 'node:fs'

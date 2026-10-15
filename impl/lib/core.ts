@@ -1,9 +1,8 @@
 /**
  * core.ts — headless core facade. ONE API that both front-ends (web GUI + CLI)
- * consume, so the UIs stay pure UI. Consolidates what used to be duplicated in
- * app.ts / chat-session.ts / bob / alice / ec:
+ * consume, so the UIs stay pure UI:
  *   - Identity (HEM or software), the ECDH holder,
- *   - deriveRoom: ss = ECDH(IK_a, IK_b) -> topic + interim keys,
+ *   - deriveRoom: the pair's topic + Announce key, through the identity backend,
  *   - Conversation: transport (peer + relay dial) + join + the typing/away/leave
  *     state machine, behind sendText / noteActivity / leave.
  *
@@ -466,10 +465,10 @@ export async function deriveRotationOffset(id: Identity, peer: Peer, p: RoomPara
 }
 
 /**
- * The presence topic + MAC key from an already-computed pair secret. `ss` is
- * date-independent (only the HKDF `info` carries the date), so a rotating watch
- * computes `ss` once and calls this per day — never a second `ecdh` (an HSM
- * round-trip for a HEM identity).
+ * The presence topic + MAC key from a pair secret held in the clear - the
+ * REFERENCE derivation `test/derive.test.ts` checks `derivePresence` against.
+ * Production never holds `ss`: the watch derives through the identity backend
+ * (`derivePresence`) and caches the day's values.
  */
 export async function presenceFromSecret(ss: Uint8Array, p: RoomParams): Promise<{ topic: string; macKey: CryptoKey }> {
   return { topic: await topicFromSecret(ss, p), macKey: await announceMacKey(ss, p) }

@@ -26,8 +26,6 @@ import { b64, unb64 } from '../lib/wc.ts'
 
 type Internals = { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<any> }
 const internals = (): Internals | undefined => (globalThis as any).__TAURI_INTERNALS__
-/** True when a native host with the core commands is reachable. */
-export const nativeCoreAvailable = (): boolean => typeof internals()?.invoke === 'function'
 
 function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const i = internals()

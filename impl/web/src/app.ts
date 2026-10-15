@@ -1,17 +1,17 @@
 /**
- * app.ts — onchato web GUI (mockup skin). Login (HEM) -> dashboard.
+ * app.ts — onchato web GUI. Sign-in (HEM or software profile) -> dashboard.
  *
  * Identity in the HEM (hem-sdk-js) or a password-sealed software profile.
  * Rendezvous/messages via the SAME engine as the CLI (../../lib, WebCrypto).
  * Content crypto is EH-2 + Double Ratchet, the only scheme; content prefers a
  * direct WebRTC DataChannel with GossipSub through the relay as the fallback
- * (docs/SPEC.md §7.3/§13). The §13 relay-blind plane is pending the libp2p
- * v3 ecosystem (gossipsub not yet migrated). Timestamps are shown on the
+ * (docs/SPEC.md §7.3/§13); the relay is the default, direct is a setting. The
+ * relay-blind plane (ARCHITECTURE.md) waits on libp2p v3. Timestamps are shown on the
  * READER's clock (`localHHMM`) — UTC is what the protocol computes in, not what
  * a person is asked to read.
  *
- * Unbacked mockup elements (P1–P3 profiles, direct/relay
- * modes) are kept as visual placeholders until the engine backs them.
+ * The P1–P3 profile presets are placeholders until the relay-blind plane
+ * exists; everything else on screen is backed by the engine.
  */
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'

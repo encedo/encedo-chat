@@ -905,7 +905,6 @@ function detect(): string {
 let locale = detect()
 let plural = new Intl.PluralRules(locale)
 
-export const locales = () => SUPPORTED.slice()
 export const getLocale = () => locale
 
 /** Switch language and repaint everything that is static markup. */

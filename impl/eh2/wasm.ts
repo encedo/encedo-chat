@@ -117,8 +117,6 @@ function fail(core: Core, rc: number): never {
   throw new HandshakeError(core.err() || `core returned ${rc}`)
 }
 
-export interface WasmSessionOpts { pqEverySteps?: number; pqEveryMs?: number; maxSkipPerChain?: number; now?: () => number }
-
 /** Wrap a ratchet handle as a `Session`. */
 function sessionOf(core: Core, h: number, now: () => number): Session & { stats(): { nSend: number; nRecv: number; skipped: number; pqOutstanding: boolean; pqSteps: number; dhPub: string | null }; free(): void } {
   const x = core.exports

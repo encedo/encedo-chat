@@ -58,8 +58,6 @@ export function enableProtoLog(opts: { events?: boolean; keys?: boolean; wire?: 
   if (showKeys) sink('[proto] KEY MATERIAL WILL BE PRINTED — debug builds only, never a shipped one')
 }
 
-export const protoLogOn = () => showEvents
-export const protoKeysOn = () => showKeys
 export const protoWireOn = () => showWire
 /** How much of each frame the wire dump shows: enough to see a header AND ciphertext (the user's call: 64 at least). */
 export const WIRE_HEAD = 64

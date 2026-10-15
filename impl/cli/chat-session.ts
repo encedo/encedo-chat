@@ -77,7 +77,7 @@ export async function runChatSession(
         if (state === 'stop') peerTyping = false
       },
       onReaction: (_from, r) => ui.print(`${time(r.ts)} ${C.peer}* ${peerName} reacted ${r.emoji}${C.reset}`),
-      onFile: (_from, f) => ui.print(`${time(f.ts)} ${C.peer}* ${peerName} shared a file: ${f.name} (${f.cid.slice(0, 12)}...) — interim: fetch TODO${C.reset}`),
+      onFile: (_from, f) => ui.print(`${time(f.ts)} ${C.peer}* ${peerName} shared a file: ${f.name} (${f.cid.slice(0, 12)}...) - this test client does not fetch files; onchato-cli does${C.reset}`),
       onPresence: (peer, ev) => {
         const what = ev === 'join' ? 'is in the room' : ev === 'active' ? 'is back' : ev === 'away' ? 'is away'
           : ev === 'quiet' ? 'has gone quiet — no heartbeat' : 'left'

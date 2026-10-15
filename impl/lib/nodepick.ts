@@ -17,17 +17,16 @@
  *
  * ## What a weight is NOT
  *
- * It is not an operational lever. The list is fetched by a CID compiled into
- * the app and checked against the content it returns, so changing a weight
- * means changing the file, which changes the CID, which needs a release —
- * exactly like changing the order today. That is deliberate: nobody can swap
+ * It is not an operational lever. The list is compiled in, and refreshed only
+ * by the CID a signed release manifest names, checked against the content it
+ * returns; changing a weight means changing the file, which changes the CID,
+ * which needs a new manifest — exactly like changing the order. That is deliberate: nobody can swap
  * the relay list under a running client.
  *
- * It is also not load. A weight is a guess made at release time; a node that
- * fills up does not stop being picked. Reported load is the next step and this
- * is what it will bias — which is why the drawing is probabilistic from the
- * start rather than "pick the best", since "pick the best" sends everybody to
- * the same place at the same moment.
+ * It is also not load. A weight is a guess made at release time; the measured
+ * load is read on top of it (below) — which is why the drawing is
+ * probabilistic from the start rather than "pick the best", since "pick the
+ * best" sends everybody to the same place at the same moment.
  *
  * ## The part worth knowing before choosing numbers
  *
@@ -40,12 +39,14 @@
  */
 
 /**
- * NEXT, AND NOT YET BUILT: load, and the hysteresis it needs.
+ * Load, and the hysteresis it needs — the reasoning; built below as
+ * `loginChoice` / `rebalanceChoice`, wired in `lib/core.ts`.
  *
- * Relays already announce how full they are (`relay/load.mjs`) — a whole
- * percent, on the mesh, every 30 s. What is missing is this side reading it,
- * and the intended shape is `effective = w * (1 - pct/100)`: load CORRECTS the
- * weight, it does not replace it. A weight says things a measurement cannot,
+ * Relays announce how full they are (`relay/load.mjs`) — a whole percent, on
+ * the mesh, every 30 s. The shape first planned here, `effective = w * (1 -
+ * pct/100)`, is not what was built: the weight still makes the draw, and load
+ * decides only whether to leave it (two choices at login, hysteresis later).
+ * Load CORRECTS the weight, it does not replace it. A weight says things a measurement cannot,
  * such as bs1 being the web host and therefore wanted as a spare however empty
  * it looks.
  *
