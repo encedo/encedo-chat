@@ -1,8 +1,9 @@
 # nginx — the site config, in the repository
 
-`onchato.com` is the whole `sites-available` file for the web host: the app, the
-two store operations proxied to the IPFS RPC (`/f`), the relay's WebSocket and
-the ACME challenge. It lived on one laptop and on the server, and the two could
+`onchato.com` is the whole site file of the web host (bs1): the landing and the
+app, the file store's `/f` (upload through `onchato-fput`, download straight to
+the IPFS RPC — `infra/README.md`), `/feedback`, the relay's WebSocket and the
+ACME challenge. It lived on one laptop and on the server, and the two could
 only be compared by reading them side by side — which is how a config gains a
 change nobody remembers making.
 
@@ -18,17 +19,32 @@ the mistake was pushed; `nginx -t` catches syntax and cannot catch a wrong
 `proxy_pass`. So a person does this, having read the diff:
 
 ```bash
-scp infra/nginx/onchato.com <host>:/etc/nginx/sites-available/onchato.com
-ssh <host> 'nginx -t && systemctl reload nginx'
+scp infra/nginx/onchato.com <host>:/tmp/onchato.com
+ssh <host> 'sudo cp /tmp/onchato.com /etc/nginx/sites-enabled/onchato.com &&
+            sudo cp /tmp/onchato.com /etc/nginx/sites-available/onchato.com &&
+            sudo nginx -t && sudo systemctl reload nginx'
+ssh <host> 'sudo nginx -T | grep -c "<a line only the new version has>"'   # did it land?
 ```
 
-⚠️ **`sites-enabled` holds a symlink to `sites-available`, and it must stay a
-symlink.** A copy there is the trap this deployment has already fallen into: two
-files, one edited, one served, and no error anywhere.
+⚠️ **On bs1 `sites-enabled/onchato.com` is a plain FILE, not a symlink, and it
+is the one nginx serves.** `sites-available/onchato.com` is a second plain file
+that once fell behind and, compared with the repo, showed 214 phantom
+differences. So: compare against and edit `sites-enabled`, and write both, so
+that neither lies. Copying to `sites-available` alone changes nothing and
+`nginx -t` still says "ok", because the old file is valid. The `nginx -T` grep
+is the only check that proves what is loaded.
 
-```bash
-ssh <host> 'ls -l /etc/nginx/sites-enabled/'   # -> onchato.com -> ../sites-available/onchato.com
-```
+Two more traps on the same host:
+
+- **Backups never go in `sites-enabled/`.** Everything there is globbed, so a
+  `onchato.com.bak` beside the file is loaded too, binds every limit zone a
+  second time and fails `nginx -t` (`"relay_conn" is already bound`). Keep
+  copies outside — on bs1 in `/root/nginx-backup/`.
+- **Changing the KEY of an existing `limit_*_zone` needs `systemctl restart
+  nginx`, not `reload`.** The reload refuses with an `[emerg]` that lands only
+  in `error.log`, and nginx carries on with the old config while the command
+  reports nothing. `grep emerg /var/log/nginx/error.log` after every reload
+  that touches a zone, and the same when reverting one.
 
 ## The relay nodes (bs2, bs3, …) — two more files
 
@@ -51,10 +67,12 @@ the template is `relay/DEPLOY.md`.
   `return` on the server runs in the rewrite phase, BEFORE nginx picks a
   location — so it swallows the ACME challenge block and certbot renewals fail
   with "unauthorized" and nothing about a redirect.
-* **`/f` answers CORS.** The web app is same-origin with the store and does not
-  need it; the packaged desktop and Android builds load from `tauri://localhost`
-  and do. Without those headers nginx answers correctly and the webview throws
-  the answer away, which reads in the app as "files do not work".
+* **`/f` answers CORS.** Every client is cross-origin to it: the web app has
+  its own origin, `app.onchato.com`, since 0.7.0, and the packaged desktop and
+  Android builds load from `tauri://localhost`. Without those headers nginx
+  answers correctly and the webview throws the answer away, which reads in the
+  app as "files do not work"; the download also needs CORP, because the web app
+  runs under COEP `require-corp`.
 
 ## The favicon is NOT here
 

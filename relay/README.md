@@ -178,8 +178,8 @@ What to look for in either: the `Upgrade`/`Connection` headers, the hour-long
 read/send timeouts a long-lived WebSocket needs, `X-Real-IP` (read only by
 the Dump, below), and the `limit_conn`/`limit_req` pair on `/relay` (see the
 inbound-limits section for why those limits are load-bearing, not optional).
-Deploy is `scp` to `sites-available` (a symlink in `sites-enabled`) +
-`nginx -t` + reload.
+Deploy is `infra/nginx/README.md` § Deploying it — on bs1 the served file is
+a plain one in `sites-enabled`, not a symlink.
 
 ## Peer scoring — why IP colocation is OFF
 

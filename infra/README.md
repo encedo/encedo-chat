@@ -1,5 +1,9 @@
 # Infra for file sharing (IPFS)
 
+This file is the IPFS store and the web host's `/f`; the rest of `infra/` has
+its own READMEs (`fput/`, `geoip/`, `health/`, `stun/`, `feedback/`, `nginx/`,
+`release/`).
+
 Two machines, and the split between them is the security boundary. The node
 answers on three names, and they are three different trust levels rather than
 three spellings of one:
@@ -40,56 +44,34 @@ to let the same CIDs reach the DHT — see below.
 
 ## On the web host (`onchato.com`)
 
-```nginx
-# Upload: ciphertext in, CID out. The blob is already encrypted; this host does
-# no crypto and learns nothing but a size.
-location = /f {
-    limit_except POST { deny all; }
-    client_max_body_size 128m;
-    proxy_request_buffering off;      # stream it; buffering 128 MB fills /tmp
-    proxy_read_timeout 300s;
-    proxy_send_timeout 300s;
+The config of record is **`infra/nginx/onchato.com`** — read the `/f` blocks
+there, never a copy of them in prose. Two paths, and since 0.5.73 they are not
+symmetric:
 
-    proxy_set_header Origin     "";
-    proxy_set_header Referer    "";
-    proxy_set_header User-Agent "encedo-proxy";
-    proxy_ssl_server_name on;
-    rewrite ^ /api/v0/add?pin=false&to-files=/ec/$msec-$request_id break;
-    proxy_pass https://rpc.ipfs.encedo.com;
-}
-
-# Download by CID. The regex is the allow-list: nothing else reaches the node.
-location ~ ^/f/(?<cid>[A-Za-z0-9]+)$ {
-    limit_except GET { deny all; }
-    proxy_method POST;                # Kubo rejects GET on /api/v0/*
-    proxy_set_header Origin     "";
-    proxy_set_header Referer    "";
-    proxy_set_header User-Agent "encedo-proxy";
-    proxy_ssl_server_name on;
-    # Kubo answers "I do not have it, and I am not allowed to look" with a 500.
-    # For this store that is the ordinary end of a file's life rather than a
-    # fault, so it is reported as what it is. ONLY 500 is mapped: 502 and 504
-    # keep their meaning, which is that the node is not answering at all.
-    proxy_intercept_errors on;
-    error_page 500 = @gone;
-
-    rewrite ^ /api/v0/cat?arg=$cid&offline=true break;
-    proxy_pass https://rpc.ipfs.encedo.com;
-}
-
-# An expired file, said plainly. nginx cannot read the upstream body, so every
-# 500 becomes this — acceptable because with `offline=true` there is essentially
-# one way for cat to fail.
-location @gone {
-    internal;
-    default_type application/json;
-    return 404 '{"error":"expired"}';
-}
-```
+- **Upload, `POST /f`**, goes to **`onchato-fput`** (`infra/fput/`,
+  127.0.0.1:9202), not to Kubo. The service prepends eight bytes to every
+  upload on its way to the store, so what enters is never what leaves (the
+  reason is in `infra/fput/README.md`), and it carries the three things that
+  used to be nginx's here: the sweeper's ledger name `/ec/<epoch>-<unique>`,
+  `pin=false`, and the neutral `User-Agent`. nginx keeps the CORS preflight,
+  the per-IP limits (`fput_req`, `fput_conn`), the 128 MB cap and
+  `proxy_request_buffering off` + `proxy_http_version 1.1` — either of those
+  missing puts the whole upload on disk before the service sees a byte.
+- **Download, `GET /f/<cid>`**, stays on nginx straight to the Kubo RPC
+  (`cat`), with its own limits (`fget_req`, `fget_conn`), CORS + CORP for the
+  packaged apps and the web app's COEP, and `nosniff` + `Content-Disposition:
+  attachment`, because the upload is open to the world and what hangs at a
+  `/f/<cid>` under our domain may be anybody's. It deliberately does NOT strip
+  the prefix: only the client skips it, when decrypting
+  (`impl/lib/fileenvelope.ts`).
+- An expired file is a `404 {"error":"expired"}` from `@gone`.
 
 ### Five things here are not obvious, and each one cost a failed request
 
-**Strip every marker of browser identity.** Kubo refuses anything that looks
+They apply to the download block on nginx and, where marked, to fput's
+request to Kubo.
+
+**Strip every marker of browser identity** (download on nginx, upload in fput). Kubo refuses anything that looks
 like it came from a browser — an `Origin` it does not allow, a `Referer`, or a
 `User-Agent` beginning with `Mozilla`. That is its CSRF defence and it is
 correct: a browser must never drive an admin API. But this hop is
@@ -122,10 +104,10 @@ CID arrives empty and Kubo answers "path does not have enough components". A
 named capture survives, and it does not duplicate the pattern the way repeating
 the regex inside the rewrite would.
 
-`pin=false` matters: the MFS entry is what keeps a blob alive, so expiry is a
-`files rm` away rather than a pin to hunt down. `$msec-$request_id` is the
-name the expiry job reads — seconds are enough, and the request id makes it
-unique.
+**`pin=false`** (fput) matters: the MFS entry is what keeps a blob alive, so expiry is a
+`files rm` away rather than a pin to hunt down. `/ec/<epoch>-<unique>` is the
+name the expiry job reads — epoch SECONDS (milliseconds parse as a date
+54 000 years out, and that file never expires), plus eight random bytes.
 
 Certificates are Let's Encrypt on both sides, so no `proxy_ssl_verify off`.
 Turning verification off on the path our ciphertext travels would be a bad habit
@@ -171,7 +153,7 @@ The split is already built, so it costs nothing to use:
 | content | how it arrives | pinned? | announced? |
 |---|---|---|---|
 | firmware, the node list, the WebUI | `ipfs add --pin=true` | yes | yes |
-| chat files | `/f` → `add?pin=false&to-files=/ec/…` | no — an MFS entry keeps the blocks | no |
+| chat files | `/f` → fput → `add?pin=false&to-files=/ec/…` | no — an MFS entry keeps the blocks | no |
 
 ```bash
 docker exec ipfs1 ipfs config --json Provide.Enabled true
