@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { pickFirst, orderFrom } from '../lib/nodepick.ts'
+import { pickFirst, orderFrom, loadFromItsNode } from '../lib/nodepick.ts'
 
 const N = (addr: string, w?: number) => (w === undefined ? { addr } : { addr, w })
 
@@ -140,4 +140,22 @@ test('rebalance: over many checks only about REBALANCE_P of a hot room moves', (
   let moved = 0
   for (let i = 0; i < 1000; i++) if (rebalanceChoice('bs3', ['bs3', 'bs2'], ls, NOW - HOT_FOR_MS, i / 1000, NOW)) moved++
   assert.ok(Math.abs(moved - 1000 * REBALANCE_P) <= 1, `moved ${moved}`)
+})
+
+test('a load reading is believed only from the node it names, and not from the future', () => {
+  const BS1 = '12D3KooWP6SpQxgcUDdAU1CdY3dcvSrkxHPki7FRtMLLYiGxcDmp'
+  const BS2 = '12D3KooWJJJtAk9m6yTUdKwqUYpxcyWLZTVNgyrpZheyK161NT1y'
+  const cands = [
+    `/dns4/bs1.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/${BS1}`,
+    `/dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/${BS2}`,
+  ]
+  const now = 1_000_000
+  const r = { node: 'bs1', pct: 10, at: now }
+  assert.equal(loadFromItsNode(r, BS1, cands, nodeKey, now), true, 'bs1 speaking for itself')
+  assert.equal(loadFromItsNode(r, BS2, cands, nodeKey, now), false, 'bs2 may not speak for bs1')
+  assert.equal(loadFromItsNode(r, '12D3KooWClientClientClient', cands, nodeKey, now), false, 'a client may not speak for bs1')
+  assert.equal(loadFromItsNode(r, undefined, cands, nodeKey, now), false, 'no publisher, no reading')
+  assert.equal(loadFromItsNode({ ...r, node: 'bs9' }, BS1, cands, nodeKey, now), false, 'a node we do not dial')
+  assert.equal(loadFromItsNode({ ...r, at: now + 31_000 }, BS1, cands, nodeKey, now), false, 'dated ahead of our clock')
+  assert.equal(loadFromItsNode({ ...r, at: now + 29_000 }, BS1, cands, nodeKey, now), true, 'within a round of skew')
 })

@@ -98,3 +98,12 @@ test('the cache hands over the newest reading of every node, and nothing stale',
 test('the written-out topic is still base32(sha256("encedo-chat-relay-load-v1"))[:52]', () => {
   assert.equal(LOAD_TOPIC, base32(createHash('sha256').update('encedo-chat-relay-load-v1').digest()).slice(0, 52))
 })
+
+test('the cache does not keep a reading dated ahead of it - it would shut out the real ones', () => {
+  const c = makeLoadCache()
+  const now = 1_000_000_000
+  assert.equal(c.put('p1', encodeLoad('bs1', 100, now + 10 * ANNOUNCE_MS), now), false, 'far future: refused')
+  assert.equal(c.put('p1', encodeLoad('bs1', 20, now - 1_000), now), true, 'the real reading lands')
+  assert.deepEqual(c.snapshot(now).map((e) => decodeLoad(e.data).pct), [20])
+  assert.equal(c.put('p1', encodeLoad('bs1', 30, now + ANNOUNCE_MS - 1), now), true, 'a clock a little ahead is still a reading')
+})

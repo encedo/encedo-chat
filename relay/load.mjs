@@ -157,9 +157,13 @@ export function freshest(readings, now = Date.now()) {
 export function makeLoadCache() {
   const last = new Map() // node -> { from, data, at }
   return {
-    put(from, data) {
+    put(from, data, now = Date.now()) {
       const r = decodeLoad(data)
       if (!r) return false
+      // Dated ahead of us by more than a round: not kept. `snapshot` would hide
+      // it anyway, but "newest wins" would let it shut out every real reading
+      // of that node until a restart.
+      if (r.at > now + ANNOUNCE_MS) return false
       const prev = last.get(r.node)
       if (!prev || r.at >= prev.at) last.set(r.node, { from: String(from), data, at: r.at })
       return true

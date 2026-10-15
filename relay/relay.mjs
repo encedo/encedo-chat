@@ -52,7 +52,7 @@ import { siblingSet, shouldJoin, evictable, staleSiblings, dupOnlySiblings, over
 import { LOAD_TOPIC, ANNOUNCE_MS, loadPercent, encodeLoad, makeLoadCache } from './load.mjs'
 import { makeQuota, DEFAULT_PER_PEER } from './quota.mjs'
 import { leafAnnouncements } from './leaf.mjs'
-import { MAX_FRAME_BYTES, MAX_RPC_BYTES, oversize, frameValidator } from './limits.mjs'
+import { MAX_FRAME_BYTES, MAX_RPC_BYTES, oversize, frameValidator, loadValidator } from './limits.mjs'
 import { pipe } from 'it-pipe'
 import * as lp from 'it-length-prefixed'
 import { pushable } from 'it-pushable'
@@ -299,6 +299,13 @@ if (PICK) {
         if (!f) continue
         if (f.type === PICK_T.DROP) { if (picks.drop(peer, f.topic, send)) quota.release(peer, f.topic); continue }
         if (f.type === PICK_T.PUSH) {
+          // Nobody but a relay speaks on the load topic, and a PUSH would go out
+          // under THIS node's id - a sibling's - past every other node's check.
+          if (f.topic === LOAD_TOPIC) {
+            console.log(`[!load] PUSH on the load topic by ${peer.slice(0, 12)}... refused`)
+            send(encodeAck(f.topic, 0))
+            continue
+          }
           // The frame bound (limits.mjs), said rather than silently dropped
           // on the far side: an ACK of 0 is the truth - it reached nobody.
           if (oversize(f.data)) {
@@ -526,6 +533,7 @@ console.log(`Połączenia: limit ${MAX_CONNS}`)
 // subscription-change handler, so `--local-topics-only` does not apply to it —
 // this one is the relay's own business, not a client's.
 relay.services.pubsub.subscribe(LOAD_TOPIC)
+relay.services.pubsub.topicValidators.set(LOAD_TOPIC, loadValidator(SIBLINGS, relay.peerId.toString()))
 if (ANNOUNCE_LOAD) {
   const say = () => {
     try {

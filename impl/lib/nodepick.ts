@@ -167,6 +167,22 @@ export function nodeKey(addr: string): string {
   return host.split('.')[0]
 }
 
+/**
+ * Is this reading believed? It names its node in its own body, so it counts
+ * only when the node itself published it: `from` (GossipSub-signed, or named by
+ * our relay on the light path) must be the PeerId at the end of that
+ * candidate's multiaddr. A reading for a node we do not dial, from anybody
+ * else, or dated more than a round ahead of our clock is dropped - any full
+ * peer on the topic could otherwise steer clients between nodes, or with a
+ * far-future date shut out a node's real readings.
+ */
+export function loadFromItsNode(r: LoadReading, from: string | undefined, candidates: string[],
+  keyOf: (addr: string) => string, now: number): boolean {
+  if (!from || r.at > now + 30_000) return false
+  const addr = candidates.find((a) => keyOf(a) === r.node)
+  return !!addr && addr.match(/\/p2p\/([^/]+)$/)?.[1] === from
+}
+
 const fresh = (r: LoadReading | undefined, now: number): r is LoadReading =>
   !!r && now - r.at <= LOAD_STALE_MS && r.at <= now + 30_000
 

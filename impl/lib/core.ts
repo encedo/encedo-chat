@@ -23,7 +23,7 @@ import { dhFromEcdh } from './x25519.ts'
 import { createPeer, dial } from '../net/peer.ts'
 import { createLightPeer } from '../net/light.ts'
 import { protoWireOn, wlog } from './protolog.ts'
-import { loginChoice, rebalanceChoice, nodeKey, HOT, LOAD_STALE_MS, type LoadReading } from './nodepick.ts'
+import { loginChoice, rebalanceChoice, nodeKey, loadFromItsNode, HOT, LOAD_STALE_MS, type LoadReading } from './nodepick.ts'
 import { LOAD_TOPIC, decodeLoad } from '../../relay/load.mjs'
 import { origin, unwrap } from './origin.ts'
 import { attachWebRTC, type WebRTCPlane } from '../net/webrtc-plane.ts'
@@ -1005,10 +1005,16 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     let lastMove = 0
     const keys = () => candidates.map(keyOf)
     const summary = () => [...loads.values()].sort((a, b) => a.node.localeCompare(b.node)).map((r) => `${r.node} ${r.pct}%`).join(', ') || 'no readings'
+    // A reading names its node in its own body, so it is believed only from
+    // that node: the publisher (GossipSub-signed, or named by our relay on the
+    // light path) must be the PeerId in the candidate's multiaddr. Anyone else
+    // on the topic - any full peer - could otherwise steer clients between
+    // nodes. Readings dated ahead of us are dropped here too (loginChoice would
+    // ignore them, but they would still displace the real one in `loads`).
     node.services.pubsub.addEventListener('message', (evt: any) => {
       if (evt.detail?.topic !== LOAD_TOPIC) return
       const r = decodeLoad(evt.detail.data)
-      if (r) loads.set(r.node, r)
+      if (r && loadFromItsNode(r, evt.detail.from?.toString?.(), candidates, keyOf, Date.now())) loads.set(r.node, r)
     })
     node.services.pubsub.subscribe(LOAD_TOPIC)
     const moveTo = async (key: string, why: string) => {

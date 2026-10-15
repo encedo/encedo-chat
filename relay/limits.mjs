@@ -30,3 +30,20 @@ export const oversize = (data) => (data?.length ?? 0) > MAX_FRAME_BYTES
 export function frameValidator(_topic, msg) {
   return oversize(msg?.data) ? TopicValidatorResult.Ignore : TopicValidatorResult.Accept
 }
+
+/**
+ * The load topic's validator: only a relay speaks there (load.mjs). The reading
+ * names its node in its own body, so whoever may publish may name any node -
+ * a client could make bs1 look full, or, with a reading dated far ahead, hide
+ * bs1's real ones from this node's cache until a restart. GossipSub signs every
+ * message, so `msg.from` is the publisher; a frame from anybody but a sibling
+ * relay (or this node) is not forwarded, not cached, not handed to a client.
+ * Ignore, not Reject: the peer that FORWARDED it may be a sibling in good faith.
+ */
+export function loadValidator(siblings, selfId) {
+  return (_topic, msg) => {
+    const from = msg?.from?.toString?.()
+    if (oversize(msg?.data) || !from) return TopicValidatorResult.Ignore
+    return siblings.has(from) || from === selfId ? TopicValidatorResult.Accept : TopicValidatorResult.Ignore
+  }
+}
