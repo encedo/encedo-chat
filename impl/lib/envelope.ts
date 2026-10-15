@@ -20,7 +20,7 @@
 import { randomBytes, b64 } from './wc.ts'
 import { nowMs } from './time.ts'
 import { isQuoteRef, type QuoteRef } from './quote.ts'
-import { MAX_CHUNK, MAX_FILE } from './filecrypto.ts'
+import { FILE_ALG, MAX_CHUNK, MAX_FILE } from './filecrypto.ts'
 
 export const ENVELOPE_V = 1
 
@@ -180,15 +180,14 @@ export interface GroupSkdEnv extends BaseEnv {
  */
 export interface GroupSkdReqEnv extends BaseEnv { t: 'group-skd-req'; gid: string; epoch: number }
 /**
- * FUTURE FEATURE - in-band IK rotation (SPEC roadmap, plan T13). NOT wired:
- * the type and its decode are the seam only, so a build that one day sends
- * `ik-rotate` already has a receiver that validates the shape, and this build
- * drops it as `UnknownEnv` rather than mis-parsing it. When T13 is built, the
- * sender seals `{ t:'ik-rotate', newPub, effectiveFrom }` under the live
- * ratchet (auth = SK, deniability kept), the receiver re-signs the contact
- * book (lib/bookmac.ts) and derives rendezvous from newPub at effectiveFrom
- * (lib/room.ts). Nothing dispatches it today; `decodeEnvelope` validates it so
- * the shape is frozen and a malformed one is dropped, not acted on.
+ * FUTURE FEATURE - in-band IK rotation (SPEC §7.4 reserved type, plan T13).
+ * NOT wired: the type and its decode are the seam only. `decodeEnvelope`
+ * validates the shape, so a well-formed one decodes as `IkRotateEnv` (which
+ * nothing dispatches) and a malformed one is dropped, never mis-parsed. When
+ * T13 is built, the sender seals `{ t:'ik-rotate', newPub, effectiveFrom }`
+ * under the live ratchet (auth = SK, deniability kept), the receiver rewrites
+ * the contact in the sealed book (lib/localbook.ts) and derives rendezvous
+ * from newPub at effectiveFrom (lib/room.ts).
  */
 export interface IkRotateEnv extends BaseEnv { t: 'ik-rotate'; newPub: string; effectiveFrom: number }
 /** A valid envelope whose `t` this build doesn't know — carried for forward-compat. */
@@ -291,10 +290,10 @@ export function decodeEnvelope(bytes: Uint8Array): Envelope | null {
     // size, or the two sides disagree about where the file ends.
     case 'file': return (typeof m.cid === 'string' && typeof m.name === 'string'
       && Number.isInteger(m.size) && m.size >= 0 && m.size <= MAX_FILE && typeof m.mime === 'string'
-      && typeof m.key === 'string' && typeof m.alg === 'string'
+      && typeof m.key === 'string' && m.alg === FILE_ALG
       && Number.isInteger(m.chunk) && m.chunk > 0 && m.chunk <= MAX_CHUNK
       && Number.isInteger(m.chunks) && m.chunks === Math.max(1, Math.ceil(m.size / m.chunk))
-      && (m.exp === undefined || typeof m.exp === 'number')
+      && typeof m.exp === 'number'
       && (m.body === undefined || typeof m.body === 'string')) ? (sanitizeAlbum(sanitizeQuote(m)) as FileEnv) : null
     case 'rtc': return (typeof m.to === 'string' && m.sig != null) ? (m as RtcEnv) : null
     case 'ack': return (typeof m.ref === 'string' && typeof m.rts === 'number') ? (m as AckEnv) : null

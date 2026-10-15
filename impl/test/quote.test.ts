@@ -58,7 +58,7 @@ test('a reply roundtrips through the envelope', () => {
   assert.equal(d.body, 'yes, that')
   assert.deepEqual(d.re, q)
   // A file answers a message the same way a sentence does.
-  const meta = { cid: 'Qm1', name: 'a.txt', size: 3, mime: 'text/plain', key: 'AAAA', chunk: 4096, chunks: 1, alg: 'A256GCM-chunked-v1', re: q }
+  const meta = { cid: 'Qm1', name: 'a.txt', size: 3, mime: 'text/plain', key: 'AAAA', chunk: 4096, chunks: 1, alg: 'A256GCM-chunked-v1', exp: 1, re: q }
   assert.deepEqual(rt(envFile(2, meta as any)).re, q)
 })
 
@@ -76,7 +76,7 @@ test('a broken quote loses itself, never the message', () => {
   }
   // A file's quote is held to the same rule, and its own fields still are not:
   // a file missing its key is undecryptable and must not decode at all.
-  const file = { v: 1, t: 'file', id: 'x', ts: 1, seq: 1, cid: 'Qm1', name: 'a.txt', size: 1, mime: 'text/plain', key: 'AAAA', chunk: 1, chunks: 1, alg: 'A256GCM-chunked-v1' }
+  const file = { v: 1, t: 'file', id: 'x', ts: 1, seq: 1, cid: 'Qm1', name: 'a.txt', size: 1, mime: 'text/plain', key: 'AAAA', chunk: 1, chunks: 1, alg: 'A256GCM-chunked-v1', exp: 1 }
   assert.equal(raw({ ...file, re: { id: 'a' } })?.name, 'a.txt')
   assert.equal(raw({ ...file, re: { id: 'a' } })?.re, undefined)
 })

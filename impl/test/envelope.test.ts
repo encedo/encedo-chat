@@ -20,17 +20,18 @@ test('typing / presence / reaction / file roundtrip', () => {
   // single-use key, the chunking, the algorithm. All of it is REQUIRED — an
   // envelope missing any of it describes a blob nobody can open, and accepting
   // it would put a permanently broken bubble in the transcript.
-  const meta = { cid: 'Qm123', name: 'a.txt', size: 10, mime: 'text/plain', key: 'AAAA', chunk: 4096, chunks: 1, alg: 'A256GCM-chunked-v1' }
+  const meta = { cid: 'Qm123', name: 'a.txt', size: 10, mime: 'text/plain', key: 'AAAA', chunk: 4096, chunks: 1, alg: 'A256GCM-chunked-v1', exp: 1 }
   const f = rt(envFile(5, meta)); assert.equal(f.name, 'a.txt'); assert.equal(f.size, 10)
   assert.equal(f.chunks, 1); assert.equal(f.key, 'AAAA')
-  for (const missing of ['key', 'chunk', 'chunks', 'alg']) {
+  for (const missing of ['key', 'chunk', 'chunks', 'alg', 'exp']) {
     const bad: any = { ...meta }; delete bad[missing]
     assert.equal(rt(envFile(5, bad) as any), null, `a file envelope without ${missing} must not decode`)
   }
+  assert.equal(rt(envFile(5, { ...meta, alg: 'A128GCM-chunked-v9' })), null, 'an algorithm this build cannot open does not decode')
 })
 
 test('a file manifest past the sender\'s limits, or with a chunk count the size does not give, does not decode', () => {
-  const meta = { cid: 'Qm123', name: 'a.bin', size: 10 * 1024 * 1024, mime: 'application/octet-stream', key: 'AAAA', chunk: 4 * 1024 * 1024, chunks: 3, alg: 'A256GCM-chunked-v1' }
+  const meta = { cid: 'Qm123', name: 'a.bin', size: 10 * 1024 * 1024, mime: 'application/octet-stream', key: 'AAAA', chunk: 4 * 1024 * 1024, chunks: 3, alg: 'A256GCM-chunked-v1', exp: 1 }
   assert.ok(rt(envFile(5, meta)), 'a consistent 10 MiB manifest in 4 MiB chunks decodes')
   assert.ok(rt(envFile(5, { ...meta, size: 0, chunks: 1 })), 'an empty file is one chunk')
   // Receiver-side bounds (7.5): what the sender may not send, the receiver does
@@ -88,7 +89,7 @@ test('an SKD without ctr still decodes (it means 0); a nonsense ctr does not', (
 })
 
 test('an album travels with each file, and a broken one costs the grouping, never the file', () => {
-  const meta = { cid: 'Qm123', name: 'a.jpg', size: 10, mime: 'image/jpeg', key: 'AAAA', chunk: 4096, chunks: 1, alg: 'A256GCM-chunked-v1' }
+  const meta = { cid: 'Qm123', name: 'a.jpg', size: 10, mime: 'image/jpeg', key: 'AAAA', chunk: 4096, chunks: 1, alg: 'A256GCM-chunked-v1', exp: 1 }
   const album = { id: '0123456789abcdef', i: 1, n: 3 }
   const f = rt(envFile(5, { ...meta, album }))
   assert.deepEqual(f.album, album, 'a well-formed album survives the round trip')

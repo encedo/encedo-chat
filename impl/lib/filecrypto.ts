@@ -42,6 +42,8 @@ export const DEFAULT_CHUNK = 4 * 1024 * 1024
 /** Bigger than this and a phone starts failing allocations rather than slowing down. */
 export const MAX_CHUNK = 16 * 1024 * 1024
 export const MAX_FILE = 128 * 1024 * 1024
+/** The one file algorithm (SPEC §7.5); a manifest naming another does not decode. */
+export const FILE_ALG = 'A256GCM-chunked-v1'
 
 const TAG = 16 // AES-GCM tag, appended by WebCrypto
 
