@@ -29,6 +29,10 @@ import { sealKnock } from '../impl/lib/knock.ts'
 import { inviteKey } from '../impl/lib/inbox.ts'
 import { kdf, aeadNonce, sha256, subtle } from '../impl/lib/wc.ts'
 import { tag } from '../impl/lib/senderkey.ts'
+import { RV_LABEL, ANNOUNCE_LABEL, ROTATION_LABEL, paramsInfo, rotationCtx, topicFromSecret, groupTopicFromSecret, rotationOffsetSec } from '../impl/lib/rendezvous.ts'
+import { DECOY_SEED_LABEL, decoyMaterial } from '../impl/lib/decoy.ts'
+import { NAMES_LABEL, namesFromKey } from '../impl/lib/storenames.ts'
+import { hemKid } from '../impl/lib/descr.ts'
 const hmacSha256 = async (k, m) => new Uint8Array(await subtle.sign('HMAC', await subtle.importKey('raw', k, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']), m))
 
 const out = join(dirname(fileURLToPath(import.meta.url)), '..', 'docs', 'kat')
@@ -190,7 +194,61 @@ async function knockKat() {
 }
 const knock = await knockKat()
 
-for (const [name, v] of [['eh2-handshake-classical', classical], ['eh2-handshake-mlkem', hybrid], ['group-senderkey', senderkey], ['ratchet-hybrid', ratchet], ['invite-knock', knock], ['group-keys', groupkeys]]) {
+// Rendezvous (5.1-5.5, 5.10): what two implementations must agree on exactly
+// with nothing on the wire to compare - a wrong byte here is an empty room.
+async function rendezvousKat() {
+  const a = await x25519FromPriv(fill(0x11)), b = await x25519FromPriv(fill(0x22))
+  const ss = await a.dh(b.pub)
+  if (hex(ss) !== hex(await b.dh(a.pub))) throw new Error('pair secret not symmetric')
+  const selfSs = await a.dh(a.pub)
+  const p = { networkId: 'main', dateUTC: '2026-10-15' }
+  const te = new TextEncoder()
+  const announceKey = await kdf(ANNOUNCE_LABEL, ss, paramsInfo(p))
+  const ann = { v: 3, peer: '12D3KooWExamplePeerIdOfTheSender', nonce: b64(fill(0x5a).slice(0, 16)), ts: NOW }
+  const mac = await hmacSha256(announceKey, te.encode(`${ann.v}|${ann.peer}|${ann.nonce}|${ann.ts}`))
+  const seed = await kdf(DECOY_SEED_LABEL, selfSs, rotationCtx(p.networkId), 32)
+  const decoys = []
+  for (const i of [0, 1, 7]) decoys.push({ i, ...(await decoyMaterial(seed, i, p)) })
+  return {
+    ik_priv: { a: hex(fill(0x11)), b: hex(fill(0x22)) }, ik_pub: { a: hex(a.pub), b: hex(b.pub) },
+    network_id: p.networkId, date_utc: p.dateUTC,
+    pair: {
+      ss: hex(ss), topic: await topicFromSecret(ss, p), announce_key: hex(announceKey),
+      rotation_material: hex(await kdf(ROTATION_LABEL, ss, rotationCtx(p.networkId), 4)),
+      rotation_offset_sec: await rotationOffsetSec(ss, p),
+    },
+    announce: { ...ann, mac: b64(mac) },
+    self: { ss: hex(selfSs), topic: await topicFromSecret(selfSs, p), rotation_offset_sec: await rotationOffsetSec(selfSs, p) },
+    group: { group_secret: hex(fill(0x44)), topic: await groupTopicFromSecret(fill(0x44), p) },
+    decoy: { seed: hex(seed), cases: decoys },
+    note: 'ctx = UTF-8(network_id) || 0x00 || UTF-8(date_utc); topic = base32(HKDF(ss, salt=ctx, info="encedo-chat-rendezvous-v1", 32))[0:52], RFC 4648 lower case, no padding; '
+      + 'announce_key = HKDF(ss, salt=ctx, info="encedo-chat-announce-mac-v1", 32); mac = HMAC-SHA256(announce_key, UTF-8(v|peer|nonce|ts)), base64; '
+      + 'rotation: HKDF(ss, salt=UTF-8(network_id)||0x00, info="encedo-chat-rotation-v1", 4) as u32be mod 86400; self: the same with ss = ECDH(IK_a, IK_a_pub); '
+      + 'group topic: info "encedo-chat-group-rendezvous-v1", ikm = group_secret; decoy seed = HKDF(self ss, salt=UTF-8(network_id)||0x00, info="encedo-chat-decoy-v1", 32), '
+      + 'decoy i: offset = HKDF(seed, salt=[i], info="encedo-chat-decoy-offset-v1", 4) u32be mod 86400, topic = base32(HKDF(seed, salt=[i]||ctx, info="encedo-chat-decoy-topic-v1", 32))[0:52] (5.1-5.5, 5.10).',
+  }
+}
+const rendezvous = await rendezvousKat()
+
+// Storage names (10): nk from the identity's own DH, then every record's name.
+async function storeNamesKat() {
+  const a = await x25519FromPriv(fill(0x11))
+  const nk = await kdf(NAMES_LABEL, await a.dh(a.pub), new TextEncoder().encode('local storage names'), 32)
+  const kid = await hemKid(a.pub)
+  const names = await namesFromKey(nk, kid)
+  const room = b64(fill(0x22)), gid = hex(fill(0x33).slice(0, 16))
+  return {
+    ik_priv: hex(fill(0x11)), kid, nk: hex(nk), prefix: names.prefix, fixed: names.fixed,
+    pin: { scope: room, name: await names.scoped('pin', room) },
+    group: { scope: gid, name: await names.scoped('group', gid) },
+    note: 'nk = HKDF(ECDH(IK, IK_pub), salt=UTF-8("local storage names"), info="encedo-chat-store-names-v1", 32); '
+      + 'name = "ec-" || hex(HMAC-SHA256(nk, "id")[0:8]) || "-" || hex(HMAC-SHA256(nk, UTF-8(label) || 0x00 || UTF-8(scope))[0:16]); '
+      + 'fixed labels have an empty scope; pin scope = roomId, group scope = group_id as hex; kid = SHA-1(IK_pub)[0:16] hex (10, 4.2).',
+  }
+}
+const storeNames = await storeNamesKat()
+
+for (const [name, v] of [['eh2-handshake-classical', classical], ['eh2-handshake-mlkem', hybrid], ['group-senderkey', senderkey], ['ratchet-hybrid', ratchet], ['invite-knock', knock], ['group-keys', groupkeys], ['rendezvous', rendezvous], ['store-names', storeNames]]) {
   writeFileSync(join(out, name + '.json'), JSON.stringify(v, null, 2) + '\n')
   console.log('wrote docs/kat/' + name + '.json')
 }

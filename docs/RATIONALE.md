@@ -295,7 +295,7 @@ impl/
 ├── web/        the web UI
 ├── cli/        the terminal client · daemon + outbox/queue (§13) · peer.ts (a software test peer, test only)
 ├── src-tauri/  the desktop, Android and iOS shell (core_native.rs is the native engine, rtc.rs the Linux DataChannel host)
-└── test/       KATs (docs/kat/: eh2-handshake classical + ML-KEM, ratchet-hybrid, group-senderkey, group-keys, invite-knock), FS/PCS and forge tests, wire-format pins,
+└── test/       KATs (docs/kat/: eh2-handshake classical + ML-KEM, ratchet-hybrid, group-senderkey, group-keys, invite-knock, rendezvous, store-names), FS/PCS and forge tests, wire-format pins,
                 §8 repair and roster authority, §9.1, §10 stores
 ```
 

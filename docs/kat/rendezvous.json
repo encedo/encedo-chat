@@ -1,0 +1,56 @@
+{
+  "ik_priv": {
+    "a": "1111111111111111111111111111111111111111111111111111111111111111",
+    "b": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "ik_pub": {
+    "a": "7b4e909bbe7ffe44c465a220037d608ee35897d31ef972f07f74892cb0f73f13",
+    "b": "0faa684ed28867b97f4a6a2dee5df8ce974e76b7018e3f22a1c4cf2678570f20"
+  },
+  "network_id": "main",
+  "date_utc": "2026-10-15",
+  "pair": {
+    "ss": "9e004098efc091d4ec2663b4e9f5cfd4d7064571690b4bea97ab146ab9f35056",
+    "topic": "cnjx2mwfjsktzfnpuucrzhq33aqxfmbgsxshlmnpxwgeomsvfqlq",
+    "announce_key": "062264ff39e9a18c83207a3d9c62343c9dd2e5185d36b9d961480a6add1b3299",
+    "rotation_material": "d178e54d",
+    "rotation_offset_sec": 41165
+  },
+  "announce": {
+    "v": 3,
+    "peer": "12D3KooWExamplePeerIdOfTheSender",
+    "nonce": "WlpaWlpaWlpaWlpaWlpaWg==",
+    "ts": 1784000000000,
+    "mac": "x1I3LkfMyEp7K8eQXFB50meRPOORRrv7iYRTZstrLhc="
+  },
+  "self": {
+    "ss": "98201c39572bcdc6fe98c66b585af1e193f219de7d3997033a4489f68518906f",
+    "topic": "rgfdejh6li4tqtiznrigyehplpe3ujndacoss7g37fetegkx7hra",
+    "rotation_offset_sec": 49186
+  },
+  "group": {
+    "group_secret": "4444444444444444444444444444444444444444444444444444444444444444",
+    "topic": "ivur2rjci645ndoxd657ajb2matone4cov67uneasuom3wueb74a"
+  },
+  "decoy": {
+    "seed": "306f3c6b8721eceb7b2a095e154ae9db81ba99203b2b03167ecad512868bda49",
+    "cases": [
+      {
+        "i": 0,
+        "topic": "2uydsb6pogjysahowtjid7fpndlsa7k3qxfyyhghttkw7p2huuwq",
+        "offsetSec": 72580
+      },
+      {
+        "i": 1,
+        "topic": "u7nfvu3ba3tz2o4psopkc3f2k7j6s4b3oqhnvk7qzzor2iyifjkq",
+        "offsetSec": 7261
+      },
+      {
+        "i": 7,
+        "topic": "waiu6owc4oxsnef7ngwrkiswbnb4pqrlb6bsh7f57syxib5wco7q",
+        "offsetSec": 19499
+      }
+    ]
+  },
+  "note": "ctx = UTF-8(network_id) || 0x00 || UTF-8(date_utc); topic = base32(HKDF(ss, salt=ctx, info=\"encedo-chat-rendezvous-v1\", 32))[0:52], RFC 4648 lower case, no padding; announce_key = HKDF(ss, salt=ctx, info=\"encedo-chat-announce-mac-v1\", 32); mac = HMAC-SHA256(announce_key, UTF-8(v|peer|nonce|ts)), base64; rotation: HKDF(ss, salt=UTF-8(network_id)||0x00, info=\"encedo-chat-rotation-v1\", 4) as u32be mod 86400; self: the same with ss = ECDH(IK_a, IK_a_pub); group topic: info \"encedo-chat-group-rendezvous-v1\", ikm = group_secret; decoy seed = HKDF(self ss, salt=UTF-8(network_id)||0x00, info=\"encedo-chat-decoy-v1\", 32), decoy i: offset = HKDF(seed, salt=[i], info=\"encedo-chat-decoy-offset-v1\", 4) u32be mod 86400, topic = base32(HKDF(seed, salt=[i]||ctx, info=\"encedo-chat-decoy-topic-v1\", 32))[0:52] (5.1-5.5, 5.10)."
+}

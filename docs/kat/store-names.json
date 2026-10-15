@@ -1,0 +1,29 @@
+{
+  "ik_priv": "1111111111111111111111111111111111111111111111111111111111111111",
+  "kid": "1abed096357d7178b1d3577fb19756e1",
+  "nk": "c8eea0c9d82b9aeded6ec149e9019ea5f3fb6da7077fb498bae658d2c4083180",
+  "prefix": "ec-2041c8249daec3e8-",
+  "fixed": {
+    "emp": "ec-2041c8249daec3e8-cd4c0a717aa1acb1e5fa737e92cf5941",
+    "book": "ec-2041c8249daec3e8-aa47a4a4c9ab3babb29385d76e95e321",
+    "book-signed": "ec-2041c8249daec3e8-45bfd745271d715865e0cfcd33d81b96",
+    "sealed": "ec-2041c8249daec3e8-98a8f864dfdc432b01b6726b2ab8760a",
+    "invites": "ec-2041c8249daec3e8-8a600d1250074375a23d1eb44d44f717",
+    "waiting": "ec-2041c8249daec3e8-fa7beb62d3ba94309b56bcd4def7aa62",
+    "ignored": "ec-2041c8249daec3e8-a11ac67621d00bd4b4568e59663581df",
+    "outbox": "ec-2041c8249daec3e8-ab2d6150866a2d32e313ceb5816f9aef",
+    "prefs": "ec-2041c8249daec3e8-643951e028f04f273a58b4dec3e9746f",
+    "seen": "ec-2041c8249daec3e8-c3afc8e225cf59ab2bf69ca060b50746",
+    "gleft": "ec-2041c8249daec3e8-9844371a074d93ff07fc34e397901440",
+    "groups": "ec-2041c8249daec3e8-855dde531fc8a69c337633f993c1ee87"
+  },
+  "pin": {
+    "scope": "IiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI=",
+    "name": "ec-2041c8249daec3e8-7cd19704f0942b2cc9e4099bc3596bad"
+  },
+  "group": {
+    "scope": "33333333333333333333333333333333",
+    "name": "ec-2041c8249daec3e8-e40bae6c63f068a4463fc77aeb27c869"
+  },
+  "note": "nk = HKDF(ECDH(IK, IK_pub), salt=UTF-8(\"local storage names\"), info=\"encedo-chat-store-names-v1\", 32); name = \"ec-\" || hex(HMAC-SHA256(nk, \"id\")[0:8]) || \"-\" || hex(HMAC-SHA256(nk, UTF-8(label) || 0x00 || UTF-8(scope))[0:16]); fixed labels have an empty scope; pin scope = roomId, group scope = group_id as hex; kid = SHA-1(IK_pub)[0:16] hex (10, 4.2)."
+}

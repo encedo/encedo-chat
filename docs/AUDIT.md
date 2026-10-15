@@ -18,11 +18,11 @@ Out of scope: a compromised HSM, a compromised endpoint, statistical traffic ana
 
 ## Known-answer vectors
 
-Fixed inputs, fixed outputs, in `docs/kat/*.json`. Written only by `scripts/export-kat.mjs`; the tests read them. Two independent implementations reproduce them, with two exceptions: `eh2-handshake-classical.json` (the schedule with a seeded stand-in KEM) and `invite-knock.json` (§5.8, not in the Rust crate) have a TypeScript consumer only. The Rust crate reproduces `eh2-handshake-mlkem`, `ratchet-hybrid`, `group-senderkey` and `group-keys`; its sender-key chain (`core-rs/src/senderkey.rs`) is checked against the vectors and called by no client — groups run on the engine in the webview on every platform.
+Fixed inputs, fixed outputs, in `docs/kat/*.json`. Written only by `scripts/export-kat.mjs`; the tests read them. Two independent implementations reproduce the protocol vectors; four files have a TypeScript consumer only: `eh2-handshake-classical.json` (the schedule with a seeded stand-in KEM), `invite-knock.json` (§5.8), `rendezvous.json` (§5.1–5.5, §5.10) and `store-names.json` (§10) — the Rust crate implements none of these, and for the last two the vectors are what a second implementation has to agree with, since nothing on the wire carries them. The Rust crate reproduces `eh2-handshake-mlkem`, `ratchet-hybrid`, `group-senderkey` and `group-keys`; its sender-key chain (`core-rs/src/senderkey.rs`) is checked against the vectors and called by no client — groups run on the engine in the webview on every platform.
 
 ```
 # TypeScript engine (the fallback engine; the groups' engine everywhere)
-cd impl && node --test test/eh2-handshake.test.ts test/eh2-mlkem.test.ts test/senderkey.test.ts test/eh2-ratchet.test.ts test/group-keys-kat.test.ts test/knock.test.ts
+cd impl && node --test test/eh2-handshake.test.ts test/eh2-mlkem.test.ts test/senderkey.test.ts test/eh2-ratchet.test.ts test/group-keys-kat.test.ts test/knock.test.ts test/rendezvous-kat.test.ts
 
 # Rust core (the WASM engine in browsers and the terminal since 0.7.21; native in the Tauri host since 0.7.31; its IPC: `NATIVE_IPC=1 node --test test/native-ipc.test.ts` after `cargo build --example core-ipc` in impl/src-tauri)
 cd core-rs && cargo test
