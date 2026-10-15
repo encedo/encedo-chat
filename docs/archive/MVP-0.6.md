@@ -1,4 +1,9 @@
-# MVP — plan wydania 0.9
+# MVP — plan wydania 0.9 (ARCHIWUM)
+
+> **Archiwum, stan z 2026-09-18 (0.6.3).** Większość punktów jest od dawna
+> nieaktualna: iOS się buduje, Linux ma kanał bezpośredni przez hosta, test
+> grupy pięciu osób zaliczony, Diagnostyka jest w Ustawieniach, książka
+> kontaktów jest zapieczętowana. Zostaje jako zapis planu, nie jako plan.
 
 Co trzeba **zrobić**, co trzeba **przetestować** i co trzeba **podpisać**, żeby
 wypuścić onchato 0.9 na cztery cele: **web, desktop, Android, iOS**.

@@ -5,7 +5,17 @@ Working notes, not a spec, like `EMBED-PLAN.md` and `MOBILE-PLAN.md`. Written
 become a real client: an IRC-style terminal app (irssi is the model) plus a
 scripting/daemon mode for administrators.
 
-## Where it stands (2026-10-07)
+**Status (0.7.37): stages 1-6 shipped, stage 7 (the Docker image) shipped
+without its CLI <-> browser harness scenario (every `net/cli-*-test.ts` is CLI
+<-> CLI), stage 8 (WebRTC in the terminal) not started.** The manual is
+`CLI.md`; this file is the stage log as it was written. Read it with two
+corrections: the record names below (`ec-outbox-<kid>`, `ec-invites-…`,
+`ec-gcache-<kid>-<gid>`) are the pre-0.7.34 ones - every name is an HMAC now
+(`SPEC.md` §10) - and the contact book is sealed, not signed; the npm package
+and the compatibility rule were superseded by the Docker image and by the
+pre-1.0 rule (`SECURITY.md`, Versions).
+
+## Where it stood (2026-10-07, before stage 1)
 
 `impl/cli/` — 561 lines, untouched since 2026-09-21. It works and it talks to
 production (`npm run eh2-test` over the live relay: handshake + ratcheted

@@ -12,6 +12,13 @@ from this file. This one keeps what a specification does not: the reasoning,
 the rejected alternatives and the numbers behind the decisions, in the shape of
 `GROUPS-DESIGN.md`.
 
+⚠️ **The knock below (§2.1, v1) is not what ships.** Since 0.7.29 a knock is
+`knock-v2`, sealed to a per-invite key `HKDF(self-DH, salt = invite_secret,
+"encedo-chat-invite-key-v1")` whose public half travels in the link as `k`, so
+opening one is a local X25519 and never an identity-backend call (`SPEC.md`
+§5.8, `lib/knock.ts`, `lib/inbox.ts`). §2.1 is kept as the reasoning the v2
+grew from.
+
 ⚠️ **This file has not been re-read line by line against the shipped code.** It
 is a design record from the day of writing; where it and `SPEC.md` disagree,
 the specification is right and this file is the older thought.

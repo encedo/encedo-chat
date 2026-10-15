@@ -1,5 +1,12 @@
 # Performance & capacity — measured numbers
 
+> **Read the dates.** The engine numbers are the TypeScript engine's (the
+> default is WASM since 0.7.21, native in the shells since 0.7.31, not
+> re-measured here), and the capacity verdict predates the light client
+> (0.6.24). What binds first in production is the topic budget, not
+> connections: about 4 topics per client, `--max-topics` 250 by default and
+> 1600 on the nodes (`docs/ARCHITECTURE.md`, Discovery nodes).
+
 Everything we measured, with the **conditions** each number was taken under (a
 rate without the box and config it ran on is meaningless). Newest work at the
 bottom of each section. Reproduce with the tools in `impl/net/` (`npm run

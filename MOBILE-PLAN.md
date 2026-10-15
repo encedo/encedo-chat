@@ -22,15 +22,17 @@ not yet released — no CI workflow, no device test, no signing.
   custom scheme, and completes EH-2. WebKitGTK is a WebKit port, so this is a
   real (not conclusive) signal for WKWebView on iOS.
 - **The phone layout exists and is tested.** `@media (max-width:900px),
-  (max-height:560px)` gives one pane at a time; `--app-h` tracks
-  `visualViewport` so the keyboard cannot bury the composer. Pinned by the
+  (max-height:560px)` gives one pane at a time. `--app-h` was meant to track
+  `visualViewport`, but `trackViewport` has never been called: the app is
+  `100dvh`, and Android keeps the composer above the keyboard natively
+  (`adjustResize`, `src-tauri/android/patch.mjs`). Pinned by the
   browser-test "phone layout" scenario in both orientations, and by
   `node net/phone-shot.ts <dir>` at real device metrics.
 - **Capability probing is shipped** (`lib/capabilities.ts`). It derives with
   X25519 rather than naming it — several webviews expose the algorithm and then
   throw — and separates REQUIRED (refuse to start, say why) from DEGRADED (log
-  it, carry on). Visible on a phone in the Network tab, row "Platforma"; a
-  phone has no console.
+  it, carry on). Visible on a phone under Settings → Diagnostyka; a phone has
+  no console.
 
 ### Secure context — the one that looked like a risk and mostly is not
 

@@ -361,5 +361,7 @@ Approved and now normative in `docs/SPEC.md` §8/§5.3:
 5. ✅ Epoch rotation on add/remove (removed loses topic + keys — tested).
 6. ✅ Web GUI — groups in the contact/room list, covered by `browser-test`
    scenarios (create, invite, broadcast, mentions, reload persistence).
-7. **Live 4–5 user test — still owed** (equal configs; scale test at 8 exists
-   only as a unit scenario in `grouproom`).
+7. ✅ Live test with five people — done for 0.7.0 (2026-10-12); a scale test
+   at 8 exists as a unit scenario in `grouproom`.
+8. Sender keys exist in Rust too (`core-rs/src/senderkey.rs`, the same
+   vectors), checked and not wired: groups run on the TypeScript engine.

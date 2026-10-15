@@ -1,5 +1,12 @@
 # Embedding the chat inside someone else's application
 
+> **Status: frozen, nothing built** (no `@encedo/chat-core`, no `mount()`).
+> The counts below are from the day of measuring and have moved (app.ts is
+> ~9800 lines; `lib/saveas.ts` and `lib/notify.ts` touch the DOM; the CSP now
+> needs `'wasm-unsafe-eval'` and lists three nodes). The "compatibility rule"
+> step is superseded: until 1.0 there is one protocol version and no
+> compatibility layer (`SECURITY.md`, Versions).
+
 Working notes, not a spec. `docs/` stays the audit target; this file is
 implementation reality, like `CLAUDE.md`, `GROUPS-DESIGN.md` and
 `MOBILE-PLAN.md`.

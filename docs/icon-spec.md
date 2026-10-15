@@ -1,5 +1,8 @@
 # onchato - ikona: zadanie dla Claude Code
 
+> Wykonane: komplet jest w `assets/icon/`, generuje go `scripts/build-icons.mjs`
+> (`make icons`). Ten plik zostaje jako specyfikacja znaku.
+
 ## Cel
 Wygeneruj komplet plikow ikony onchato (P2P E2EE chat, tryb whisper) z jednego
 zrodla SVG. Zero recznego rysowania poza podana geometria. Wszystko ma byc
@@ -79,7 +82,7 @@ Warianty kolorystyczne:
       lockup-light.svg       czarny znak i tekst na przezroczystym
 
 ## Skrypt
-    scripts/build-icons.sh (albo .mjs z sharp)
+    scripts/build-icons.mjs (sharp)
     - zrodlo: assets/icon/src/*.svg, nic nie jest edytowane recznie
     - rasteryzacja: rsvg-convert lub sharp; nie ImageMagick z domyslnym
       antialiasingiem

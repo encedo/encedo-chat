@@ -76,8 +76,9 @@ names its lines.
 - Root `*.md` — `README`, `SECURITY`, `CLI`, `hem_usage` (**which operations
   reach the HSM and what they cost** — read it before adding anything that talks
   to the device), plus design records and plans (`GROUPS-DESIGN`,
-  `TRANSFER-DESIGN`, `DISCOVERY-PROPOSAL`, `MOBILE-PLAN`, `EMBED-PLAN`, `MVP`,
-  `CLI-PLAN`, `performance`) — those are records, SPEC wins where they differ.
+  `TRANSFER-DESIGN`, `DISCOVERY-PROPOSAL`, `MOBILE-PLAN`, `EMBED-PLAN`,
+  `CLI-PLAN`, `performance`) — those are records, SPEC wins where they differ;
+  superseded plans go to `docs/archive/`.
 
 Older iterations (v2–v5) are the separate repo `encedo/onchato.com`.
 
