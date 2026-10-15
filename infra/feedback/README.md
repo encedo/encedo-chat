@@ -34,8 +34,8 @@ journalctl -u onchato-feedback -n 5 --no-pager     # 📮 … on http://127.0.0.
 `StateDirectory=onchato` makes systemd create `/var/lib/onchato` owned by
 `www-data`, so no `mkdir`/`chown` by hand. Then the nginx block (`location =
 /feedback` in `infra/nginx/onchato.com` — CORS for the packaged apps, a per-IP
-rate limit, a 32 KB body cap) goes out the usual way: `scp` to
-`sites-available`, `nginx -t`, reload.
+rate limit, a 32 KB body cap) goes out the usual way: `infra/nginx/README.md`
+"Deploying it" (on bs1 the served file is a plain one in `sites-enabled`).
 
 Smoke test from anywhere:
 

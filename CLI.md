@@ -1,12 +1,12 @@
 # onchato w terminalu — podręcznik
 
-`onchato` to klient onchato w terminalu: ta sama sieć, to samo szyfrowanie i te
+`onchato-cli` to klient onchato w terminalu: ta sama sieć, to samo szyfrowanie i te
 same tożsamości co aplikacja. Rozmawiasz z każdym, kto używa aplikacji,
 z okna terminala, przez SSH albo wewnątrz `screen`/`tmux`. Interfejs jest
 wzorowany na irssi: każda rozmowa ma swoje okno, a pasek stanu na dole pokazuje,
 gdzie coś się dzieje.
 
-Ten podręcznik opisuje stan z 2026-10-07. Plan dalszych etapów (tryb skryptowy,
+Ten podręcznik opisuje wersję 0.7.37. Plan dalszych etapów (tryb skryptowy,
 demon, powiadomienia, pliki, grupy) jest w [CLI-PLAN.md](CLI-PLAN.md).
 
 ---
@@ -593,7 +593,8 @@ profil przenosi się w obie strony bez konwersji.
 | co | jak chronione |
 |---|---|
 | tożsamość (profil programowy) | zapieczętowana Twoim hasłem (PBKDF2 1 000 000 rund + AES-GCM); klucza prywatnego nie ma nigdzie jawnie |
-| kontakty | podpisane (HMAC kluczem wyprowadzonym z tożsamości) — podmiana kontaktu w pliku jest wykrywana, a `onchato` odmawia pracy na takiej książce i jej nie nadpisuje |
+| kontakty | zapieczętowane (AES-GCM kluczem wyprowadzonym z tożsamości) — z pliku nie da się wyczytać, kogo znasz, a podmiana kontaktu jest wykrywana: książki, która się nie otwiera, `onchato-cli` nie używa i nie nadpisuje |
+| nazwy wpisów w `store.json` | skróty HMAC kluczem tożsamości — nazwa nie zdradza ani KID, ani kontaktu, ani grupy |
 | zaproszenia, pukania, lista ignorowanych | zaszyfrowane kluczem wyprowadzonym z tożsamości |
 | historia rozmów | **nie ma jej** — rozmowa istnieje tylko na ekranach uczestników |
 
@@ -634,9 +635,12 @@ akcentem). Ustaw w terminalu „Meta wysyła Escape” (GNOME Terminal, Konsole,
 **„złe hasło” przy pewnym haśle.** Hasło jest per profil. Sprawdź `onchato-cli profile list`
 i `--profile`.
 
-**„książka kontaktów nie przeszła weryfikacji podpisu”.** Ktoś (albo coś) zmienił
-`store.json` poza `onchato`. Nic nie jest nadpisywane — to dowód. Przywróć plik
-z kopii albo usuń wpis `ec-local-contacts-…` i dodaj kontakty od nowa.
+**„książka kontaktów nie przeszła weryfikacji”.** Ktoś (albo coś) zmienił
+`store.json` poza `onchato-cli`. Nic nie jest nadpisywane — to dowód. Przywróć
+plik z kopii. Jeśli masz eksport profilu (`.ocmig`), możesz też odłożyć
+`store.json` na bok i zaimportować profil od nowa (`onchato-cli profile import`).
+Nazwy wpisów są skrótami HMAC, więc pojedynczego wpisu książki nie da się
+wskazać po nazwie.
 
 **Terminal został w dziwnym stanie** (np. po zabiciu procesu): wpisz `reset`.
 

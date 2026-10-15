@@ -3,7 +3,8 @@
 The rendezvous/transport node — libp2p GossipSub (message fan-out) +
 circuit-relay-v2 (reservations). **Transport-only:** it forwards encrypted
 frames and grants reservations; it never sees plaintext or keys. The production
-network is **bs1 + bs2**; the list clients compile in is `infra/nodes.json`,
+network is **bs1, bs2 and bs3**, each dialling every other over IPv6 port 9002;
+the list clients compile in is `infra/nodes.json`,
 and the client fails over down that list (`impl/lib/nodelist.ts`,
 `test/failover.test.ts`).
 
@@ -32,6 +33,14 @@ Flags:
 - `--v6-port` / `--v6-host` — a second, direct IPv6 WS listener for the
   inter-relay mesh (public IPv4 between the nodes is blocked; peers dial the raw
   port, nginx is not on that path).
+
+The production unit (`onchato-relay.service`) sets more — `--siblings`,
+`--local-topics-only`, `--leaf-announce`, `--pick`, `--announce-load`,
+`--max-topics-per-peer`, `--stats`, `--stats-redis`/`--stats-node`/
+`--stats-ttl-days`, `--quiet-msgs`, `--metrics-port`; each is explained in
+`docs/ARCHITECTURE.md` ("Discovery nodes").
+`--stats-json <path>` writes the same snapshot as the `[stats]` line to a file
+(development; production uses Redis).
 
 Environment: `DUMP=<dir>` — full JSONL trace of everything the relay observes,
 for debugging and audit; **never on production** (see Dump, bottom).
@@ -63,7 +72,7 @@ sudo journalctl -u onchato-relay -f    # PeerId 12D3KooWP6Sp… + the topic budg
 First-time systemd install:
 
 `onchato-relay.service` is a TEMPLATE with `<NODE>`, `<V6>`, `<PEERS>`,
-`<SIBLINGS>` and `<MAX_TOPICS>` to fill (the existing nodes' values are in a
+`<SIBLINGS>`, `<MAX_TOPICS>` and `<MAX_CONNS>` to fill (the existing nodes' values are in a
 table at its bottom) — copying it as it is gives a unit that will not start.
 The fill-in recipe is `DEPLOY.md` step 4; the gist:
 
@@ -74,7 +83,7 @@ sudo systemctl enable --now onchato-relay
 sudo journalctl -u onchato-relay -f      # confirm the PeerId on startup (bs1: 12D3KooWP6Sp…)
 ```
 
-Node 18+ (plain ESM). Runs as `www-data` by default — the clone dir must be readable
+Node 22 LTS (`DEPLOY.md` step 2; plain ESM). Runs as `www-data` by default — the clone dir must be readable
 by it (`sudo chgrp -R www-data /opt/github/encedo-chat && sudo chmod -R g+rX` if not).
 
 ### Did it actually take? (check, don't assume)
@@ -159,12 +168,13 @@ Order of work, and the order matters — the commands are in [`DEPLOY.md`](DEPLO
 The relay listens on `127.0.0.1:9001` — plain WS on loopback, since 2026-10-09
 (`--bind`, default `127.0.0.1`; it was `0.0.0.0` before) — and the **firewall
 keeps it closed as well**: only nginx, over loopback, may reach it. Two locks
-where there used to be one. Since 2026-09-03 every node allows exactly
+where there used to be one. Since 2026-09-03 every node allows
 22/80/443 in; 9001 had been open to the world on bs1 and bs2 until then
 (nothing was using it, but an open 9001 is a plain-WS door around every limit
-below), and bs3 was born with it closed. The
-one exception is bs1's IPv6 port 9002, the inter-relay link for bs2 (its
-provider blocks IPv4 between VMs), and ufw restricts that to bs2's address.
+below), and bs3 was born with it closed. Two more, on every node: 3478/udp for
+our STUN (nginx does not proxy UDP — `DEPLOY.md` §4b), and the IPv6 port 9002,
+the inter-relay mesh (providers block IPv4 between the VMs), which ufw opens
+only to the other nodes' addresses.
 
 nginx terminates TLS and proxies `/relay` (WSS). Two versioned configs, and
 they must agree on the `/relay` block:
