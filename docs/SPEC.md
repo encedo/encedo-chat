@@ -118,7 +118,7 @@ GROUP  the marker of §8.6, on the GK_pub entry
 - **The identity's id is the KID of its own IK entry**, `KID = SHA-1(pub)[0:16]` — the device's index on key content, so the same identity on another device has the same id.
 - **Contacts are scoped by the owning identity's KID**: `ETSEIC:peer1,<owner_KID>,` returns one identity's contacts. Fixed-width identifiers come first, free text last, and the name is read as the whole tail (it may contain the delimiter).
 - **A public key is held once per device**: the device refuses to import a key it already holds under any DESCR. The client predicts this from the KID (one broad `key_search("ETSEIC:peer1,")` on the add path) and names the identity that already holds the contact.
-- All per-identity client state is keyed by the KID, never by the handle. The one record keyed by name is the sealed software identity itself (`ec-soft-id-<name>`, §4.5).
+- All per-identity client state is scoped by the identity (the KID as `idKey` in its key schedules, §10) and stored under names derived from the identity's own key (§10, Storage names), never by the handle. The one record keyed by name is the sealed software identity itself (`ec-soft-id-<name>`, §4.5).
 - **Fingerprint** = `SHA-256(pub)[0:8]`, shown as sixteen uppercase hex digits in colon-separated pairs. It identifies a key (telling entries apart, keying local records such as §5.7's ignore list); it does not verify one — verification is the safety number of §4.4.1.
 - **Invite link**: URL fragment `#i=base64url(JSON { p, n, r?, s?, k? })` — `p` the public key (base64, exactly 32 bytes), `n` a display name (≤ 64 characters, with control, format and line/paragraph-separator characters stripped; empty after that rejects the link), `r` marks a reply to an invite when present and truthy (clients write `1`) (the receiver adds the contact without sending its own key back), `s` the 32-byte `invite_secret` of a published invite (§5.7, base64), `k` that invite's 32-byte `invite_pub` (§5.8, base64). `s` and `k` come together or not at all; either without the other, or either of another length, rejects the whole link. A link without them is an ordinary one-to-one invite.
 
@@ -610,7 +610,7 @@ The transcript is RAM-only. What persists is the stores below, keyed off one dev
 base = ECDH(IK_priv, emp_pub)          // one identity-backend call per session, memoised
 ```
 
-`emp_pub` is a random X25519 public value generated at first run and stored in plain sight (`ec-gcache-emp-<KID>`); deriving `base` requires the IK holder plus this device-local value. Every store derives from the one `base`. These stores keep the label in the salt and the scope in `info` — the reverse of the wire convention of §1 — because they are on-device only.
+`emp_pub` is a random X25519 public value generated at first run and stored in plain sight (under the storage name of label `emp`, below); deriving `base` requires the IK holder plus this device-local value. Every store derives from the one `base`. These stores keep the label in the salt and the scope in `info` — the reverse of the wire convention of §1 — because they are on-device only.
 
 | store | key schedule | protects |
 |---|---|---|
