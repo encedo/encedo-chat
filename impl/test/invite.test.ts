@@ -54,6 +54,18 @@ test('a name is stripped of control characters and capped', () => {
   assert.ok(got!.name.length <= MAX_NAME)
 })
 
+test('the name cap counts characters, so an emoji at the cut is never split in half', () => {
+  const name = 'x'.repeat(MAX_NAME - 1) + '\u{1F600}' + 'tail'
+  const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+  const frag = 'i=' + Buffer.from(JSON.stringify({ p: PUB, n: name })).toString('base64url')
+  const got = decodeInvite('#' + frag)!.name
+  assert.equal(got, 'x'.repeat(MAX_NAME - 1) + '\u{1F600}', 'the emoji is the 64th character and stays whole')
+  assert.equal(lone.test(got), false)
+  const sent = JSON.parse(Buffer.from(encodeInvite({ pub: PUB, name }).slice(2), 'base64url').toString('utf8')).n
+  assert.equal([...sent].length, MAX_NAME)
+  assert.equal(lone.test(sent), false, 'the sender cuts the same way')
+})
+
 test('a name that is only control characters is refused, not silently emptied', () => {
   const frag = 'i=' + Buffer.from(JSON.stringify({ p: PUB, n: '​‮\n' })).toString('base64url')
   assert.equal(decodeInvite('#' + frag), null)

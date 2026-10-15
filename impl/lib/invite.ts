@@ -38,6 +38,9 @@
 /** Longest display name accepted from a link. Long enough for a real name,
  *  short enough that it cannot be used to wreck the contact list. */
 export const MAX_NAME = 64
+/** At most MAX_NAME characters - code points, so an emoji at the cut is kept
+ *  whole or dropped whole, never left as half a surrogate pair. */
+const clampName = (s: string): string => [...s].slice(0, MAX_NAME).join('')
 
 /** An inbox secret is a full-width key's worth of randomness, like every other
  *  secret that names a topic (`topicFromSecret`). */
@@ -116,7 +119,7 @@ const b64urlDecode = (s: string) =>
 
 /** The fragment an invite link carries, without the leading `#`. */
 export function encodeInvite(inv: Invite): string {
-  const o: any = { p: inv.pub, n: inv.name.slice(0, MAX_NAME) }
+  const o: any = { p: inv.pub, n: clampName(inv.name) }
   if (inv.reply) o.r = 1
   if (inv.inbox) o.s = inv.inbox
   if (inv.key) o.k = inv.key
@@ -153,7 +156,7 @@ export function decodeInvite(hash: string): Invite | null {
   // reorders what they see or takes up space while rendering as nothing. The
   // emptiness check comes AFTER the strip, or a name made only of those
   // characters arrives as a contact with no visible name at all.
-  const name = obj.n.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '').trim().slice(0, MAX_NAME)
+  const name = clampName(obj.n.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, '').trim())
   if (!name) return null
 
   // A present-but-broken inbox rejects the WHOLE invite rather than decoding to
