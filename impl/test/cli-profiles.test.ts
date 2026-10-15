@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, statSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, statSync, writeFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileKV } from '../cli/store.ts'
@@ -116,4 +116,12 @@ test('a contact book edited in the file behind the CLI is caught, not believed',
   const again = await bookOf(id, key, kv)
   assert.equal(again.verdict, 'tampered')
   await assert.rejects(again.book.add('x', 'QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVowMTIzNDU='), /refusing to write over it/, 'the evidence is not overwritten')
+})
+
+test('the store directory is 0700 even when it existed before, wider', () => {
+  const dir = join(mkdtempSync(join(tmpdir(), 'oc-')), 'home')
+  mkdirSync(dir, { mode: 0o755 })
+  assert.equal(statSync(dir).mode & 0o777, 0o755, 'precondition: a wider directory')
+  fileKV(dir)
+  assert.equal(statSync(dir).mode & 0o777, 0o700)
 })

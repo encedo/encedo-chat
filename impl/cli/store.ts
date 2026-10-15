@@ -29,6 +29,13 @@ export interface FileKV extends KV { remove(key: string): void; readonly path: s
 
 export function fileKV(dir = onchatoHome()): FileKV {
   mkdirSync(dir, { recursive: true, mode: 0o700 })
+  // `mode` applies only to a directory mkdir creates; one that already exists
+  // (made by hand, by an older build, by a wider umask) keeps its own. The
+  // store's file is 0600 either way, but the directory also holds the socket.
+  // Not ours to change on a bind mount owned by another uid: say so, run on.
+  try { chmodSync(dir, 0o700) } catch (e: any) {
+    process.stderr.write(`WARNING: ${dir} could not be made 0700 (${e?.code ?? e}); other local accounts may list it\n`)
+  }
   const path = join(dir, 'store.json')
   let data: Record<string, string> = {}
   if (existsSync(path)) {
