@@ -111,7 +111,7 @@ two-item menu instead of the file picker:
 │  przez czat — do 128 MB, znika po 5 minutach│
 ├─────────────────────────────────────────────┤
 │  Transfer bezpośredni            🟢 Direct  │
-│  prosto do drugiej przeglądarki,            │
+│  prosto do drugiej przeglądarki — do 512 MB,│
 │  nic nie trafia na serwer                   │
 └─────────────────────────────────────────────┘
 ```
@@ -228,10 +228,12 @@ the 1 MB/s road this design refuses.
 **The tab closes.** Both sides lose everything; that is what "nothing is stored"
 means. The confirmation window says so before the transfer starts, not after.
 
-**Memory.** The receiver holds the whole file in RAM before saving, so the cap
-stays where the store path has it (128 MB) until it streams to disk. The File
-System Access API would remove the cap for Chromium and not for Firefox, so it
-is a follow-up, not part of v1.
+**Memory.** The receiver holds the whole file in RAM before saving, so the
+direct path has its own cap, `MAX_DIRECT` = 512 MiB (`lib/xfer.ts`) — four times
+the store's `MAX_FILE` = 128 MB (`lib/filecrypto.ts`), which stays where it is
+because it protects the store, not the receiver. The File System Access API
+would remove the memory bound for Chromium and not for Firefox, so it is a
+follow-up.
 
 **Two tabs of the same identity.** §9.1 already stands both down; a transfer
 inherits that and does not need its own rule.
@@ -243,8 +245,9 @@ inherits that and does not need its own rule.
 1. **Is v1 one file at a time?** A queue is easy to add and easy to get wrong
    (two transfers sharing one channel's backpressure). Recommend: one, refuse
    the second with the reason.
-2. **Does the cap stay at 128 MB** when there is no store to protect? The
-   constraint is the receiver's memory, not policy.
+2. ~~**Does the cap stay at 128 MB** when there is no store to protect?~~
+   Decided: no — the direct path is capped at 512 MiB by the receiver's memory
+   (`MAX_DIRECT`); 128 MB stays the store's cap.
 3. **Groups: never, or later?** Never is defensible — no acks, N channels — and
    it keeps the feature honest as a two-browser thing.
 4. **Protobuf.** Irrelevant here: the DataChannel carries binary already, and

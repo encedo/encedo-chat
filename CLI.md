@@ -467,7 +467,8 @@ ONCHATO_SOCKET=/run/user/1000/onchato.sock /home/bot/.local/bin/onchato-cli send
 Plik jest szyfrowany na Twoim komputerze nowym kluczem (AES-GCM, porcjami),
 zaszyfrowana treść trafia do magazynu, a klucz, nazwa i typ idą tylko w rozmowie.
 Magazyn widzi wyłącznie zaszyfrowane bajty i ich rozmiar — i trzyma je **ok. 5 minut**.
-Limit wielkości to 128 MB.
+Limit wielkości to 128 MB — to limit magazynu. Transfer bezpośredni (do 512 MB,
+prosto do drugiej przeglądarki po WebRTC) jest tylko w aplikacji; terminal go nie ma.
 
 W kliencie:
 
