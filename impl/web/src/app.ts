@@ -4143,7 +4143,7 @@ function clearComposer() {
   // has something to collapse before anything is painted), and this makes the
   // wording translated from the first frame rather than after the first room.
   setBadge($('transport-badge'), 'badge relay', tr('⚪ Relay'), tr('Treść przez relay (GossipSub)'))
-  setBadge($('e2e-badge'), 'badge e2e', tr('🔒 E2E interim'), tr('Szyfrowane E2E — interim, EH-2 w drodze'))
+  setBadge($('e2e-badge'), 'badge e2e', tr('🔒 E2E'), tr('Szyfrowane E2E — każda rozmowa uzgadnia EH-2 przy otwarciu'))
 }
 $('btn-wipeout').addEventListener('click', async () => {
   // The loudest window in the app, and it was the one that stayed Polish

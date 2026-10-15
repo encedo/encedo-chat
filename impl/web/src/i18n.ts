@@ -588,7 +588,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'status HEM': 'HEM status',
     'Status węzła sieci': 'Network node status',
     'Szukaj kontaktu…': 'Search contacts…',
-    'Szyfrowane E2E — interim, EH-2 w drodze': 'E2E encrypted — interim, EH-2 on the way',
+    'Szyfrowane E2E — każda rozmowa uzgadnia EH-2 przy otwarciu': 'E2E encrypted — every conversation agrees EH-2 when it opens',
     'Szyfruję…': 'Encrypting…',
     'Ta nazwa jest już zajęta przez kogoś o innym kluczu. Zastąpienie usunie tamten kontakt — jeśli to dwie różne osoby, wróć i nadaj inną nazwę.':
       'That name belongs to someone with a different key. Replacing removes that contact — if these are two different people, go back and pick another name.',
@@ -815,7 +815,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
       '👋 Knock sent into the room — if they are here, they hear it now',
     '👋 {name} puka': '👋 {name} is knocking',
     '👋 {name} puka — jest teraz przy klawiaturze': '👋 {name} is knocking — they are at the keyboard now',
-    '🔒 E2E interim': '🔒 E2E interim',
+    '🔒 E2E': '🔒 E2E',
     '🔒 W HEM — trwałe, przenośne między urządzeniami': '🔒 In the HEM — durable, portable between devices',
     '📷 Zeskanuj kod QR': '📷 Scan a QR code',
     '📌 Przypięte ({n})': '📌 Pinned ({n})',
