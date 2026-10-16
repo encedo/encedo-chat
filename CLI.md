@@ -198,6 +198,10 @@ onchato-cli invites qr 1                           # kod QR zaproszenia nr 1
 onchato-cli invites revoke 1                       # wycofanie - nikt o tym nie jest informowany
 ```
 
+`invites new` i `invites revoke` odmawiają, gdy działa demon: demon trzyma `store.json`
+w pamięci i przy najbliższym zapisie nadpisałby zmianę zrobioną obok niego. Zatrzymaj
+go na chwilę, zmień zaproszenia i uruchom ponownie.
+
 **Pukanie widać w kliencie** (`onchato-cli chat`) **albo w demonie** (`onchato-cli daemon`,
 rozdział 8) — zaproszenie „słucha” tylko wtedy, gdy jedno z nich działa:
 

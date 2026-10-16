@@ -238,6 +238,11 @@ try {
     }
     case 'invites': {
       const [sub, ...more] = args
+      // The daemon holds store.json in memory and rewrites it whole: an invite
+      // written beside it would go unheard and then be overwritten by its next save.
+      if ((sub === 'new' || sub === 'revoke') && await connectDaemon().then((s) => { s?.end(); return !!s })) {
+        die('demon działa - zatrzymaj go na chwilę (zaproszenie zapisane obok demona zostałoby nadpisane), potem uruchom ponownie')
+      }
       const { id, store } = await signIn(kv)
       const list = await store.invites()
       const pick = (n: string) => list[Number(n) - 1] ?? die(`nie ma zaproszenia nr ${n} (onchato-cli invites)`)
@@ -245,7 +250,7 @@ try {
       if (!sub || sub === 'list') {
         if (!list.length) { console.log('(brak zaproszeń - onchato-cli invites new <etykieta>)'); break }
         for (const [i, inv] of list.entries()) console.log(`  ${i + 1}) ${inv.label.padEnd(16)} od ${when(inv.created)}  ${inv.expires ? (expired(inv) ? 'WYGASŁO' : 'do ' + when(inv.expires)) : 'bez terminu'}\n     ${await publishedLink(APP_ORIGIN, APP_PATH, id, inv)}`)
-        console.log('Pukanie widać w kliencie (onchato-cli chat) - zaproszenie słucha tylko, gdy klient działa.')
+        console.log('Pukanie widać w kliencie (onchato-cli chat) albo w demonie (onchato-cli knocks) - zaproszenie słucha tylko, gdy któryś działa.')
         break
       }
       if (sub === 'new') {
