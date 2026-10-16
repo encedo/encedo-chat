@@ -20,6 +20,8 @@
  *   <- {"ok":true,"status":"added","name":"ewa","fp":"71:84:...","knock":1}            (an invite: knocked, keeps knocking)
  *   <- {"ok":true,"status":"added","name":"ewa","fp":"...","reply":"https://..."}     (an identity link: send them this)
  *   <- {"ok":true,"status":"known","name":"ewa","fp":"..."}
+ *   -> {"op":"contacts"}
+ *   <- {"ok":true,"contacts":[{"name":"ewa","pub":"<b64>","online":true}]}
  *   -> {"op":"knocks"}
  *   <- {"ok":true,"knocks":[{"n":1,"name":"Ewa","fp":"...","note":"...","invite":"biuro"}]}
  *   -> {"op":"accept","n":1}    -> {"op":"ignore","n":1}
@@ -110,6 +112,8 @@ function handle(hub: Hub, sock: Socket, log: (m: string) => void, queue?: Queue)
         const r = await hub.addFromLink(req.link, { name: typeof req.name === 'string' ? req.name : undefined, note: typeof req.note === 'string' ? req.note : undefined })
         log(`kontakt ${r.name} (${r.fp}): ${r.status}${r.knock !== undefined ? `, zapukano (${r.knock ?? '?'})` : ''}`)
         reply({ ok: true, ...r })
+      } else if (req.op === 'contacts') {
+        reply({ ok: true, contacts: hub.contactList.map((c) => ({ name: c.name, pub: c.pub, online: hub.online.has(c.pub) })) })
       } else if (req.op === 'knocks') {
         reply({ ok: true, knocks: (hub.desk?.list() ?? []).map((k) => ({ n: k.n, name: k.name, fp: k.fp, note: k.note, invite: k.inv.label })) })
       } else if (req.op === 'accept' || req.op === 'ignore') {

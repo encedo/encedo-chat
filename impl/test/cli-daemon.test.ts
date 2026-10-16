@@ -34,6 +34,8 @@ test('the socket is private, answers, and refuses bad requests', async () => {
   assert.equal((await ask(s3, { op: 'send', to: 'bob' })).ok, false, 'no text, no send'); s3.end()
   const s4 = (await connectDaemon(path))!
   assert.equal((await ask(s4, { op: 'status' })).me, 'ala'); s4.end()
+  const s5 = (await connectDaemon(path))!
+  assert.deepEqual(await ask(s5, { op: 'contacts' }), { ok: true, contacts: [{ name: 'bob', pub: 'p', online: true }] }); s5.end()
   srv.close()
 })
 
