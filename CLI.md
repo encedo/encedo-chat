@@ -1,415 +1,415 @@
-# onchato w terminalu — podręcznik
+# onchato in the terminal — manual
 
-`onchato-cli` to klient onchato w terminalu: ta sama sieć, to samo szyfrowanie i te
-same tożsamości co aplikacja. Rozmawiasz z każdym, kto używa aplikacji,
-z okna terminala, przez SSH albo wewnątrz `screen`/`tmux`. Interfejs jest
-wzorowany na irssi: każda rozmowa ma swoje okno, a pasek stanu na dole pokazuje,
-gdzie coś się dzieje.
+`onchato-cli` is the terminal client of onchato: the same network, the same encryption and
+the same identities as the app. You talk to anyone who uses the app
+from a terminal window, over SSH or inside `screen`/`tmux`. The interface is
+modelled on irssi: every conversation has its own window, and the status bar at the bottom shows
+where something is happening.
 
-Ten podręcznik opisuje wersję 0.7.45. Plan dalszych etapów (tryb skryptowy,
-demon, powiadomienia, pliki, grupy) jest w [CLI-PLAN.md](CLI-PLAN.md).
-
----
-
-## Spis treści
-
-1. [Instalacja](#1-instalacja)
-2. [Pierwsze kroki](#2-pierwsze-kroki)
-3. [Tożsamość: profil albo HEM](#3-tożsamość-profil-albo-hem)
-4. [Kontakty](#4-kontakty)
-5. [Zaproszenia, które odpowiadają same](#5-zaproszenia-które-odpowiadają-same)
-6. [Weryfikacja: numer bezpieczeństwa](#6-weryfikacja-numer-bezpieczeństwa)
-7. [Klient rozmów](#7-klient-rozmów)
-8. [Skrypty i demon](#8-skrypty-i-demon)
-9. [Spis komend](#9-spis-komend)
-10. [Opcje i zmienne środowiskowe](#10-opcje-i-zmienne-środowiskowe)
-11. [Gdzie są dane i jak są chronione](#11-gdzie-są-dane-i-jak-są-chronione)
-12. [Ograniczenia, które warto znać](#12-ograniczenia-które-warto-znać)
-13. [Rozwiązywanie problemów](#13-rozwiązywanie-problemów)
+This manual describes version 0.7.45. The plan for further stages (script mode,
+daemon, notifications, files, groups) is in [CLI-PLAN.md](CLI-PLAN.md).
 
 ---
 
-## 1. Instalacja
+## Contents
 
-Wymagany **Node.js 24** lub nowszy (uruchamia kod TypeScript bezpośrednio).
+1. [Installation](#1-installation)
+2. [Getting started](#2-getting-started)
+3. [Identity: profile or HEM](#3-identity-profile-or-hem)
+4. [Contacts](#4-contacts)
+5. [Invites that answer by themselves](#5-invites-that-answer-by-themselves)
+6. [Verification: the safety number](#6-verification-the-safety-number)
+7. [The chat client](#7-the-chat-client)
+8. [Scripts and the daemon](#8-scripts-and-the-daemon)
+9. [Command reference](#9-command-reference)
+10. [Options and environment variables](#10-options-and-environment-variables)
+11. [Where the data lives and how it is protected](#11-where-the-data-lives-and-how-it-is-protected)
+12. [Limitations worth knowing](#12-limitations-worth-knowing)
+13. [Troubleshooting](#13-troubleshooting)
 
-Na razie `onchato-cli` uruchamia się z repozytorium. Najwygodniej podlinkować je jako
-zwykłą komendę:
+---
+
+## 1. Installation
+
+Requires **Node.js 24** or newer (it runs the TypeScript code directly).
+
+For now `onchato-cli` runs from the repository. The easiest way is to link it as an
+ordinary command:
 
 ```sh
 mkdir -p ~/.local/bin
 ln -s <repo>/impl/cli/onchato.ts ~/.local/bin/onchato-cli
-onchato-cli        # bez argumentów: krótka ściągawka
+onchato-cli        # no arguments: a short cheat sheet
 ```
 
-Komenda nazywa się `onchato-cli`, bo `onchato` to aplikacja desktopowa z paczki
-(`/usr/bin/onchato`). Dowiązanie `~/.local/bin/onchato` z wcześniejszych wersji
-przesłaniało ją w `PATH` i ikona uruchamiała CLI zamiast okna - zmień jego nazwę:
+The command is called `onchato-cli` because `onchato` is the packaged desktop app
+(`/usr/bin/onchato`). The `~/.local/bin/onchato` symlink from earlier versions
+shadowed it in `PATH`, and the icon launched the CLI instead of the window - rename it:
 `mv ~/.local/bin/onchato ~/.local/bin/onchato-cli`.
 
-`~/.local/bin` jest w `PATH` na większości dystrybucji (po ponownym zalogowaniu).
-Dowiązanie wskazuje na repozytorium, więc `git pull` od razu daje nową wersję.
+`~/.local/bin` is in `PATH` on most distributions (after logging in again).
+The symlink points into the repository, so `git pull` gives you the new version right away.
 
 ### Docker
 
-Na serwerze bez Node 24 albo gdy demon ma żyć w kontenerze. Obraz zawiera tylko CLI;
-dane (profil, kontakty, kolejka, pobrane pliki) są w wolumenie `/data`, a demon
-słucha na gnieździe `/data/onchato.sock`. W kontenerze działa jako zwykły użytkownik
-(uid 1000), nie jako root.
+For a server without Node 24, or when the daemon should live in a container. The image contains only the CLI;
+the data (profile, contacts, queue, downloaded files) is in the `/data` volume, and the daemon
+listens on the socket `/data/onchato.sock`. In the container it runs as an ordinary user
+(uid 1000), not as root.
 
 ```sh
-docker build -t onchato .                          # z katalogu głównego repozytorium
+docker build -t onchato .                          # from the repository root
 
-# raz: profil w wolumenie (interaktywnie - pyta o hasło)
+# once: a profile in the volume (interactive - asks for the password)
 docker run --rm -it -v onchato:/data onchato profile new ops-bot
-docker run --rm -it -v onchato:/data onchato add <link zaproszenia albo nazwa klucz>
+docker run --rm -it -v onchato:/data onchato add <invite link or name key>
 
-# demon w tle; hasło z pliku, podmontowanego jako sekret - nie w zmiennej środowiskowej
-install -m 600 /dev/stdin ./ops-bot.pass <<< 'hasło profilu ops-bot'
+# daemon in the background; password from a file mounted as a secret - not in an environment variable
+install -m 600 /dev/stdin ./ops-bot.pass <<< 'ops-bot profile password'
 docker run -d --name onchato --restart unless-stopped -v onchato:/data \
   --mount type=bind,src=$PWD/ops-bot.pass,dst=/run/secrets/onchato-password,ro \
   onchato daemon
 
-# skrypty na hoście rozmawiają z demonem przez docker exec
+# scripts on the host talk to the daemon through docker exec
 docker exec onchato onchato-cli send ewa "backup gotowy"
 docker exec onchato onchato-cli listen --json
 docker logs -f onchato
 ```
 
-Plik hasła musi być czytelny dla uid 1000 w kontenerze (właściciel 1000 albo
-`chmod 644` na katalogu, do którego nikt inny nie ma dostępu). W docker compose albo
-Swarm to samo daje `secrets:` o nazwie `onchato-password` — obraz szuka hasła
-w `/run/secrets/onchato-password`.
+The password file must be readable by uid 1000 in the container (owner 1000, or
+`chmod 644` in a directory nobody else can access). In docker compose or
+Swarm, `secrets:` named `onchato-password` does the same — the image looks for the password
+in `/run/secrets/onchato-password`.
 
-Klient rozmów też działa w kontenerze, z terminalem: `docker run --rm -it -v onchato:/data
-onchato chat`. Tylko nie równolegle z demonem na tej samej tożsamości — jedna
-tożsamość to jedna sesja (rozdział 12).
+The chat client works in a container too, with a terminal: `docker run --rm -it -v onchato:/data
+onchato chat`. Just not in parallel with the daemon on the same identity — one
+identity is one session (section 12).
 
 ---
 
-## 2. Pierwsze kroki
+## 2. Getting started
 
-Pięć minut od zera do rozmowy z kimś, kto ma aplikację:
+Five minutes from zero to a conversation with someone who has the app:
 
 ```sh
-onchato-cli profile new ala                      # 1. tożsamość (hasło, dwa razy)
-onchato-cli invite --qr                          # 2. Twój kod - druga osoba skanuje go w aplikacji
-onchato-cli add 'https://app.onchato.com/#i=…'   # 3. albo dodajesz jej link (pokaże odcisk, zapyta)
-onchato-cli verify ewa                           # 4. porównajcie numer bezpieczeństwa
-onchato-cli chat                                 # 5. klient: lista kontaktów, /query 1, piszesz
+onchato-cli profile new ala                      # 1. identity (password, twice)
+onchato-cli invite --qr                          # 2. your code - the other person scans it in the app
+onchato-cli add 'https://app.onchato.com/#i=…'   # 3. or you add their link (shows the fingerprint, asks)
+onchato-cli verify ewa                           # 4. compare the safety number
+onchato-cli chat                                 # 5. client: contact list, /query 1, type away
 ```
 
-Rozmowa zaczyna się dopiero wtedy, gdy **obie strony mają nawzajem swoje klucze**.
-Z tego biorą się trzy sposoby dodawania kontaktu opisane w rozdziale 4.
+A conversation starts only once **both sides have each other's keys**.
+Hence the three ways of adding a contact described in section 4.
 
 ---
 
-## 3. Tożsamość: profil albo HEM
+## 3. Identity: profile or HEM
 
-### Profil programowy
+### Software profile
 
-Para kluczy wygenerowana na tym komputerze, zapieczętowana hasłem — ten sam
-format co profil w aplikacji.
+A key pair generated on this computer, sealed with a password — the same
+format as a profile in the app.
 
 ```sh
-onchato-cli profile new <nazwa>      # hasło podajesz dwa razy
+onchato-cli profile new <name>      # you enter the password twice
 onchato-cli profile list
 ```
 
-Hasło musi być mocne (pełny miernik, około 60 bitów) — ta sama zasada co
-w aplikacji. Najprościej: dwa, trzy zwykłe słowa (`kot pies dom lampa`).
-**Profilu nie da się odzyskać** — bez hasła nie ma do niego drogi.
+The password must be strong (the full meter, about 60 bits) — the same rule as
+in the app. The simplest way: two or three ordinary words (`kot pies dom lampa`).
+**A profile cannot be recovered** — without the password there is no way into it.
 
-### Przeniesienie profilu z aplikacji i z powrotem
+### Moving a profile from the app and back
 
 ```sh
-onchato-cli profile import ala.ocmig             # plik z aplikacji: Ustawienia → Przenieś profil
-onchato-cli profile export ala ala.ocmig         # i odwrotnie
+onchato-cli profile import ala.ocmig             # file from the app: Ustawienia → Przenieś profil (Settings → Move profile)
+onchato-cli profile export ala ala.ocmig         # and the other way round
 ```
 
-Przenoszone są tożsamość, kontakty, zaproszenia i lista węzłów. To jest
-**przeniesienie, nie kopia**: ta sama tożsamość otwarta w dwóch miejscach naraz
-zamyka obie sesje (zob. rozdział 12).
+What moves: the identity, contacts, invites and the node list. This is
+**a move, not a copy**: the same identity open in two places at once
+closes both sessions (see section 12).
 
 ### HEM
 
-Klucz siedzi w urządzeniu i go nie opuszcza. Do każdej komendy dodajesz `--hem <url>`:
+The key lives in the device and never leaves it. Add `--hem <url>` to every command:
 
 ```sh
 onchato-cli whoami --hem https://my.ence.do
 onchato-cli chat --hem https://my.ence.do
 ```
 
-- Jeśli HEM ma **kilka tożsamości**, `onchato` wyświetli ponumerowaną listę i zapyta,
-  której użyć. `--handle <nazwa>` wybiera bez pytania.
-- Logowanie **nigdy nie tworzy** tożsamości. Nową tworzysz świadomie:
+- If the HEM holds **several identities**, `onchato` shows a numbered list and asks
+  which one to use. `--handle <name>` picks one without asking.
+- Signing in **never creates** an identity. You create a new one deliberately:
 
   ```sh
-  onchato-cli hem new <nazwa> --hem https://my.ence.do
+  onchato-cli hem new <name> --hem https://my.ence.do
   ```
 
-- Kontakty zapisane w HEM pojawiają się razem z lokalnymi (`onchato-cli contacts`
-  pokazuje źródło: `hem` albo `local`).
+- Contacts stored in the HEM appear alongside the local ones (`onchato-cli contacts`
+  shows the source: `hem` or `local`).
 
-### Który profil
+### Which profile
 
-Bez `--profile` i bez `--hem` `onchato` używa jedynego profilu, jaki jest. Gdy jest
-ich kilka, wybierasz `--profile <nazwa>`.
+Without `--profile` and without `--hem`, `onchato` uses the only profile there is. When there are
+several, choose with `--profile <name>`.
 
 ---
 
-## 4. Kontakty
+## 4. Contacts
 
 ```sh
-onchato-cli contacts                 # nazwa, odcisk klucza, źródło
+onchato-cli contacts                 # name, key fingerprint, source
 ```
 
-Trzy sposoby dodania kontaktu:
+Three ways to add a contact:
 
-| sposób | jak | co dalej |
+| method | how | what next |
 |---|---|---|
-| **link tożsamości** | `onchato-cli add '<link>'` (link z aplikacji: „Udostępnij swój profil”) | `onchato` wypisze **link zwrotny** — odeślij go tej osobie, żeby miała też Twój klucz |
-| **Twój kod QR** | `onchato-cli invite --qr`, druga osoba skanuje go w aplikacji | ona dodaje Ciebie; Ty dodajesz ją jej linkiem zwrotnym |
-| **zaproszenie ze skrzynką** | rozdział 5 | puka i po `/accept` macie się nawzajem — bez odsyłania linków |
+| **identity link** | `onchato-cli add '<link>'` (a link from the app: „Udostępnij swój profil” ("Share your profile")) | `onchato` prints a **return link** — send it back to that person so they have your key too |
+| **your QR code** | `onchato-cli invite --qr`, the other person scans it in the app | they add you; you add them with their return link |
+| **mailbox invite** | section 5 | they knock, and after `/accept` you have each other — no links sent back and forth |
 
-`add` przyjmuje link w każdej postaci: cały adres, sam fragment `#i=…` albo goły
-kod. Pokazuje **nazwę i odcisk klucza** i pyta `t/N` — porównaj odcisk z tym, co ta
-osoba podała Ci innym kanałem (rozmowa, telefon). W skrypcie: `--yes`.
+`add` accepts the link in any form: the full address, just the `#i=…` fragment, or the bare
+code. It shows **the name and the key fingerprint** and asks `t/N` — compare the fingerprint with what that
+person gave you over another channel (in person, by phone). In a script: `--yes`.
 
 ```sh
-onchato-cli add '<link>' --name "Ewa z biura"    # własna nazwa zamiast tej z linku
-onchato-cli add ewa <kluczB64>                   # surowy klucz publiczny (32 bajty, base64)
+onchato-cli add '<link>' --name "Ewa z biura"    # your own name instead of the one in the link
+onchato-cli add ewa <keyB64>                     # raw public key (32 bytes, base64)
 ```
 
-Nazwa w linku to tylko deklaracja — o tożsamości decyduje klucz.
+The name in the link is only a claim — the key decides the identity.
 
 ---
 
-## 5. Zaproszenia, które odpowiadają same
+## 5. Invites that answer by themselves
 
-Zaproszenie ze skrzynką to link (i kod QR), który możesz powiesić gdziekolwiek.
-Kto je otworzy, **puka** swoim kluczem; Ty widzisz pukanie z odciskiem i decydujesz.
-Po przyjęciu macie się nawzajem w kontaktach.
+A mailbox invite is a link (and a QR code) you can post anywhere.
+Whoever opens it **knocks** with their key; you see the knock with its fingerprint and decide.
+Once accepted, you are in each other's contacts.
 
 ```sh
-onchato-cli invites new biuro --expires 24h --qr   # nowe zaproszenie (czas: 30m, 24h, 7d; bez --expires - bez terminu)
-onchato-cli invites                                # lista z linkami
-onchato-cli invites qr 1                           # kod QR zaproszenia nr 1
-onchato-cli invites revoke 1                       # wycofanie - nikt o tym nie jest informowany
+onchato-cli invites new biuro --expires 24h --qr   # new invite (time: 30m, 24h, 7d; without --expires - no expiry)
+onchato-cli invites                                # list with links
+onchato-cli invites qr 1                           # QR code of invite no. 1
+onchato-cli invites revoke 1                       # revoke - nobody is notified
 ```
 
-Gdy działa demon, `invites` idzie **przez niego**: to demon tworzy i wycofuje
-zaproszenie (trzyma `store.json` w pamięci — zmiana zapisana obok niego zostałaby
-nadpisana) i od razu zaczyna go słuchać. Restart nie jest potrzebny.
+When the daemon is running, `invites` goes **through it**: the daemon creates and revokes
+the invite (it holds `store.json` in memory — a change written next to it would be
+overwritten) and starts listening on it at once. No restart needed.
 
-**Pukanie widać w kliencie** (`onchato-cli chat`) **albo w demonie** (`onchato-cli daemon`,
-rozdział 8) — zaproszenie „słucha” tylko wtedy, gdy jedno z nich działa:
+**Knocks show up in the client** (`onchato-cli chat`) **or in the daemon** (`onchato-cli daemon`,
+section 8) — an invite "listens" only while one of them is running:
 
 ```
 23:04 -!- Ewa puka (zaproszenie „biuro”) · odcisk 71:84:64:2F:8E:66:01:E7 - /accept 1 · /ignore 1
 ```
 
-| w kliencie | działanie |
+| in the client | action |
 |---|---|
-| `/knocks` | lista oczekujących pukań |
-| `/accept N` | dodaje tę osobę do kontaktów |
-| `/ignore N` | ignoruje ten klucz — kolejne pukanie z niego się nie pojawi |
+| `/knocks` | list of pending knocks |
+| `/accept N` | adds that person to your contacts |
+| `/ignore N` | ignores that key — further knocks from it will not show up |
 
-Przy działającym demonie to samo robią komendy `onchato-cli knocks`, `onchato-cli accept N`
-i `onchato-cli ignore N`; pukanie trafia też do dziennika demona i jako zdarzenie
-`{"t":"knock",…}` do `listen --json`. Przyjęty kontakt działa od razu, bez restartu demona.
+With the daemon running, the commands `onchato-cli knocks`, `onchato-cli accept N`
+and `onchato-cli ignore N` do the same; the knock also goes to the daemon's log and, as the event
+`{"t":"knock",…}`, to `listen --json`. An accepted contact works at once, without restarting the daemon.
 
-Przyjęcie jest zawsze ręczne. Zaproszenie jest publiczne i żyje, dopóki go nie
-wycofasz — zapukać może każdy, kto kiedykolwiek widział ten kod.
+Accepting is always manual. An invite is public and lives until you
+revoke it — anyone who has ever seen the code can knock.
 
-**W drugą stronę:** `onchato-cli add '<link zaproszenia>'` dodaje kontakt i puka.
-Jeśli zapraszający jest akurat offline, klient (`onchato-cli chat`) albo demon puka dalej
-co 90 s, aż przyjmie — wtedy zobaczysz „… przyjął(a) Twoje pukanie”. Pojedyncze pukanie
-często przepada (nikt akurat nie słucha), więc to ponawianie jest istotne.
+**The other way round:** `onchato-cli add '<invite link>'` adds the contact and knocks.
+If the inviter happens to be offline, the client (`onchato-cli chat`) or the daemon keeps knocking
+every 90 s until they accept — then you see „… przyjął(a) Twoje pukanie” ("… accepted your knock"). A single knock
+is often lost (nobody happens to be listening), so this retrying matters.
 
-Gdy działa demon, `add` oddaje kontakt **jemu** — nie otwiera drugiej sesji tej samej
-tożsamości, a demon zna nowy kontakt od razu.
+When the daemon is running, `add` hands the contact **to it** — it does not open a second session of the same
+identity, and the daemon knows the new contact right away.
 
-Zaproszenia przenoszą się razem z profilem między aplikacją a terminalem.
-
----
-
-## 6. Weryfikacja: numer bezpieczeństwa
-
-```sh
-onchato-cli verify ewa               # 60 cyfr, u obojga identyczne
-onchato-cli verify ewa --qr          # to samo jako kod QR
-onchato-cli verify ewa 38421 99404 … # porównanie z numerem przeczytanym przez drugą osobę
-```
-
-Porównajcie numer osobiście albo przez telefon (w aplikacji jest w oknie pod 🔐,
-tam można też zeskanować kod QR). Zgodny numer znaczy, że nikt nie podszywa się pod
-żadne z Was. Przy porównaniu `verify` kończy się kodem `0` (zgodny) albo `4`
-(niezgodny) — przydatne w skryptach.
+Invites move with the profile between the app and the terminal.
 
 ---
 
-## 7. Klient rozmów
+## 6. Verification: the safety number
 
 ```sh
-onchato-cli chat               # start od listy kontaktów
-onchato-cli chat ewa           # od razu z otwartą rozmową z ewa
+onchato-cli verify ewa               # 60 digits, identical for both of you
+onchato-cli verify ewa --qr          # the same as a QR code
+onchato-cli verify ewa 38421 99404 … # compare with the number read out by the other person
 ```
 
-Klient wymaga prawdziwego terminala. Zajmuje cały ekran (jak irssi czy `less`)
-i po wyjściu przywraca terminal do poprzedniego stanu.
+Compare the number in person or over the phone (in the app it is in the window under 🔐,
+where you can also scan the QR code). A matching number means nobody is impersonating
+either of you. When comparing, `verify` exits with code `0` (match) or `4`
+(mismatch) — handy in scripts.
 
-### Ekran
+---
+
+## 7. The chat client
+
+```sh
+onchato-cli chat               # starts at the contact list
+onchato-cli chat ewa           # with the conversation with ewa already open
+```
+
+The client needs a real terminal. It takes over the whole screen (like irssi or `less`)
+and restores the terminal to its previous state on exit.
+
+### Screen
 
 ```
-22:39 <ewa> cześć, testujesz CLI?             ← okno: bieżąca rozmowa
+22:39 <ewa> cześć, testujesz CLI?             ← window: the current conversation
 22:39 <ala> tak, z terminala przez ssh
-22:41 -!- plik od ewa: raport.pdf (1.2 MB)     ← -!- to komunikaty systemowe
-[22:42] [ala·HEM] [bs1 ●] [2:ewa 🔐] [Act: 3,4]  ← pasek stanu
-[ewa] tu piszesz▌                              ← linia wpisywania
+22:41 -!- plik od ewa: raport.pdf (1.2 MB)     ← -!- marks system messages
+[22:42] [ala·HEM] [bs1 ●] [2:ewa 🔐] [Act: 3,4]  ← status bar
+[ewa] you type here▌                           ← input line
 ```
 
-Pasek stanu:
+The status bar:
 
-| pole | znaczenie |
+| field | meaning |
 |---|---|
-| `[22:42]` | godzina |
-| `[ala·HEM]` | Twoja tożsamość i jej rodzaj (`HEM` / `software`) |
-| `[bs1 ●]` | węzeł i połączenie: zielone ● połączono, czerwone ● brak, żółte ○ łączę |
-| `[2:ewa 🔐]` | bieżące okno; 🔐 = sesja zabezpieczona (uzgodnienie klucza EH-2 zakończone) |
-| `[Act: 3,4]` | okna z nowymi wiadomościami; na fioletowo — wzmianka o Tobie |
+| `[22:42]` | time |
+| `[ala·HEM]` | your identity and its kind (`HEM` / `software`) |
+| `[bs1 ●]` | node and connection: green ● connected, red ● none, yellow ○ connecting |
+| `[2:ewa 🔐]` | current window; 🔐 = session secured (EH-2 key agreement complete) |
+| `[Act: 3,4]` | windows with new messages; in purple — a mention of you |
 
-### Okna
+### Windows
 
-- Okno **1** to status: start, połączenie, lista kontaktów, pukanie do zaproszeń.
-- Każda rozmowa dostaje kolejny wolny numer i zachowuje go, dopóki jej nie zamkniesz.
-- Gdy ktoś zacznie z Tobą rozmowę, jego okno otwiera się **w tle**: w statusie pojawia
-  się informacja, a na pasku `Act:` — Twój widok się nie przesuwa.
+- Window **1** is the status window: startup, connection, contact list, knocks on invites.
+- Each conversation gets the next free number and keeps it until you close it.
+- When someone starts a conversation with you, their window opens **in the background**: a notice
+  appears in the status window and on the `Act:` bar — your view does not move.
 
-### Klawisze
+### Keys
 
-| klawisz | działanie |
+| key | action |
 |---|---|
-| **Alt+1 … Alt+9** | przełącz okno (Alt+0 = okno 10) |
-| **Tab** | po `/query ` — dopełnij nazwę kontaktu |
-| **Enter** | wyślij wiadomość albo wykonaj polecenie |
-| **← →**, **Home** / **End**, **Ctrl+A** / **Ctrl+E** | ruch w linii |
-| **Backspace**, **Delete** | kasowanie |
-| **Ctrl+W** | skasuj słowo przed kursorem |
-| **Ctrl+U** | skasuj do początku linii |
-| **↑ ↓** | historia wpisanych linii |
-| **Ctrl+L** | przerysuj ekran |
-| **Ctrl+C**, **Ctrl+D** | wyjście (jak `/quit`) |
+| **Alt+1 … Alt+9** | switch window (Alt+0 = window 10) |
+| **Tab** | after `/query ` — complete a contact name |
+| **Enter** | send a message or run a command |
+| **← →**, **Home** / **End**, **Ctrl+A** / **Ctrl+E** | move within the line |
+| **Backspace**, **Delete** | delete |
+| **Ctrl+W** | delete the word before the cursor |
+| **Ctrl+U** | delete to the start of the line |
+| **↑ ↓** | history of entered lines |
+| **Ctrl+L** | redraw the screen |
+| **Ctrl+C**, **Ctrl+D** | quit (like `/quit`) |
 
-### Polecenia
+### Commands
 
-| polecenie | działanie |
+| command | action |
 |---|---|
-| `/list` | kontakty z obecnością (● online, ○ offline), ponumerowane |
-| `/query <nr>` · `/query <nazwa>` · `/q …` | otwórz rozmowę albo okno grupy |
-| `/win <nr>` · `/w <nr>` | przełącz okno |
-| `/close` | zamknij bieżącą rozmowę |
-| `/who` | czy rozmówca jest teraz w pokoju |
-| `/me <akcja>` | akcja („* ala macha”) |
-| `/react <emoji>` | reakcja na ostatnią wiadomość rozmówcy |
-| `/verify` | numer bezpieczeństwa tej rozmowy |
-| `/invite` | Twój link tożsamości |
-| `/send <ścieżka>` | wyślij plik (rozdział 8, „Pliki”) |
-| `/get [id]` | zapisz otrzymany plik (bez id — ostatni w tym oknie) |
-| `/knocks` · `/accept N` · `/ignore N` | pukanie do Twoich zaproszeń (rozdział 5) |
-| `/groups` · `/group new <nazwa> <kontakt\|nr>…` | grupy (zob. „Grupy” niżej) |
-| `/add <kontakt\|nr>` · `/kick <kto>` · `/rename <nazwa>` | admin, w oknie grupy: skład i nazwa |
-| `/clear` | wyczyść bieżące okno |
-| `/help` | ściągawka |
-| `/quit` · `/exit` | wyjdź (rozmówcy dostają informację o wyjściu) |
+| `/list` | contacts with presence (● online, ○ offline), numbered |
+| `/query <no>` · `/query <name>` · `/q …` | open a conversation or a group window |
+| `/win <no>` · `/w <no>` | switch window |
+| `/close` | close the current conversation |
+| `/who` | whether the other person is in the room right now |
+| `/me <action>` | an action („* ala macha”) |
+| `/react <emoji>` | react to the other person's last message |
+| `/verify` | safety number of this conversation |
+| `/invite` | your identity link |
+| `/send <path>` | send a file (section 8, "Files") |
+| `/get [id]` | save a received file (without an id — the last one in this window) |
+| `/knocks` · `/accept N` · `/ignore N` | knocks on your invites (section 5) |
+| `/groups` · `/group new <name> <contact\|no>…` | groups (see "Groups" below) |
+| `/add <contact\|no>` · `/kick <who>` · `/rename <name>` | admin, in a group window: membership and name |
+| `/clear` | clear the current window |
+| `/help` | cheat sheet |
+| `/quit` · `/exit` | quit (the people you talk to are told you left) |
 
-Linie wykonują się po kolei — wiadomość wpisana albo wklejona zaraz po `/query`
-poczeka, aż okno się otworzy.
+Lines run in order — a message typed or pasted right after `/query`
+waits until the window opens.
 
-### Grupy
+### Groups
 
 ```
-/group new zespol ewa 3          # grupa z kontaktami ewa i nr 3 z /list; Ty jesteś adminem
-/groups                          # Twoje grupy i ich okna
-/query zespol                    # okno grupy (albo /win N)
-@ewa sprawdzisz deploy?          # w oknie grupy piszesz do wszystkich; @Imię to wzmianka
-/who                             # członkowie: obecność, admin, spoza kontaktów, czekające zaproszenia
-/send raport.pdf                 # plik do całej grupy
+/group new zespol ewa 3          # a group with contacts ewa and no. 3 from /list; you are the admin
+/groups                          # your groups and their windows
+/query zespol                    # the group window (or /win N)
+@ewa sprawdzisz deploy?          # in a group window you write to everyone; @Name is a mention
+/who                             # members: presence, admin, not in contacts, pending invites
+/send raport.pdf                 # a file to the whole group
 
-# admin, w oknie grupy:
-/add 4                           # dodaj kontakt nr 4 z /list (albo po nazwie)
-/kick ewa                        # usuń członka (kontakt albo nazwa z /who)
-/rename ops                      # zmień nazwę grupy
+# admin, in the group window:
+/add 4                           # add contact no. 4 from /list (or by name)
+/kick ewa                        # remove a member (contact or a name from /who)
+/rename ops                      # rename the group
 ```
 
-- Zaproszenie do grupy przychodzi samo: w statusie pojawia się „dołączono do grupy …”
-  i grupa dostaje swoje okno. Twój klucz do grupy trafia wtedy do pozostałych członków.
-- **Wzmianka** (`@Imię`) jest widoczna u adresata jako wzmianka — na pasku stanu na
-  fioletowo, mocniej niż zwykła aktywność. Każdy widzi przy tym nazwę, jaką sam nadał
-  tej osobie.
-- **Wszyscy członkowie muszą mieć się nawzajem w kontaktach.** Klucze grupy krążą
-  rozmowami 1:1, więc z kimś spoza kontaktów nie zobaczycie nawzajem swoich wiadomości —
-  klient mówi to w oknie grupy i w `/who`.
-- Zaproszenie dla kogoś offline czeka i wychodzi, gdy się pojawi, także po restarcie.
-- Grupy są zapisane zaszyfrowane, w tym samym formacie co w aplikacji — przenoszą się
-  razem z profilem.
-- `/close` w oknie grupy zamyka tylko okno; dalej jesteś w grupie.
-- **Zmiana składu to nowa epoka.** `/add` i `/kick` dają grupie nowe klucze i nowy
-  temat, a nowe klucze dostaje tylko nowy skład. Usunięta osoba nie przeczyta niczego,
-  co pada od tej chwili (wcześniejszych wiadomości to nie cofa). `/rename` nie zmienia
-  kluczy. Skład i nazwę zmienia tylko admin, czyli twórca grupy.
-- Do grupy można pisać ze skryptów: `onchato-cli send <grupa> "tekst"` (rozdział 8).
+- A group invite arrives by itself: „dołączono do grupy …” ("joined group …") appears in the status window
+  and the group gets its own window. Your group key then goes to the other members.
+- A **mention** (`@Name`) shows up for the recipient as a mention — in purple on the status bar,
+  stronger than ordinary activity. Everyone sees the name they themselves gave
+  that person.
+- **All members must have each other in their contacts.** Group keys travel over
+  1:1 conversations, so with someone outside your contacts you will not see each other's messages —
+  the client says so in the group window and in `/who`.
+- An invite for someone offline waits and goes out when they appear, even after a restart.
+- Groups are stored encrypted, in the same format as in the app — they move
+  with the profile.
+- `/close` in a group window closes only the window; you are still in the group.
+- **A membership change is a new epoch.** `/add` and `/kick` give the group new keys and a new
+  topic, and only the new membership gets the new keys. A removed person cannot read anything
+  said from that moment on (it does not undo earlier messages). `/rename` does not change
+  the keys. Only the admin, i.e. the group's creator, changes membership and name.
+- Scripts can write to a group: `onchato-cli send <group> "text"` (section 8).
 
 ---
 
-## 8. Skrypty i demon
+## 8. Scripts and the daemon
 
-Do automatów, monitoringu i powiadomień. Bot to zwykła tożsamość — najlepiej osobny
-profil (np. `ops-bot`) — którą admini mają w kontaktach i weryfikują numerem
-bezpieczeństwa jak każdego.
+For automation, monitoring and notifications. A bot is an ordinary identity — ideally a separate
+profile (e.g. `ops-bot`) — that admins keep in their contacts and verify with the safety
+number like anyone else.
 
-### Wysyłanie
+### Sending
 
 ```sh
-onchato-cli send ewa "backup gotowy"                 # 0 = doręczono, 3 = nie doręczono w czasie
-echo "dysk 92% na db1" | onchato-cli send ewa -      # tekst ze standardowego wejścia
-onchato-cli send ewa "deploy OK" --wait 60 --json    # dłużej czekaj, wynik jako JSON
+onchato-cli send ewa "backup gotowy"                 # 0 = delivered, 3 = not delivered in time
+echo "dysk 92% na db1" | onchato-cli send ewa -      # text from standard input
+onchato-cli send ewa "deploy OK" --wait 60 --json    # wait longer, result as JSON
 ```
 
-`send` czeka na **potwierdzenie od klienta odbiorcy** (domyślnie 20 s, `--wait`).
-Kod wyjścia `3` znaczy: odbiorca nie potwierdził w tym czasie — zwykle jest offline.
-Co dalej z wiadomością, zależy od tego, czy działa demon:
+`send` waits for **a confirmation from the recipient's client** (20 s by default, `--wait`).
+Exit code `3` means: the recipient did not confirm in that time — usually they are offline.
+What happens to the message next depends on whether the daemon is running:
 
-| | demon działa | demonu nie ma |
+| | daemon running | no daemon |
 |---|---|---|
-| jak | `send` oddaje wiadomość demonowi przez gniazdo i od razu wraca | `send` otwiera własną krótką sesję |
-| odbiorca online | doręczona w ok. sekundę | doręczona po zestawieniu sesji (kilka sekund) |
-| odbiorca offline | **czeka w kolejce demona** (na dysku, przeżywa restart) i wychodzi sama, gdy odbiorca wróci | **przepada** (komunikat o tym na stderr) |
+| how | `send` hands the message to the daemon over the socket and returns at once | `send` opens its own short session |
+| recipient online | delivered in about a second | delivered once the session is up (a few seconds) |
+| recipient offline | **waits in the daemon's queue** (on disk, survives a restart) and goes out by itself when the recipient is back | **is lost** (a notice says so on stderr) |
 
-W **kliencie rozmów** (`onchato-cli chat`) wiadomość do kogoś, kto wyszedł, od razu dostaje
-„nie doręczono … wyślę sama, gdy wróci”: klient trzyma ją w pamięci i wysyła, gdy
-rozmówca wróci, a wtedy pisze „wiadomość … dotarła jednak do ewa (po 2 min)”. Ta
-pamięć żyje tylko do zamknięcia klienta. **Trwałą kolejkę ma wyłącznie demon** — to
-świadomy podział: czy wiadomości mają czekać na dysku, decyduje admin, uruchamiając
-demona (wygoda kosztem tego, że treść leży zaszyfrowana u nadawcy), a nie klient
-rozmów za plecami użytkownika.
+In the **chat client** (`onchato-cli chat`), a message to someone who has left immediately gets
+„nie doręczono … wyślę sama, gdy wróci” ("not delivered … will send it myself when they're back"): the client keeps it in memory and sends it when
+the person returns, and then prints „wiadomość … dotarła jednak do ewa (po 2 min)” ("message … reached ewa after all (after 2 min)"). That
+memory lives only until the client is closed. **Only the daemon has a persistent queue** — a
+deliberate split: whether messages wait on disk is decided by the admin by running
+the daemon (convenience at the cost of the content sitting encrypted at the sender), not by the chat
+client behind the user's back.
 
-Wynik `--json`: `{"ok":true,"status":"delivered","id":"…","ms":412,"to":"ewa","via":"daemon"}`
-(`status` = `delivered` albo `queued`, `via` = `daemon` albo `direct`).
+`--json` result: `{"ok":true,"status":"delivered","id":"…","ms":412,"to":"ewa","via":"daemon"}`
+(`status` = `delivered` or `queued`, `via` = `daemon` or `direct`).
 
-**Do grupy** — nazwa grupy zamiast kontaktu: `onchato-cli send zespol "deploy OK"`. Grupa
-nie potwierdza doręczenia, więc wynik to `status: "sent"` i kod `0`, bez kolejki: co
-wysłane, idzie od razu do członków, którzy są w sieci. `--key` i `--ttl` grupy nie
-dotyczą.
+**To a group** — the group name instead of a contact: `onchato-cli send zespol "deploy OK"`. A group
+does not confirm delivery, so the result is `status: "sent"` and code `0`, with no queue: what is
+sent goes straight to the members who are on the network. `--key` and `--ttl` do not apply
+to groups.
 
-### Odbieranie
+### Receiving
 
 ```sh
 onchato-cli listen                       # 22:41 <ewa> restart nginx?
 onchato-cli listen --json | jq -c 'select(.t=="msg")'
 ```
 
-Zdarzenia JSON (jedna linia = jedno zdarzenie):
+JSON events (one line = one event):
 
 ```json
 {"t":"msg","from":"ewa","pub":"…","text":"restart nginx?","ts":1791400121000,"id":"…"}
@@ -420,25 +420,25 @@ Zdarzenia JSON (jedna linia = jedno zdarzenie):
 {"t":"link","state":"reconnecting"}
 ```
 
-Z działającym demonem `listen` podłącza się do niego; bez demona otwiera własną sesję.
+With the daemon running, `listen` attaches to it; without the daemon it opens its own session.
 
-### Demon
+### Daemon
 
 ```sh
-onchato-cli daemon --profile ops-bot     # na pierwszym planie; zatrzymanie: Ctrl+C / SIGTERM
+onchato-cli daemon --profile ops-bot     # in the foreground; stop with Ctrl+C / SIGTERM
 ```
 
-Demon trzyma połączenie, obecność kontaktów i otwarte rozmowy, i odpowiada na
-lokalnym gnieździe `$XDG_RUNTIME_DIR/onchato.sock` (prawa `0600` — gniazdo jest całym
-jego uwierzytelnieniem, więc nikt poza Tobą nie może z niego korzystać). Drugiego demona
-na tym samym gnieździe nie da się uruchomić.
+The daemon keeps the connection, contact presence and open conversations, and answers on the
+local socket `$XDG_RUNTIME_DIR/onchato.sock` (mode `0600` — the socket is its entire
+authentication, so nobody but you can use it). A second daemon
+cannot be started on the same socket.
 
-Demon słucha też Twoich zaproszeń i puka do cudzych (rozdział 5). Kontakty dodane
-przez `onchato-cli add` albo przyjęte przez `onchato-cli accept` działają od razu —
-demona nie trzeba restartować.
+The daemon also listens on your invites and knocks on other people's (section 5). Contacts added
+with `onchato-cli add` or accepted with `onchato-cli accept` work at once —
+no need to restart the daemon.
 
-Przykładowa jednostka systemd (użytkownika), z hasłem przez `LoadCredential` — nie
-w pliku jednostki ani w zmiennej środowiskowej:
+An example systemd (user) unit, with the password passed through `LoadCredential` — not
+in the unit file and not in an environment variable:
 
 ```ini
 # ~/.config/systemd/user/onchato.service
@@ -457,210 +457,210 @@ WantedBy=default.target
 ```
 
 ```sh
-install -m 600 /dev/stdin ~/.config/onchato/ops-bot.pass <<< 'hasło profilu ops-bot'
+install -m 600 /dev/stdin ~/.config/onchato/ops-bot.pass <<< 'ops-bot profile password'
 systemctl --user daemon-reload
 systemctl --user enable --now onchato
-loginctl enable-linger $USER          # żeby demon działał także bez zalogowanej sesji
+loginctl enable-linger $USER          # so the daemon runs without a logged-in session too
 ```
 
-Przykład — powiadomienie o logowaniu przez SSH:
+Example — a notification on SSH login:
 
 ```sh
 # /etc/pam.d/sshd
 session optional pam_exec.so /usr/local/bin/onchato-login-notify
 
-# /usr/local/bin/onchato-login-notify   (uruchamiany jako root - wskaż gniazdo demona bota)
+# /usr/local/bin/onchato-login-notify   (runs as root - point it at the bot daemon's socket)
 #!/bin/sh
 [ "$PAM_TYPE" = open_session ] || exit 0
-# root nie ma ~/.local/bin w PATH - pełna ścieżka; root łączy się z gniazdem 0600 innego użytkownika
+# root has no ~/.local/bin in PATH - full path; root connects to another user's 0600 socket
 ONCHATO_SOCKET=/run/user/1000/onchato.sock /home/bot/.local/bin/onchato-cli send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
-# albo, gdy demon jest w kontenerze (rozdział 1, „Docker”):
+# or, when the daemon is in a container (section 1, "Docker"):
 # docker exec onchato onchato-cli send admin "login: $PAM_USER z $PAM_RHOST na $(hostname)"
 ```
 
-### Pliki
+### Files
 
-Plik jest szyfrowany na Twoim komputerze nowym kluczem (AES-GCM, porcjami),
-zaszyfrowana treść trafia do magazynu, a klucz, nazwa i typ idą tylko w rozmowie.
-Magazyn widzi wyłącznie zaszyfrowane bajty i ich rozmiar — i trzyma je **ok. 5 minut**.
-Limit wielkości to 128 MB — to limit magazynu. Transfer bezpośredni (do 512 MB,
-prosto do drugiej przeglądarki po WebRTC) jest tylko w aplikacji; terminal go nie ma.
+A file is encrypted on your computer with a fresh key (AES-GCM, in chunks),
+the encrypted content goes to the store, and the key, name and type travel only in the conversation.
+The store sees only encrypted bytes and their size — and keeps them for **about 5 minutes**.
+The size limit is 128 MB — that is the store's limit. Direct transfer (up to 512 MB,
+straight to the other browser over WebRTC) exists only in the app; the terminal does not have it.
 
-W kliencie:
+In the client:
 
 ```
 /send ~/raporty/q3.pdf
 22:41 <ewa> 📎 logi.tar.gz (2.4 MB) - /get rMS5
-/get rMS5            # albo samo /get: ostatni plik w tym oknie
+/get rMS5            # or just /get: the last file in this window
 22:41 -!- zapisano /home/ala/Pobrane/logi.tar.gz
 ```
 
-W skryptach:
+In scripts:
 
 ```sh
-onchato-cli send-file ewa ./backup.log           # 0 = doręczono, 3 = nie potwierdzono w czasie
-onchato-cli listen --json --save-files ~/przyjete   # każdy przychodzący plik zapisywany od razu
-onchato-cli get rMS5 --dir ~/przyjete            # zapis pliku, który odebrał demon
+onchato-cli send-file ewa ./backup.log           # 0 = delivered, 3 = not confirmed in time
+onchato-cli listen --json --save-files ~/przyjete   # every incoming file saved at once
+onchato-cli get rMS5 --dir ~/przyjete            # save a file the daemon received
 ```
 
-- Pliki zapisują się w `$ONCHATO_DOWNLOADS`, a bez niej w `~/Pobrane` albo `~/Downloads`.
-- Zapis jest bezpieczny: z nazwy usuwane są katalogi i znaki sterujące (nic nie trafi
-  poza katalog docelowy), istniejący plik **nigdy nie jest nadpisywany** (powstaje
-  `nazwa (2).ext`), a nowy ma prawa `0600`.
-- Pliki **nie czekają w kolejce** demona — magazyn i tak usuwa je po ok. 5 minutach.
-  Do kogoś offline `send-file` kończy się kodem `3`.
-- Zdarzenie `file` w `listen --json` nie zawiera klucza — klucz zna tylko proces,
-  który plik odebrał (demon albo sam `listen`).
+- Files are saved to `$ONCHATO_DOWNLOADS`, or without it to `~/Pobrane` or `~/Downloads`.
+- Saving is safe: directories and control characters are stripped from the name (nothing lands
+  outside the target directory), an existing file is **never overwritten** (you get
+  `name (2).ext`), and the new file has mode `0600`.
+- Files **do not wait in the daemon's queue** — the store deletes them after about 5 minutes anyway.
+  To someone offline, `send-file` ends with code `3`.
+- The `file` event in `listen --json` does not contain the key — only the process
+  that received the file knows the key (the daemon or `listen` itself).
 
-### Kolejka powiadomień
+### Notification queue
 
-Sieć niczego nie przechowuje, więc powiadomienie dla kogoś, kto jest offline, czeka
-**u bota** — w kolejce demona, zaszyfrowanej na dysku (przeżywa restart demona
-i serwera). Wychodzi samo, gdy odbiorca pojawi się online.
+The network stores nothing, so a notification for someone who is offline waits
+**at the bot** — in the daemon's queue, encrypted on disk (it survives a restart of the daemon
+and of the server). It goes out by itself when the recipient comes online.
 
 ```sh
 onchato-cli send admin "login: $PAM_USER z $PAM_RHOST" --key ssh --ttl 24h
-onchato-cli queue                        # co czeka i na kogo (--json do skryptów)
+onchato-cli queue                        # what is waiting and for whom (--json for scripts)
 ```
 
-| zasada | jak działa |
+| rule | how it works |
 |---|---|
-| **kolejność** | najstarsze najpierw, osobno dla każdego odbiorcy |
-| **czas ważności** `--ttl` | domyślnie 24 h (`30m`, `24h`, `7d`); przeterminowane powiadomienie **nie jest wysyłane z opóźnieniem** — wypada, a demon zapisuje to w dzienniku |
-| **łączenie** `--key` | czekające powiadomienie z tym samym kluczem zostaje zastąpione najnowszym, z dopiskiem „(+N wcześniejszych)” |
-| **okno klucza** | gdy odbiorca jest online, z jednym kluczem wychodzi najwyżej jedno powiadomienie na minutę; kolejne czekają i łączą się w następne — atak na SSH nie zamieni się w 500 powiadomień |
-| **limit** | do 100 czekających na odbiorcę; po przekroczeniu wypada najstarsze (z wpisem w dzienniku) |
+| **order** | oldest first, separately for each recipient |
+| **lifetime** `--ttl` | 24 h by default (`30m`, `24h`, `7d`); an expired notification **is not sent late** — it is dropped, and the daemon records that in its log |
+| **merging** `--key` | a waiting notification with the same key is replaced by the newest one, with the suffix „(+N wcześniejszych)” ("(+N earlier)") |
+| **key window** | while the recipient is online, at most one notification per key goes out per minute; the rest wait and merge into the next — an SSH attack will not turn into 500 notifications |
+| **limit** | up to 100 waiting per recipient; beyond that the oldest is dropped (with a log entry) |
 
-`send` przez demona zwraca `status`: `delivered` (doręczone, kod 0), `queued`
-(czeka w kolejce, kod 3) albo `merged` (połączone z czekającym, kod 3). Powiadomienie
-z kluczem w trakcie jego okna też ma status `queued`, nawet gdy odbiorca jest online.
+`send` through the daemon returns `status`: `delivered` (delivered, code 0), `queued`
+(waiting in the queue, code 3) or `merged` (merged with a waiting one, code 3). A notification
+with a key sent during its window also has status `queued`, even when the recipient is online.
 
-Bez demona nie ma kolejki: `--key` i `--ttl` nic wtedy nie zmieniają.
+Without the daemon there is no queue: `--key` and `--ttl` then change nothing.
 
 ---
 
-## 9. Spis komend
+## 9. Command reference
 
-| komenda | opis |
+| command | description |
 |---|---|
-| `onchato-cli profile new <nazwa>` | nowy profil programowy |
-| `onchato-cli profile list` | profile na tym komputerze |
-| `onchato-cli profile import <plik.ocmig>` | profil przeniesiony z aplikacji |
-| `onchato-cli profile export <nazwa> <plik.ocmig>` | profil do przeniesienia do aplikacji |
-| `onchato-cli hem new <nazwa> --hem <url>` | nowa tożsamość na HEM (z potwierdzeniem) |
-| `onchato-cli whoami` | tożsamość, klucz, odcisk |
-| `onchato-cli pubkey` | sam klucz publiczny (do skryptów) |
-| `onchato-cli contacts` | kontakty z odciskami |
-| `onchato-cli add <link\|kod> [--name n] [--yes] [--note tekst]` | kontakt z linku; przy zaproszeniu ze skrzynką — puka (`--note` dołącza krótką notatkę) |
-| `onchato-cli add <nazwa> <kluczB64>` | kontakt z surowego klucza |
-| `onchato-cli invite [--qr]` | Twój link tożsamości (i kod QR) |
-| `onchato-cli invites` · `invites new [etykieta] [--expires 24h] [--qr]` · `invites qr <nr>` · `invites revoke <nr>` | zaproszenia ze skrzynką |
-| `onchato-cli verify <nazwa> [--qr] [numer]` | numer bezpieczeństwa; porównanie z podanym |
-| `onchato-cli chat [<nazwa>] [--debug]` | klient rozmów |
-| `onchato-cli send <kontakt\|grupa> <tekst \| -> [--wait s] [--ttl 24h] [--key k] [--json]` | jedna wiadomość (rozdział 8) |
-| `onchato-cli queue [--json]` | co czeka w kolejce demona |
-| `onchato-cli send-file <kontakt> <plik> [--wait s] [--json]` | plik (magazyn trzyma go ok. 5 min) |
-| `onchato-cli listen [--json] [--save-files <katalog>]` | z `--save-files` zapisuje przychodzące pliki od razu |
-| `onchato-cli get <id> [--dir <katalog>]` | zapis pliku odebranego przez demona |
-| `onchato-cli daemon` | demon z gniazdem lokalnym |
-| `onchato-cli knocks` · `accept <nr>` · `ignore <nr>` | pukanie do Twoich zaproszeń, przez demona |
+| `onchato-cli profile new <name>` | new software profile |
+| `onchato-cli profile list` | profiles on this computer |
+| `onchato-cli profile import <file.ocmig>` | a profile moved from the app |
+| `onchato-cli profile export <name> <file.ocmig>` | a profile to move to the app |
+| `onchato-cli hem new <name> --hem <url>` | new identity on the HEM (with confirmation) |
+| `onchato-cli whoami` | identity, key, fingerprint |
+| `onchato-cli pubkey` | the bare public key (for scripts) |
+| `onchato-cli contacts` | contacts with fingerprints |
+| `onchato-cli add <link\|code> [--name n] [--yes] [--note text]` | a contact from a link; for a mailbox invite — knocks (`--note` attaches a short note) |
+| `onchato-cli add <name> <keyB64>` | a contact from a raw key |
+| `onchato-cli invite [--qr]` | your identity link (and QR code) |
+| `onchato-cli invites` · `invites new [label] [--expires 24h] [--qr]` · `invites qr <no>` · `invites revoke <no>` | mailbox invites |
+| `onchato-cli verify <name> [--qr] [number]` | safety number; compare with the one given |
+| `onchato-cli chat [<name>] [--debug]` | chat client |
+| `onchato-cli send <contact\|group> <text \| -> [--wait s] [--ttl 24h] [--key k] [--json]` | a single message (section 8) |
+| `onchato-cli queue [--json]` | what is waiting in the daemon's queue |
+| `onchato-cli send-file <contact> <file> [--wait s] [--json]` | a file (the store keeps it about 5 min) |
+| `onchato-cli listen [--json] [--save-files <dir>]` | with `--save-files` saves incoming files at once |
+| `onchato-cli get <id> [--dir <dir>]` | save a file received by the daemon |
+| `onchato-cli daemon` | daemon with a local socket |
+| `onchato-cli knocks` · `accept <no>` · `ignore <no>` | knocks on your invites, through the daemon |
 
-### Kody wyjścia
+### Exit codes
 
-| kod | znaczenie |
+| code | meaning |
 |---|---|
-| `0` | w porządku |
-| `1` | błąd (komunikat na stderr: złe hasło, brak kontaktu, brak terminala…) |
-| `3` | `send`: nie doręczono w czasie — czeka w kolejce demona (albo połączone z czekającym); bez demona przepadła (rozdział 8) |
-| `4` | `verify`: numery się **nie** zgadzają |
-| `130` | przerwane Ctrl+C przy pytaniu o hasło |
+| `0` | OK |
+| `1` | error (message on stderr: wrong password, no such contact, no terminal…) |
+| `3` | `send`: not delivered in time — waiting in the daemon's queue (or merged with a waiting one); without the daemon it is lost (section 8) |
+| `4` | `verify`: the numbers do **not** match |
+| `130` | interrupted with Ctrl+C at the password prompt |
 
 ---
 
-## 10. Opcje i zmienne środowiskowe
+## 10. Options and environment variables
 
-| opcja / zmienna | działanie |
+| option / variable | effect |
 |---|---|
-| `--profile <nazwa>` | który profil programowy |
-| `--hem <url>` | tożsamość z HEM zamiast profilu |
-| `--handle <nazwa>` | która tożsamość na HEM (bez pytania) |
-| `--password <hasło>` / `ONCHATO_PASSWORD` | hasło bez pytania — uwaga: widoczne w historii powłoki i liście procesów; w skryptach lepiej zmienna albo prompt |
-| `--password-file <plik>` | hasło z pierwszej linii pliku (`0600`); pod systemd zamiast tego `LoadCredential=onchato-password:…` |
-| `--yes` | bez pytania t/N (skrypty) |
-| `--wait <s>`, `--json` | `send`: jak długo czekać na potwierdzenie; wynik jako JSON |
-| `--ttl <czas>`, `--key <klucz>` | `send` przez demona: czas ważności w kolejce; klucz łączenia powtarzalnych zdarzeń |
-| `ONCHATO_SOCKET` | gniazdo demona (domyślnie `$XDG_RUNTIME_DIR/onchato.sock`) |
-| `ONCHATO_DOWNLOADS` | gdzie zapisywać pliki (domyślnie `~/Pobrane` albo `~/Downloads`) |
-| `--debug` | w kliencie: dziennik silnika w oknie statusu |
-| `--libp2p` | w kliencie: pełny transport GossipSub zamiast lekkiego (diagnostyka) |
-| `--network <id>` | sieć, dla której liczone są tematy (`SPEC.md` §5.1); domyślnie `main`, czyli sieć operatora. Własna sieć = własne węzły i własny identyfikator; klienci na różnych id nigdy się nie spotkają, nawet na jednym węźle |
-| `--core ts` | handshake EH‑2 i ratchet liczone w silniku TypeScript zamiast w module `core-rs` (Rust → WASM, `impl/core-wasm/core.wasm`), który jest domyślny od 0.7.21. Te same ramki na drucie, więc druga strona nie widzi różnicy |
-| `ONCHATO_HOME` | katalog danych (domyślnie `$XDG_CONFIG_HOME/onchato`, czyli `~/.config/onchato`) |
+| `--profile <name>` | which software profile |
+| `--hem <url>` | identity from a HEM instead of a profile |
+| `--handle <name>` | which identity on the HEM (without asking) |
+| `--password <password>` / `ONCHATO_PASSWORD` | password without a prompt — note: visible in the shell history and the process list; in scripts prefer the variable or the prompt |
+| `--password-file <file>` | password from the file's first line (`0600`); under systemd use `LoadCredential=onchato-password:…` instead |
+| `--yes` | no t/N question (scripts) |
+| `--wait <s>`, `--json` | `send`: how long to wait for the confirmation; result as JSON |
+| `--ttl <time>`, `--key <key>` | `send` through the daemon: lifetime in the queue; merge key for repeated events |
+| `ONCHATO_SOCKET` | daemon socket (default `$XDG_RUNTIME_DIR/onchato.sock`) |
+| `ONCHATO_DOWNLOADS` | where to save files (default `~/Pobrane` or `~/Downloads`) |
+| `--debug` | in the client: engine log in the status window |
+| `--libp2p` | in the client: full GossipSub transport instead of the light one (diagnostics) |
+| `--network <id>` | the network the topics are computed for (`SPEC.md` §5.1); default `main`, i.e. the operator's network. Your own network = your own nodes and your own identifier; clients on different ids never meet, even on the same node |
+| `--core ts` | the EH‑2 handshake and the ratchet computed in the TypeScript engine instead of the `core-rs` module (Rust → WASM, `impl/core-wasm/core.wasm`), which is the default since 0.7.21. The same frames on the wire, so the other side sees no difference |
+| `ONCHATO_HOME` | data directory (default `$XDG_CONFIG_HOME/onchato`, i.e. `~/.config/onchato`) |
 
-Hasło bez terminala (potok): `onchato` czyta pierwszą linię ze standardowego wejścia.
+Password without a terminal (a pipe): `onchato` reads the first line from standard input.
 
 ---
 
-## 11. Gdzie są dane i jak są chronione
+## 11. Where the data lives and how it is protected
 
-Wszystko jest w `~/.config/onchato/store.json` (katalog `0700`, plik `0600`,
-zapisywany atomowo). Klucze i formaty są takie same jak w aplikacji, dlatego
-profil przenosi się w obie strony bez konwersji.
+Everything is in `~/.config/onchato/store.json` (directory `0700`, file `0600`,
+written atomically). Keys and formats are the same as in the app, so
+a profile moves both ways without conversion.
 
-| co | jak chronione |
+| what | how it is protected |
 |---|---|
-| tożsamość (profil programowy) | zapieczętowana Twoim hasłem (PBKDF2 1 000 000 rund + AES-GCM); klucza prywatnego nie ma nigdzie jawnie |
-| kontakty | zapieczętowane (AES-GCM kluczem wyprowadzonym z tożsamości) — z pliku nie da się wyczytać, kogo znasz, a podmiana kontaktu jest wykrywana: książki, która się nie otwiera, `onchato-cli` nie używa i nie nadpisuje |
-| nazwy wpisów w `store.json` | skróty HMAC kluczem tożsamości — nazwa nie zdradza ani KID, ani kontaktu, ani grupy |
-| zaproszenia, pukania, lista ignorowanych | zaszyfrowane kluczem wyprowadzonym z tożsamości |
-| historia rozmów | **nie ma jej** — rozmowa istnieje tylko na ekranach uczestników |
+| identity (software profile) | sealed with your password (PBKDF2 1 000 000 rounds + AES-GCM); the private key is nowhere in the clear |
+| contacts | sealed (AES-GCM with a key derived from the identity) — the file does not reveal whom you know, and a swapped contact is detected: `onchato-cli` neither uses nor overwrites a book that does not open |
+| entry names in `store.json` | HMAC digests under the identity key — a name reveals neither a KID, nor a contact, nor a group |
+| invites, knocks, the ignore list | encrypted with a key derived from the identity |
+| conversation history | **there is none** — a conversation exists only on the participants' screens |
 
-Na serwerze lepszy jest HEM: klucz nie opuszcza urządzenia, a kradzież pliku nic nie daje.
-
----
-
-## 12. Ograniczenia, które warto znać
-
-- **Rozmowa wymaga obecności.** onchato nie przechowuje wiadomości w sieci. Wiadomość
-  dochodzi, gdy rozmówca jest online; jeśli nie jest, czeka u Ciebie, dopóki klient
-  działa. Po zamknięciu klienta nic nie czeka.
-- **Jedna tożsamość, jedna sesja.** Ta sama tożsamość otwarta jednocześnie w aplikacji
-  i w terminalu (albo w dwóch terminalach) zamyka obie sesje. Do rozmowy z samym sobą
-  użyj dwóch różnych tożsamości.
-- **Zaproszenie słucha tylko, gdy klient albo demon działa.** Bez uruchomionego
-  `onchato-cli chat` albo `onchato-cli daemon` pukanie nie ma dokąd dojść.
-- **Pliki żyją ok. 5 minut** w magazynie — kto ich nie pobierze w tym czasie, prosi
-  o ponowne wysłanie.
-- **Jeszcze nie ma**: przewijania historii okna (PgUp), wskaźnika pisania, połączenia
-  bezpośredniego (WebRTC) — w terminalu wszystko idzie przez węzły. Kolejność w [CLI-PLAN.md](CLI-PLAN.md).
+On a server a HEM is better: the key never leaves the device, and stealing the file gains nothing.
 
 ---
 
-## 13. Rozwiązywanie problemów
+## 12. Limitations worth knowing
 
-**Alt+cyfra nie przełącza okien.** Terminal wysyła Alt inaczej (np. jako znak z
-akcentem). Ustaw w terminalu „Meta wysyła Escape” (GNOME Terminal, Konsole, iTerm2:
-„Option as Meta”) albo używaj `/win N`.
+- **A conversation requires presence.** onchato does not store messages in the network. A message
+  arrives when the other person is online; if they are not, it waits on your side while the client
+  runs. Once the client is closed, nothing waits.
+- **One identity, one session.** The same identity open at the same time in the app
+  and in the terminal (or in two terminals) closes both sessions. To talk to yourself,
+  use two different identities.
+- **An invite listens only while the client or the daemon is running.** Without
+  `onchato-cli chat` or `onchato-cli daemon` running, a knock has nowhere to go.
+- **Files live about 5 minutes** in the store — whoever does not download them in that time has to ask
+  for them to be sent again.
+- **Not there yet**: scrolling back through window history (PgUp), a typing indicator, a direct
+  connection (WebRTC) — in the terminal everything goes through the nodes. The order is in [CLI-PLAN.md](CLI-PLAN.md).
 
-**Pukanie do zaproszenia nie przychodzi.**
-1. Czy `onchato-cli chat` działa i w statusie widać „słucham N zaproszeń”? Albo demon:
-   ta sama linia jest w jego dzienniku po starcie.
-2. Czy ta osoba nie ma Cię już w kontaktach? Aplikacja wtedy nie puka — pokazuje
-   „Ten sam klucz, który masz zapisany”. Pukanie od istniejącego kontaktu klient
-   zgłasza w statusie jedną linią.
-3. Aplikacja ponawia pukanie co 90 s — daj jej chwilę.
+---
 
-**„złe hasło” przy pewnym haśle.** Hasło jest per profil. Sprawdź `onchato-cli profile list`
-i `--profile`.
+## 13. Troubleshooting
 
-**„książka kontaktów nie przeszła weryfikacji”.** Ktoś (albo coś) zmienił
-`store.json` poza `onchato-cli`. Nic nie jest nadpisywane — to dowód. Przywróć
-plik z kopii. Jeśli masz eksport profilu (`.ocmig`), możesz też odłożyć
-`store.json` na bok i zaimportować profil od nowa (`onchato-cli profile import`).
-Nazwy wpisów są skrótami HMAC, więc pojedynczego wpisu książki nie da się
-wskazać po nazwie.
+**Alt+digit does not switch windows.** Your terminal sends Alt differently (e.g. as an accented
+character). Set "Meta sends Escape" in the terminal (GNOME Terminal, Konsole; iTerm2:
+"Option as Meta") or use `/win N`.
 
-**Terminal został w dziwnym stanie** (np. po zabiciu procesu): wpisz `reset`.
+**Knocks on an invite do not arrive.**
+1. Is `onchato-cli chat` running, and does the status window show „słucham N zaproszeń” ("listening on N invites")? Or the daemon:
+   the same line is in its log after startup.
+2. Does that person already have you in their contacts? The app then does not knock — it shows
+   „Ten sam klucz, który masz zapisany” ("The same key you have saved"). A knock from an existing contact is reported by the client
+   in the status window as a single line.
+3. The app retries the knock every 90 s — give it a moment.
 
-**„ta tożsamość otworzyła się w drugim miejscu”.** Masz tę samą tożsamość otwartą
-w aplikacji albo w drugim terminalu — zamknij jedno z nich i uruchom ponownie.
+**„złe hasło” ("wrong password") with a password you are sure of.** The password is per profile. Check `onchato-cli profile list`
+and `--profile`.
+
+**„książka kontaktów nie przeszła weryfikacji” ("the contact book failed verification").** Someone (or something) changed
+`store.json` outside `onchato-cli`. Nothing is overwritten — it is evidence. Restore the
+file from a backup. If you have a profile export (`.ocmig`), you can also set
+`store.json` aside and import the profile again (`onchato-cli profile import`).
+Entry names are HMAC digests, so a single book entry cannot be
+identified by name.
+
+**The terminal is left in a strange state** (e.g. after the process was killed): type `reset`.
+
+**„ta tożsamość otworzyła się w drugim miejscu” ("this identity opened in another place").** You have the same identity open
+in the app or in a second terminal — close one of them and start again.

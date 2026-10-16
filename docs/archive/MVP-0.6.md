@@ -1,233 +1,233 @@
-# MVP — plan wydania 0.9 (ARCHIWUM)
+# MVP — release plan for 0.9 (ARCHIVE)
 
-> **Archiwum, stan z 2026-09-18 (0.6.3).** Większość punktów jest od dawna
-> nieaktualna: iOS się buduje, Linux ma kanał bezpośredni przez hosta, test
-> grupy pięciu osób zaliczony, Diagnostyka jest w Ustawieniach, książka
-> kontaktów jest zapieczętowana. Zostaje jako zapis planu, nie jako plan.
+> **Archive, state as of 2026-09-18 (0.6.3).** Most items have long been
+> out of date: iOS builds, Linux has a direct channel through the host, the
+> five-person group test has passed, Diagnostics is in Settings, the contact
+> book is sealed. It stays as a record of the plan, not as a plan.
 
-Co trzeba **zrobić**, co trzeba **przetestować** i co trzeba **podpisać**, żeby
-wypuścić onchato 0.9 na cztery cele: **web, desktop, Android, iOS**.
+What has to be **done**, what has to be **tested** and what has to be **signed** to
+ship onchato 0.9 on four targets: **web, desktop, Android, iOS**.
 
-Nazwa pliku: `MVP.md`, nie `MCP.md` — w tym repo `MCP` znaczyłoby co innego
-(Model Context Protocol), a to jest plan wydania.
+File name: `MVP.md`, not `MCP.md` — in this repo `MCP` would mean something else
+(Model Context Protocol), and this is a release plan.
 
-> Stan na 2026-09-18: **0.6.3 na produkcji**. `npm test` 567/567,
-> `browser-test` PASS (37 scenariuszy), CI zielone. Ścieżka wydania sprawdzona
-> wielokrotnie; **Windows jest podpisywany od 0.6.3** (Azure Artifact Signing,
-> certyfikat RKV — patrz §5), a web wdraża się sam timerem systemd po tagu.
+> State as of 2026-09-18: **0.6.3 in production**. `npm test` 567/567,
+> `browser-test` PASS (37 scenarios), CI green. The release path has been verified
+> many times; **Windows is signed since 0.6.3** (Azure Artifact Signing,
+> RKV certificate — see §5), and the web deploys itself via a systemd timer after a tag.
 >
-> Od 0.6.3 aplikacja jest w rękach osób spoza projektu, więc §6.1 przestaje być
-> listą dla autora i staje się **scenariuszem, który dostaje tester**.
+> Since 0.6.3 the app is in the hands of people outside the project, so §6.1 stops being
+> a list for the author and becomes **the script the tester gets**.
 
 ---
 
-## 1. Co 0.9 ma znaczyć
+## 1. What 0.9 is meant to mean
 
-**0.9 = pierwsza wersja, którą można dać obcej osobie bez instrukcji obsługi i
-bez asysty.** To jest jedyne kryterium, które trzyma resztę tego dokumentu:
+**0.9 = the first version you can give to a stranger without a user manual and
+without assistance.** This is the only criterion that holds the rest of this document together:
 
-- instaluje się z podpisanego pakietu na swojej platformie,
-- da się nią rozmawiać z drugą osobą **bez pomocy trzeciej**,
-- kiedy czegoś nie umie (WebRTC na desktopie, skaner QR na Linuksie), **mówi to
-  wprost** zamiast milczeć albo udawać,
-- utrata danych jest **odwracalna albo zapowiedziana** — nigdy cicha.
+- it installs from a signed package on its platform,
+- you can talk to a second person with it **without help from a third**,
+- when it cannot do something (WebRTC on desktop, the QR scanner on Linux), it **says so
+  plainly** instead of staying silent or pretending,
+- data loss is **reversible or announced** — never silent.
 
-Czego 0.9 **nie** musi mieć: wielourządzeniowości, historii po restarcie,
-rozmów głosowych na żywo, sklepów aplikacji (poza Play, jeśli zdążymy), OIDC.
+What 0.9 does **not** need: multi-device, history after restart,
+live voice calls, app stores (other than Play, if we make it), OIDC.
 
 ---
 
-## 2. Stan na dziś, uczciwie, per cel
+## 2. State today, honestly, per target
 
 | | web | desktop (Linux) | desktop (Win/macOS) | Android | iOS |
 |---|---|---|---|---|---|
-| buduje się | ✅ | ✅ | ✅ w Actions | ✅ w Actions | ❌ nie próbowane |
-| podpisany | n/d | ❌ (updater: minisign) | ✅ **Windows od 0.6.3** / macOS ❌ | ✅ **APK, klucz dev z sekretów** / `.aab` świadomie nie (Play App Signing) | ❌ |
-| 1:1 + grupy | ✅ | ✅ | ✅ Win (0.6.3) / ❓ macOS | ✅ | ❌ |
-| WebRTC direct | ✅ | ❌ **brak w WebKitGTK** | ❓ | ❓ (webview ma API, most `wry` niesprawdzony) | ❓ |
-| powiadomienia | ✅ | ✅ | ❓ | ✅ | ❓ |
-| zasobnik / tło | n/d | ⚠️ zależy od pulpitu | ❓ | ✅ **foreground service, potwierdzony na urządzeniu** | ❓ |
-| głosówki | ✅ | ✅ (winne było audio VM, nie kod) | ❓ | ❓ | ❓ |
-| skaner QR | ❌ (brak API) | ❌ | ✅ powinien | ✅ powinien | ✅ |
+| builds | ✅ | ✅ | ✅ in Actions | ✅ in Actions | ❌ not attempted |
+| signed | n/a | ❌ (updater: minisign) | ✅ **Windows since 0.6.3** / macOS ❌ | ✅ **APK, dev key from secrets** / `.aab` deliberately not (Play App Signing) | ❌ |
+| 1:1 + groups | ✅ | ✅ | ✅ Win (0.6.3) / ❓ macOS | ✅ | ❌ |
+| WebRTC direct | ✅ | ❌ **missing in WebKitGTK** | ❓ | ❓ (the webview has the API, the `wry` bridge unverified) | ❓ |
+| notifications | ✅ | ✅ | ❓ | ✅ | ❓ |
+| tray / background | n/a | ⚠️ depends on the desktop | ❓ | ✅ **foreground service, confirmed on a device** | ❓ |
+| voice notes | ✅ | ✅ (the VM audio was to blame, not the code) | ❓ | ❓ | ❓ |
+| QR scanner | ❌ (no API) | ❌ | ✅ should | ✅ should | ✅ |
 
-❓ = **zbudowane, ale nikt tego nie uruchomił**. Dowody są z czterech celów (web,
-desktop-Linux, **Windows od 2026-09-17** i Android); **macOS i iOS wciąż bez ani
-jednego uruchomienia**.
-
----
-
-## 3. Blokery — bez tego nie ma 0.9
-
-### B1. ~~Nikt nie uruchomił Windows~~ — ✅ ZROBIONE; **macOS wciąż nie**
-2026-09-17: podpisany `.exe` **ARM64** z wydania 0.6.3 zainstalowany na
-prawdziwej maszynie i rozmowa działa. SmartScreen ostrzegł o niepewnym źródle —
-to **reputacja, nie podpis**, i buduje się miesiącami na tożsamości wydawcy
-(reputacji się nie nabija; decyzja zapisana 2026-09-18).
-(Android wypadł z tej listy 2026-08: podpisany APK z Actions zainstalowany,
-ścieżka §6.1 przechodzona na urządzeniu.)
-
-**Zostaje macOS**: artefakt `.dmg` powstaje w każdym wydaniu i nikt go nigdy nie
-uruchomił. Niepodpisany, więc instalacja przez „Otwórz mimo to".
-
-### B2. ~~Android nie przeżywa uśpienia~~ — ✅ ZROBIONE
-Foreground service (`OnchatoService.kt`, typ `specialUse`, wstrzykiwany przez
-`patch.mjs`); **doręczanie w tle potwierdzone na urządzeniu**. Do każdego
-wydania zostaje test regresyjny z §6.2: ekran wygaszony 10 minut, wiadomość
-dochodzi.
-
-### B3. ~~Migracja profilu software~~ — ✅ ZROBIONE
-`lib/migrate.ts` + import na karcie logowania, dokładnie w uzgodnionym zakresie:
-eksport **całości** profilu w jednym zapieczętowanym pliku (nazwa W ŚRODKU
-pieczęci), hasło = hasło profilu, kolizja nazwy = głośna odmowa, słownictwo
-„przenosisz". Testy `test/migrate.test.ts` + scenariusz w `browser-test`.
-
-### B4. ~~Trzeci węzeł rendezvous~~ — ✅ ZROBIONE
-**Sprostowanie:** `bs2` jest zdrowy — przeszedł cały scenariusz grupowy
-`browser-test` puszczony wyłącznie na nim. Wcześniejsze „bs2 leży" było **moim
-błędem obsługi**: `RELAY_NODE` bierze pełny multiaddr, a ja podałem nazwę hosta,
-która wylądowała w liście węzłów jako nieprawidłowy adres.
-
-~~Zostaje realne ryzyko: dwa węzły to dwa punkty awarii, a nie zapas.~~
-**✅ ZROBIONE 2026-09-03**: `bs3` stoi (DigitalOcean AMS3, wdrożony wg
-`relay/DEPLOY.md`) i jest w `infra/nodes.json`. Trójkąt mesh domknięty —
-sprawdzać przez `ss :9002 ESTAB` na węźle, nie przez wnioskowanie z logu.
-
-### B5. Specyfikacje zgodne z kodem — ✅ ZROBIONE
-`re` i `edit` **były już** opisane w §7.4 (to notatka w `CLAUDE.md` była
-nieaktualna i mnie zmyliła — poprawiona). Porównanie typów kopert z kodem
-znalazło jedną prawdziwą lukę: **`rtc`**, koperta sygnalizacji WebRTC, jeździła
-po drucie i nie było jej w specyfikacji. Dopisana. Lista typów w §7.4 zgadza się
-teraz z `lib/envelope.ts` co do nazwy, `group-skd`/`group-skd-req` włącznie.
-
-### B6. ~~Kłamstwa w kodzie i w UI~~ — ✅ ZROBIONE (`69fc2b9`)
-Komentarze o WebRTC mówią teraz odwrotnie i zgodnie z pomiarem („włączone —
-i nic nie zmieniło"); okno usuwania kontaktu przeszło przez `tr()` z wpisem
-w katalogu. Strażnik `test/i18n.test.ts` czyta od 0.5.8 miejsca wywołań, więc
-goły string na ścieżce UI wywala build.
+❓ = **built, but nobody has run it**. The evidence comes from four targets (web,
+desktop-Linux, **Windows since 2026-09-17** and Android); **macOS and iOS still without a
+single run**.
 
 ---
 
-## 4. Do zrobienia — lista robocza
+## 3. Blockers — no 0.9 without these
 
-Kolejność jest kolejnością ryzyka: najpierw to, co może wywrócić plan.
+### B1. ~~Nobody has run Windows~~ — ✅ DONE; **macOS still not**
+2026-09-17: the signed **ARM64** `.exe` from the 0.6.3 release installed on a
+real machine and a conversation works. SmartScreen warned about an untrusted source —
+that is **reputation, not the signature**, and it builds up over months on the publisher's identity
+(reputation is not to be gamed; decision recorded 2026-09-18).
+(Android dropped off this list in 2026-08: the signed APK from Actions installed,
+the §6.1 path walked through on a device.)
 
-1. ~~Android etap C~~ — ✅ (B2).
-2. ~~Migracja profilu~~ — ✅ (B3).
-3. ~~Podpisywanie Windows~~ — ✅ **DZIAŁA od 0.6.3** (2026-09-17). Pułapka,
-   która kosztowała pierwszy przebieg: GitHub wysyła subject OIDC w dwóch
-   postaciach **per repozytorium** (`use_immutable_subject`), a wpis w Azure
-   musi pasować dosłownie. Przepis: `AZURE-SIGNING-NEXT-APP.md`.
-4. ~~Poprawki z B6~~ — ✅.
-5. **iOS** — dopiero po założeniu Apple ID: `npm run tauri -- ios init`, budowa,
-   wgranie na urządzenie. Ikony i `identifier` (`com.onchato.chat`) są gotowe.
-6. **Test grupy 4–5 osób na żywo** — najstarszy niespłacony dług. Od 0.6.3
-   wreszcie wykonalny: są testerzy z Windowsem.
-7. **Flaki do obserwacji**: przeładowanie grupy w pełnym `browser-test`,
-   scenariusz wzmianek. Jeśli wrócą w CI, złapać log, nie „puścić jeszcze raz".
-8. ~~Strona pobierania~~ — ✅ JEST: `landing.html` rozpoznaje system i podaje
-   właściwy artefakt z ostatniego wydania, a o iOS mówi wprost „No iOS yet."
-9. **Updater z podpisanym instalatorem** — 0.6.3 jest pierwszym podpisanym
-   wydaniem i zostało zainstalowane **ręcznie**, więc ścieżka „aplikacja sama
-   pobiera i podmienia się na podpisaną paczkę" nie została nigdy wykonana.
-   Sprawdzić na przejściu 0.6.3 → 0.6.4, zanim testerów będzie więcej.
+**macOS remains**: a `.dmg` artifact is produced in every release and nobody has ever
+run it. Unsigned, so installation goes through "Otwórz mimo to" ("Open Anyway").
+
+### B2. ~~Android does not survive sleep~~ — ✅ DONE
+Foreground service (`OnchatoService.kt`, type `specialUse`, injected by
+`patch.mjs`); **background delivery confirmed on a device**. For every
+release the regression test from §6.2 remains: screen off for 10 minutes, the message
+arrives.
+
+### B3. ~~Software profile migration~~ — ✅ DONE
+`lib/migrate.ts` + import on the sign-in card, exactly in the agreed scope:
+export of the **whole** profile in one sealed file (the name INSIDE the
+seal), password = profile password, a name collision = a loud refusal, the wording
+"przenosisz" ("you are moving"). Tests `test/migrate.test.ts` + a scenario in `browser-test`.
+
+### B4. ~~A third rendezvous node~~ — ✅ DONE
+**Correction:** `bs2` is healthy — it passed the whole group scenario of
+`browser-test` run exclusively on it. The earlier "bs2 is down" was **my
+operating error**: `RELAY_NODE` takes a full multiaddr, and I gave a hostname,
+which ended up in the node list as an invalid address.
+
+~~The real risk remains: two nodes are two points of failure, not a spare.~~
+**✅ DONE 2026-09-03**: `bs3` is up (DigitalOcean AMS3, deployed per
+`relay/DEPLOY.md`) and is in `infra/nodes.json`. The mesh triangle is closed —
+check with `ss :9002 ESTAB` on the node, not by inferring from the log.
+
+### B5. Specifications consistent with the code — ✅ DONE
+`re` and `edit` **were already** described in §7.4 (it was the note in `CLAUDE.md` that was
+out of date and misled me — corrected). Comparing the envelope types with the code
+found one real gap: **`rtc`**, the WebRTC signalling envelope, was travelling
+on the wire and was not in the specification. Added. The type list in §7.4 now matches
+`lib/envelope.ts` name for name, `group-skd`/`group-skd-req` included.
+
+### B6. ~~Lies in the code and in the UI~~ — ✅ DONE (`69fc2b9`)
+The comments about WebRTC now say the opposite, in line with the measurement ("włączone —
+i nic nie zmieniło", "enabled — and it changed nothing"); the contact-removal dialog went through `tr()` with an entry
+in the catalogue. The guard `test/i18n.test.ts` reads call sites since 0.5.8, so
+a bare string on a UI path breaks the build.
 
 ---
 
-## 5. Podpisywanie i dystrybucja
+## 4. To do — working list
 
-| cel | jak | stan |
+The order is the order of risk: first whatever can overturn the plan.
+
+1. ~~Android stage C~~ — ✅ (B2).
+2. ~~Profile migration~~ — ✅ (B3).
+3. ~~Windows signing~~ — ✅ **WORKS since 0.6.3** (2026-09-17). The trap
+   that cost the first run: GitHub sends the OIDC subject in two
+   forms **per repository** (`use_immutable_subject`), and the entry in Azure
+   must match literally. Recipe: `AZURE-SIGNING-NEXT-APP.md`.
+4. ~~Fixes from B6~~ — ✅.
+5. **iOS** — only after creating an Apple ID: `npm run tauri -- ios init`, build,
+   install on a device. The icons and the `identifier` (`com.onchato.chat`) are ready.
+6. **Live test of a 4–5 person group** — the oldest unpaid debt. Since 0.6.3
+   finally feasible: there are testers with Windows.
+7. **Flakes to watch**: group reload in the full `browser-test`,
+   the mentions scenario. If they come back in CI, capture the log, do not "just run it again".
+8. ~~Download page~~ — ✅ IT EXISTS: `landing.html` detects the system and offers
+   the right artifact from the latest release, and about iOS it says plainly "No iOS yet."
+9. **Updater with a signed installer** — 0.6.3 is the first signed
+   release and was installed **by hand**, so the path "the app downloads
+   and swaps itself for the signed package by itself" has never been exercised.
+   Check it on the 0.6.3 → 0.6.4 transition, before there are more testers.
+
+---
+
+## 5. Signing and distribution
+
+| target | how | state |
 |---|---|---|
-| **Windows** | **Azure Artifact Signing** (dawniej Trusted Signing) **przez OIDC**, wzorzec z `encedo-wg-hsm` — **bez sekretów**, sterowane zmiennymi repo (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `TRUSTED_SIGNING_ENDPOINT/ACCOUNT/PROFILE`). Podpis oddany Tauri przez `signCommand`, żeby podpisany był też **luźny `.exe`**, nie tylko instalatory | ✅ **działa od 0.6.3**, zweryfikowane parsowaniem wydanego binarium: łańcuch *Microsoft Identity Verification Root CA 2020* → *ID Verified Code Signing PCA 2021* → *ID Verified CS AOC CA 04*, `C=PL`, znacznik czasu RFC3161, podpisany też luźny `.exe`. Uwaga: polecenie `sign code trusted-signing` jest **przestarzałe**, następca to `sign code artifact-signing` |
-| **macOS** | niepodpisane — instalacja przez „Otwórz mimo to". Podpis = subskrypcja Apple Developer; decyzja przy iOS | świadomie odłożone |
-| **Linux** | `.deb` + `.rpm` + AppImage bez podpisu; dystrybucja z GitHub Releases | działa |
-| **Android** | CI podpisuje **APK** kluczem deweloperskim z sekretów (`zipalign` + `apksigner` v2/v3 + `verify`; brak sekretów = job failuje z listą nazw); `.aab` celowo niepodpisany pod Play App Signing; dwa osobne artefakty | ✅ działa, APK zainstalowany z Actions |
-| **updater desktopu** | minisign (`tauri signer`), klucz prywatny w sekretach (`TAURI_SIGNING_PRIVATE_KEY` + `_PASSWORD`), pubkey w `tauri.conf.json`; `latest.json` w draft release | ✅ kod działa; patrz bramka niżej |
-| **web** | auto-deploy: host sam robi pull+build po tagu (`infra/deploy-on-tag.sh` + timer systemd; model PULL — żaden klucz produkcji nie leży w runnerze); relay celowo NIE jest restartowany | ✅ działa |
-| **iOS** | wymaga konta Apple; TestFlight na start | zablokowane kontem |
+| **Windows** | **Azure Artifact Signing** (formerly Trusted Signing) **via OIDC**, the pattern from `encedo-wg-hsm` — **no secrets**, driven by repo variables (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `TRUSTED_SIGNING_ENDPOINT/ACCOUNT/PROFILE`). Signing handed to Tauri through `signCommand`, so that the **loose `.exe`** is signed too, not just the installers | ✅ **works since 0.6.3**, verified by parsing the released binary: chain *Microsoft Identity Verification Root CA 2020* → *ID Verified Code Signing PCA 2021* → *ID Verified CS AOC CA 04*, `C=PL`, RFC3161 timestamp, the loose `.exe` signed too. Note: the command `sign code trusted-signing` is **deprecated**, its successor is `sign code artifact-signing` |
+| **macOS** | unsigned — installation through "Otwórz mimo to" ("Open Anyway"). Signing = an Apple Developer subscription; decision together with iOS | deliberately deferred |
+| **Linux** | `.deb` + `.rpm` + AppImage unsigned; distribution from GitHub Releases | works |
+| **Android** | CI signs the **APK** with the developer key from secrets (`zipalign` + `apksigner` v2/v3 + `verify`; missing secrets = the job fails with a list of names); `.aab` deliberately unsigned for Play App Signing; two separate artifacts | ✅ works, APK installed from Actions |
+| **desktop updater** | minisign (`tauri signer`), private key in secrets (`TAURI_SIGNING_PRIVATE_KEY` + `_PASSWORD`), pubkey in `tauri.conf.json`; `latest.json` in the draft release | ✅ the code works; see the gate below |
+| **web** | auto-deploy: the host itself does pull+build after a tag (`infra/deploy-on-tag.sh` + systemd timer; PULL model — no production key sits in the runner); the relay is deliberately NOT restarted | ✅ works |
+| **iOS** | requires an Apple account; TestFlight to start | blocked by the account |
 
-**Aktualizacje automatyczne — zbudowane (0.4.0); rządzą nimi dwa fakty.**
-(a) **Draft release jest bramką**: tag buduje `latest.json`, ale assety drafta
-nie są publiczne, więc do kliknięcia „Publish release" updater dostaje 404 —
-celowo, publikacja = wydanie. Po każdym tagu sprawdzić, czy draft w ogóle ma
-`latest.json` (bez sekretów podpisu build przechodzi na zielono i po cichu go
-nie tworzy). (b) `desk_update_kind` = `system` dla `.deb`/`.rpm` — paczki
-dystrybucyjne dostają **powiadomienie + link**, nigdy podmianę; samo-aktualizacja
-dotyczy AppImage/Windows/macOS. Test podmiany ma sens tylko na Win/macOS
-(AppImage nie startuje na VM bez 3D — EGL_BAD_PARAMETER).
-
----
-
-## 6. Testy — ta sama ścieżka na każdej platformie
-
-Skrypt jest jeden, bo pytanie jest jedno: *czy dwie obce osoby się dogadają*.
-Przejście = wszystkie punkty na danej platformie, **na paczce z Actions**, nie
-na buildzie z laptopa.
-
-### 6.1 Ścieżka główna (każdy cel)
-1. Instalacja z artefaktu wydania. Aplikacja startuje, pokazuje ikonę i wersję.
-2. Założenie tożsamości: HEM **oraz** profil software z hasłem.
-3. Dodanie kontaktu: link zaproszenia **i** kod QR (tam, gdzie jest kamera).
-4. Rozmowa 1:1: tekst, emoji, odpowiedź (↩), poprawka (✏), reakcja.
-5. Plik: wysłanie, odebranie, wygaśnięcie po kilku minutach.
-6. Obraz: wklejenie ze schowka, podgląd u nadawcy od razu, „Pokaż" u odbiorcy.
-7. Głosówka: nagranie, wysłanie, odsłuch po drugiej stronie.
-8. Grupa: założenie, zaproszenie, broadcast, wzmianka `@`, usunięcie członka
-   (usunięty przestaje widzieć), dodanie z powrotem.
-9. Przypięcie wiadomości i jej powrót po restarcie aplikacji.
-10. Zerwanie sieci na 30 s: ⚠ przy wiadomości, ↻ dowozi ją po powrocie.
-11. Powiadomienie, gdy okno nie jest na wierzchu; **treść wiadomości nigdy w banerze**.
-12. Wylogowanie i ponowne wejście: kontakty i grupy są, transkrypcja nie.
-13. **Diagnostyka**: raport możliwości i test WebRTC mówią prawdę o platformie
-    — **schowane za `?debug=1`** (decyzja z 0.3.x), więc krok wymaga wejścia
-    z tym parametrem.
-
-### 6.2 Dodatkowo per cel
-- **web**: Chromium i Firefox; telefon w pionie i w poziomie; klawiatura
-  ekranowa nie zasłania pola; odświeżenie strony w trakcie rozmowy.
-- **desktop**: zamknięcie okna (zasobnik **albo** wyjście — zależnie od pulpitu),
-  drugie uruchomienie podnosi istniejące okno, autostart po restarcie systemu,
-  przeciągnięcie pliku na okno.
-- **Android**: **ekran wygaszony 10 minut → wiadomość dochodzi** (to jest test
-  etapu C, nie formalność), obrót ekranu, powrót z tła, udostępnianie pliku do
-  aplikacji.
-- **iOS**: to samo co Android, gdy będzie konto.
-
-### 6.3 Test bezpieczeństwa, który musi przejść przed wydaniem
-1. Blob w magazynie plików **nie zawiera** tekstu jawnego (harness to sprawdza,
-   powtórzyć ręcznie na produkcji).
-2. Powiadomienie nie niesie treści w żadnym z trzech trybów.
-3. Usunięcie kontaktu odcina osiągalność (druga strona przestaje docierać).
-4. Usunięcie z grupy: usunięty **nie** odczytuje wiadomości po rotacji epoki.
-5. Wipeout kasuje wszystkie klucze `ec-*` i wraca do logowania.
-6. Druga karta z tą samą tożsamością: obie sesje stają, komunikat to tłumaczy.
-7. **Podmiana `pub` w książce kontaktów jest wykrywana przy logowaniu**
-   (`lib/bookmac.ts`: `tampered` = książka nieużywana i NIEnadpisywana — dowód
-   zostaje). To dziś jedyna obrona trust anchora i nikt jej ręcznie nie
-   przechodzi.
+**Automatic updates — built (0.4.0); two facts govern them.**
+(a) **The draft release is the gate**: the tag builds `latest.json`, but the draft's assets
+are not public, so until "Publish release" is clicked the updater gets a 404 —
+on purpose, publication = release. After every tag check that the draft has
+`latest.json` at all (without the signing secrets the build goes green and silently
+does not create it). (b) `desk_update_kind` = `system` for `.deb`/`.rpm` — distribution
+packages get **a notification + a link**, never a swap; self-update
+applies to AppImage/Windows/macOS. A swap test only makes sense on Win/macOS
+(AppImage does not start on a VM without 3D — EGL_BAD_PARAMETER).
 
 ---
 
-## 7. Świadomie poza 0.9
+## 6. Tests — the same path on every platform
 
-Zapisane, żeby nie wracały jako „a może jeszcze": wielourządzeniowość, OIDC i
-rejestracja urządzenia, historia po restarcie (sync od członka **odrzucony** —
-obchodzi lockout epok), rozmowy głosowe/wideo (osobny projekt, osadzenie
-później), telemetria (**zdecydowane: nie ma**), płaszczyzna relay-blind (§13,
-czeka na gossipsub v3), TURN (**zdecydowane: nie**).
+There is one script, because there is one question: *can two strangers get through to each other*.
+A pass = all items on the given platform, **on the package from Actions**, not
+on a build from a laptop.
+
+### 6.1 Main path (every target)
+1. Installation from the release artifact. The app starts, shows the icon and the version.
+2. Creating an identity: HEM **and** a software profile with a password.
+3. Adding a contact: an invite link **and** a QR code (where there is a camera).
+4. A 1:1 conversation: text, emoji, reply (↩), correction (✏), reaction.
+5. File: sending, receiving, expiry after a few minutes.
+6. Image: paste from the clipboard, preview at the sender immediately, "Pokaż" ("Show") at the recipient.
+7. Voice note: recording, sending, playback on the other side.
+8. Group: creation, invitation, broadcast, `@` mention, removing a member
+   (the removed one stops seeing), adding back.
+9. Pinning a message and its return after an app restart.
+10. Network cut for 30 s: ⚠ on the message, ↻ delivers it after the return.
+11. A notification when the window is not in front; **message content never in the banner**.
+12. Signing out and back in: contacts and groups are there, the transcript is not.
+13. **Diagnostics**: the capability report and the WebRTC test tell the truth about the platform
+    — **hidden behind `?debug=1`** (a decision from 0.3.x), so the step requires entering
+    with that parameter.
+
+### 6.2 Additionally per target
+- **web**: Chromium and Firefox; phone in portrait and landscape; the on-screen
+  keyboard does not cover the field; page reload in the middle of a conversation.
+- **desktop**: closing the window (tray **or** exit — depending on the desktop),
+  a second launch raises the existing window, autostart after a system restart,
+  dragging a file onto the window.
+- **Android**: **screen off for 10 minutes → the message arrives** (this is the
+  stage C test, not a formality), screen rotation, return from the background, sharing a file to
+  the app.
+- **iOS**: the same as Android, once there is an account.
+
+### 6.3 Security test that must pass before a release
+1. The blob in the file store **does not contain** plaintext (the harness checks this,
+   repeat by hand in production).
+2. A notification carries no content in any of the three modes.
+3. Removing a contact cuts off reachability (the other side stops getting through).
+4. Removal from a group: the removed one does **not** read messages after the epoch rotation.
+5. Wipeout erases all `ec-*` keys and returns to sign-in.
+6. A second tab with the same identity: both sessions stop, the message explains it.
+7. **Substitution of `pub` in the contact book is detected at sign-in**
+   (`lib/bookmac.ts`: `tampered` = the book is not used and NOT overwritten — the evidence
+   remains). Today this is the only defence of the trust anchor and nobody walks
+   through it by hand.
 
 ---
 
-## 8. Kolejność (stan 2026-08-30)
+## 7. Deliberately outside 0.9
 
-1. ~~§6.1 na Androidzie z artefaktu~~ — ✅ przechodzone, etap C potwierdzony.
-2. ~~Migracja profilu i `SPEC.md`~~ — ✅ obie.
-3. ~~Windows z podpisem~~ i ~~`bs3`~~ i ~~strona pobierania~~ — ✅ wszystkie trzy.
-4. **Teraz**: podmiana updatera na Windows (§4 pkt 9) przy wydaniu 0.6.4, potem
-   §6.1 przechodzone **przez testerów**, nie przeze mnie — i §6.3, którego nadal
-   nikt ręcznie nie przeszedł.
-5. macOS: pierwsze uruchomienie `.dmg` (B1) — artefakt powstaje od dawna.
-6. Na końcu: iOS, jeśli konto będzie; jeśli nie — 0.9 wychodzi bez iOS i to jest
-   w porządku, a strona pobierania już o nim nie kłamie.
+Written down so they do not come back as "maybe also": multi-device, OIDC and
+device registration, history after restart (sync from a member **rejected** —
+it bypasses the epoch lockout), voice/video calls (a separate project, embedding
+later), telemetry (**decided: none**), the relay-blind plane (§13,
+waiting for gossipsub v3), TURN (**decided: no**).
 
-**Wersje po drodze**: numer rośnie z każdą paczką (0.6.x). Tag `v0.9.0`
-odpalamy dopiero, gdy §6.1 przeszło na web, desktop i Androidzie.
+---
+
+## 8. Order (state as of 2026-08-30)
+
+1. ~~§6.1 on Android from the artifact~~ — ✅ walked through, stage C confirmed.
+2. ~~Profile migration and `SPEC.md`~~ — ✅ both.
+3. ~~Windows with signing~~ and ~~`bs3`~~ and ~~the download page~~ — ✅ all three.
+4. **Now**: the updater swap on Windows (§4 item 9) with the 0.6.4 release, then
+   §6.1 walked through **by testers**, not by me — and §6.3, which still
+   nobody has walked through by hand.
+5. macOS: the first run of the `.dmg` (B1) — the artifact has been produced for a long time.
+6. At the end: iOS, if there is an account; if not — 0.9 ships without iOS and that is
+   fine, and the download page no longer lies about it.
+
+**Versions along the way**: the number grows with every package (0.6.x). The tag `v0.9.0`
+is fired only when §6.1 has passed on web, desktop and Android.

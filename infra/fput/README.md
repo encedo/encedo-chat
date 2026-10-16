@@ -1,64 +1,64 @@
-# fput — osiem bajtow miedzy uploadem a magazynem
+# fput — eight bytes between the upload and the store
 
-`POST /f` przyjmuje plik od kazdego i tak ma zostac: uwierzytelniony upload
-wiedzialby, kto co wyslal i kiedy, czyli dokladnie to, czego reszta produktu
-unika. Ten serwis nie zmienia tej decyzji — zmienia to, **co da sie z magazynu
-wyciagnac**.
+`POST /f` accepts a file from anyone and that is how it should stay: an authenticated
+upload would know who sent what and when, which is exactly what the rest of the
+product avoids. This service does not change that decision — it changes **what can
+be pulled out of the store**.
 
-## Co robi
+## What it does
 
-Dokleja osiem bajtow (`ECF1` + wersja + zapas, `impl/lib/fileenvelope.ts`) na
-poczatek kazdego uploadu, zanim trafi on do Kubo. Nikt ich po drodze nie zdejmuje
-— ani `/f`, ani publiczna bramka. Zdejmuje je dopiero klient przy deszyfrowaniu.
+It prepends eight bytes (`ECF1` + version + reserve, `impl/lib/fileenvelope.ts`) to
+the start of every upload before it reaches Kubo. Nobody strips them along the way
+— neither `/f` nor the public gateway. Only the client strips them, when decrypting.
 
-**Co wchodzi, nie jest tym, co wychodzi.** Magazyn przestaje oddawać cokolwiek
-1:1, wiec nie da sie go uzyc jako hostingu plikow, a przegladarka dostaje z
-bramki `application/octet-stream` zamiast strony: Kubo rozpoznaje typ po
-pierwszych bajtach, a te sa binarne. Sprawdzone na zywym uploadzie —
-`<!doctype html>` wraca jako `text/html`, `ECF1…<!doctype html>` jako
+**What goes in is not what comes out.** The store no longer hands back anything
+1:1, so it cannot be used as file hosting, and a browser gets
+`application/octet-stream` from the gateway instead of a page: Kubo detects the
+type from the first bytes, and those are binary. Verified on a live upload —
+`<!doctype html>` comes back as `text/html`, `ECF1…<!doctype html>` as
 `application/octet-stream`.
 
-## Czego nie robi
+## What it does not do
 
-**Nie odmawia.** Kto zna nasz format, dalej zaparkuje tu 128 MB na piec minut, i
-bez uwierzytelniania nie da sie tego odroznic od naszego szyfrogramu. Znika
-konkretna szkoda: klikalna strona pod nasza domena, a po niej Safe Browsing, po
-ktorym aplikacja nie otwiera sie nikomu. Zostaje przechowalnia na bajty, ktorych
-nikt nie otworzy ani jako strony, ani jako programu.
+**It does not refuse.** Anyone who knows our format can still park 128 MB here for
+five minutes, and without authentication that cannot be told apart from our
+ciphertext. What goes away is a concrete harm: a clickable page under our domain,
+and after it Safe Browsing, after which the app opens for nobody. What remains is
+a locker for bytes that nobody will open either as a page or as a program.
 
-## Jak jest wpiete
+## How it is wired
 
-    klient -> nginx `location = /f` -> 127.0.0.1:9202 -> rpc.ipfs.encedo.com /api/v0/add
+    client -> nginx `location = /f` -> 127.0.0.1:9202 -> rpc.ipfs.encedo.com /api/v0/add
 
-nginx zostaje brzegiem: limity tempa, `limit_conn`, CORS, `limit_except`,
-`client_max_body_size 128m` i **`proxy_request_buffering off`**. Bez tej ostatniej
-nginx zapisuje cale cialo do pliku tymczasowego, zanim serwis cokolwiek zobaczy.
+nginx stays the edge: rate limits, `limit_conn`, CORS, `limit_except`,
+`client_max_body_size 128m` and **`proxy_request_buffering off`**. Without the last
+one nginx writes the whole body to a temporary file before the service sees anything.
 
-Z nginxa przenioslo sie tutaj: nazwa wpisu w ksiedze zamiatacza
-(`/ec/<epoch>-<unikat>` — wpis poza tym schematem **nigdy nie wygasa**, a
-`ipfs-ttl.sh` nie zglosi tego jako bledu), `pin=false`, oraz `User-Agent:
-encedo-proxy`, bo Kubo odrzuca naglowki zaczynajace sie od "Mozilla".
+Moved here from nginx: the entry name in the sweeper's ledger
+(`/ec/<epoch>-<unique>` — an entry outside this scheme **never expires**, and
+`ipfs-ttl.sh` will not report it as an error), `pin=false`, and `User-Agent:
+encedo-proxy`, because Kubo rejects headers starting with "Mozilla".
 
-`GET /f/<cid>` **nie idzie przez ten serwis** — dalej nginx prosto do Kubo. Cale
-pobieranie omija Node, a prefiks i tak zostaje na miejscu.
+`GET /f/<cid>` **does not go through this service** — it is still nginx straight to
+Kubo. All downloading bypasses Node, and the prefix stays in place anyway.
 
-## Uruchomienie i sprawdzenie
+## Running and checking
 
     node fput.mjs                              # 127.0.0.1:9202
     IPFS_RPC=http://127.0.0.1:5001 node fput.mjs
-    node --test *.test.mjs                     # offline, przeciw udawanemu Kubo
+    node --test *.test.mjs                     # offline, against a fake Kubo
 
-Po wdrozeniu dwa sprawdzenia, ktore musza dac PRZECIWNE odpowiedzi:
+After deploying, two checks that must give OPPOSITE answers:
 
-    # cudza strona: wchodzi, ale bramka nie chce jej wyrenderowac
+    # a foreign page: goes in, but the gateway refuses to render it
     C=$(curl -s -F file=@evil.html https://onchato.com/f | grep -o '"Hash":"[^"]*"' | cut -d'"' -f4)
-    curl -sI https://ipfs.encedo.com/ipfs/$C | grep -i content-type   # ma byc octet-stream
+    curl -sI https://ipfs.encedo.com/ipfs/$C | grep -i content-type   # must be octet-stream
 
-    # nasz plik: wysyla sie i otwiera w aplikacji, a po TTL znika
+    # our file: uploads and opens in the app, and disappears after the TTL
     docker exec ipfs1 ipfs files ls /ec | tail -3
 
-## Uwaga dla kogokolwiek, kto to zmienia
+## A note for anyone changing this
 
-Nic tu nie wolno wczytac "w calosci". Jeden `await req.text()` albo dowolny
-gotowy parser multipartu i 128 MB laduje w pamieci albo na dysku — a to jest
-jedyny powod, dla ktorego ten plik jest napisany strumieniowo.
+Nothing here may be read "in full". A single `await req.text()` or any ready-made
+multipart parser and 128 MB lands in memory or on disk — and that is the only
+reason this file is written as a stream.
