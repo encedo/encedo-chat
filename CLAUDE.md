@@ -291,6 +291,11 @@ in landscape (852×393).
   MutationObserver). Tauri's AppPlugin walks the webview history when no JS
   listens, so without the entry Back leaves the app. A new closable surface
   goes into `backTarget` in stacking order. browser-test "Back on a phone…".
+  Two traps (0.7.43): a fragment navigation (an invite link in a signed-in
+  tab) fires `popstate` too and is NOT Back - told apart by the URL; and
+  `history.back()` is async, so nothing is pushed while one is in flight, and
+  only an entry this document pushed is ever stepped back off (a reload leaves
+  the page on the old page's marked entry - cleared at load).
 - **A bubble's controls are revealed by PRESSING it**, mouse and finger alike
   (`attachReveal`, `.tapped`): a drag that selects text is left alone, one bubble
   open at a time, file/voice bubbles use the same helper. The emoji picker is

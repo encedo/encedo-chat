@@ -9720,19 +9720,42 @@ function backTarget(): (() => void) | null {
 }
 let backArmed = false
 let backPopsToIgnore = 0
+/** The address our entry was pushed at - pushState keeps the URL, so a real Back lands on the same one. */
+let armedHref = ''
+// Our entries name the document that pushed them. An entry left by the page
+// BEFORE a reload belongs to a document that is gone, and going back onto it
+// would be a cross-document navigation - a full reload. We only ever step back
+// off an entry of ours.
+const BACK_DOC = Math.random().toString(36).slice(2)
+// A reload while armed lands the new page ON the old page's entry, marker and
+// all; left there, every Back we take returns to an entry that says "armed".
+if (history.state?.ecBack) { try { history.replaceState(null, '') } catch {} }
 function syncBack() {
+  // history.back() is asynchronous: an entry pushed before its traversal lands
+  // is the one it then removes, and the count of pops to ignore goes out of step
+  // with the stack (closing one window and opening the next did that). Wait for
+  // the traversal; its popstate runs this again.
+  if (backPopsToIgnore) return
   const want = !!backTarget()
   if (want && !backArmed) {
-    try { history.pushState({ ecBack: 1 }, ''); backArmed = true } catch {}
+    try { history.pushState({ ecBack: BACK_DOC }, ''); backArmed = true; armedHref = location.href } catch {}
   } else if (!want && backArmed) {
     backArmed = false
+    // Not on our entry (replaced, or the browser moved): leave the stack be -
+    // an extra entry costs one Back, a wrong history.back() costs the session.
+    if (history.state?.ecBack !== BACK_DOC) return
     backPopsToIgnore++
     history.back()
   }
 }
 window.addEventListener('popstate', () => {
-  if (backPopsToIgnore) { backPopsToIgnore--; return }
+  if (backPopsToIgnore) { backPopsToIgnore--; queueMicrotask(syncBack); return }
   if (!backArmed) return
+  // A fragment navigation fires popstate too - an invite link opened in a
+  // signed-in tab - and it is not Back: it ADDED an entry, over ours. Back off
+  // our entry lands on the same address. (0.7.40 read the invite link as Back
+  // and closed the conversation under it.)
+  if (location.href !== armedHref) return
   backArmed = false
   backTarget()?.()
   queueMicrotask(syncBack)
