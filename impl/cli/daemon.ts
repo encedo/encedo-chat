@@ -16,6 +16,17 @@
  *   <- {"ok":true,"entries":[{"to":"ewa","age_s":40,"expires_in_s":86360,"key":"ssh","merged":2,"text":"..."}]}
  *   -> {"op":"status"}
  *   <- {"ok":true,"me":"ala","link":"online","online":["ewa"],"contacts":3}
+ *   -> {"op":"add","link":"https://app.onchato.com/#i=...","name":"ewa","note":"..."}   (name, note optional)
+ *   <- {"ok":true,"status":"added","name":"ewa","fp":"71:84:...","knock":1}            (an invite: knocked, keeps knocking)
+ *   <- {"ok":true,"status":"added","name":"ewa","fp":"...","reply":"https://..."}     (an identity link: send them this)
+ *   <- {"ok":true,"status":"known","name":"ewa","fp":"..."}
+ *   -> {"op":"knocks"}
+ *   <- {"ok":true,"knocks":[{"n":1,"name":"Ewa","fp":"...","note":"...","invite":"biuro"}]}
+ *   -> {"op":"accept","n":1}    -> {"op":"ignore","n":1}
+ *   <- {"ok":true,"name":"Ewa","fp":"..."}
+ *
+ * `add` and `accept` take effect at once: the daemon's contact book is live.
+ * No question is asked here - the caller decided (the CLI after its t/N prompt).
  */
 
 import { createServer, createConnection, type Server, type Socket } from 'node:net'
@@ -94,6 +105,25 @@ function handle(hub: Hub, sock: Socket, log: (m: string) => void, queue?: Queue)
         reply({ ok: true, path: await hub.getFile(req.id, typeof req.dir === 'string' ? req.dir : undefined) })
       } else if (req.op === 'queue') {
         reply({ ok: true, entries: queue?.list() ?? [] })
+      } else if (req.op === 'add') {
+        if (typeof req.link !== 'string') throw new Error('add potrzebuje "link"')
+        const r = await hub.addFromLink(req.link, { name: typeof req.name === 'string' ? req.name : undefined, note: typeof req.note === 'string' ? req.note : undefined })
+        log(`kontakt ${r.name} (${r.fp}): ${r.status}${r.knock !== undefined ? `, zapukano (${r.knock ?? '?'})` : ''}`)
+        reply({ ok: true, ...r })
+      } else if (req.op === 'knocks') {
+        reply({ ok: true, knocks: (hub.desk?.list() ?? []).map((k) => ({ n: k.n, name: k.name, fp: k.fp, note: k.note, invite: k.inv.label })) })
+      } else if (req.op === 'accept' || req.op === 'ignore') {
+        if (!hub.desk) throw new Error('ten demon nie słucha zaproszeń')
+        if (typeof req.n !== 'number') throw new Error(`${req.op} potrzebuje "n" (numer z knocks)`)
+        if (req.op === 'accept') {
+          const { knock: k, contact } = await hub.desk.accept(req.n)
+          log(`przyjęto pukanie: ${contact.name} (${k.fp})`)
+          reply({ ok: true, name: contact.name, fp: k.fp })
+        } else {
+          const k = await hub.desk.ignore(req.n)
+          log(`zignorowano pukanie: ${k.name} (${k.fp})`)
+          reply({ ok: true, name: k.name, fp: k.fp })
+        }
       } else if (req.op === 'status') {
         const ns = hub.session.netStatus()
         reply({ ok: true, me: hub.id.handle, link: ns.link, relay: ns.relay, contacts: hub.contactList.length, online: [...hub.online].map((p) => hub.nameOf(p)) })

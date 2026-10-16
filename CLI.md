@@ -6,7 +6,7 @@ z okna terminala, przez SSH albo wewnątrz `screen`/`tmux`. Interfejs jest
 wzorowany na irssi: każda rozmowa ma swoje okno, a pasek stanu na dole pokazuje,
 gdzie coś się dzieje.
 
-Ten podręcznik opisuje wersję 0.7.37. Plan dalszych etapów (tryb skryptowy,
+Ten podręcznik opisuje wersję 0.7.42. Plan dalszych etapów (tryb skryptowy,
 demon, powiadomienia, pliki, grupy) jest w [CLI-PLAN.md](CLI-PLAN.md).
 
 ---
@@ -198,8 +198,8 @@ onchato-cli invites qr 1                           # kod QR zaproszenia nr 1
 onchato-cli invites revoke 1                       # wycofanie - nikt o tym nie jest informowany
 ```
 
-**Pukanie widać w kliencie** (`onchato-cli chat`) — zaproszenie „słucha” tylko wtedy,
-gdy klient działa:
+**Pukanie widać w kliencie** (`onchato-cli chat`) **albo w demonie** (`onchato-cli daemon`,
+rozdział 8) — zaproszenie „słucha” tylko wtedy, gdy jedno z nich działa:
 
 ```
 23:04 -!- Ewa puka (zaproszenie „biuro”) · odcisk 71:84:64:2F:8E:66:01:E7 - /accept 1 · /ignore 1
@@ -211,12 +211,20 @@ gdy klient działa:
 | `/accept N` | dodaje tę osobę do kontaktów |
 | `/ignore N` | ignoruje ten klucz — kolejne pukanie z niego się nie pojawi |
 
+Przy działającym demonie to samo robią komendy `onchato-cli knocks`, `onchato-cli accept N`
+i `onchato-cli ignore N`; pukanie trafia też do dziennika demona i jako zdarzenie
+`{"t":"knock",…}` do `listen --json`. Przyjęty kontakt działa od razu, bez restartu demona.
+
 Przyjęcie jest zawsze ręczne. Zaproszenie jest publiczne i żyje, dopóki go nie
 wycofasz — zapukać może każdy, kto kiedykolwiek widział ten kod.
 
 **W drugą stronę:** `onchato-cli add '<link zaproszenia>'` dodaje kontakt i puka.
-Jeśli zapraszający jest akurat offline, klient (`onchato-cli chat`) puka dalej co 90 s,
-aż przyjmie — wtedy zobaczysz „… przyjął(a) Twoje pukanie”.
+Jeśli zapraszający jest akurat offline, klient (`onchato-cli chat`) albo demon puka dalej
+co 90 s, aż przyjmie — wtedy zobaczysz „… przyjął(a) Twoje pukanie”. Pojedyncze pukanie
+często przepada (nikt akurat nie słucha), więc to ponawianie jest istotne.
+
+Gdy działa demon, `add` oddaje kontakt **jemu** — nie otwiera drugiej sesji tej samej
+tożsamości, a demon zna nowy kontakt od razu.
 
 Zaproszenia przenoszą się razem z profilem między aplikacją a terminalem.
 
@@ -421,6 +429,10 @@ lokalnym gnieździe `$XDG_RUNTIME_DIR/onchato.sock` (prawa `0600` — gniazdo je
 jego uwierzytelnieniem, więc nikt poza Tobą nie może z niego korzystać). Drugiego demona
 na tym samym gnieździe nie da się uruchomić.
 
+Demon słucha też Twoich zaproszeń i puka do cudzych (rozdział 5). Kontakty dodane
+przez `onchato-cli add` albo przyjęte przez `onchato-cli accept` działają od razu —
+demona nie trzeba restartować.
+
 Przykładowa jednostka systemd (użytkownika), z hasłem przez `LoadCredential` — nie
 w pliku jednostki ani w zmiennej środowiskowej:
 
@@ -547,6 +559,7 @@ Bez demona nie ma kolejki: `--key` i `--ttl` nic wtedy nie zmieniają.
 | `onchato-cli listen [--json] [--save-files <katalog>]` | z `--save-files` zapisuje przychodzące pliki od razu |
 | `onchato-cli get <id> [--dir <katalog>]` | zapis pliku odebranego przez demona |
 | `onchato-cli daemon` | demon z gniazdem lokalnym |
+| `onchato-cli knocks` · `accept <nr>` · `ignore <nr>` | pukanie do Twoich zaproszeń, przez demona |
 
 ### Kody wyjścia
 
@@ -610,8 +623,8 @@ Na serwerze lepszy jest HEM: klucz nie opuszcza urządzenia, a kradzież pliku n
 - **Jedna tożsamość, jedna sesja.** Ta sama tożsamość otwarta jednocześnie w aplikacji
   i w terminalu (albo w dwóch terminalach) zamyka obie sesje. Do rozmowy z samym sobą
   użyj dwóch różnych tożsamości.
-- **Zaproszenie słucha tylko, gdy klient działa.** Bez uruchomionego `onchato-cli chat`
-  pukanie nie ma dokąd dojść.
+- **Zaproszenie słucha tylko, gdy klient albo demon działa.** Bez uruchomionego
+  `onchato-cli chat` albo `onchato-cli daemon` pukanie nie ma dokąd dojść.
 - **Pliki żyją ok. 5 minut** w magazynie — kto ich nie pobierze w tym czasie, prosi
   o ponowne wysłanie.
 - **Jeszcze nie ma**: przewijania historii okna (PgUp), wskaźnika pisania, połączenia
@@ -626,7 +639,8 @@ akcentem). Ustaw w terminalu „Meta wysyła Escape” (GNOME Terminal, Konsole,
 „Option as Meta”) albo używaj `/win N`.
 
 **Pukanie do zaproszenia nie przychodzi.**
-1. Czy `onchato-cli chat` działa i w statusie widać „słucham N zaproszeń”?
+1. Czy `onchato-cli chat` działa i w statusie widać „słucham N zaproszeń”? Albo demon:
+   ta sama linia jest w jego dzienniku po starcie.
 2. Czy ta osoba nie ma Cię już w kontaktach? Aplikacja wtedy nie puka — pokazuje
    „Ten sam klucz, który masz zapisany”. Pukanie od istniejącego kontaktu klient
    zgłasza w statusie jedną linią.

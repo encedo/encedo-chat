@@ -33,7 +33,7 @@ import { fileKV, type FileKV } from './store.ts'
 import { listProfiles, createProfile, openProfile, exportProfileFile, importProfileFile, identityKey } from './profiles.ts'
 import { hemSignIn, hemCreate, type HemChoice } from './identity.ts'
 import { runClient } from './client.ts'
-import { Hub, type HubEvent } from './hub.ts'
+import { Hub, type HubEvent, APP_ORIGIN, APP_PATH } from './hub.ts'
 import { serve, connectDaemon, ask, lineReader, socketPath } from './daemon.ts'
 import { Queue } from './queue.ts'
 import { existsSync, unlinkSync } from 'node:fs'
@@ -59,7 +59,6 @@ import { inboxSecretBytes } from '../lib/invite.ts'
 import { createInterface } from 'node:readline/promises'
 
 /** Where invite links point (app.ts CANONICAL_ORIGIN/PATH): the CLI has no address bar either. */
-const APP_ORIGIN = 'https://app.onchato.com', APP_PATH = '/'
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 
 /** y/N on a terminal; refused without one unless --yes was given. */
@@ -272,6 +271,24 @@ try {
       // An invite (link, fragment or bare code) first, through the app's own parser;
       // a raw key only as the explicit two-argument form.
       const inv = args[0] ? inviteFromPaste(args[0]) : null
+      // A running daemon holds this identity's session: the contact goes in
+      // THROUGH it (live, no restart, its knocks repeat until accepted) - a
+      // second session here would close both (one identity, one session).
+      const dsock = inv ? await connectDaemon() : null
+      if (inv && dsock) {
+        console.log(`kontakt:  ${opt('--name') ?? inv.name}\nodcisk:   ${await fingerprint(inv.pub)}\nPorównaj odcisk z tym, co ta osoba podała Ci innym kanałem (rozmowa, telefon).`)
+        if (!await confirm('Zapisać?')) { dsock.end(); die('nie zapisano') }
+        const r = await ask(dsock, { op: 'add', link: args[0], name: opt('--name'), note: opt('--note') })
+        dsock.end()
+        if (!r.ok) die(r.error)
+        if (r.status === 'known') { console.log(`ten klucz już masz: ${r.name} (${r.fp})`); break }
+        console.log(`zapisano kontakt ${r.name} (przez demona)`)
+        if (r.knock !== undefined) console.log(r.knock === 0
+          ? `zapukano, ale nikt teraz nie słucha tego zaproszenia - demon puka co 90 s, aż ${r.name} przyjmie`
+          : `zapukano do ${r.name} - demon puka dalej co 90 s, aż przyjmie`)
+        if (r.reply) console.log(`Odeślij ${r.name} swój link (już oznaczony jako odpowiedź):\n${r.reply}`)
+        break
+      }
       if (inv) {
         const name = opt('--name') ?? inv.name
         const { id, contacts, store } = await signIn(kv)
@@ -456,18 +473,41 @@ try {
       for (const e of r.entries) console.log(`  do ${String(e.to).padEnd(12)} od ${e.age_s}s, ważne jeszcze ${Math.round(e.expires_in_s / 60)} min${e.key ? ' · klucz ' + e.key : ''}${e.merged ? ` · +${e.merged} połączonych` : ''}\n     ${e.text.slice(0, 100)}`)
       break
     }
+    case 'knocks': case 'accept': case 'ignore': {
+      // Knocks are held by the session that heard them: the daemon (or `chat`, with /knocks).
+      const sock = await connectDaemon()
+      if (!sock) die('demon nie działa - pukanie odbiera onchato-cli daemon albo onchato-cli chat (/knocks)')
+      if (cmd === 'knocks') {
+        const r = await ask(sock!, { op: 'knocks' }); sock!.end()
+        if (!r.ok) die(r.error)
+        if (!r.knocks.length) { console.log('nikt nie puka'); break }
+        for (const k of r.knocks) console.log(`  ${k.n}) ${k.name} · odcisk ${k.fp} · zaproszenie „${k.invite}”${k.note ? ' · „' + k.note + '”' : ''}`)
+        break
+      }
+      const n = Number(args[0])
+      if (!Number.isInteger(n) || n < 1) { sock!.end(); die(`użycie: ${cmd} <nr z onchato-cli knocks>`) }
+      const r = await ask(sock!, { op: cmd, n }); sock!.end()
+      if (!r.ok) die(r.error)
+      console.log(cmd === 'accept' ? `dodano ${r.name} (${r.fp})` : `zignorowano ${r.name} (${r.fp}) - kolejne pukanie z tego klucza nie pojawi się`)
+      break
+    }
     case 'daemon': {
       const { id, contacts, kind, names, base } = await signIn(kv)
       const say = (m: string) => console.log(`[onchato] ${m}`)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names }, log: rest.includes('--debug') ? say : undefined })
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names }, log: rest.includes('--debug') ? say : undefined, hem: kind === 'HEM', invites: true })
       hub.on((e) => {
         if (e.t === 'link') say(`łącze: ${e.state}`)
+        // Loud: somebody is at the door, and the name is only a claim.
+        if (e.t === 'knock') say(`${e.name} puka (zaproszenie „${e.invite}”) · odcisk ${e.fp}${e.note ? ` · „${e.note}”` : ''} - onchato-cli accept ${e.n} | ignore ${e.n}`)
+        if (e.t === 'contact') say(e.how === 'accepted' ? `${e.name} przyjął(a) nasze pukanie (${e.fp})` : `nowy kontakt: ${e.name} (${e.fp})`)
         if (e.t === 'presence') say(`${e.from}: ${e.state}`)
         // That something arrived, never what: the journal is not the conversation.
         if (e.t === 'msg') say(`wiadomość od ${e.from}${e.group ? ` w ${e.group}` : ''} (${e.text.length} znaków)`)
         if (e.t === 'file') say(`plik od ${e.from}${e.group ? ` w ${e.group}` : ''} (${e.size} B)`)
       })
       await hub.start()
+      if (hub.desk?.listening()) say(`słucham ${hub.desk.listening()} zaproszeń - pukanie: onchato-cli knocks`)
+      if (hub.desk?.knockingOn().length) say(`pukam do: ${hub.desk.knockingOn().join(', ')} (co 90 s, aż przyjmą)`)
       const queue = new Queue({ hub, kv, base, names, log: say })
       await queue.load()
       const path = socketPath()
@@ -479,7 +519,7 @@ try {
       break
     }
     default:
-      console.log('użycie: onchato-cli profile new|list|import|export · hem new <nazwa> --hem <url> · send · send-file · listen · get · daemon · queue · whoami · pubkey · contacts · invite [--qr]\n         add <link|kod> | add <nazwa> <klucz> · verify <nazwa> [--qr] [numer] · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
+      console.log('użycie: onchato-cli profile new|list|import|export · hem new <nazwa> --hem <url> · send · send-file · listen · get · daemon · queue · knocks · accept N · ignore N · whoami · pubkey · contacts · invite [--qr]\n         add <link|kod> | add <nazwa> <klucz> · verify <nazwa> [--qr] [numer] · chat <nazwa>\n         [--profile <nazwa> | --hem <url> [--handle h]] [--password p]')
   }
 } catch (e: any) {
   // Nodes refuse the sanctioned regions with 451 (GEOBLOKADA.md), and a refused

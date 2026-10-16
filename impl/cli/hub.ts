@@ -18,6 +18,12 @@ import { Groups } from './groups.ts'
 import type { KV } from '../lib/migrate.ts'
 import { anchorClock } from '../lib/clock.ts'
 import { hostOf } from '../lib/ice.ts'
+import { inviteFromPaste, inviteLink } from '../lib/invite.ts'
+import { InviteStore } from './invites.ts'
+import { KnockDesk } from './knocks.ts'
+import { fingerprint } from './fp.ts'
+
+export const APP_ORIGIN = 'https://app.onchato.com', APP_PATH = '/'
 
 export type HubEvent =
   | { t: 'msg'; from: string; pub: string; text: string; ts: number; id: string; group?: string }
@@ -26,6 +32,13 @@ export type HubEvent =
   | { t: 'presence'; from: string; pub: string; state: 'online' | 'offline' }
   | { t: 'delivered'; to: string; pub: string; id: string; ms: number }
   | { t: 'link'; state: 'online' | 'reconnecting' | 'offline' }
+  /** Somebody knocked on one of our invites; `n` is what `accept` / `ignore` take. */
+  | { t: 'knock'; n: number; name: string; fp: string; note: string; invite: string }
+  /** A contact appeared in the book: `added` (add/accept) or `accepted` (they took our knock). */
+  | { t: 'contact'; name: string; pub: string; fp: string; how: 'added' | 'accepted' }
+
+/** What `addFromLink` did. `reply` is the link to send back when theirs had no inbox. */
+export interface AddResult { status: 'added' | 'known'; name: string; fp: string; knock?: number | null; reply?: string }
 
 /** 'sent' is a group: a broadcast has no acks to wait for (SPEC.md §8). */
 export interface SendResult { status: 'delivered' | 'queued' | 'sent'; id: string; ms?: number; to: string }
@@ -38,6 +51,11 @@ export class Hub {
   private networkId?: string
   private log: (m: string) => void
   private vault?: { kv: KV; base: Uint8Array | null; names: Names }
+  private hem: boolean
+  private invites: boolean
+  private presence!: { onOnline(p: { pub: string }): void; onOffline(p: { pub: string }): void; onWantsConversation(p: { pub: string }): void }
+  /** Invites both ways (cli/knocks.ts) - only with `invites: true`, i.e. in the daemon. */
+  desk: KnockDesk | null = null
   groups: Groups | null = null
   session!: ClientSession
   contactList: Contact[] = []
@@ -48,9 +66,16 @@ export class Hub {
   /** Received files by message id - the key stays in memory, never in an event. */
   files = new Map<string, FileMeta>()
 
-  constructor(o: { id: Identity; contacts: ContactManager; relays: string[]; transport?: 'light' | 'libp2p'; networkId?: string; log?: (m: string) => void; vault?: { kv: KV; base: Uint8Array | null; names: Names } }) {
+  constructor(o: {
+    id: Identity; contacts: ContactManager; relays: string[]; transport?: 'light' | 'libp2p'; networkId?: string; log?: (m: string) => void
+    vault?: { kv: KV; base: Uint8Array | null; names: Names }
+    /** New contacts go to the HEM (the identity is a HEM one). */
+    hem?: boolean
+    /** Listen on our invites and keep knocking on theirs: a long-lived session (the daemon), never a one-shot `send`. */
+    invites?: boolean
+  }) {
     this.id = o.id; this.contacts = o.contacts; this.relays = o.relays; this.vault = o.vault; this.networkId = o.networkId
-    this.transport = o.transport ?? 'light'; this.log = o.log ?? (() => {})
+    this.transport = o.transport ?? 'light'; this.log = o.log ?? (() => {}); this.hem = !!o.hem; this.invites = !!o.invites
   }
 
   on(cb: (e: HubEvent) => void): () => void { this.listeners.add(cb); return () => this.listeners.delete(cb) }
@@ -67,12 +92,25 @@ export class Hub {
     const anchor = () => { void anchorClock(this.relays.map(hostOf).filter((h): h is string => !!h), { log: this.log }) }
     anchor(); setInterval(anchor, 3_600_000).unref?.()
     this.contactList = await this.contacts.list()
-    await this.session.watchContacts(this.contactList.map((c) => ({ pub: c.pub })), {
+    // Before presence starts, so an acceptance of our knock that lands at once is recognised.
+    if (this.invites && this.vault) {
+      this.desk = new KnockDesk({
+        session: this.session, store: new InviteStore(this.vault.kv, this.vault.base, this.vault.names), me: this.id,
+        contacts: () => this.contactList, addContact: (name, pub) => this.addContact(name, pub), log: this.log,
+        on: {
+          knock: (k) => this.emit({ t: 'knock', n: k.n, name: k.name, fp: k.fp, note: k.note, invite: k.inv.label }),
+          accepted: (c, pub) => void fingerprint(pub).then((fp) => this.emit({ t: 'contact', name: c?.name ?? pub.slice(0, 8), pub, fp, how: 'accepted' })),
+        },
+      })
+      await this.desk.start()
+    }
+    this.presence = {
       onOnline: (p) => this.setOnline(p.pub, true),
       onOffline: (p) => this.setOnline(p.pub, false),
       // Somebody writes to us: open the room so the handshake completes and the message arrives.
       onWantsConversation: (p) => { const c = this.contactList.find((x) => x.pub === p.pub); if (c) void this.room(c) },
-    })
+    }
+    await this.session.watchContacts(this.contactList.map((c) => ({ pub: c.pub })), this.presence)
     if (this.vault) {
       this.groups = new Groups({
         session: this.session, me: this.id.pub, ...this.vault, contacts: () => this.contactList,
@@ -95,9 +133,42 @@ export class Hub {
   private setOnline(pub: string, on: boolean) {
     if (on) {
       if (this.online.has(pub)) return
-      this.online.add(pub); this.groups?.onOnline(pub)
+      this.online.add(pub); this.groups?.onOnline(pub); this.desk?.online(pub)
       this.emit({ t: 'presence', from: this.nameOf(pub), pub, state: 'online' })
     } else if (this.online.delete(pub)) this.emit({ t: 'presence', from: this.nameOf(pub), pub, state: 'offline' })
+  }
+
+  /** Save a contact and start watching it - no restart: the daemon's book is live. */
+  async addContact(name: string, pub: string): Promise<Contact> {
+    await this.contacts.add(name, pub, this.hem)
+    await new Promise((r) => setTimeout(r, 150)) // the book's seal follows the write
+    this.contactList = await this.contacts.list()
+    await this.session.watchContacts([{ pub }], this.presence)
+    const c = this.contactList.find((x) => x.pub === pub)
+    if (!c) throw new Error('kontakt nie zapisał się w książce')
+    this.emit({ t: 'contact', name: c.name, pub, fp: await fingerprint(pub), how: 'added' })
+    return c
+  }
+
+  /**
+   * A contact from a link (identity link or invite, any shape `add` takes). With
+   * an inbox: knock, and keep knocking until they accept (needs `invites`).
+   * Without one: hand back our reply link - they still need our key.
+   * No question asked here: whoever calls decided (the CLI after t/N, a bot after
+   * its admin confirmed the fingerprint).
+   */
+  async addFromLink(link: string, o: { name?: string; note?: string } = {}): Promise<AddResult> {
+    const inv = inviteFromPaste(link)
+    if (!inv) throw new Error('to nie jest link onchato ani kod zaproszenia')
+    if (inv.pub === this.id.pub) throw new Error('to Twój własny klucz')
+    const fp = await fingerprint(inv.pub)
+    const known = this.contactList.find((c) => c.pub === inv.pub)
+    if (known) return { status: 'known', name: known.name, fp }
+    const name = (o.name ?? inv.name ?? '').trim().slice(0, 64) || 'bez nazwy'
+    if (inv.inbox && inv.key && !this.desk) throw new Error('pukanie wymaga demona (onchato-cli daemon)')
+    const c = await this.addContact(name, inv.pub)
+    if (inv.inbox && inv.key) return { status: 'added', name: c.name, fp, knock: await this.desk!.knockInvite(inv, c.name, o.note) }
+    return { status: 'added', name: c.name, fp, ...(inv.reply ? {} : { reply: inviteLink(APP_ORIGIN, APP_PATH, { pub: this.id.pub, name: this.id.handle, reply: true }) }) }
   }
 
   nameOf(pub: string) { return this.contactList.find((c) => c.pub === pub)?.name ?? pub.slice(0, 8) }
@@ -171,6 +242,7 @@ export class Hub {
   }
 
   async close(): Promise<void> {
+    this.desk?.stop()
     for (const r of this.rooms.values()) { try { await (await r).leave() } catch {} }
     try { await this.session?.close() } catch {}
   }

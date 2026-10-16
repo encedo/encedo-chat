@@ -16,8 +16,8 @@ import { inviteLink } from '../lib/invite.ts'
 import { Windows, type Win } from './windows.ts'
 import { decodeKeys, LineEditor } from './keys.ts'
 import { Screen, statusLine, SGR, type Out } from './tui.ts'
-import { expired, type InviteStore, type PubInvite } from './invites.ts'
-import { inboxSecretBytes } from '../lib/invite.ts'
+import type { InviteStore } from './invites.ts'
+import { KnockDesk } from './knocks.ts'
 import { prepareFile, saveFile, humanSize, downloadDir } from './files.ts'
 import type { FileMeta } from '../lib/envelope.ts'
 import { Groups, type GroupInfo } from './groups.ts'
@@ -56,9 +56,6 @@ export interface ClientOpts {
   vault?: { kv: KV; base: Uint8Array | null; names: Names }
   io: Io
 }
-
-/** Under a minute would be rude to the relay; over a few makes the other side wait (the app's value). */
-const KNOCK_EVERY_MS = 90_000
 
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 const nodeName = (addr: string) => addr.match(/dns4\/([^./]+)/)?.[1] ?? addr.slice(0, 12)
@@ -211,18 +208,29 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
 
   // Presence for every contact; an incoming conversation opens in the background.
   const contactList = await o.contacts.list()
-  let waiting = o.store ? await o.store.waiting() : new Map()
-  // A knock sealed to the identity key is opened by nobody since knocks are
-  // sealed to the invite's key (the app's loadWaiting drops the same records).
-  for (const [pub, w] of [...waiting]) if (!w.key) waiting.delete(pub)
+  // ---- invites that answer themselves (SPEC.md §5.7-5.8; cli/knocks.ts) -----
+  // Started before presence, so an acceptance that lands at once is recognised.
+  const desk = o.store ? new KnockDesk({
+    session, store: o.store, me: o.id, contacts: () => contactList,
+    addContact: async (name, pub) => {
+      await o.contacts.add(name, pub, o.kind === 'HEM')
+      await new Promise((r) => setTimeout(r, 150)) // the book's seal follows the write
+      contactList.splice(0, contactList.length, ...(await o.contacts.list()))
+      await session.watchContacts([{ pub }], presence)
+      return contactList.find((c) => c.pub === pub)!
+    },
+    on: {
+      // Loud on purpose: somebody is at the door, and the name is only a claim.
+      knock: (kn) => print(1, `${t()} ${SGR.magenta}${SGR.bold}-!- ${kn.name} puka${SGR.reset} ${SGR.grey}(zaproszenie „${kn.inv.label}”) · odcisk ${kn.fp}${kn.note ? ' · „' + kn.note + '”' : ''} - /accept ${kn.n} · /ignore ${kn.n}${SGR.reset}`, 'mention'),
+      knownKnock: (c, inv) => print(1, sys(`${c.name} zapukał(a) do zaproszenia „${inv.label}”, ale jest już w Twoich kontaktach - /query ${c.name}`), 'msg'),
+      // They announce, so they hold our key: a knock of ours was accepted.
+      accepted: (c) => print(1, sys(`${SGR.green}${c?.name ?? 'kontakt'} przyjął(a) Twoje pukanie${SGR.reset}${SGR.grey} - /query ${c?.name ?? ''}`), 'msg'),
+    },
+  }) : null
+  await desk?.start()
   const presence = {
     onOnline: (p: { pub: string }) => {
-      // They announce, so they hold our key: a knock of ours was accepted.
-      if (waiting.delete(p.pub)) {
-        void o.store?.saveWaiting(waiting)
-        const c = contactList.find((x) => x.pub === p.pub)
-        print(1, sys(`${SGR.green}${c?.name ?? 'kontakt'} przyjął(a) Twoje pukanie${SGR.reset}${SGR.grey} - /query ${c?.name ?? ''}`), 'msg')
-      }
+      desk?.online(p.pub)
       if (!online.has(p.pub)) { online.add(p.pub); repaintStatus(); groups?.onOnline(p.pub) }
     },
     onOffline: (p: { pub: string }) => { online.delete(p.pub) },
@@ -284,56 +292,8 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
   }
   const groupOf = (win: Win) => win.kind === 'group' ? groups?.get(win.key) ?? null : null
 
-  // ---- invites that answer themselves (SPEC.md §5.7-5.8) ----------------
-  interface Knock { n: number; ik: string; name: string; note: string; fp: string; inv: PubInvite }
-  let knocks: Knock[] = []
-  let knockSeq = 0
-  const inboxWatches = new Map<string, { stop(): void }>()
-  const knownKnocks = new Set<string>()
-  const watchInvites = async () => {
-    if (!o.store) return
-    const list = await o.store.invites()
-    for (const [id, wt] of inboxWatches) if (!list.some((i) => i.id === id && !expired(i))) { wt.stop(); inboxWatches.delete(id) }
-    for (const inv of list) {
-      if (inboxWatches.has(inv.id) || expired(inv)) continue
-      const raw = inboxSecretBytes({ pub: '', name: '', inbox: inv.secret }); if (!raw) continue
-      inboxWatches.set(inv.id, session.watchInbox(raw, {
-        onKnock: (k) => void (async () => {
-          const ik = btoa(String.fromCharCode(...k.ik))
-          if (knocks.some((x) => x.ik === ik && x.inv.id === inv.id)) return       // a re-knock while waiting
-          const known = contactList.find((c) => c.pub === ik)
-          if (known) {
-            if (knownKnocks.has(ik + inv.id)) return   // the app re-knocks every 90 s; say it once
-            knownKnocks.add(ik + inv.id)
-            // Said, not swallowed: silence here made a working invite look broken
-            // (2026-10-07 - the phone already held this key).
-            print(1, sys(`${known.name} zapukał(a) do zaproszenia „${inv.label}”, ale jest już w Twoich kontaktach - /query ${known.name}`), 'msg')
-            return
-          }
-          const fp = await fingerprint(ik)
-          if ((await o.store!.ignored()).some((r) => r.fp === fp)) return
-          if (knocks.some((x) => x.ik === ik && x.inv.id === inv.id)) return       // raced the awaits
-          const kn: Knock = { n: ++knockSeq, ik, name: (k.name || 'bez nazwy').slice(0, 64), note: k.note ?? '', fp, inv }
-          knocks.push(kn)
-          // Loud on purpose: somebody is at the door, and the name is only a claim.
-          print(1, `${t()} ${SGR.magenta}${SGR.bold}-!- ${kn.name} puka${SGR.reset} ${SGR.grey}(zaproszenie „${inv.label}”) · odcisk ${fp}${kn.note ? ' · „' + kn.note + '”' : ''} - /accept ${kn.n} · /ignore ${kn.n}${SGR.reset}`, 'mention')
-        })(),
-      }))
-    }
-  }
-  await watchInvites()
-  if (inboxWatches.size) status(sys(`słucham ${inboxWatches.size} zaproszeń (pukanie pojawi się tutaj)`))
-  const invTimer = setInterval(() => void watchInvites(), 30_000); (invTimer as any).unref?.()
-
-  // Knocks we are still making (onchato-cli add <invite>), until they accept.
-  const knockAll = () => {
-    for (const [pub, wt] of waiting) {
-      const raw = inboxSecretBytes({ pub: '', name: '', inbox: wt.inbox }); if (!raw || !wt.key) continue
-      void session.knock(raw, wt.key, { name: o.id.handle, note: wt.note }).catch(() => {})
-    }
-  }
-  if (waiting.size) { knockAll(); status(sys(`pukam do: ${[...waiting.values()].map((x) => x.name).join(', ')} (co 90 s, aż przyjmą)`)) }
-  const knockTimer = setInterval(() => { if (waiting.size) knockAll() }, KNOCK_EVERY_MS); (knockTimer as any).unref?.()
+  if (desk?.listening()) status(sys(`słucham ${desk.listening()} zaproszeń (pukanie pojawi się tutaj)`))
+  if (desk?.knockingOn().length) status(sys(`pukam do: ${desk.knockingOn().join(', ')} (co 90 s, aż przyjmą)`))
 
   /** A contact by its number on /list or by name (case-insensitive). */
   const findContact = (q: string) => {
@@ -450,20 +410,15 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         break
       }
       case 'knocks': {
+        const knocks = desk?.list() ?? []
         if (!knocks.length) { print(w.active, sys('nikt nie puka')); break }
         for (const k of knocks) print(w.active, sys(`${k.n}) ${k.name} · odcisk ${k.fp} · zaproszenie „${k.inv.label}”${k.note ? ' · „' + k.note + '”' : ''}`))
         break
       }
       case 'accept': case 'ignore': {
-        const k = knocks.find((x) => x.n === Number(arg)); if (!k) { print(w.active, warn(`nie ma pukania nr ${arg} (/knocks)`)); break }
-        knocks = knocks.filter((x) => x !== k)
-        if (cmd === 'ignore') { await o.store?.ignore(k.fp); print(w.active, sys(`zignorowano ${k.name} (${k.fp}) - kolejne pukanie z tego klucza nie pojawi się`)); break }
-        // Accepting IS adding the contact: they hold our key from the invite, now
-        // we hold theirs, and both sides can compute the pair topic (§5.8).
-        await o.contacts.add(k.name, k.ik, o.kind === 'HEM')
-        await new Promise((r) => setTimeout(r, 150)) // the book's seal follows the write
-        contactList.splice(0, contactList.length, ...(await o.contacts.list()))
-        await session.watchContacts([{ pub: k.ik }], presence)
+        if (!desk?.list().some((x) => x.n === Number(arg))) { print(w.active, warn(`nie ma pukania nr ${arg} (/knocks)`)); break }
+        if (cmd === 'ignore') { const k = await desk.ignore(Number(arg)); print(w.active, sys(`zignorowano ${k.name} (${k.fp}) - kolejne pukanie z tego klucza nie pojawi się`)); break }
+        const { knock: k } = await desk.accept(Number(arg))
         print(w.active, sys(`${SGR.green}dodano ${k.name}${SGR.reset}${SGR.grey} - /query ${k.name}`))
         break
       }
@@ -506,7 +461,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
     status(sys('wylogowuję…'))
     const wd = setTimeout(() => { sc.stop(); o.io.exit(0) }, 2500)
     ;(wd as any).unref?.()
-    for (const wt of inboxWatches.values()) { try { wt.stop() } catch {} }
+    desk?.stop()
     try { await Promise.all([...rooms.values()].map((r) => r.conv?.leave())) } catch {}
     try { await session.close() } catch {}
     clearTimeout(wd)
