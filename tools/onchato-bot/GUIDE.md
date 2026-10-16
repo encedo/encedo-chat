@@ -1,152 +1,160 @@
-# onchato-bot — bot na własnym serwerze
+# onchato-bot — a bot on your own server
 
-Bot to osobna tożsamość onchato na Twoim serwerze. Wysyła Ci raporty, odpowiada na
-polecenia z ustalonej listy i daje adminom dodawać kontakty prosto z czatu. Wszystko
-szyfrowane end-to-end, jak każda rozmowa w onchato. Postawienie zajmuje ok. 15 minut.
+The bot is a separate onchato identity on your server. It sends you reports, answers
+commands from a fixed list, and lets admins add contacts and make invites straight from
+the chat. Everything is end-to-end encrypted, like any onchato conversation. Setting it
+up takes about 15 minutes.
 
-Wymagana wersja: **onchato-cli 0.7.45 lub nowsza** (demon przyjmuje kontakty bez
-restartu; wcześniejsze wersje mają też błąd obecności, przez który kolejka potrafiła
-stać).
+Requires **onchato-cli 0.7.45 or newer** (the daemon takes contacts and makes invites
+without a restart; earlier versions also had a presence bug that could stall the queue).
 
 ```
-┌──────────── kontener: onchato-cli daemon ────────────┐
-│ tożsamość, klucze, sieć, kolejka (wolumen /data)     │
-│ gniazdo /data/onchato.sock = /srv/onchato na hoście  │
-└────────────────────────▲─────────────────────────────┘
-                         │ jedna linia JSON w każdą stronę
-┌────────────────────────┴─────────────────────────────┐
-│ onchato-bot.py (host, Python 3.8+, bez zależności)   │
-│ /etc/onchato/bot.json: polecenia -> programy, admini │
-└──────────────────────────────────────────────────────┘
+┌──────────── container: onchato-cli daemon ──────────┐
+│ identity, keys, network, queue (volume /data)       │
+│ socket /data/onchato.sock = /srv/onchato on the host│
+└────────────────────────▲────────────────────────────┘
+                         │ one JSON line each way
+┌────────────────────────┴────────────────────────────┐
+│ onchato-bot.py (host, Python 3.8+, no dependencies) │
+│ /etc/onchato/bot.json: commands -> programs, admins │
+└─────────────────────────────────────────────────────┘
 ```
 
-Bot nie ma żadnych kluczy: wszystko, co dotyczy tożsamości i sieci, robi demon. Bot tylko
-tłumaczy wiadomość na program z listy.
+The bot holds no keys: everything about identity and network is the daemon's job. The
+bot only turns a message into a program from the list.
 
 ---
 
-## 1. Demon w Dockerze
+## 1. The daemon in Docker
 
 ```bash
 git clone --recurse-submodules https://github.com/encedo/encedo-chat
-cd encedo-chat && git checkout v0.7.45      # albo nowszy tag
+cd encedo-chat && git checkout v0.7.45      # or a newer tag
 docker build -t onchato .
 
-sudo install -d -o 1000 -g 1000 -m 700 /srv/onchato          # dane demona, widoczne z hosta
-docker run --rm -it -v /srv/onchato:/data onchato profile new mojbot   # hasło dwa razy
+sudo install -d -o 1000 -g 1000 -m 700 /srv/onchato              # the daemon's data, visible from the host
+docker run --rm -it -v /srv/onchato:/data onchato profile new mybot   # password twice
 
 sudo install -d -m 700 /etc/onchato
-read -rs -p 'haslo bota: ' P; echo
+read -rs -p 'bot password: ' P; echo
 printf '%s\n' "$P" | sudo install -m 600 -o 1000 -g 1000 /dev/stdin /etc/onchato/bot.pass; unset P
 
-docker run -d --name onchato --restart unless-stopped --memory 200m \
+docker run -d --name onchato --restart unless-stopped --memory 256m \
   -v /srv/onchato:/data \
   --mount type=bind,src=/etc/onchato/bot.pass,dst=/run/secrets/onchato-password,ro \
   onchato daemon
 docker logs -f onchato
 ```
 
-Kontener działa jako uid 1000, stąd właściciel katalogu i pliku z hasłem. Hasła nie
-wpisuj w linię poleceń ani w zmienną środowiskową — widać je w `ps` i w historii.
+The container runs as uid 1000, hence the owner of the directory and the password file.
+Never put the password on a command line or in an environment variable — both show in
+`ps` and in the shell history. The daemon takes ~90 MB with a few contacts and grows with
+each open conversation; 256 MB leaves room.
 
-## 2. Pierwszy kontakt: Ty
+## 2. The first contact: you
 
-Bot musi mieć Twój klucz, a Ty jego. Przy działającym demonie `add` idzie przez demona:
+The bot needs your key and you need its. With the daemon running, `add` goes through it:
 
 ```bash
-docker exec -it onchato onchato-cli add 'https://app.onchato.com/#i=...' --name ja
+docker exec -it onchato onchato-cli add 'https://app.onchato.com/#i=...' --name me
 ```
 
-- **Link tożsamości** (w aplikacji: „Udostępnij swój profil”): bot wypisze **link
-  zwrotny** — otwórz go w aplikacji.
-- **Zaproszenie ze skrzynką**: demon puka i ponawia co 90 s, aż przyjmiesz w aplikacji.
+- **An identity link** (in the app: "Share your profile"): the bot prints a **reply
+  link** — open it in the app.
+- **An invite with an inbox**: the daemon knocks, and again every 90 s, until you accept
+  in the app.
 
-Porównaj odcisk, który pokazuje `add`, z odciskiem w aplikacji. Swój odcisk w bocie
-zobaczysz w `docker exec onchato onchato-cli contacts` — przyda się za chwilę jako admin.
+Compare the fingerprint `add` shows with the one in the app. Your fingerprint as the bot
+sees it is in `docker exec onchato onchato-cli contacts` — you need it below, as an admin.
 
-Test: `docker exec onchato onchato-cli send ja "test"` — kod 0 = doręczono, 3 = czeka
-w kolejce demona i wyjdzie, gdy będziesz online.
+Test: `docker exec onchato onchato-cli send me "test"` — exit 0 = delivered, 3 = waiting
+in the daemon's queue, it goes out when you are online.
 
-## 3. Bot
+## 3. The bot
 
 ```bash
 sudo install -d /opt/onchato-bot
 sudo cp tools/onchato-bot/onchato-bot.py /opt/onchato-bot/
-sudo cp tools/onchato-bot/bot.example.json /etc/onchato/bot.json     # i edytuj
+sudo cp tools/onchato-bot/bot.example.json /etc/onchato/bot.json     # and edit it
 sudo cp tools/onchato-bot/onchato-bot.service /etc/systemd/system/
 python3 /opt/onchato-bot/onchato-bot.py --config /etc/onchato/bot.json check
 sudo systemctl daemon-reload && sudo systemctl enable --now onchato-bot
 ```
 
-`check` sprawdza konfigurację i łączy się z demonem. Napisz do bota `ping`.
+`check` validates the config and reaches the daemon. Then write `ping` to the bot.
 
-### Konfiguracja (`/etc/onchato/bot.json`)
+### Configuration (`/etc/onchato/bot.json`)
 
 ```json
 {
   "socket": "/srv/onchato/onchato.sock",
-  "name": "serwer1",
+  "name": "server1",
+  "lang": "en",
   "admins": ["E1:30:1D:E1:0D:F8:32:88"],
   "answer": "contacts",
-  "reports": { "to": ["ja"], "ttl": "7d" },
+  "reports": { "to": ["me"], "ttl": "7d" },
   "commands": {
     "ping":   { "run": ["echo", "pong"] },
-    "dysk":   { "run": ["df", "-h", "/"] },
+    "disk":   { "run": ["df", "-h", "/"] },
     "docker": { "run": ["docker", "ps", "--format", "{{.Names}}  {{.Status}}"], "admin": true },
-    "logi":   { "run": ["journalctl", "-u", "{unit}", "-n", "20", "--no-pager"],
+    "logs":   { "run": ["journalctl", "-u", "{unit}", "-n", "20", "--no-pager"],
                 "args": { "unit": "^(nginx|ssh|docker)$" }, "admin": true }
   }
 }
 ```
 
-| pole | znaczenie |
+| field | meaning |
 |---|---|
-| `socket` | gniazdo demona (katalog z kroku 1) |
-| `name` | przedrostek odpowiedzi, `[serwer1] …` — przydaje się przy kilku serwerach |
-| `admins` | **odciski** kluczy adminów (`onchato-cli contacts`), nie nazwy |
-| `answer` | `contacts` — odpowiada każdemu kontaktowi; `admins` — tylko adminom |
-| `reports.to` | komu idą `run` i `notify`; `ttl` — jak długo czekają w kolejce |
-| `commands` | polecenie → program (`run`, lista argumentów, bez powłoki) |
-| `commands.*.args` | argumenty z wiadomości: tylko zadeklarowane, każdy z regexem, który musi pasować w całości; trafia wyłącznie w element `run` równy dokładnie `{nazwa}` |
-| `commands.*.admin` | `true` — polecenie tylko dla adminów |
-| `rate_seconds`, `timeout_seconds` | 1 odpowiedź na kontakt co tyle sekund (adminów nie dotyczy); limit czasu programu |
+| `socket` | the daemon's socket (the directory from step 1) |
+| `name` | prefix of every answer, `[server1] …` — handy with several servers |
+| `lang` | `en` or `pl`: the language of help for unknown text and of what the bot says unasked (knocks); a built-in command is always answered in the language it was written in |
+| `admins` | admins' key **fingerprints** (`onchato-cli contacts`), not names |
+| `answer` | `contacts` — answers every contact; `admins` — admins only |
+| `reports.to` | who gets `run` and `notify`; `ttl` — how long they wait in the queue |
+| `commands` | command → program (`run`, an argument list, no shell) |
+| `commands.*.args` | arguments from the message: only declared ones, each with a regex it must match whole; it replaces only a `run` element that is exactly `{name}` |
+| `commands.*.admin` | `true` — admins only |
+| `rate_seconds`, `timeout_seconds` | one answer per contact per that many seconds (not for admins); the program's time limit |
 
-Nowe polecenie to jedna linia w `commands` i `systemctl restart onchato-bot`.
+A new command is one line in `commands` and `systemctl restart onchato-bot`.
 
-### Polecenia w czacie
+### Commands in the chat
 
-| piszesz | kto | co się dzieje |
+Built-in commands work in English and in Polish; the answer comes in the language asked.
+
+| you write | who | what happens |
 |---|---|---|
-| `ping`, `dysk`, … | każdy kontakt (albo admin, gdy `admin: true`) | wynik programu |
-| `logi nginx` | admin | argument sprawdzony regexem; `logi nginx;reboot` jest odrzucane |
-| cokolwiek innego | każdy | lista poleceń, które ta osoba może wydać |
-| `dodaj <link> [nazwa]` | admin | bot pokazuje nazwę i **odcisk** z linku i prosi: `tak 3946` |
-| `tak 3946` | admin | kontakt dodany od razu (bez restartu); przy zaproszeniu bot puka, aż przyjmą, przy linku tożsamości odsyła link zwrotny |
-| `pukania` | admin | kto puka do zaproszeń bota |
-| `przyjmij 1`, `ignoruj 1` | admin | decyzja o pukaniu |
-| `zaproszenie [etykieta] [7d]` | admin | nowe zaproszenie bota; odpowiedź to link, demon słucha od razu |
-| `zaproszenia`, `wycofaj 1` | admin | lista zaproszeń z linkami; wycofanie (nikt nie jest informowany) |
+| `ping`, `disk`, … | any contact (an admin, with `admin: true`) | the program's output |
+| `logs nginx` | admin | the argument is checked by its regex; `logs nginx;reboot` is refused |
+| `help`, or anything else | anyone | the commands this person may use |
+| `add <link> [name]` · `dodaj` | admin | the bot shows the name and **fingerprint** from the link and asks: `yes 3946` |
+| `yes 3946` · `tak` | admin | the contact is added at once (no restart); for an invite the bot knocks until they accept, for an identity link it hands back a reply link |
+| `knocks` · `pukania` | admin | who is knocking on the bot's invites |
+| `accept 1`, `ignore 1` · `przyjmij`, `ignoruj` | admin | decide on a knock |
+| `invite [label] [7d]` · `zaproszenie` | admin | a new invite for the bot; the answer is the link, the daemon listens at once |
+| `invites`, `revoke 1` · `zaproszenia`, `wycofaj` | admin | invites with their links; withdraw one (nobody is told) |
 
-Gdy ktoś zapuka do zaproszenia bota, każdy admin dostaje wiadomość z odciskiem i numerem
-do `przyjmij`. Zaproszenie robi demon — z czatu (`zaproszenie bot 7d`) albo z serwera:
+When someone knocks on the bot's invite, every admin gets a message with the fingerprint
+and the number for `accept`. Invites are made by the daemon — from the chat
+(`invite bot 7d`) or on the server:
 
 ```bash
-docker exec onchato onchato-cli invites new bot --expires 7d   # wypisze link; demon od razu słucha
-docker exec onchato onchato-cli invites                         # lista; invites revoke <nr> wycofuje
+docker exec onchato onchato-cli invites new bot --expires 7d   # prints the link; the daemon listens at once
+docker exec onchato onchato-cli invites                         # the list; invites revoke <n> withdraws
 ```
 
-### Raporty
+### Reports
 
-`run` uruchamia polecenie z konfiguracji i wysyła wynik do `reports.to`; `notify` wysyła
-standardowe wejście:
+`run` runs a command from the config and sends its output to `reports.to`; `notify`
+sends standard input:
 
 ```ini
-# /etc/systemd/system/onchato-raport.service
+# /etc/systemd/system/onchato-report.service
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 -I /opt/onchato-bot/onchato-bot.py --config /etc/onchato/bot.json run dysk
+ExecStart=/usr/bin/python3 -I /opt/onchato-bot/onchato-bot.py --config /etc/onchato/bot.json run disk
 
-# /etc/systemd/system/onchato-raport.timer
+# /etc/systemd/system/onchato-report.timer
 [Timer]
 OnCalendar=*-*-* 08,20:00
 [Install]
@@ -154,36 +162,37 @@ WantedBy=timers.target
 ```
 
 ```bash
-echo "backup gotowy" | python3 /opt/onchato-bot/onchato-bot.py --config /etc/onchato/bot.json notify
+echo "backup done" | python3 /opt/onchato-bot/onchato-bot.py --config /etc/onchato/bot.json notify
 ```
 
-Każdy raport czeka w kolejce osobno (domyślnie 7 dni): po powrocie dostaniesz wszystkie
-po kolei.
+Every report waits in the queue on its own (7 days by default): when you come back, you
+get all of them, in order.
 
-## 4. Zasady bezpieczeństwa
+## 4. Security rules
 
-- Bot nigdy nie uruchamia powłoki i nie wkleja tekstu z wiadomości w polecenie —
-  argument istnieje tylko tam, gdzie konfiguracja go zadeklarowała, z regexem.
-- Admin to **klucz**, nie nazwa. Przejęty telefon admina może dodawać kontakty; dodane
-  kontakty mogą jednak tylko to, co polecenia bez `admin: true`.
-- Dodanie kontaktu wymaga potwierdzenia odcisku (`tak <kod>`), ważnego 5 minut.
-- Obcy nie napisze do bota: demon rozmawia tylko z kontaktami. Grupy bot pomija.
-- Program z `run` działa z uprawnieniami usługi (domyślnie root, żeby czytać dziennik
-  i Dockera). Wolisz mniej — ustaw `User=` w jednostce i daj temu użytkowi dostęp do
-  gniazda (właściciel uid 1000) i do tego, co polecenia czytają.
+- The bot never runs a shell and never pastes message text into a command — an argument
+  exists only where the config declares it, with a regex.
+- An admin is a **key**, not a name. A stolen admin phone can add contacts; those contacts
+  can still do only what commands without `admin: true` allow.
+- Adding a contact needs the fingerprint confirmed (`yes <code>`), valid for 5 minutes.
+- A stranger cannot write to the bot: the daemon talks to contacts only. Groups are ignored.
+- A program from `run` runs with the service's rights (root by default, to read the
+  journal and Docker). For less, set `User=` in the unit and give that user access to the
+  socket (owned by uid 1000) and to what the commands read.
 
-## 5. Pułapki
+## 5. Known traps
 
-| objaw | przyczyna | co zrobić |
+| symptom | cause | what to do |
 |---|---|---|
-| „ta tożsamość otworzyła się w drugim miejscu” | `chat` albo drugi demon na tożsamości bota | zatrzymaj jedno; przy działającym demonie używaj `docker exec onchato onchato-cli …` |
-| wiadomości do telefonu czekają | Android i iOS usypiają aplikację w tle | normalne: kolejka trzyma je `ttl` i wysyła po otwarciu aplikacji |
-| bot milczy po restarcie demona | strumień zdarzeń się zerwał | systemd podnosi bota po 5 s; `journalctl -u onchato-bot` |
-| godziny w logach przesunięte | kontener liczy w UTC | `-e TZ=Europe/Warsaw` przy `docker run` |
+| „ta tożsamość otworzyła się w drugim miejscu” ("this identity opened somewhere else") | `chat` or a second daemon on the bot's identity | stop one; with the daemon running use `docker exec onchato onchato-cli …` |
+| messages to a phone wait | Android and iOS put the app to sleep in the background | normal: the queue keeps them for `ttl` and sends when the app opens |
+| the bot goes quiet after a daemon restart | the event stream broke | systemd restarts the bot after 5 s; `journalctl -u onchato-bot` |
+| times in the logs are off | the container runs in UTC | `-e TZ=Europe/Warsaw` (your zone) on `docker run` |
 
-Aktualizacja: `git pull`, `docker build -t onchato .`, `docker rm -f onchato`, ten sam
-`docker run`; profil i kolejka zostają w `/srv/onchato`. Bot: skopiuj nowy
-`onchato-bot.py` i `systemctl restart onchato-bot`.
+Updating: `git pull`, `docker build -t onchato .`, `docker rm -f onchato`, the same
+`docker run`; the profile and the queue stay in `/srv/onchato`. The bot: copy the new
+`onchato-bot.py` and `systemctl restart onchato-bot`.
 
-Testy: `cd tools/onchato-bot && python3 -m unittest -v`; na żywo przez prawdziwe węzły:
-`sh tools/onchato-bot/live-test.sh`. Protokół gniazda: nagłówek `impl/cli/daemon.ts`.
+Tests: `cd tools/onchato-bot && python3 -m unittest -v`; live over the real nodes:
+`sh tools/onchato-bot/live-test.sh`. The socket protocol: the header of
+`impl/cli/daemon.ts`.

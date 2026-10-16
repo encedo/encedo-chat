@@ -1,19 +1,20 @@
 {
-  "_opis": "Przyklad - GUIDE.md. admins: odciski kluczy (onchato-cli contacts), nie nazwy. Argument tylko jako caly element run, z regexem w args.",
+  "_about": "Example - see GUIDE.md. admins: key fingerprints (onchato-cli contacts), not names. An argument only as a whole run element, with a regex in args.",
   "socket": "/srv/onchato/onchato.sock",
-  "name": "serwer1",
+  "name": "server1",
+  "lang": "en",
   "admins": ["00:00:00:00:00:00:00:00"],
   "answer": "contacts",
   "rate_seconds": 10,
   "timeout_seconds": 20,
-  "reports": { "to": ["ja"], "ttl": "7d" },
+  "reports": { "to": ["me"], "ttl": "7d" },
   "commands": {
     "ping":   { "run": ["echo", "pong"] },
     "uptime": { "run": ["uptime"] },
-    "dysk":   { "run": ["df", "-h", "/"] },
-    "pamiec": { "run": ["free", "-m"] },
+    "disk":   { "run": ["df", "-h", "/"] },
+    "memory": { "run": ["free", "-m"] },
     "docker": { "run": ["docker", "ps", "--format", "{{.Names}}  {{.Status}}"], "admin": true },
-    "logi":   { "run": ["journalctl", "-u", "{unit}", "-n", "20", "--no-pager"],
+    "logs":   { "run": ["journalctl", "-u", "{unit}", "-n", "20", "--no-pager"],
                 "args": { "unit": "^(nginx|ssh|docker)$" }, "admin": true }
   }
 }

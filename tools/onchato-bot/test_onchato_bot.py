@@ -198,6 +198,40 @@ class Invites(unittest.TestCase):
         self.assertEqual(d.asked, [])
 
 
+class English(unittest.TestCase):
+    def test_english_commands_answer_in_english(self):
+        b, d, ran, _ = make()
+        self.assertEqual(b.answer('help', USER, False), 'commands: ping')
+        self.assertEqual(b.answer('add ' + KUBA, USER, False), "this command is for the bot's admins only")
+        r = b.answer('add ' + KUBA + ' Kuba', ADMIN, True)
+        self.assertIn('fingerprint 39:46:1D:E0:18:8C:93:39', r)
+        self.assertIn('reply: yes 3946', r)
+        self.assertEqual(b.answer('yes 0000', ADMIN, True), 'wrong code - reply: yes 3946')
+        self.assertIn('added Kuba', b.answer('yes 3946', ADMIN, True))
+        self.assertEqual(d.asked[-1], {'op': 'add', 'link': KUBA, 'name': 'Kuba'})
+        self.assertIn('whoever opens it knocks', b.answer('invite team 1h', ADMIN, True))
+        self.assertEqual(d.asked[-1]['ttl'], 3_600_000)
+        self.assertEqual(b.answer('accept 1', ADMIN, True), 'added Ola (AA:BB:CC:DD:EE:FF:00:11)')
+
+    def test_polish_and_english_mix_per_message(self):
+        b, d, ran, _ = make()
+        b.answer('dodaj ' + KUBA, ADMIN, True)
+        self.assertIn('added', b.answer('yes 3946', ADMIN, True), 'confirmed in English after a Polish add')
+
+    def test_lang_sets_help_for_unknown_text_and_unasked_messages(self):
+        b, d, ran, _ = make(lang='en')
+        self.assertEqual(b.answer('hello', USER, False), 'commands: ping')
+        b.on_event({'t': 'knock', 'n': 2, 'name': 'Ola', 'fp': 'AA:BB:CC:DD:EE:FF:00:11', 'note': '', 'invite': 'bot'})
+        self.assertIn('is knocking', d.sent[-1][1])
+        self.assertIn('accept 2', d.sent[-1][1])
+        with self.assertRaises(bot.ConfigError):
+            make(lang='de')
+
+    def test_english_names_are_reserved_too(self):
+        with self.assertRaises(bot.ConfigError):
+            make({'invite': {'run': ['true']}})
+
+
 class Links(unittest.TestCase):
     def test_fingerprints_match_the_cli(self):
         self.assertEqual(bot.fingerprint(bot.read_link(KUBA)[0]), '39:46:1D:E0:18:8C:93:39')
