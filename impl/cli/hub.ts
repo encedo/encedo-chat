@@ -68,8 +68,8 @@ export class Hub {
     anchor(); setInterval(anchor, 3_600_000).unref?.()
     this.contactList = await this.contacts.list()
     await this.session.watchContacts(this.contactList.map((c) => ({ pub: c.pub })), {
-      onOnline: (p) => { if (!this.online.has(p.pub)) { this.online.add(p.pub); this.groups?.onOnline(p.pub); this.emit({ t: 'presence', from: this.nameOf(p.pub), pub: p.pub, state: 'online' }) } },
-      onOffline: (p) => { if (this.online.delete(p.pub)) this.emit({ t: 'presence', from: this.nameOf(p.pub), pub: p.pub, state: 'offline' }) },
+      onOnline: (p) => this.setOnline(p.pub, true),
+      onOffline: (p) => this.setOnline(p.pub, false),
       // Somebody writes to us: open the room so the handshake completes and the message arrives.
       onWantsConversation: (p) => { const c = this.contactList.find((x) => x.pub === p.pub); if (c) void this.room(c) },
     })
@@ -91,6 +91,15 @@ export class Hub {
     }
   }
 
+  /** One presence event per change of a contact, whichever layer saw it. */
+  private setOnline(pub: string, on: boolean) {
+    if (on) {
+      if (this.online.has(pub)) return
+      this.online.add(pub); this.groups?.onOnline(pub)
+      this.emit({ t: 'presence', from: this.nameOf(pub), pub, state: 'online' })
+    } else if (this.online.delete(pub)) this.emit({ t: 'presence', from: this.nameOf(pub), pub, state: 'offline' })
+  }
+
   nameOf(pub: string) { return this.contactList.find((c) => c.pub === pub)?.name ?? pub.slice(0, 8) }
 
   /** A contact by name (case-insensitive) or by its public key. */
@@ -102,7 +111,16 @@ export class Hub {
   room(c: Contact): Promise<Conversation> {
     let r = this.rooms.get(c.pub)
     if (!r) {
+      // An open room retires the light watch, so from here the ROOM says who is
+      // present - per PeerId (a restarted peer joins under a new one before the
+      // old one times out). Without this a contact whose handshake came before
+      // its first Announce never went online, and the queue waited for good.
+      const here = new Set<string>()
       r = this.session.open({ pub: c.pub }, {
+        onPresence: (peer, ev) => {
+          if (ev === 'quiet' || ev === 'leave') here.delete(peer); else here.add(peer)
+          this.setOnline(c.pub, here.size > 0)
+        },
         onMessage: (_from, m) => this.emit({ t: 'msg', from: c.name, pub: c.pub, text: m.body, ts: m.ts, id: m.id }),
         onFile: (_from, f) => {
           this.files.set(f.id, f as unknown as FileMeta)
