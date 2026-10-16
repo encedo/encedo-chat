@@ -20,7 +20,7 @@ ADMIN_FP = bot.fingerprint(ADMIN)
 
 class FakeDaemon:
     def __init__(self):
-        self.sent, self.asked = [], []
+        self.sent, self.asked, self.invites = [], [], []
         self.contacts = [{'name': 'szef', 'pub': ADMIN}, {'name': 'ewa', 'pub': USER}]
 
     def send(self, to, text, ttl=None):
@@ -36,6 +36,14 @@ class FakeDaemon:
             return {'ok': True, 'status': 'added', 'name': req['name'], 'fp': '39:46:1D:E0:18:8C:93:39', 'knock': 1}
         if op == 'knocks':
             return {'ok': True, 'knocks': [{'n': 1, 'name': 'Ola', 'fp': 'AA:BB:CC:DD:EE:FF:00:11', 'note': '', 'invite': 'bot'}]}
+        if op == 'invite-new':
+            self.invites.append({'n': len(self.invites) + 1, 'id': 'i%d' % len(self.invites), 'label': req['label'], 'expired': False, 'link': 'https://app.onchato.com/#i=XYZ'})
+            return {'ok': True, 'label': req['label'], 'expires': 1 if req['ttl'] else None, 'link': 'https://app.onchato.com/#i=XYZ'}
+        if op == 'invites':
+            return {'ok': True, 'invites': list(self.invites)}
+        if op == 'invite-revoke':
+            self.invites = [i for i in self.invites if i['id'] != req['id']]
+            return {'ok': True, 'label': 'bot'}
         if op in ('accept', 'ignore'):
             return {'ok': True, 'name': 'Ola', 'fp': 'AA:BB:CC:DD:EE:FF:00:11'}
         return {'ok': False, 'error': 'nieznane op'}
@@ -169,6 +177,25 @@ class Contacts(unittest.TestCase):
         self.assertIn('przyjmij 1', d.sent[0][1])
         self.assertEqual(b.on_message(msg('przyjmij 1', ADMIN, 'szef')), 'dodano Ola (AA:BB:CC:DD:EE:FF:00:11)')
         self.assertEqual(d.asked[-1], {'op': 'accept', 'n': 1})
+
+
+class Invites(unittest.TestCase):
+    def test_admins_make_list_and_withdraw_invites_through_the_daemon(self):
+        b, d, ran, _ = make()
+        r = b.answer('zaproszenie nowi 7d', ADMIN, True)
+        self.assertIn('#i=', r)
+        self.assertIn('(z terminem)', r)
+        self.assertEqual(d.asked[-1], {'op': 'invite-new', 'label': 'nowi', 'ttl': 7 * 86_400_000})
+        self.assertIn('1) nowi', b.answer('zaproszenia', ADMIN, True))
+        self.assertIn('wycofano', b.answer('wycofaj 1', ADMIN, True))
+        self.assertEqual(d.invites, [])
+        self.assertIn('nie ma zaproszenia nr 1', b.answer('wycofaj 1', ADMIN, True))
+
+    def test_a_contact_cannot_touch_invites(self):
+        b, d, ran, _ = make()
+        for t in ('zaproszenie x', 'zaproszenia', 'wycofaj 1'):
+            self.assertEqual(b.answer(t, USER, False), 'to polecenie jest tylko dla adminow bota')
+        self.assertEqual(d.asked, [])
 
 
 class Links(unittest.TestCase):

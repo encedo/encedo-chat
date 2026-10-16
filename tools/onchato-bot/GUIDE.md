@@ -4,7 +4,7 @@ Bot to osobna tożsamość onchato na Twoim serwerze. Wysyła Ci raporty, odpowi
 polecenia z ustalonej listy i daje adminom dodawać kontakty prosto z czatu. Wszystko
 szyfrowane end-to-end, jak każda rozmowa w onchato. Postawienie zajmuje ok. 15 minut.
 
-Wymagana wersja: **onchato-cli 0.7.42 lub nowsza** (demon przyjmuje kontakty bez
+Wymagana wersja: **onchato-cli 0.7.45 lub nowsza** (demon przyjmuje kontakty bez
 restartu; wcześniejsze wersje mają też błąd obecności, przez który kolejka potrafiła
 stać).
 
@@ -29,7 +29,7 @@ tłumaczy wiadomość na program z listy.
 
 ```bash
 git clone --recurse-submodules https://github.com/encedo/encedo-chat
-cd encedo-chat && git checkout v0.7.42      # albo nowszy tag
+cd encedo-chat && git checkout v0.7.45      # albo nowszy tag
 docker build -t onchato .
 
 sudo install -d -o 1000 -g 1000 -m 700 /srv/onchato          # dane demona, widoczne z hosta
@@ -124,15 +124,15 @@ Nowe polecenie to jedna linia w `commands` i `systemctl restart onchato-bot`.
 | `tak 3946` | admin | kontakt dodany od razu (bez restartu); przy zaproszeniu bot puka, aż przyjmą, przy linku tożsamości odsyła link zwrotny |
 | `pukania` | admin | kto puka do zaproszeń bota |
 | `przyjmij 1`, `ignoruj 1` | admin | decyzja o pukaniu |
+| `zaproszenie [etykieta] [7d]` | admin | nowe zaproszenie bota; odpowiedź to link, demon słucha od razu |
+| `zaproszenia`, `wycofaj 1` | admin | lista zaproszeń z linkami; wycofanie (nikt nie jest informowany) |
 
 Gdy ktoś zapuka do zaproszenia bota, każdy admin dostaje wiadomość z odciskiem i numerem
-do `przyjmij`. Zaproszenie tworzy się **przy zatrzymanym demonie** — demon trzyma dane
-w pamięci i nadpisałby zaproszenie zapisane obok niego (CLI tego pilnuje i odmawia):
+do `przyjmij`. Zaproszenie robi demon — z czatu (`zaproszenie bot 7d`) albo z serwera:
 
 ```bash
-docker stop onchato
-docker run --rm -it -v /srv/onchato:/data onchato invites new bot --expires 7d   # wypisze link
-docker start onchato
+docker exec onchato onchato-cli invites new bot --expires 7d   # wypisze link; demon od razu słucha
+docker exec onchato onchato-cli invites                         # lista; invites revoke <nr> wycofuje
 ```
 
 ### Raporty

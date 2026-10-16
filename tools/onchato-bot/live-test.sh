@@ -6,7 +6,7 @@
 # Three temporary profiles: `bot` (daemon + onchato-bot serve), `szef` (daemon,
 # the bot's admin by fingerprint), `nowy` (only a link). szef asks `ping`, then
 # adds `nowy` from chat with `dodaj <link>` + `tak <code>`; the bot's daemon
-# must hold the new contact at once. Leaves nothing running.
+# must hold the new contact at once; then makes an invite from chat. Leaves nothing running.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 CLI="node $ROOT/impl/cli/onchato.ts"
@@ -55,4 +55,9 @@ wait_for "$T/szef.events" 'dodano Nowak' 'the add result'
 as bot contacts | grep -q Nowak || fail "the bot's daemon does not list Nowak"
 grep -q 'nowy kontakt: Nowak' "$T/bot.log" || fail "the daemon did not take Nowak live"
 echo "  - dodaj <link> Nowak -> code $CODE -> tak $CODE -> the bot's daemon holds Nowak, no restart"
+as szef send bot "zaproszenie nowi 1h" --wait 60 >/dev/null
+wait_for "$T/szef.events" 'zaproszenie \\"nowi\\"' 'the invite link'
+as bot invites | grep -q 'nowi' || fail "the bot's daemon does not list the invite"
+grep -q 'nowe zaproszenie' "$T/bot.log" || fail "the daemon did not make the invite itself"
+echo "  - zaproszenie nowi 1h -> a link back, made and listened on by the bot's daemon"
 echo "PASS - onchato-bot over real daemons and relays"

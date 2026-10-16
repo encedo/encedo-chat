@@ -44,7 +44,8 @@ DEFAULTS = {
     'reports': {'to': [], 'ttl': '7d'},
     'commands': {},
 }
-BUILTIN = {'pomoc', 'dodaj', 'tak', 'pukania', 'przyjmij', 'ignoruj'}
+BUILTIN = {'pomoc', 'dodaj', 'tak', 'pukania', 'przyjmij', 'ignoruj', 'zaproszenie', 'zaproszenia', 'wycofaj'}
+ADMIN_CMDS = ('dodaj', 'tak', 'pukania', 'przyjmij', 'ignoruj', 'zaproszenie', 'zaproszenia', 'wycofaj')
 CONFIRM_S = 300                 # an unconfirmed `dodaj` is forgotten after this
 FP_RE = re.compile(r'^[0-9A-F]{2}(:[0-9A-F]{2}){7}$')
 PLACEHOLDER = re.compile(r'\{([A-Za-z_][A-Za-z0-9_]*)\}')
@@ -215,7 +216,7 @@ class Bot:
         if not words:
             return self.help(admin)
         cmd, args = words[0].lower(), words[1:]
-        if cmd in ('dodaj', 'tak', 'pukania', 'przyjmij', 'ignoruj'):
+        if cmd in ADMIN_CMDS:
             if not admin:
                 return 'to polecenie jest tylko dla adminow bota'
             return getattr(self, 'cmd_' + cmd)(args, pub)
@@ -231,7 +232,8 @@ class Bot:
         mine = [n for n, c in self.cfg['commands'].items() if admin or not c.get('admin')]
         names = [n + ''.join(f' <{a}>' for a in self.cfg['commands'][n].get('args', {})) for n in mine]
         if admin:
-            names += ['dodaj <link> [nazwa]', 'pukania', 'przyjmij <nr>', 'ignoruj <nr>']
+            names += ['dodaj <link> [nazwa]', 'pukania', 'przyjmij <nr>', 'ignoruj <nr>',
+                      'zaproszenie [etykieta] [7d]', 'zaproszenia', 'wycofaj <nr>']
         return 'polecenia: ' + ', '.join(names) if names else 'brak polecen'
 
     def argv(self, c, args):
@@ -308,6 +310,36 @@ class Bot:
 
     def cmd_ignoruj(self, args, pub):
         return self._decide('ignore', args, 'zignorowano')
+
+    # Invites are made BY the daemon (it holds store.json and listens at once).
+    def cmd_zaproszenie(self, args, pub):
+        ttl = None
+        if args and re.match(r'^\d+[mhd]$', args[-1]):
+            ttl = parse_ttl(args[-1])
+            args = args[:-1]
+        r = self.d.ask({'op': 'invite-new', 'label': ' '.join(args) or 'bot', 'ttl': ttl})
+        if not r.get('ok'):
+            return r.get('error', '?')
+        return (f'zaproszenie "{r["label"]}"' + (' (z terminem)' if r.get('expires') else ' (bez terminu)')
+                + f' - kto je otworzy, zapuka i dostaniecie wiadomosc:\n{r["link"]}')
+
+    def cmd_zaproszenia(self, args, pub):
+        r = self.d.ask({'op': 'invites'})
+        if not r.get('ok'):
+            return r.get('error', '?')
+        if not r['invites']:
+            return 'brak zaproszen - zaproszenie [etykieta] [7d]'
+        return '\n'.join(f'{i["n"]}) {i["label"]}' + (' WYGASLO' if i['expired'] else '') + f'\n{i["link"]}' for i in r['invites'])
+
+    def cmd_wycofaj(self, args, pub):
+        if len(args) != 1 or not args[0].isdigit():
+            return 'podaj numer z: zaproszenia'
+        r = self.d.ask({'op': 'invites'})
+        inv = next((i for i in r.get('invites', []) if i['n'] == int(args[0])), None)
+        if not inv:
+            return f'nie ma zaproszenia nr {args[0]}'
+        r = self.d.ask({'op': 'invite-revoke', 'id': inv['id']})
+        return f'wycofano "{r["label"]}" - nikt nie jest o tym informowany' if r.get('ok') else r.get('error', '?')
 
     def _decide(self, op, args, said):
         if len(args) != 1 or not args[0].isdigit():
