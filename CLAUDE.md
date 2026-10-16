@@ -724,5 +724,5 @@ feature is missing.
   shells with updater — shipped.
 - Known follow-ups: skipped-key persistence across restarts; the light client's
   stage 3 after battery measurements; storage migrations from 0.7.34 come out in
-  0.7.40.
+  0.8.0 (moved from 0.7.40, the user's call 2026-10-16).
 - The tree is normally clean at a tag; the release ritual is in Deploy above.
