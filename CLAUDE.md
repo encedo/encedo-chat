@@ -75,9 +75,8 @@ names its lines.
   update via `git submodule update --remote`.
 - Root `*.md` — `README`, `SECURITY`, `CLI`, `hem_usage` (**which operations
   reach the HSM and what they cost** — read it before adding anything that talks
-  to the device), plus design records and plans (`GROUPS-DESIGN`,
-  `TRANSFER-DESIGN`, `DISCOVERY-PROPOSAL`, `MOBILE-PLAN`, `EMBED-PLAN`,
-  `CLI-PLAN`, `performance`) — those are records, SPEC wins where they differ;
+  to the device), plus design records and plans (`TRANSFER-DESIGN`,
+  `DISCOVERY-PROPOSAL`, `MOBILE-PLAN`, `EMBED-PLAN`, `CLI-PLAN`, `performance`) — those are records, SPEC wins where they differ;
   superseded plans go to `docs/archive/`.
 
 Older iterations (v2–v5) are the separate repo `encedo/onchato.com`.
@@ -465,7 +464,7 @@ reproduces `docs/kat/eh2-handshake-mlkem.json`, `ratchet-hybrid.json`,
   deterministically — not a boundary against a compromised page. The native
   engine is.
 
-### Groups — Sender Keys, all-ECDH (§8, `GROUPS-DESIGN.md`)
+### Groups — Sender Keys, all-ECDH (§8)
 
 Built, wired into web and CLI, tested live with five people (0.7.0). A group is
 a software layer over the 1:1 mesh: Sender Keys for content, authenticated by

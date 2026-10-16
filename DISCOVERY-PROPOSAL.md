@@ -9,8 +9,7 @@
 knock frame, the cover-traffic schedule), with the exposure in §11.3 S14 and
 `THREAT-MODELS.md` F4b. Those sections were written from the shipped code, not
 from this file. This one keeps what a specification does not: the reasoning,
-the rejected alternatives and the numbers behind the decisions, in the shape of
-`GROUPS-DESIGN.md`.
+the rejected alternatives and the numbers behind the decisions.
 
 ⚠️ **The knock below (§2.1, v1) is not what ships.** Since 0.7.29 a knock is
 `knock-v2`, sealed to a per-invite key `HKDF(self-DH, salt = invite_secret,

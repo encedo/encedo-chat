@@ -212,6 +212,9 @@ A pair topic can hold more than the two people it was derived for: a second tab 
 | SPQR as the PQ-ratchet template | Its complexity stems from asynchrony and push-size limits this transport does not have |
 | MLS for groups — deferred, not rejected | At 3–10 members TreeKEM's advantage is irrelevant and the Delivery Service is a server |
 | `GK_pub` or a group DH as the topic seed | Section 3 |
+| A group key derived deterministically in the HSM | Re-derivable from the HSM means no forward secrecy; message keys stay client-side sender chains |
+| `group_secret` held in the HEM (`cipherUnwrap`, a keypair per member) | Keeps the topic across an all-wipe but not the content; a keypair per member and a re-wrap every epoch for a partial gain |
+| A roster hash in the marker | Rebuilding needs a subset search over the contact book; the admin's marker carries roster hints with a CRC instead (§8.6) |
 | A per-client rotation jitter | Section 3 |
 | A stable initiator id in msg1 | Section 4 |
 | Newest-window-wins on the self-topic | Section 7 |

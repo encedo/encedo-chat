@@ -8,7 +8,7 @@
 > compatibility layer (`SECURITY.md`, Versions).
 
 Working notes, not a spec. `docs/` stays the audit target; this file is
-implementation reality, like `CLAUDE.md`, `GROUPS-DESIGN.md` and
+implementation reality, like `CLAUDE.md` and
 `MOBILE-PLAN.md`.
 
 Written 2026-08-07, prompted by a concrete case: a software vendor who does not

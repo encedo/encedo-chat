@@ -1,7 +1,6 @@
 # Mobile — plan (Android + iOS)
 
-Working notes, not a spec. This file is implementation reality, like `CLAUDE.md`
-and `GROUPS-DESIGN.md`.
+Working notes, not a spec. This file is implementation reality, like `CLAUDE.md`.
 
 Written 2026-08-04; brought up to reality 2026-08-30 and again 2026-09-22.
 **Android is no longer a plan** — a signed APK ships from CI on every tag, the

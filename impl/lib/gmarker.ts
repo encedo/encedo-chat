@@ -24,7 +24,7 @@
  *   accident, because admin and owner were the same party. A MEMBER's marker
  *   breaks it: its admin is somebody else.
  * - **A KID is taken from the HEM when we hold one, and derived only when we do
- *   not.** The HEM KID is `SHA1(pub)[0:16]` (GROUPS-DESIGN.md) — deterministic
+ *   not.** The HEM KID is `SHA1(pub)[0:16]` (SPEC.md §4.2) — deterministic
  *   and global, which is exactly why a hint the admin writes resolves on
  *   someone else's device. Note it is SHA-**1**, and NOT the app fingerprint
  *   `SHA-256(pub)` (§4.4), which is the human out-of-band check and a different
