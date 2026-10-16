@@ -223,7 +223,11 @@
   .msg.ok{display:block;background:var(--good-soft);color:var(--good)}
 
   /* app shell */
-  .app{display:flex;gap:8px;max-width:1680px;margin:0 auto;padding:16px;height:100vh;min-height:560px}
+  /* No width cap: the app fills the window, however wide. It was 1680px and
+     centred, which left two empty bands on a 2560 or ultrawide screen; what
+     a wide window must not do is stretch a line of text, and that is bounded
+     on the bubble instead (below). */
+  .app{display:flex;gap:8px;padding:16px;height:100vh;min-height:560px}
   .sidebar{width:var(--sidebar-w,420px);flex-shrink:0;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
   /* Draggable divider between the contact list and the chat (desktop only). */
   .splitter{flex:none;width:8px;align-self:stretch;cursor:col-resize;border-radius:6px;background:transparent;transition:background .15s}
@@ -436,7 +440,9 @@
   .badge.rotate{color:var(--muted);font-variant-numeric:tabular-nums}
   .messages{flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px}
   .mrow{display:flex;align-items:center;gap:6px}.mrow.out{justify-content:flex-end}
-  .bubble{max-width:62%;padding:10px 14px;border-radius:10px;box-shadow:var(--shadow)}
+  /* 760px is what 62% came to at the old 1680px app width with the default
+     sidebar: up to there nothing changes, past it a line stops growing. */
+  .bubble{max-width:min(62%,760px);padding:10px 14px;border-radius:10px;box-shadow:var(--shadow)}
   .mrow.in .bubble{background:var(--bubble-in);border-bottom-left-radius:2px}
   .mrow.out .bubble{background:var(--bubble-out);border-bottom-right-radius:2px}
 /* One person's consecutive messages: one block (regroupTranscript in app.ts). */
