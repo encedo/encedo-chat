@@ -460,7 +460,13 @@ try {
       const { id, contacts, kind, names, base } = await signIn(kv)
       const say = (m: string) => console.log(`[onchato] ${m}`)
       const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names }, log: rest.includes('--debug') ? say : undefined })
-      hub.on((e) => { if (e.t === 'link') say(`łącze: ${e.state}`); if (e.t === 'presence') say(`${e.from}: ${e.state}`) })
+      hub.on((e) => {
+        if (e.t === 'link') say(`łącze: ${e.state}`)
+        if (e.t === 'presence') say(`${e.from}: ${e.state}`)
+        // That something arrived, never what: the journal is not the conversation.
+        if (e.t === 'msg') say(`wiadomość od ${e.from}${e.group ? ` w ${e.group}` : ''} (${e.text.length} znaków)`)
+        if (e.t === 'file') say(`plik od ${e.from}${e.group ? ` w ${e.group}` : ''} (${e.size} B)`)
+      })
       await hub.start()
       const queue = new Queue({ hub, kv, base, names, log: say })
       await queue.load()
