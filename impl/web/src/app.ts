@@ -2758,7 +2758,7 @@ $('import-add').addEventListener('click', async () => {
     // An invite carrying an inbox answers itself: this side knocks on it, and
     // the contact stays marked as waiting until the other side announces. There
     // is no reply channel to watch - the answer IS them appearing on the pair
-    // topic, which this client could always derive (DISCOVERY-PROPOSAL.md §2.2).
+    // topic, which this client could always derive (SPEC.md §5.7).
     if (inv.inbox && inv.key && store !== 'none') startKnocking(inv.pub, inv.inbox, inv.key, name, val('import-note'))
     pendingInvite = null
     endModals() // imported: the windows it came through are finished too
@@ -4324,7 +4324,7 @@ for (const [tab, pane] of TABS) {
  * we hold their key, they hold nothing of ours, and the knock is what tells them
  * we exist. Until they accept it there is no channel and no way to know whether
  * the frame was even delivered — GossipSub stores nothing, so a knock reaches a
- * listener or reaches nobody (DISCOVERY-PROPOSAL.md §4.7).
+ * listener or reaches nobody (RATIONALE.md §3).
  *
  * So this re-knocks while the app is open, and the contact carries a plain
  * label saying there is no confirmation of delivery. For a Source an ambiguous
@@ -4441,7 +4441,7 @@ async function resumeKnocking() {
  * A PUBLISHED invite is not the share modal's one-off link. That one hands your
  * key to one person who hands theirs back by hand; this one is hung somewhere
  * public and answers itself, because it carries an inbox secret that names a
- * topic you listen on (DISCOVERY-PROPOSAL.md §2).
+ * topic you listen on (SPEC.md §5.7).
  *
  * One secret per invite, never shared between them: retiring an invite is
  * unsubscribing from its topic, and a shared secret would mean retiring one

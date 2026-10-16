@@ -101,7 +101,7 @@ test('a fragment that is not ours is left alone', () => {
   assert.equal(decodeInvite('#access_token=abc'), null)
 })
 
-// ---- the inbox secret (DISCOVERY-PROPOSAL.md) -------------------------------
+// ---- the inbox secret (SPEC.md §5.7) -------------------------------
 
 test('an inbox secret survives the round trip and yields its bytes', () => {
   const s = newInboxSecret()

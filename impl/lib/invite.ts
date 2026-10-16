@@ -77,7 +77,7 @@ export interface Invite {
    *
    * It is public by construction — it is printed wherever the link is — so the
    * topic is unguessable only to somebody who has not seen the link. That is a
-   * real cost and it is written up in DISCOVERY-PROPOSAL.md §6.1 rather than
+   * real cost and it is written up in SPEC.md §11.3 S14 rather than
    * hidden here.
    *
    * Absent means an invite with no inbox: a one-to-one link whose reply
@@ -95,7 +95,7 @@ export interface Invite {
 
 /** A fresh inbox secret, base64. One per published invite — never shared
  *  between them, or retiring one would have to retire the others
- *  (DISCOVERY-PROPOSAL.md §4.1). */
+ *  (RATIONALE.md §3, one topic per invite). */
 export function newInboxSecret(): string {
   const b = new Uint8Array(INBOX_BYTES)
   crypto.getRandomValues(b)

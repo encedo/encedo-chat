@@ -218,7 +218,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Kto napisał — bez treści': 'Who wrote — without the text',
     'Kontakty': 'Contacts',
     'Kopiuj link': 'Copy the link',
-    // ---- published invites (DISCOVERY-PROPOSAL.md) ----
+    // ---- published invites (SPEC.md §5.7-5.9) ----
     'Zaproszenia': 'Invites',
     'CZEKAM': 'WAITING',
     'Zapukaliśmy — czekamy, aż {name} przyjmie': 'Knocked — waiting for {name} to accept',

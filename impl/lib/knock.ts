@@ -2,7 +2,7 @@
  * knock.ts — one sealed frame that says "here is my key" on a public topic.
  *
  * The frame a Source publishes on a Journalist's inbox topic
- * (DISCOVERY-PROPOSAL.md §2.1). Its shape is EH-2's `msg1`: a one-shot
+ * (SPEC.md §5.8). Its shape is EH-2's `msg1`: a one-shot
  * ephemeral public key in the clear, everything else sealed to the key of the
  * invite it answers. Nothing new is introduced — X25519, HKDF-SHA256 and AES-GCM,
  * all of them already on the message path.

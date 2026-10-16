@@ -637,7 +637,7 @@ export interface ClientSession {
   /** Drop one contact's presence watch (e.g. it was removed). */
   unwatch(pub: string): void
   /**
-   * Listen on one published invite's inbox (DISCOVERY-PROPOSAL.md §2).
+   * Listen on one published invite's inbox (SPEC.md §5.7).
    *
    * Unlike `watchContacts` this is not about people we know: the topic is named
    * by a secret printed wherever the invite was published, so anybody who read
@@ -1096,7 +1096,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
     for (const [pub, o] of openConvs) if (o.conv.who().length === 0) void realign(pub, 'nobody on the old topic').catch(() => {})
   }, opts.realignEveryMs ?? 60_000)
   ;(realignTimer as any).unref?.()
-  /** One per published invite; stopped with the session (DISCOVERY-PROPOSAL.md §2). */
+  /** One per published invite; stopped with the session (SPEC.md §5.7). */
   const inboxes = new Set<InboxWatch>()
   // The day a contact's handshake arrived on, remembered until we open the room
   // so it lands on the exact rotating topic the handshake is using (see `open`).

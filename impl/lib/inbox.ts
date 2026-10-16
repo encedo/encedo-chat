@@ -1,5 +1,5 @@
 /**
- * inbox.ts — listening on the topic an invite names (DISCOVERY-PROPOSAL.md §2).
+ * inbox.ts — listening on the topic an invite names (SPEC.md §5.7).
  *
  * A Journalist publishes a link; the secret in it names a topic; this watches
  * that topic for knocks. It is deliberately NOT a presence watch: there is no

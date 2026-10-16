@@ -1,5 +1,5 @@
 /**
- * The sealed knock (DISCOVERY-PROPOSAL.md §2.1).
+ * The sealed knock (SPEC.md §5.8).
  *
  * The round trip is the easy half. What the rest of this file pins is the three
  * properties the design actually rests on: every frame is the same length, a

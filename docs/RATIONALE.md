@@ -56,6 +56,8 @@ Why the protocol in `SPEC.md` is the way it is: the reasoning behind each area, 
 
 **Cover traffic.** "Somebody knocked" stops carrying information if it happens anyway. The decoy schedule must not be derivable from the invite secret: the secret is public, so every link holder could compute when the decoys fall, subtract them and read off the real knocks, leaving an observer better off than with no cover at all. Seeding from the self-DH means only the identity holder can compute the schedule; being deterministic means two windows of one identity produce one stream rather than two (the rate would otherwise reveal how many devices listen) and a restart resumes with nothing stored. 45 s is well under half the nodes' 120 s idle eviction, and the decoy doubles as the keepalive of a full GossipSub peer's inbox topic; the arithmetic that matters is the worst gap, since two consecutive decoys at uniformly random instants can fall almost two slots apart. What remains is traffic analysis against an inbox somebody chose to publish (S14).
 
+**One topic per invite, and what an inbox must not become.** Each published invite has its own secret and its own topic, so retiring one is unsubscribing (silent, local, and only that invite dies), and a holder of one invite learns nothing about the traffic of another; a shared inbox per identity could revoke only by filtering and would let anyone who ever held any invite count and time every knock from every source. The secret travels in the URL fragment, which the browser never sends, so the web host that serves the app does not learn it. A knock is a request that a person accepts, never a contact (the product decision of 2026-09-15): that is why the frame is not asked to authenticate anybody, since the key it carries still proves itself in EH-2 with a human reading the fingerprint in between, and why the pending list is built as attacker-fillable (capped, cheap to clear). Impersonation is out of scope, said rather than implied: a hostile page can publish its own invite under somebody's name, and the protocol has nothing to check that claim against, so it shows the claim as a claim and offers no "verified" badge. The inviter must be online, as everywhere else; the answerer re-sends and says on screen that nothing has been delivered yet, and an inviter who publishes a contact address is the one to run an always-on instance (the terminal client). The inbox must never become a directory: a knock is addressed by an invite secret, never by an identity key alone. Its daily rotation spreads load and buys no unlinkability, because the secret it rotates under is public.
+
 ---
 
 ## 4. Handshake
@@ -223,6 +225,13 @@ A pair topic can hold more than the two people it was derived for: a second tab 
 | TURN (coturn) for hard NATs | One configuration line from an open relay; STUN only, hard-NAT pairs use the node |
 | Link previews | The app would contact a stranger's server for every URL before anyone clicked |
 | Group archive synced from a member | Circumvents the epoch lockout of a removed member |
+| One inbox per identity instead of one topic per published invite | Revoking one invite would cut every source; any holder of any invite could count and time every knock |
+| Invite secrets derived from one master secret | Saves storage, adds a construction, changes nothing else |
+| Signing the knock instead of sealing it | Proof of who knocked, for whoever later seizes the inviter's device |
+| A per-visitor invite secret minted by the web page | The web host would hold a list of candidate sources |
+| Rotating a published invite as a defence against watchers | The watcher re-reads the page |
+| A mailbox on the node for an offline inviter | The node would store something for somebody; transport only |
+| Proof of work in the knock — deferred | Costs the honest answerer CPU, buys little against an adversary who cares |
 | Electron + Cordova | Replaced by Tauri 2 |
 | Iroh instead of libp2p | No migration justification |
 
@@ -268,6 +277,7 @@ Two problems on different horizons: PQ confidentiality (needed now, against harv
 - **P6** — IK rotation on compromise: no built-in contact notification; out-of-band re-import today; in-band rotation (a new `IK_pub` MAC'd under `SK` in a live session to every contact) is planned.
 - **P7** — crypto library audit, especially `@noble/post-quantum`.
 - **P8** — cache backend: localStorage today; IndexedDB or SQLite in the shell as data outgrows it.
+- **P9** — published invites (put to the cryptographer 2026-09-15, no answer recorded): with the decoy schedule seeded per invite, does the arrival pattern of real knocks still link two invites of one inviter over months; and for a rare event under continuous cover, is a constant decoy rate better than a pseudo-random one?
 - **HKDF in the HSM** — the client is already on the seam (`lib/derive.ts`): every rendezvous, Announce, rotation, decoy-seed and group-MAC key is asked of the identity backend as `derive(label, peer, ctx, L)`, and the HEM backend realises it today over its raw `ecdh`. When firmware ships `ecdh` + HKDF in one call, what changes is:
   1. `hemIdentityFrom` in `lib/core.ts`: `derive` becomes the SDK call (`ecdhDerive(token, kid, peerKid ?? peerPub, ctx, label, L)` or whatever the SDK names it), for both the public-key and the two-KID form;
   2. `hemGkBackend` in `lib/core.ts`: the admin's `rk_i` likewise, through the GK's kid;
