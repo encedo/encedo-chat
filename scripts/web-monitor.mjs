@@ -22,6 +22,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { cidV1Raw } from '../impl/lib/cid.ts'
 import { verifyManifest } from '../impl/lib/manifest.ts'
+import { findCiBuild } from './ci-cid.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const WEB = process.env.MONITOR_WEB ?? 'https://app.onchato.com/'
@@ -52,19 +53,17 @@ if (m.web?.cid === served) say('OK', `the served web app is the approved one (v$
 
 // Not the approved one. Is it what CI built for the latest release tag?
 const gh = { headers: { accept: 'application/vnd.github+json', ...(process.env.GITHUB_TOKEN ? { authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) } }
-let ciCid = null, tag = null, since = null
-try {
-  const rel = await (await get(`https://api.github.com/repos/${REPO}/releases?per_page=5`, gh)).json()
-  for (const r of rel) {
-    const asset = r.assets?.find((a) => a.name === `reproducible-${r.tag_name}.md`)
-    if (!asset) continue
-    const md = await (await get(asset.url, { headers: { ...gh.headers, accept: 'application/octet-stream' } })).text()
-    const cid = md.match(/GitHub runner[^|]*\|\s*`([a-z0-9]+)`/)?.[1]
-    if (cid === served) { ciCid = cid; tag = r.tag_name; since = Date.parse(asset.created_at); break }
-  }
-} catch (e) { console.log(`(could not read the releases: ${e.message})`) }
-
-if (!ciCid) say('ALARM', `the host serves ${served}, which is neither the approved CID nor one CI built for a recent release tag`, 1)
+// A draft release is invisible to this read-only token, so ci-cid.mjs also
+// reads the run's `web-cid-<tag>-<cid>` artifact (needs `actions: read`).
+const build = await findCiBuild(served, {
+  repo: REPO,
+  getJson: async (u) => (await get(u, gh)).json(),
+  getText: async (u) => (await get(u, { headers: { ...gh.headers, accept: 'application/octet-stream' } })).text(),
+  log: (m) => console.log(m),
+})
+const tag = build?.tag, since = build?.since
+if (build) console.log(`ci       ${served}  (${tag}, from the ${build.via})`)
+if (!build) say('ALARM', `the host serves ${served}, which is neither the approved CID nor one CI built for a recent release tag`, 1)
 const waited = (now - since) / 3_600_000
 const hour = Math.floor(waited)
 const remind = hour >= REMIND_H && hour % REMIND_H === 0

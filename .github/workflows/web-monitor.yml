@@ -21,6 +21,10 @@ concurrency:
 
 permissions:
   contents: read
+  # The CI build of a tag whose release is still a draft is found by its
+  # `web-cid-<tag>-<cid>` artifact (scripts/ci-cid.mjs): a read-only token
+  # cannot list draft releases.
+  actions: read
 
 jobs:
   check:

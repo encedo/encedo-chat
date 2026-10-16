@@ -261,6 +261,10 @@ jobs:
           echo "runner    $RUNNER"
           echo "container $CONTAINER"
           [ "$RUNNER" = "$CONTAINER" ] || { echo "::error::the two builds of $TAG differ: runner $RUNNER, container $CONTAINER"; exit 1; }
+          # The agreed CID, where the web monitor's read-only token can see it
+          # while the release is still a draft (scripts/ci-cid.mjs).
+          echo "WEB_CID=$RUNNER" >> "$GITHUB_ENV"
+          mkdir -p /tmp/webcid && echo "$RUNNER" > /tmp/webcid/cid.txt
 
           SERVED=""; WAITED=0
           for i in $(seq 1 40); do
@@ -294,6 +298,13 @@ jobs:
           cat "reproducible-$TAG.md"
           gh release upload "$TAG" "reproducible-$TAG.md" --clobber
           [ "$SERVED" = "$RUNNER" ] || { echo "::error::the host does not serve the CID both builds agree on"; exit 1; }
+      - name: Name the agreed CID in an artifact (the monitor reads the name)
+        if: ${{ !cancelled() && env.WEB_CID != '' }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: web-cid-${{ github.ref_name }}-${{ env.WEB_CID }}
+          path: /tmp/webcid/cid.txt
+          retention-days: 30
 
   bundle:
     name: ${{ matrix.label }}
