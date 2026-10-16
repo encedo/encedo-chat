@@ -3733,6 +3733,41 @@ async function main() {
       step(`loaded ${nodes.length} published node(s) by CID, first is ${nodes[0].name}`)
     }
 
+    // Last, because it ends B's session. The header's sign-out asks in a window
+    // first; closing that window disarmed the Back stack, and its history.back()
+    // cancelled the reload: "the window shows, nothing happens" (0.7.40-0.7.46,
+    // reported on Android 2026-10-17). Driven by REAL input (CDP mouse events)
+    // on a phone layout: with element.click() the old code passed this too.
+    scenario('Sign-out from the header: confirmed, the page reloads to the sign-in screen')
+    {
+      await B.eval(`if (document.getElementById('drawer').classList.contains('open')) document.getElementById('btn-close-drawer').click(); return 1`)
+      await B.waitFor('nothing open', `return !document.getElementById('drawer').classList.contains('open') && !document.querySelector('.modal.open')`, 5_000)
+      await B.resize(390, 780, true)
+      if (await B.eval<boolean>(`return document.getElementById('app').classList.contains('chat-open')`)) {
+        await B.eval(`document.getElementById('btn-back').click(); return 1`); await sleep(600)
+      }
+      const tap = async (id: string) => {
+        const r = JSON.parse(await B.eval<string>(`const r = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect(); return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 })`))
+        // Real input, not element.click(): a script click carries no user
+        // activation, and without it the history entry is handled differently -
+        // the bug did not show with .click(). (Touch input hung in the full run.)
+        await B.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 }, true)
+        await sleep(60)
+        await B.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 }, true)
+      }
+      // Input goes only to the page in front; an earlier scenario may have left B behind.
+      await B.send('Page.bringToFront', {}, true)
+      await B.eval(`window.__notReloaded = 1; return 1`)
+      await tap('btn-signout')
+      await B.waitFor('the sign-out question', `return document.getElementById('ask-modal').classList.contains('open')`, 5_000)
+      await sleep(500)
+      await tap('ask-yes')
+      await B.waitFor('the page reloaded to the sign-in screen', `
+        return !window.__notReloaded && !window.__pub && getComputedStyle(document.getElementById('app')).display === 'none';
+      `, 10_000)
+      step('header sign-out, confirmed: the page reloaded and shows the sign-in screen')
+    }
+
     if (GROUP_ONLY) {
       console.log(`\nPASS — group scenario (GROUP_ONLY: the WebRTC/other scenarios were skipped)`)
       process.exitCode = 0

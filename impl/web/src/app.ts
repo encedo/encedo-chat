@@ -3447,14 +3447,27 @@ $('scrim').addEventListener('click', () => {
   if (modalStack.length) { backModal(); return }
   closeDrawer()
 })
-$('btn-logout').addEventListener('click', () => location.reload())
+/**
+ * Logging out is a reload. The Back stack must stand down FIRST: the header
+ * button asks in a window, closing that window disarms the stack, and its
+ * history.back() - queued right after location.reload() - cancelled the reload
+ * (0.7.40-0.7.46: "the window shows, nothing happens", any browser). If the page
+ * is somehow still here a moment later, a plain navigation does it.
+ */
+function logOut() {
+  leaving = true
+  diag.note('logout: reload')
+  location.reload()
+  setTimeout(() => { diag.note('logout: still here - navigating'); location.replace(location.pathname + location.search) }, 1500)
+}
+$('btn-logout').addEventListener('click', logOut)
 // The same act, from the header rather than from inside Settings — but asked
 // first, because this one sits beside a button people press often. Logging out
 // is a reload: the identity survives (it is in the HEM, or in this browser), the
 // TRANSCRIPT does not, and neither do the ratchets carrying it.
 $('btn-signout').addEventListener('click', async () => {
   if (!(await ask(tr('Wylogować?'), tr('Historia tej sesji zniknie — jest efemeryczna i nigdzie się nie zapisuje. Tożsamość i kontakty zostają.'), tr('Wyloguj'))).ok) return
-  location.reload()
+  logOut()
 })
 
 // ---- attach a file --------------------------------------------------------
@@ -9720,6 +9733,8 @@ function backTarget(): (() => void) | null {
 }
 let backArmed = false
 let backPopsToIgnore = 0
+/** Set by Log out: the page is going; the Back stack must not touch history any more. */
+let leaving = false
 /** The address our entry was pushed at - pushState keeps the URL, so a real Back lands on the same one. */
 let armedHref = ''
 // Our entries name the document that pushed them. An entry left by the page
@@ -9735,7 +9750,7 @@ function syncBack() {
   // is the one it then removes, and the count of pops to ignore goes out of step
   // with the stack (closing one window and opening the next did that). Wait for
   // the traversal; its popstate runs this again.
-  if (backPopsToIgnore) return
+  if (leaving || backPopsToIgnore) return
   const want = !!backTarget()
   if (want && !backArmed) {
     try { history.pushState({ ecBack: BACK_DOC }, ''); backArmed = true; armedHref = location.href } catch {}
@@ -9745,10 +9760,13 @@ function syncBack() {
     // an extra entry costs one Back, a wrong history.back() costs the session.
     if (history.state?.ecBack !== BACK_DOC) return
     backPopsToIgnore++
+    diag.note('back: history.back (disarm)')
     history.back()
   }
 }
 window.addEventListener('popstate', () => {
+  if (leaving) return
+  diag.note(`back: popstate ignore=${backPopsToIgnore} armed=${backArmed} same=${location.href === armedHref}`)
   if (backPopsToIgnore) { backPopsToIgnore--; queueMicrotask(syncBack); return }
   if (!backArmed) return
   // A fragment navigation fires popstate too - an invite link opened in a
