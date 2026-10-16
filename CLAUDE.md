@@ -68,6 +68,11 @@ names its lines.
 - `scripts/` — release tooling (`approve-web.mjs`, `release-manifest.mjs`,
   `release-cid.mjs`, `yubikey-sign.mjs`), `export-kat.mjs`, `web-monitor.mjs`,
   `build-icons.mjs`.
+- `tools/onchato-bot/` — a command bot OVER the CLI daemon's socket (Python,
+  stdlib only, no keys): config maps a message to a fixed argv, admins by key
+  fingerprint, `dodaj <link>` + `tak <code>` adds a contact live. Its own tests
+  (`python3 -m unittest` there, `live-test.sh` over the relays) are not in
+  `npm test`. Guide: `tools/onchato-bot/GUIDE.md`.
 - `Dockerfile` + `.dockerignore` (allow-list) — the **CLI** image only; the
   context is the repo root because the CLI imports `hem-sdk-js/`,
   `relay/pick.mjs`/`load.mjs` and `impl/core-wasm/core.wasm`.
