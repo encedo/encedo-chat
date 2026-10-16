@@ -19,7 +19,7 @@ import type { KV } from '../lib/migrate.ts'
 import { anchorClock } from '../lib/clock.ts'
 import { hostOf } from '../lib/ice.ts'
 import { inviteFromPaste, inviteLink } from '../lib/invite.ts'
-import { InviteStore } from './invites.ts'
+import { InviteStore, publishedLink, expired, type PubInvite } from './invites.ts'
 import { KnockDesk } from './knocks.ts'
 import { fingerprint } from './fp.ts'
 
@@ -56,6 +56,7 @@ export class Hub {
   private presence!: { onOnline(p: { pub: string }): void; onOffline(p: { pub: string }): void; onWantsConversation(p: { pub: string }): void }
   /** Invites both ways (cli/knocks.ts) - only with `invites: true`, i.e. in the daemon. */
   desk: KnockDesk | null = null
+  private inviteStore: InviteStore | null = null
   groups: Groups | null = null
   session!: ClientSession
   contactList: Contact[] = []
@@ -94,8 +95,9 @@ export class Hub {
     this.contactList = await this.contacts.list()
     // Before presence starts, so an acceptance of our knock that lands at once is recognised.
     if (this.invites && this.vault) {
+      this.inviteStore = new InviteStore(this.vault.kv, this.vault.base, this.vault.names)
       this.desk = new KnockDesk({
-        session: this.session, store: new InviteStore(this.vault.kv, this.vault.base, this.vault.names), me: this.id,
+        session: this.session, store: this.inviteStore, me: this.id,
         contacts: () => this.contactList, addContact: (name, pub) => this.addContact(name, pub), log: this.log,
         on: {
           knock: (k) => this.emit({ t: 'knock', n: k.n, name: k.name, fp: k.fp, note: k.note, invite: k.inv.label }),
@@ -169,6 +171,37 @@ export class Hub {
     const c = await this.addContact(name, inv.pub)
     if (inv.inbox && inv.key) return { status: 'added', name: c.name, fp, knock: await this.desk!.knockInvite(inv, c.name, o.note) }
     return { status: 'added', name: c.name, fp, ...(inv.reply ? {} : { reply: inviteLink(APP_ORIGIN, APP_PATH, { pub: this.id.pub, name: this.id.handle, reply: true }) }) }
+  }
+
+  // ---- our invites, made and withdrawn by the process that holds the store ----
+  // A second process writing store.json beside the daemon is overwritten by the
+  // daemon's next save (fileKV rewrites the file whole), so with a daemon running
+  // the invites are made HERE, and listened on at once.
+
+  private invitesOrDie(): InviteStore {
+    if (!this.inviteStore || !this.desk) throw new Error('ten demon nie obsługuje zaproszeń')
+    return this.inviteStore
+  }
+
+  /** Our invites, newest first, each with the link to hand out (SPEC.md §5.8). */
+  async invitesList(): Promise<Array<PubInvite & { link: string; expired: boolean }>> {
+    const list = await this.invitesOrDie().invites()
+    return Promise.all(list.map(async (inv) => ({ ...inv, expired: expired(inv), link: await publishedLink(APP_ORIGIN, APP_PATH, this.id, inv) })))
+  }
+
+  async inviteNew(label: string, ttlMs?: number): Promise<PubInvite & { link: string }> {
+    const inv = await this.invitesOrDie().create(label, ttlMs)
+    await this.desk!.refresh()
+    return { ...inv, link: await publishedLink(APP_ORIGIN, APP_PATH, this.id, inv) }
+  }
+
+  /** Withdraw by id: nobody is told; the listening stops at once. */
+  async inviteRevoke(id: string): Promise<PubInvite> {
+    const store = this.invitesOrDie()
+    const inv = (await store.invites()).find((i) => i.id === id)
+    if (!inv || !(await store.revoke(id))) throw new Error('nie ma takiego zaproszenia')
+    await this.desk!.refresh()
+    return inv
   }
 
   nameOf(pub: string) { return this.contactList.find((c) => c.pub === pub)?.name ?? pub.slice(0, 8) }

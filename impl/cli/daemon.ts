@@ -22,6 +22,12 @@
  *   <- {"ok":true,"status":"known","name":"ewa","fp":"..."}
  *   -> {"op":"contacts"}
  *   <- {"ok":true,"contacts":[{"name":"ewa","pub":"<b64>","online":true}]}
+ *   -> {"op":"invites"}
+ *   <- {"ok":true,"invites":[{"n":1,"id":"...","label":"bot","created":...,"expires":...,"expired":false,"link":"https://..."}]}
+ *   -> {"op":"invite-new","label":"bot","ttl":604800000}       (ttl in ms, optional)
+ *   <- {"ok":true,"id":"...","label":"bot","expires":...,"link":"https://..."}   (listened on at once)
+ *   -> {"op":"invite-revoke","id":"..."}
+ *   <- {"ok":true,"label":"bot"}
  *   -> {"op":"knocks"}
  *   <- {"ok":true,"knocks":[{"n":1,"name":"Ewa","fp":"...","note":"...","invite":"biuro"}]}
  *   -> {"op":"accept","n":1}    -> {"op":"ignore","n":1}
@@ -114,6 +120,18 @@ function handle(hub: Hub, sock: Socket, log: (m: string) => void, queue?: Queue)
         reply({ ok: true, ...r })
       } else if (req.op === 'contacts') {
         reply({ ok: true, contacts: hub.contactList.map((c) => ({ name: c.name, pub: c.pub, online: hub.online.has(c.pub) })) })
+      } else if (req.op === 'invites') {
+        reply({ ok: true, invites: (await hub.invitesList()).map((i, k) => ({ n: k + 1, id: i.id, label: i.label, created: i.created, expires: i.expires ?? null, expired: i.expired, link: i.link })) })
+      } else if (req.op === 'invite-new') {
+        const ttl = typeof req.ttl === 'number' && req.ttl > 0 ? req.ttl : undefined
+        const i = await hub.inviteNew(typeof req.label === 'string' ? req.label : '', ttl)
+        log(`nowe zaproszenie „${i.label}”${i.expires ? '' : ' bez terminu'}`)
+        reply({ ok: true, id: i.id, label: i.label, expires: i.expires ?? null, link: i.link })
+      } else if (req.op === 'invite-revoke') {
+        if (typeof req.id !== 'string') throw new Error('invite-revoke potrzebuje "id"')
+        const i = await hub.inviteRevoke(req.id)
+        log(`wycofano zaproszenie „${i.label}”`)
+        reply({ ok: true, label: i.label })
       } else if (req.op === 'knocks') {
         reply({ ok: true, knocks: (hub.desk?.list() ?? []).map((k) => ({ n: k.n, name: k.name, fp: k.fp, note: k.note, invite: k.inv.label })) })
       } else if (req.op === 'accept' || req.op === 'ignore') {

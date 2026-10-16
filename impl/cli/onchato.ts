@@ -238,15 +238,40 @@ try {
     }
     case 'invites': {
       const [sub, ...more] = args
+      const when = (t: number) => new Date(t).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+      const usage = 'użycie: invites [list] | new [etykieta] [--expires 24h] [--qr] | qr <nr> | revoke <nr>'
       // The daemon holds store.json in memory and rewrites it whole: an invite
-      // written beside it would go unheard and then be overwritten by its next save.
-      if ((sub === 'new' || sub === 'revoke') && await connectDaemon().then((s) => { s?.end(); return !!s })) {
-        die('demon działa - zatrzymaj go na chwilę (zaproszenie zapisane obok demona zostałoby nadpisane), potem uruchom ponownie')
+      // written beside it would go unheard, then be overwritten by its next
+      // save. So with a daemon running, the daemon makes and drops invites -
+      // and listens on a new one at once.
+      const dsock = await connectDaemon()
+      if (dsock) {
+        const call = async (req: unknown) => { const r = await ask(dsock, req); if (!r.ok) { dsock.end(); die(r.error) } return r }
+        const listD = async () => (await call({ op: 'invites' })).invites as any[]
+        const pickD = async (n: string) => (await listD()).find((i) => i.n === Number(n)) ?? (dsock.end(), die(`nie ma zaproszenia nr ${n} (onchato-cli invites)`))
+        if (!sub || sub === 'list') {
+          const l = await listD()
+          if (!l.length) console.log('(brak zaproszeń - onchato-cli invites new <etykieta>)')
+          for (const i of l) console.log(`  ${i.n}) ${String(i.label).padEnd(16)} od ${when(i.created)}  ${i.expires ? (i.expired ? 'WYGASŁO' : 'do ' + when(i.expires)) : 'bez terminu'}\n     ${i.link}`)
+          if (l.length) console.log('Demon słucha tych zaproszeń - pukanie: onchato-cli knocks.')
+        } else if (sub === 'new') {
+          const r = await call({ op: 'invite-new', label: more.join(' '), ttl: opt('--expires') ? parseDuration(opt('--expires')!) : undefined })
+          console.log(`zaproszenie „${r.label}”${r.expires ? ' do ' + when(r.expires) : ' bez terminu'}:\n${r.link}`)
+          if (rest.includes('--qr')) console.log('\n' + qrForTerminal(r.link))
+          console.log('Demon już go słucha - kto je otworzy, zapuka: onchato-cli knocks, accept N.')
+        } else if (sub === 'qr') {
+          console.log(qrForTerminal((await pickD(more[0])).link))
+        } else if (sub === 'revoke') {
+          const i = await pickD(more[0])
+          await call({ op: 'invite-revoke', id: i.id })
+          console.log(`wycofano „${i.label}” - nikt nie jest o tym informowany, nowe pukanie już nie dotrze`)
+        } else { dsock.end(); die(usage) }
+        dsock.end()
+        break
       }
       const { id, store } = await signIn(kv)
       const list = await store.invites()
       const pick = (n: string) => list[Number(n) - 1] ?? die(`nie ma zaproszenia nr ${n} (onchato-cli invites)`)
-      const when = (t: number) => new Date(t).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
       if (!sub || sub === 'list') {
         if (!list.length) { console.log('(brak zaproszeń - onchato-cli invites new <etykieta>)'); break }
         for (const [i, inv] of list.entries()) console.log(`  ${i + 1}) ${inv.label.padEnd(16)} od ${when(inv.created)}  ${inv.expires ? (expired(inv) ? 'WYGASŁO' : 'do ' + when(inv.expires)) : 'bez terminu'}\n     ${await publishedLink(APP_ORIGIN, APP_PATH, id, inv)}`)
@@ -269,7 +294,7 @@ try {
         console.log(`wycofano „${inv.label}” - nikt nie jest o tym informowany, nowe pukanie już nie dotrze`)
         break
       }
-      die('użycie: invites [list] | new [etykieta] [--expires 24h] [--qr] | qr <nr> | revoke <nr>')
+      die(usage)
       break
     }
     case 'add': {

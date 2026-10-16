@@ -6,7 +6,7 @@ z okna terminala, przez SSH albo wewnątrz `screen`/`tmux`. Interfejs jest
 wzorowany na irssi: każda rozmowa ma swoje okno, a pasek stanu na dole pokazuje,
 gdzie coś się dzieje.
 
-Ten podręcznik opisuje wersję 0.7.42. Plan dalszych etapów (tryb skryptowy,
+Ten podręcznik opisuje wersję 0.7.45. Plan dalszych etapów (tryb skryptowy,
 demon, powiadomienia, pliki, grupy) jest w [CLI-PLAN.md](CLI-PLAN.md).
 
 ---
@@ -198,9 +198,9 @@ onchato-cli invites qr 1                           # kod QR zaproszenia nr 1
 onchato-cli invites revoke 1                       # wycofanie - nikt o tym nie jest informowany
 ```
 
-`invites new` i `invites revoke` odmawiają, gdy działa demon: demon trzyma `store.json`
-w pamięci i przy najbliższym zapisie nadpisałby zmianę zrobioną obok niego. Zatrzymaj
-go na chwilę, zmień zaproszenia i uruchom ponownie.
+Gdy działa demon, `invites` idzie **przez niego**: to demon tworzy i wycofuje
+zaproszenie (trzyma `store.json` w pamięci — zmiana zapisana obok niego zostałaby
+nadpisana) i od razu zaczyna go słuchać. Restart nie jest potrzebny.
 
 **Pukanie widać w kliencie** (`onchato-cli chat`) **albo w demonie** (`onchato-cli daemon`,
 rozdział 8) — zaproszenie „słucha” tylko wtedy, gdy jedno z nich działa:

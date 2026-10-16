@@ -144,6 +144,9 @@ export class KnockDesk {
     for (const w of this.waiting.values()) void this.knockOne(w).catch((e) => this.o.log?.(`pukanie do ${w.name} nie wyszło: ${e?.message ?? e}`))
   }
 
+  /** Re-read our invites now: listen on a new one at once, drop a revoked or expired one. */
+  refresh(): Promise<void> { return this.watchInvites() }
+
   private async watchInvites() {
     const list = await this.o.store.invites()
     for (const [id, wt] of this.inboxes) if (!list.some((i) => i.id === id && !expired(i))) { wt.stop(); this.inboxes.delete(id) }
