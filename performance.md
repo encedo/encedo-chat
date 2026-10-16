@@ -107,6 +107,30 @@ Docker relay, `relay-chatload`, 30 chatting pairs, ~19 msg/s aggregate:
 → When WebRTC fails and content rides the relay, the box becomes **bandwidth**-
 bound, not CPU-bound. Sizing: `bandwidth ≈ users × msg/s × (1 − webrtc_fraction) × ~3 KB`.
 
+### One room's ceiling through a node (2026-09-13) — why file transfer is direct only
+
+Two libp2p peers in one room (real EH-2 + ratchet), paced sending, counting
+**delivered** payload, against the live relay bs3:
+
+| chunk | rate | delivered | throughput |
+|---|---|---|---|
+| 60 000 B | 32/s | 100% | 1.04 MB/s |
+| 60 000 B | 48/s (5 s) | 100% | 1.56 MB/s |
+| 60 000 B | 48/s (12 s) | **71%** | 1.49 MB/s |
+| 60 000 B | 64/s | 76% | 1.18 MB/s |
+| 60 000 B | 96/s | 19% | 0.57 MB/s |
+
+**About 1 MB/s per room with everything delivered**, the knee between 48 and 64
+messages a second; a short run hides it (100% over 5 s at 48/s, 71% over 12 s).
+Controls: this machine's uplink to bs3 was 6.73 MB/s, and the same test against a
+relay on loopback delivered 100% up to 256/s = 7.26 MB/s with no knee. The ceiling
+is the path to the relay (a small VM, nginx terminating TLS, the network), not the
+stack. A node-borne transfer would move a 20 MB file in ~27 s and bill the nodes'
+bandwidth, so transfer runs on the DataChannel only (`docs/RATIONALE.md` §9).
+
+Direct transfer, measured 2026-09-21: 500 MB at ~41 MB/s over a LAN (the
+`MAX_DIRECT` ceiling is 512 MiB).
+
 ---
 
 ## DDoS / flood behaviour (onchato, real VPS)

@@ -589,7 +589,7 @@ export interface Conversation {
   retarget(topic: string, macKey: CryptoKey): boolean
   /**
    * Send a file straight down the DataChannel, bypassing the store entirely
-   * (`lib/xfer.ts`, `TRANSFER-DESIGN.md`). `'no-channel'` whenever content is
+   * (`lib/xfer.ts`, SPEC.md §13.1). `'no-channel'` whenever content is
    * not already going direct — a transfer never falls back to the relay, where
    * it would be a slower copy of the store at ~1 MB/s of relay bandwidth.
    */

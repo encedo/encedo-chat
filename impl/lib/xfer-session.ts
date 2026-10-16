@@ -12,7 +12,7 @@
  * - **No channel, no transfer.** `direct()` returns null before the link proves
  *   itself, after a demotion and once it is gone; every one of those means the
  *   answer is no, never "use the relay instead". At ~1 MB/s per room the relay
- *   would be a slower copy of the store we already have (`TRANSFER-DESIGN.md`).
+ *   would be a slower copy of the store we already have (`docs/RATIONALE.md` §9).
  * - **One at a time.** A second offer is refused with a reason rather than
  *   queued: two transfers sharing one channel's backpressure is a race nobody
  *   would enjoy debugging, and the UI says "poczekaj" perfectly well.

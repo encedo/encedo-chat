@@ -26,7 +26,7 @@ export interface WebRTCPlane {
    * whenever there is no proven channel, which is also the answer to "may this
    * conversation offer a transfer at all". A transfer never rides the relay:
    * at ~1 MB/s per room it would be a slower copy of the store, paid for in
-   * relay bandwidth (`TRANSFER-DESIGN.md`).
+   * relay bandwidth (`docs/RATIONALE.md` §9, `performance.md`).
    */
   direct(): { send(b: Uint8Array): void; buffered(): number; drain(): Promise<void> } | null
   stop(): void
