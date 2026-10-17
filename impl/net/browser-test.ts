@@ -3733,6 +3733,17 @@ async function main() {
       step(`loaded ${nodes.length} published node(s) by CID, first is ${nodes[0].name}`)
     }
 
+    // The header said "reconnecting" in red while messages flowed (Android,
+    // 2026-10-17): a browser 'online' event set it, the engine was already online
+    // and fires onLink only on a change. The header now takes the engine's word.
+    scenario('a header out of step with the engine comes back by itself')
+    {
+      await B.eval(`window.__linkDesync('reconnecting'); return 1`)
+      if (!(await B.eval<boolean>(`return document.getElementById('peer-dot').classList.contains('bad')`))) throw new Error('the desync did not show - the check below would prove nothing')
+      await B.waitFor('the header back to the engine\'s "online"', `return !document.getElementById('peer-dot').classList.contains('bad')`, 15_000)
+      step('a stale "reconnecting" in the header went back to the engine\'s state within 10 s')
+    }
+
     // Last, because it ends B's session. The header's sign-out asks in a window
     // first; closing that window disarmed the Back stack, and its history.back()
     // cancelled the reload: "the window shows, nothing happens" (0.7.40-0.7.46,

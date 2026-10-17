@@ -5481,6 +5481,8 @@ startDiag()
 // it, and on a desktop `?debug=1` is not reachable anyway (there is no address
 // bar), so this costs the packaged app nothing.
 if (DEBUG) (globalThis as any).__diag = diag
+// The harness puts the header out of step with the engine and expects it back.
+if (DEBUG) (globalThis as any).__linkDesync = (s: typeof linkState) => { linkState = s; paintStatus() }
 
 ecLog(`app start — debug=${DEBUG} network=${__EC_NETWORK__} transport=${USE_LIGHT ? 'libp2p-light (pick/push)' : 'libp2p'}`
   + ` rotation=${FORCED_ROTATION_SEC == null ? 'per-pair offset' : `forced ${String(Math.floor(FORCED_ROTATION_SEC / 3600)).padStart(2, '0')}:${String(Math.floor((FORCED_ROTATION_SEC % 3600) / 60)).padStart(2, '0')} UTC`};`
@@ -9849,6 +9851,21 @@ window.addEventListener('online', () => {
   linkState = 'reconnecting'; paintStatus()
   client?.setOffline(false)
 })
+// The header's link state is written in two places: the engine's onLink, which
+// fires on a CHANGE of the engine's state only, and the two browser events above,
+// which write it directly. When the engine was already online - a re-dial still
+// in flight makes reconnect() return at once - an 'online' event left the header
+// at "reconnecting" for good while messages flowed (Android, 2026-10-17). So the
+// engine's word is taken every 10 s. "Online" only with a live connection: a
+// session closed as a duplicate keeps its own verdict.
+setInterval(() => {
+  const ns = client?.netStatus()
+  if (!ns) return
+  const s = ns.link === 'online' && !ns.connected ? linkState : ns.link
+  if (s === linkState) return
+  diag.note(`link: header ${linkState} -> ${s} (taken from the engine)`)
+  linkState = s; paintStatus()
+}, 10_000)
 
 // Leaving the page ends the whole session, not just the open room: the §9.1
 // watch has to stop announcing, or the next window sees a rival that is already
