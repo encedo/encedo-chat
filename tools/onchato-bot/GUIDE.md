@@ -168,6 +168,49 @@ echo "backup done" | python3 /opt/onchato-bot/onchato-bot.py --config /etc/oncha
 Every report waits in the queue on its own (7 days by default): when you come back, you
 get all of them, in order.
 
+### SSH logins
+
+`hooks/ssh-login.py` sends the admins a message on every successful SSH login: who, from
+which address, when, and with which key —
+
+```
+[server1] SSH login: root from 203.0.113.7, 2026-10-17 20:45:03 UTC
+key SHA256:Xq3v… (chris@laptop)
+```
+
+The key's name is the comment of its line in the user's `authorized_keys`. PAM calls the
+hook; sshd hands it the method and the key only with `ExposeAuthInfo`:
+
+```bash
+sudo install -D -m 755 tools/onchato-bot/hooks/ssh-login.py /usr/local/lib/onchato/ssh-login.py
+echo 'ExposeAuthInfo yes' | sudo tee /etc/ssh/sshd_config.d/05-onchato-authinfo.conf
+sudo sshd -t && sudo systemctl reload ssh
+
+sudo cp -p /etc/pam.d/sshd /root/pam.d-sshd.bak
+printf '%s\n' 'session optional pam_exec.so quiet /usr/bin/python3 -I /usr/local/lib/onchato/ssh-login.py' \
+  | sudo tee -a /etc/pam.d/sshd
+```
+
+Keep the SSH session you are in open and test from a second one. The hook cannot lock you
+out: the PAM line is `optional`, every error is swallowed, and the send runs in a
+detached process, so a stopped daemon neither fails nor slows a login.
+
+- **To whom**: the admins (by fingerprint, as for commands). `--to reports` sends to
+  `reports.to` instead — mind that it tells everyone there who logs into the machine.
+- **Folding**: the same user, address and key within 10 minutes of a message are only
+  counted, and the next message says `(+N identical since …)`. Scripts that log in every
+  minute give one message per 10 minutes, not sixty an hour. `--window 0` reports each one.
+  The count of the last window is lost if no login follows it.
+- **What it trusts**: nothing the client sends goes into the message unfiltered —
+  user, address and the key's comment are cut to a safe set of characters, so a crafted
+  name cannot add a line that looks like another message.
+- Only a session that opened counts: a failed password is not reported (that is the
+  journal's job, or fail2ban's).
+- Language: the bot's `lang`. Paths: `--config` (default `/etc/onchato/bot.json`),
+  `--bot` (default: next to the hook, else `/opt/onchato-bot/onchato-bot.py`).
+
+To remove it: delete the line from `/etc/pam.d/sshd`.
+
 ## 4. Security rules
 
 - The bot never runs a shell and never pastes message text into a command — an argument
@@ -193,6 +236,6 @@ Updating: `git pull`, `docker build -t onchato .`, `docker rm -f onchato`, the s
 `docker run`; the profile and the queue stay in `/srv/onchato`. The bot: copy the new
 `onchato-bot.py` and `systemctl restart onchato-bot`.
 
-Tests: `cd tools/onchato-bot && python3 -m unittest -v`; live over the real nodes:
+Tests (the bot and the SSH hook): `cd tools/onchato-bot && python3 -m unittest -v`; live over the real nodes:
 `sh tools/onchato-bot/live-test.sh`. The socket protocol: the header of
 `impl/cli/daemon.ts`.
