@@ -249,6 +249,12 @@ export class Hub {
     return ms === null ? { status: 'queued', id, to: c.name } : { status: 'delivered', id, ms, to: c.name }
   }
 
+  /** Offer a given-up message again under its own id. False: nothing to resend now (still trying, or unknown id). */
+  async resend(pub: string, id: string): Promise<boolean> {
+    const c = this.contactList.find((x) => x.pub === pub)
+    return c ? (await this.room(c)).resend(id) : false
+  }
+
   /** Encrypt, upload and send a file; wait for the recipient's ack like `send`. */
   async sendFile(who: string, path: string, waitMs = 20_000): Promise<SendResult & { name: string }> {
     const c = this.find(who)
