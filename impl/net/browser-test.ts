@@ -3774,7 +3774,9 @@ async function main() {
       await sleep(500)
       await tap('ask-yes')
       await B.waitFor('the page reloaded to the sign-in screen', `
-        return !window.__notReloaded && !window.__pub && getComputedStyle(document.getElementById('app')).display === 'none';
+        // Mid-reload the element may not exist yet: that is "not yet", not an error.
+        const app = document.getElementById('app');
+        return !!app && !window.__notReloaded && !window.__pub && getComputedStyle(app).display === 'none';
       `, 10_000)
       step('header sign-out, confirmed: the page reloaded and shows the sign-in screen')
     }
