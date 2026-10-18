@@ -91,6 +91,25 @@ jobs:
             echo "release for $TAG already exists ($N) — leaving it alone"
           fi
 
+  # Android, in THIS run (the user's call, 2026-10-18): the release is complete
+  # only with the signed sideload APK beside the desktop bundles, and taking it
+  # from the same run means no second workflow to race with for the draft.
+  # The gate above already passed on this commit, so android.yml skips its own.
+  # Its prerelease `android-<version>` (the test channel) is still published.
+  android:
+    name: android
+    if: github.event_name != 'workflow_dispatch' || inputs.tag == ''
+    needs: gate
+    uses: ./.github/workflows/android.yml
+    # Granted for every job in the called workflow, skipped or not: its gate
+    # calls ci.yml, whose sweep asks for actions: write (see `gate` above).
+    permissions:
+      contents: write
+      actions: write
+    secrets: inherit
+    with:
+      skip_gate: true
+
   # What the release SERVES, as a number anybody can recompute.
   #
   # A CID is a hash of the bytes — computing one needs the files and nothing
@@ -740,3 +759,42 @@ jobs:
             -H "Content-Type: application/json" \
             --data-binary @latest.json \
             "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RID/assets?name=latest.json" > /dev/null
+
+  # The signed APK onto the draft, as `onchato-<version>-android.apk`: one file a
+  # phone installs from the release page (sideload, Android 14+). From the
+  # artifact of the `android` job in this run; replaced if it is already there.
+  # Android red means this job red and a release with no APK - visibly, not by
+  # omission. Not for the manifest-only repair (`inputs.tag`).
+  android-asset:
+    name: android APK on the release
+    needs: [draft, android]
+    if: startsWith(github.ref, 'refs/tags/') && (github.event_name != 'workflow_dispatch' || inputs.tag == '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: android-sideload-${{ github.ref_name }}-${{ github.sha }}
+          path: apk
+      - name: Attach it to the draft
+        run: |
+          set -euo pipefail
+          SRC=$(ls apk/*.apk | head -1 || true)
+          test -n "$SRC" || { echo "::error::the android job left no signed APK"; exit 1; }
+          NAME="onchato-${TAG#v}-android.apk"
+          # The by-tag endpoint hides drafts, so list and filter (as updater-json does).
+          RID=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+                | jq -r --arg t "$TAG" '[.[] | select(.tag_name == $t)] | sort_by(.created_at) | .[0].id // empty')
+          test -n "$RID" || { echo "::error::no release (draft or published) for $TAG"; exit 1; }
+          OLD=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RID/assets?per_page=100" | jq -r --arg n "$NAME" '.[] | select(.name == $n) | .id')
+          [ -z "$OLD" ] || gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$OLD"
+          curl -sf -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/vnd.android.package-archive" \
+            --data-binary @"$SRC" \
+            "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RID/assets?name=$NAME" > /dev/null
+          echo "attached $NAME ($(stat -c %s "$SRC") bytes) to release $RID"
