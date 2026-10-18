@@ -24,7 +24,7 @@
  * own (`ec-nodes:<id>`, `ec-transport:<id>`).
  */
 import type { NetworkProfile, AppAddress } from './network.ts'
-import { loadRegistry, type KVLike, type NetworkPolicy } from './netprofile.ts'
+import { loadRegistry, refreshNetwork, type KVLike, type NetworkPolicy, type OperatorProfile } from './netprofile.ts'
 import type { PublishedNode } from './nodelist.ts'
 
 export interface ActiveNetwork {
@@ -102,3 +102,38 @@ export function setLastNet(kv: KVLike, id: string, builtin: ActiveNetwork): void
 
 export const nodesKey = (n: ActiveNetwork) => (n.builtin ? 'ec-nodes' : `ec-nodes:${n.id}`)
 export const transportKey = (n: ActiveNetwork) => (n.builtin ? 'ec-transport' : `ec-transport:${n.id}`)
+
+/** How often a page that stays open asks again; at sign-in it always asks. */
+export const NETWORK_REFRESH_MS = 24 * 3600_000
+
+/**
+ * The quiet refresh of another network's profile (the user's call,
+ * 2026-10-18): at sign-in and once a day, so an operator can move its nodes
+ * without asking every person to press "load the official list". Accepted
+ * exactly as by hand - the pinned key, a seq that only climbs (refreshNetwork).
+ *
+ * The node list a device keeps follows the new profile only while it IS the
+ * old profile's list (every node on, the same addresses): a list the person
+ * edited is theirs, and the button in Settings replaces it on request. With no
+ * list kept at all the next load starts from the new profile anyway.
+ */
+export async function autoRefreshNetwork(
+  kv: KVLike, n: ActiveNetwork, now: number, fetchImpl: typeof fetch = fetch,
+): Promise<{ changed: false; why?: string } | { changed: true; profile: OperatorProfile; nodesFollowed: boolean }> {
+  if (n.builtin) return { changed: false }
+  const before = loadRegistry(kv, now).get(n.id)?.profile
+  if (!before) return { changed: false, why: 'unknown' }
+  const r = await refreshNetwork(kv, n.id, now, fetchImpl)
+  if (!r.ok) return { changed: false, why: r.why }
+  if (!r.changed) return { changed: false }
+  let nodesFollowed = false
+  const key = nodesKey(n)
+  let kept: unknown = null
+  try { kept = JSON.parse(kv.get(key) ?? 'null') } catch {}
+  if (Array.isArray(kept) && kept.length) {
+    const addrs = (l: { addr: string }[]) => l.map((x) => x.addr).sort().join('\n')
+    const untouched = kept.every((x: any) => x && x.enabled !== false && typeof x.addr === 'string') && addrs(kept as any) === addrs(before.nodes)
+    if (untouched) { kv.set(key, JSON.stringify(r.profile.nodes.map((x) => ({ ...x, enabled: true })))); nodesFollowed = true }
+  }
+  return { changed: true, profile: r.profile, nodesFollowed }
+}

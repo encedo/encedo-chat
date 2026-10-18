@@ -60,7 +60,7 @@ import { refreshNetwork, loadRegistry, openEnvelope, registerNetwork, rootFinger
 import type { PublishedNode } from '../../lib/nodelist.ts'
 import {
   builtinNetwork, resolveActive, networkById, bindingOf, setBinding, setLastNet, nodesKey, transportKey,
-  softBindingKey, hemBindingKey, OPEN_PROFILE_KEY, OPEN_CREATE_KEY, type ActiveNetwork,
+  softBindingKey, hemBindingKey, OPEN_PROFILE_KEY, OPEN_CREATE_KEY, autoRefreshNetwork, NETWORK_REFRESH_MS, type ActiveNetwork,
 } from '../../lib/activenet.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { boxHeight } from '../../lib/composer.ts'
@@ -1598,6 +1598,28 @@ function clearPreKidState(): number {
 sweptPreKid = clearPreKidState()
 if (sweptPreKid) ecLog(`cleared ${sweptPreKid} local entries written before identities were keyed by KID`)
 
+/**
+ * Another network's profile, refreshed quietly at sign-in and once a day
+ * (lib/activenet.ts). What can change under a running page does - the node
+ * list the session fails over through, the file stores; the rest (app address,
+ * policy, feedback) is read at load and waits for the next one.
+ */
+let netRefreshTimer: ReturnType<typeof setInterval> | null = null
+async function refreshNetworkQuietly() {
+  const kept = localStorage.getItem(nodesKey(ACTIVE))
+  const r = await autoRefreshNetwork(localKV(), ACTIVE, nowMs())
+  if (!r.changed) { if (r.why) ecLog(`network profile: not refreshed (${r.why})`); return }
+  ecLog(`network profile: now version ${r.profile.seq}${r.nodesFollowed ? ', node list follows it' : kept ? ', your own node list kept' : ''}`)
+  setStoreOrigins(r.profile.stores)
+  if (r.nodesFollowed) client?.setRelays(chosenRelays())
+  else if (!kept) client?.setRelays(r.profile.nodes.map((n) => n.addr))
+}
+function startNetworkRefresh() {
+  if (ACTIVE.builtin) return
+  void refreshNetworkQuietly()
+  if (!netRefreshTimer) netRefreshTimer = setInterval(() => void refreshNetworkQuietly(), NETWORK_REFRESH_MS)
+}
+
 async function enterApp(id: Identity, book: ContactManager, sourceLabel: string, kid?: string, gkBackend?: GkBackend) {
   session = { id, handle: id.handle, pub: id.pub, kid, idKey: await identityKey(id.pub, kid), book }
   // Read by the browser harness, which used to parse the identity out of
@@ -1674,7 +1696,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   // probe that fails leaves the previous anchor in place.
   const anchor = () => { void anchorClock(chosenRelays().map(hostOf).filter((h): h is string => !!h), { log: (m) => ecLog(m, 'debug') }) }
   clientReady.then(() => { anchor(); setInterval(anchor, 3_600_000) }, () => {})
-  clientReady.then((c) => { client = c; void restoreGroups(); void startInboxWatches(); void resumeKnocking() }, (e: any) => {
+  clientReady.then((c) => { client = c; void restoreGroups(); void startInboxWatches(); void resumeKnocking(); startNetworkRefresh() }, (e: any) => {
     ecLog(`session failed to start: ${e?.message ?? e}`)
     toast(tr('Brak połączenia z przekaźnikiem — odśwież stronę'))
     scheduleRegionCheck(0)

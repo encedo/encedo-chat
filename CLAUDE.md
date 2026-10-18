@@ -221,6 +221,12 @@ the key, a refresh never lowers `seq`, the id `main` is reserved.
   `ec-nodes`/`ec-transport`, another gets `ec-nodes:<id>`/`ec-transport:<id>`.
   "Load the official list" refreshes another network from its own
   `profileUrls`, never from the release manifest.
+- **Another network's profile refreshes itself** at sign-in and every 24 h
+  (`autoRefreshNetwork`, the user's call 2026-10-18): same checks as the
+  button. A kept node list follows the new profile only while it equals the
+  old profile's list (all on, same addresses) - an edited list is the
+  person's. Live: node list + stores; app address/policy/feedback wait for the
+  next load. The CLI does not refresh (yet).
 - **`ACTIVE` must stay declared at the top of app.ts** (babel turns `const`
   into `var`; a read above it is `undefined`, not an error).
 

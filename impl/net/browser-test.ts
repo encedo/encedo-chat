@@ -3802,11 +3802,12 @@ async function main() {
         : JSON.parse(readFileSync(new URL('../../infra/nodes.json', import.meta.url), 'utf8')).nodes.map((n: any) => n.addr)
       const KEY = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64')
       const at = Date.now()
-      const text = JSON.stringify(signNetwork({
-        v: 1, networkId: netId, operator: 'Harness Net', rootPub: rootPubFor(KEY), seq: 1, made: at - 60_000, expires: at + 86_400_000,
+      const signed = (seq: number) => JSON.stringify(signNetwork({
+        v: 1, networkId: netId, operator: 'Harness Net', rootPub: rootPubFor(KEY), seq, made: at - 60_000, expires: at + 86_400_000,
         nodes: relays.map((addr, i) => ({ name: `n${i + 1}`, addr })), stores: [origin], app: { origin, path: '/' },
         profileUrls: [`${origin}/network.json`], feedback: null, home: `${origin}/`, policy: {},
       }, KEY))
+      const text = signed(1)
       // A joins from the whole profile (a file, a paste); B from the short link a
       // phone scans: the file is fetched and must hash to the CID in the link.
       SERVED.set('/network.json', text)
@@ -3845,15 +3846,25 @@ async function main() {
           document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)};
           document.getElementById('soft-pass2').value = ${JSON.stringify(SOFT_PASS)};
           return 1;`)
+        // The operator publishes version 2 while B is joining: signing in asks
+        // for it by itself, nobody presses "refresh" (activenet.ts, autoRefreshNetwork).
+        if (given === pointer) SERVED.set('/network.json', signed(2))
         const made = await pressSoftGo(b, `the identity ${handle} in the joined network`)
         if (made !== 'done') throw new Error(`${b.name}: no identity in the joined network - ${await softError(b)}`)
+        if (given === pointer) {
+          const t0 = Date.now()
+          while (!b.console.some((l) => l.includes('network profile: now version 2'))) {
+            if (Date.now() - t0 > 20_000) throw new Error(`${b.name}: signing in did not take the newer network profile by itself`)
+            await sleep(200)
+          }
+        }
         const where = await b.eval<any>(`return { last: localStorage.getItem('ec-last-net'), bound: localStorage.getItem('ec-soft-net-' + ${JSON.stringify(handle)}) }`)
         if (where.last !== netId || where.bound !== netId) throw new Error(`${b.name}: the identity is not bound to the joined network: ${JSON.stringify(where)}`)
         if (!b.console.some((l) => l.includes(`network=${netId}`))) throw new Error(`${b.name}: the page did not start in the joined network`)
         await b.waitFor('the first-run card', `return document.getElementById('welcome-modal').classList.contains('open')`, 20_000)
         await b.eval(`document.getElementById('welcome-close').click(); return 1`)
       }
-      step(`both joined "${netId}" - A from the whole signed profile, B from the short link with its CID (a swapped file behind it refused) - and made new identities bound to it`)
+      step(`both joined "${netId}" - A from the whole signed profile, B from the short link with its CID (a swapped file behind it refused) - and made new identities bound to it; B's sign-in took the operator's newer profile by itself`)
       // Each one's invite link, and each imports the other's: the link must name
       // the network's own app, and the import goes through the usual window.
       const linkOf = (b: Page) => b.eval<string>(`
