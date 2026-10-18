@@ -35,7 +35,7 @@ export interface NetworkProfile {
   app: AppAddress
   /** Older addresses of the app whose invite links are still ours. */
   legacyApp: AppAddress[]
-  /** File store origins; the client appends the store's own paths. The first one is used today. */
+  /** File store origins, tried in order: an upload goes to the first that takes it, a download asks each (net/ipfs.ts). */
   stores: string[]
   /** Where the signed release manifest is served; its `.sig` sits beside it. */
   manifestUrls: string[]

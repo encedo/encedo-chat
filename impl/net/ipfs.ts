@@ -47,14 +47,42 @@ export const IPFS_GET = (cid: string) => `/f/${encodeURIComponent(cid)}`
  * actually is. `web/src/app.ts` sets it, because deciding what kind of build
  * this is belongs to the app and not here.
  */
-let storeOrigin = ''
+let storeOrigins: string[] = ['']
 
-export function setStoreOrigin(origin: string): void {
-  storeOrigin = origin.replace(/\/+$/, '')
+/**
+ * The stores, in the order they are tried (the network profile's `stores`).
+ * An upload goes to the first that takes it; a download asks each in turn,
+ * because the sender may have fallen through to a later one. An empty list
+ * means the same-origin default.
+ */
+export function setStoreOrigins(origins: string[]): void {
+  const list = origins.map((o) => o.replace(/\/+$/, ''))
+  storeOrigins = list.length ? list : ['']
 }
 
-/** The absolute URL for a store path, which on the web is the path itself. */
-export const storeUrl = (path: string) => storeOrigin + path
+/** One store; kept for callers that know only one. */
+export function setStoreOrigin(origin: string): void { setStoreOrigins([origin]) }
+
+/** The absolute URL for a store path on the FIRST store, which on the web is the path itself. */
+export const storeUrl = (path: string) => storeOrigins[0] + path
+
+/** An HTTP failure, carrying its status so the caller can tell "this store" from "this request". */
+class HttpError extends Error {
+  readonly status: number
+  constructor(what: string, status: number) { super(`${what} failed: HTTP ${status}`); this.status = status }
+}
+
+/**
+ * Whether trying the next store could help: a refusal of THIS request (4xx,
+ * e.g. 413 too large) will be refused the same way everywhere, so it ends the
+ * attempt; an unreachable or failing store (network error, 5xx, 408, 429)
+ * does not. An abort always ends it.
+ */
+function worthNextStore(e: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return false
+  if (e instanceof HttpError) return e.status >= 500 || e.status === 408 || e.status === 429
+  return !(e instanceof Error && /aborted/.test(e.message))
+}
 
 export interface PutResult { cid: string; size: number }
 
@@ -87,20 +115,29 @@ export async function putBlob(bytes: Uint8Array | Blob, opts: PutOpts = {}): Pro
   // On an 80 MB file the upload is the longest phase by far, so when a caller
   // wants progress we use XHR, which does. Everything else keeps fetch, which
   // is also what makes the tests injectable.
-  const text = (opts.onProgress && typeof XMLHttpRequest === 'function')
-    ? await xhrPost(storeUrl(IPFS_PUT), body, opts)
-    : await (async () => {
-        const res = await (opts.fetchImpl ?? fetch)(storeUrl(IPFS_PUT), { method: 'POST', body, signal: opts.signal })
-        if (!res.ok) throw new Error(`upload failed: HTTP ${res.status}`)
+  const upload = (origin: string) => (opts.onProgress && typeof XMLHttpRequest === 'function')
+    ? xhrPost(origin + IPFS_PUT, body, opts)
+    : (async () => {
+        const res = await (opts.fetchImpl ?? fetch)(origin + IPFS_PUT, { method: 'POST', body, signal: opts.signal })
+        if (!res.ok) throw new HttpError('upload', res.status)
         return (await res.text()).trim()
       })()
+  let text: string | null = null
+  let last: unknown = null
+  for (const origin of storeOrigins) {
+    try { text = await upload(origin); break } catch (e) {
+      last = e
+      if (!worthNextStore(e, opts.signal)) throw e
+    }
+  }
+  if (text === null) throw last
   // /add streams one JSON object per line; the last is the root.
-  const last = text.trim().split('\n').filter(Boolean).pop()
-  if (!last) throw new Error('upload returned nothing')
+  const line = text.trim().split('\n').filter(Boolean).pop()
+  if (!line) throw new Error('upload returned nothing')
   let j: any
-  try { j = JSON.parse(last) } catch { throw new Error(`upload returned non-JSON: ${last.slice(0, 120)}`) }
+  try { j = JSON.parse(line) } catch { throw new Error(`upload returned non-JSON: ${line.slice(0, 120)}`) }
   const cid = j.Hash ?? j.Cid?.['/']
-  if (typeof cid !== 'string' || !isCid(cid)) throw new Error(`upload returned no usable CID: ${last.slice(0, 120)}`)
+  if (typeof cid !== 'string' || !isCid(cid)) throw new Error(`upload returned no usable CID: ${line.slice(0, 120)}`)
   return { cid, size: Number(j.Size) || 0 }
 }
 
@@ -112,7 +149,7 @@ function xhrPost(url: string, body: FormData, opts: PutOpts): Promise<string> {
     x.upload.onprogress = (e) => { if (e.lengthComputable) opts.onProgress!(e.loaded, e.total) }
     x.onload = () => x.status >= 200 && x.status < 300
       ? resolve(x.responseText)
-      : reject(new Error(`upload failed: HTTP ${x.status}`))
+      : reject(new HttpError('upload', x.status))
     x.onerror = () => reject(new Error('upload failed: network error'))
     x.onabort = () => reject(new Error('upload aborted'))
     opts.signal?.addEventListener('abort', () => x.abort(), { once: true })
@@ -125,18 +162,30 @@ export class ExpiredError extends Error {
 }
 
 /**
- * Fetch ciphertext by CID.
+ * Fetch ciphertext by CID, asking each store in turn (the sender may have
+ * fallen through to a later one).
  *
  * A 404 or 410 is reported as `ExpiredError` rather than a generic failure,
  * because for this store that is the ordinary end of a file's life and the UI
  * has to distinguish it from a network problem: one says "ask them to send it
- * again", the other says "try again".
+ * again", the other says "try again". With several stores it is expiry only
+ * when EVERY store said so; one that could not be asked makes it "try again".
  */
 export async function getBlob(cid: string, opts: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {}): Promise<Uint8Array> {
   if (!isCid(cid)) throw new Error(`not a CID: ${cid}`)
   const f = opts.fetchImpl ?? fetch
-  const res = await f(storeUrl(IPFS_GET(cid)), { signal: opts.signal })
-  if (res.status === 404 || res.status === 410) throw new ExpiredError(cid)
-  if (!res.ok) throw new Error(`fetch failed: HTTP ${res.status}`)
-  return new Uint8Array(await res.arrayBuffer())
+  let other: unknown = null
+  for (const origin of storeOrigins) {
+    try {
+      const res = await f(origin + IPFS_GET(cid), { signal: opts.signal })
+      if (res.status === 404 || res.status === 410) continue
+      if (!res.ok) throw new HttpError('fetch', res.status)
+      return new Uint8Array(await res.arrayBuffer())
+    } catch (e) {
+      if (opts.signal?.aborted) throw e
+      other = e
+    }
+  }
+  if (other) throw other
+  throw new ExpiredError(cid)
 }

@@ -65,7 +65,7 @@ import { contactState, seenLabel, noteSeen as foldSeen, noteAdded as foldAdded, 
 import { bodyBytes, fitsOnWire, overBy, MAX_BODY, WARN_AT, kb } from '../../lib/msgsize.ts'
 import { MAX_DIRECT, MAX_OFFER_BODY } from '../../lib/xfer.ts'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE } from '../../lib/filecrypto.ts'
-import { putBlob, getBlob, setStoreOrigin } from '../../net/ipfs.ts'
+import { putBlob, getBlob, setStoreOrigins } from '../../net/ipfs.ts'
 import { webrtcLinkTauri, tauriRtcAvailable, tauriRtcSelftest } from '../../net/webrtc-tauri.ts'
 import { unwrapBlob } from '../../lib/fileenvelope.ts'
 import { beginSave, browserSaveEnv, type SaveEnv, type SaveSink } from '../../lib/saveas.ts'
@@ -2636,7 +2636,7 @@ window.addEventListener('hashchange', () => {
  * `/f` blocks in nginx must answer with `Access-Control-Allow-Origin`. Ship the
  * two together or the packaged apps stay exactly as broken.
  */
-if (isDesktopShell() || location.origin === NET.app.origin) setStoreOrigin(NET.stores[0])
+if (isDesktopShell() || location.origin === NET.app.origin) setStoreOrigins(NET.stores)
 // The login card's way back to the landing. The markup carries the same address
 // so the link survives a dead bundle; this makes the constant the one that decides,
 // so a moved domain cannot leave a stale link on the screen people log in from.

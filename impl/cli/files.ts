@@ -17,12 +17,12 @@ import { basename, extname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { newFileKey, encryptBytes, decryptBytes, MAX_FILE, type FileManifest } from '../lib/filecrypto.ts'
 import { unwrapBlob } from '../lib/fileenvelope.ts'
-import { putBlob, getBlob, setStoreOrigin } from '../net/ipfs.ts'
+import { putBlob, getBlob, setStoreOrigins } from '../net/ipfs.ts'
 import type { FileMeta } from '../lib/envelope.ts'
 import { NET } from './network.ts'
 
-/** The network profile's store, as for the packaged apps; ONCHATO_STORE overrides it. */
-setStoreOrigin(process.env.ONCHATO_STORE ?? NET.stores[0])
+/** The network profile's stores, as for the packaged apps; ONCHATO_STORE overrides them with one. */
+setStoreOrigins(process.env.ONCHATO_STORE ? [process.env.ONCHATO_STORE] : NET.stores)
 
 export const FILE_TTL_MS = 5 * 60_000   // the app's value: the store sweeps after ~5 min
 const b64 = (u: Uint8Array) => Buffer.from(u).toString('base64')

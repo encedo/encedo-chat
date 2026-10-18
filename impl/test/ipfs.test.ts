@@ -89,3 +89,55 @@ test('the store is same-origin by default and absolute when told', () => {
   setStoreOrigin('') // the default, restored for whatever runs next
   assert.equal(storeUrl(IPFS_PUT), '/f')
 })
+
+// ---- several stores (the network profile's `stores`) ------------------------
+import { setStoreOrigins } from '../net/ipfs.ts'
+
+/** A fake fetch answering per origin; records what was asked. */
+function stores(answers: Record<string, () => Response>, asked: string[] = []) {
+  return (async (input: any) => {
+    const url = String(input); asked.push(url)
+    const origin = new URL(url).origin
+    const a = answers[origin]
+    if (!a) throw new TypeError('fetch failed') // unreachable host
+    return a()
+  }) as any
+}
+const added = (cid: string) => () => new Response(`{"Name":"b","Hash":"${cid}","Size":"4"}`)
+
+test('several stores: an upload falls through a dead or failing store to the next', async () => {
+  setStoreOrigins(['https://a.example', 'https://b.example', 'https://c.example'])
+  try {
+    const asked: string[] = []
+    const r = await putBlob(new Uint8Array(4), { fetchImpl: stores({ 'https://b.example': () => new Response('', { status: 503 }), 'https://c.example': added(CID) }, asked) })
+    assert.equal(r.cid, CID)
+    assert.deepEqual(asked, ['https://a.example/f', 'https://b.example/f', 'https://c.example/f'])
+  } finally { setStoreOrigins([]) }
+})
+
+test('several stores: a refusal of the request itself (413) is not retried elsewhere', async () => {
+  setStoreOrigins(['https://a.example', 'https://b.example'])
+  try {
+    const asked: string[] = []
+    await assert.rejects(putBlob(new Uint8Array(4), { fetchImpl: stores({ 'https://a.example': () => new Response('', { status: 413 }), 'https://b.example': added(CID) }, asked) }), /HTTP 413/)
+    assert.deepEqual(asked, ['https://a.example/f'])
+  } finally { setStoreOrigins([]) }
+})
+
+test('several stores: a download asks each store, since the sender may have used a later one', async () => {
+  setStoreOrigins(['https://a.example', 'https://b.example'])
+  try {
+    const bytes = new Uint8Array([7, 7, 7])
+    const got = await getBlob(CID, { fetchImpl: stores({ 'https://a.example': () => new Response('', { status: 404 }), 'https://b.example': () => new Response(bytes) }) })
+    assert.deepEqual(got, bytes)
+  } finally { setStoreOrigins([]) }
+})
+
+test('several stores: EXPIRED only when every store says so; one that could not be asked means "try again"', async () => {
+  setStoreOrigins(['https://a.example', 'https://b.example'])
+  try {
+    await assert.rejects(getBlob(CID, { fetchImpl: stores({ 'https://a.example': () => new Response('', { status: 404 }), 'https://b.example': () => new Response('', { status: 410 }) }) }), ExpiredError)
+    const maybe = getBlob(CID, { fetchImpl: stores({ 'https://a.example': () => new Response('', { status: 404 }) }) })
+    await assert.rejects(maybe, (e: any) => !(e instanceof ExpiredError))
+  } finally { setStoreOrigins([]) }
+})
