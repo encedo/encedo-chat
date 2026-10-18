@@ -156,6 +156,22 @@ onchato-cli chat --hem https://my.ence.do
 Without `--profile` and without `--hem`, `onchato` uses the only profile there is. When there are
 several, choose with `--profile <name>`.
 
+### Another operator's network
+
+An identity lives in one network for good. To join another operator's network, make a NEW profile
+from the operator's signed network profile - a file, or the short link with its CID that the
+operator publishes (`…/network.json#onchato-net=bafkrei…`):
+
+```sh
+onchato-cli profile new work --network-profile acme-network.json
+```
+
+`onchato` shows the operator, the network id and the fingerprint of the operator's key - compare
+it with what the operator gave you another way - and asks before joining. From then on that
+profile always runs in that network: its nodes, its file store, invite links to its app.
+`profile list` names each profile's network, `whoami` says which network this run is in. A HEM
+identity is put in a network with `--network <id>` on its first sign-in on this device.
+
 ---
 
 ## 4. Contacts
@@ -593,7 +609,9 @@ Without the daemon there is no queue: `--key` and `--ttl` then change nothing.
 | `ONCHATO_DOWNLOADS` | where to save files (default `~/Pobrane` or `~/Downloads`) |
 | `--debug` | in the client: engine log in the status window |
 | `--libp2p` | in the client: full GossipSub transport instead of the light one (diagnostics) |
-| `--network <id>` | the network the topics are computed for (`SPEC.md` §5.1); default `main`, i.e. the operator's network. Your own network = your own nodes and your own identifier; clients on different ids never meet, even on the same node |
+| `--network <id>` | the network this run works in: by default the chosen profile's (a profile cannot be moved to another network), else `main`. For a HEM identity it names the network on its first sign-in. An id this device does not know is, as before, the built-in nodes under another id - for development. Clients on different ids never meet, even on the same node |
+| `--network-profile <file\|link>` | `profile new`: make the profile in another operator's network, from its signed profile file or the short link with its CID |
+| `ONCHATO_NETWORK_PROFILE` | the built-in network profile to use instead of `infra/network.json` (a build for another network) |
 | `--core ts` | the EH‑2 handshake and the ratchet computed in the TypeScript engine instead of the `core-rs` module (Rust → WASM, `impl/core-wasm/core.wasm`), which is the default since 0.7.21. The same frames on the wire, so the other side sees no difference |
 | `ONCHATO_HOME` | data directory (default `$XDG_CONFIG_HOME/onchato`, i.e. `~/.config/onchato`) |
 

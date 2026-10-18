@@ -24,8 +24,10 @@ import { KnockDesk } from './knocks.ts'
 import { fingerprint } from './fp.ts'
 import { NET } from './network.ts'
 
-/** Where invite links point: the network profile's app (the CLI has no address bar either). */
-export const APP_ORIGIN = NET.app.origin, APP_PATH = NET.app.path
+/** Where invite links point: the app of the network this process works in (the CLI has no address bar either). */
+export let APP_ORIGIN = NET.app.origin, APP_PATH = NET.app.path
+/** Set once the process knows its network (cli/onchato.ts). Importers see it: ES modules bind live. */
+export function setAppAddress(a: { origin: string; path: string }): void { APP_ORIGIN = a.origin; APP_PATH = a.path }
 
 export type HubEvent =
   | { t: 'msg'; from: string; pub: string; text: string; ts: number; id: string; group?: string }

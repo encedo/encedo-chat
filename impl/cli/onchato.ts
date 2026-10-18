@@ -33,8 +33,11 @@ import { fileKV, type FileKV } from './store.ts'
 import { listProfiles, createProfile, openProfile, exportProfileFile, importProfileFile, identityKey } from './profiles.ts'
 import { hemSignIn, hemCreate, type HemChoice } from './identity.ts'
 import { runClient } from './client.ts'
-import { Hub, type HubEvent, APP_ORIGIN, APP_PATH } from './hub.ts'
+import { Hub, type HubEvent, APP_ORIGIN, APP_PATH, setAppAddress } from './hub.ts'
 import { NET } from './network.ts'
+import { builtinNetwork, networkById, bindingOf, setBinding, nodesKey, softBindingKey, hemBindingKey } from '../lib/activenet.ts'
+import { openEnvelope, registerNetwork, rootFingerprint, parseNetworkPointer, fetchPointed, loadRegistry } from '../lib/netprofile.ts'
+import { setStoreOrigins } from '../net/ipfs.ts'
 import { serve, connectDaemon, ask, lineReader, socketPath } from './daemon.ts'
 import { Queue } from './queue.ts'
 import { existsSync, unlinkSync } from 'node:fs'
@@ -79,21 +82,16 @@ async function confirm(q: string): Promise<boolean> {
  */
 function relayList(kv: FileKV): string[] {
   try {
-    const mine = JSON.parse(kv.get('ec-nodes') ?? 'null')
+    const mine = JSON.parse(kv.get(nodesKey(ACTIVE)) ?? 'null')
     const on = Array.isArray(mine) ? mine.filter((n: any) => n?.enabled !== false && typeof n?.addr === 'string').map((n: any) => n.addr) : []
     if (on.length) return on
   } catch {}
-  const pub = JSON.parse(readFileSync(new URL('../../infra/nodes.json', import.meta.url), 'utf8'))
-  return pub.nodes.map((n: any) => n.addr)
+  return ACTIVE.nodes.map((n) => n.addr)
 }
 const [cmd, ...rest] = process.argv.slice(2)
 const opt = (name: string, def?: string) => { const i = rest.indexOf(name); return i >= 0 && rest[i + 1] && !rest[i + 1].startsWith('--') ? rest[i + 1] : def }
 const args = rest.filter((a, i) => !a.startsWith('--') && !(i > 0 && rest[i - 1].startsWith('--') && opt(rest[i - 1]) === a))
 const die = (msg: string): never => { console.error('onchato: ' + msg); process.exit(1) }
-/** The network topics are derived for (SPEC.md 5.1): the profile's, unless `--network` overrides it. */
-const NETWORK = opt('--network', NET.networkId)!
-// Every invite link this client writes names its network (lib/invite.ts).
-setInviteNetwork(NETWORK)
 // The handshake and the ratchet from core-rs (eh2/wasm.ts) by default;
 // `--core ts` selects the TypeScript engine.
 if (opt('--core') !== 'ts') setCoreBackend('wasm')
@@ -154,6 +152,11 @@ async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactMana
   const hemUrl = opt('--hem')
   if (hemUrl) {
     const { id, hem, kid } = await hemSignIn(hemUrl, await secret('Hasło HEM: '), opt('--handle'), chooseIdentity)
+    // A HEM identity's network is recorded on this device (lib/activenet.ts);
+    // one recorded elsewhere than this process's network is refused.
+    const rec = kv.get(hemBindingKey(kid))
+    if (rec && rec !== NETWORK) die(`tozsamosc HEM ${id.handle} jest w sieci "${rec}" - uruchom z --network ${rec}`)
+    if (!rec && !ACTIVE.builtin) kv.set(hemBindingKey(kid), NETWORK)
     const key = await identityKey(id.pub, kid)
     // Two derivations for the whole sign-in (on a HEM each is a device call):
     // the storage names, then the §10 base under the name they give emp_pub.
@@ -183,17 +186,66 @@ async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactMana
 const emptyBook = () => ({ list: async () => [], add: async () => { throw new Error('książka zablokowana') }, remove: async () => {}, rename: async () => {} })
 
 const kv = fileKV()
+
+/**
+ * The network this process works in, as the app's page does (lib/activenet.ts):
+ * the chosen profile's (`--profile`, or the only one), else `--network` (how a
+ * HEM sign-in names one), else the built-in network. A profile is in one
+ * network for good; asking for another one is refused, not obeyed.
+ * `--network` with an id this client does not know stays what it always was -
+ * the built-in network's nodes under another id, for development.
+ */
+const BUILTIN = builtinNetwork(NET, JSON.parse(readFileSync(new URL('../../infra/nodes.json', import.meta.url), 'utf8')).nodes)
+const PROFILE_HINT = opt('--hem') ? undefined : (opt('--profile') ?? (() => { const p = listProfiles(kv); return p.length === 1 ? p[0] : undefined })())
+const BOUND = PROFILE_HINT ? bindingOf(kv, softBindingKey(PROFILE_HINT), BUILTIN) : null
+if (BOUND && opt('--network') && opt('--network') !== BOUND) die(`profil ${PROFILE_HINT} jest w sieci "${BOUND}", nie w "${opt('--network')}" - tozsamosc nie zmienia sieci`)
+const WANTED = BOUND ?? opt('--network') ?? BUILTIN.id
+const ACTIVE = networkById(kv, WANTED, BUILTIN, Date.now())
+  ?? (BOUND ? die(`profil ${PROFILE_HINT} jest w sieci "${BOUND}", ktorej profilu nie ma juz na tym urzadzeniu`) : { ...BUILTIN, id: WANTED })
+/** The network topics are derived for (SPEC.md 5.1). */
+const NETWORK = ACTIVE.id
+// Every invite link this client writes names its network and its app; files go to its stores.
+setInviteNetwork(NETWORK)
+setAppAddress(ACTIVE.app)
+if (!process.env.ONCHATO_STORE) setStoreOrigins(ACTIVE.stores)
 try {
   switch (cmd) {
     case 'profile': {
       const [sub, a, b] = args
-      if (sub === 'list') { const n = listProfiles(kv); console.log(n.length ? n.join('\n') : '(brak profili)'); break }
+      if (sub === 'list') {
+        // Each profile with its network when it is not the built-in one.
+        const n = listProfiles(kv).map((p) => { const net = bindingOf(kv, softBindingKey(p), BUILTIN); return net === BUILTIN.id ? p : `${p}  [siec: ${networkById(kv, net, BUILTIN, Date.now())?.operator ?? net} (${net})]` })
+        console.log(n.length ? n.join('\n') : '(brak profili)'); break
+      }
       if (sub === 'new') {
-        if (!a) die('użycie: profile new <nazwa>')
+        if (!a) die('użycie: profile new <nazwa> [--network-profile <plik|link>]')
+        // Another operator's network: its signed profile, from a file or the short
+        // link with its CID; shown, confirmed, registered - and the new identity
+        // lives in it for good (lib/netprofile.ts, lib/activenet.ts).
+        let net = BUILTIN.id
+        const src = opt('--network-profile')
+        if (src) {
+          let text: string
+          const ptr = parseNetworkPointer(src)
+          if (ptr) { const got = await fetchPointed(ptr); if (!got.ok) die(got.why === 'cid' ? 'pobrany plik NIE zgadza sie z CID w linku - nie dolaczam' : `nie udalo sie pobrac ${ptr.url}`); text = (got as any).text }
+          else { try { text = readFileSync(src, 'utf8') } catch { die(`nie moge przeczytac ${src}`) } }
+          const r = openEnvelope(text!, Date.now())
+          if (!r.ok) die(`profil sieci odrzucony: ${r.why}${r.detail ? ' (' + r.detail + ')' : ''}`)
+          const p = (r as any).profile
+          const held = loadRegistry(kv, Date.now()).get(p.networkId)
+          if (held && held.profile.rootPub !== p.rootPub) die(`siec "${p.networkId}" jest juz tu pod INNYM kluczem operatora - nie dolaczam`)
+          if (p.policy.softwareProfiles === false) die(`siec "${p.networkId}" wymaga tozsamosci w HEM - uzyj: hem new <nazwa> --hem <url> --network ${p.networkId}`)
+          console.log(`siec:      ${p.operator} (${p.networkId})\nodcisk:    ${await rootFingerprint(p.rootPub)}\nwezly:     ${p.nodes.length}\nwazny do:  ${new Date(p.expires).toISOString().slice(0, 10)}\nPorownaj odcisk z tym, co operator podal innym kanalem. Operator zobaczy adres IP tego urzadzenia i czas spotkan, nie tresc.`)
+          if (!await confirm('Dolaczyc i utworzyc tozsamosc w tej sieci?')) die('nie utworzono')
+          const reg = registerNetwork(kv, (r as any).envelope, Date.now())
+          if (!reg.ok) die(`profil sieci odrzucony: ${reg.why}`)
+          net = p.networkId
+        }
         const pw = await secret('Nowe hasło: ')
         if (!opt('--password') && !process.env.ONCHATO_PASSWORD && pw !== await secret('Powtórz hasło: ')) die('hasła się różnią')
         const id = await createProfile(kv, a, pw)
-        console.log(`profil ${a} utworzony\nklucz:  ${id.pub}\nodcisk: ${await fingerprint(id.pub)}`)
+        setBinding(kv, softBindingKey(a), net, BUILTIN)
+        console.log(`profil ${a} utworzony${net !== BUILTIN.id ? ` w sieci ${net}` : ''}\nklucz:  ${id.pub}\nodcisk: ${await fingerprint(id.pub)}`)
         break
       }
       if (sub === 'import') {
@@ -223,7 +275,7 @@ try {
     }
     case 'whoami': {
       const { id, kind } = await signIn(kv)
-      console.log(`tożsamość: ${id.handle} (${kind})\nklucz:     ${id.pub}\nodcisk:    ${await fingerprint(id.pub)}`)
+      console.log(`tożsamość: ${id.handle} (${kind})\nklucz:     ${id.pub}\nodcisk:    ${await fingerprint(id.pub)}\nsieć:      ${ACTIVE.builtin ? NETWORK : `${ACTIVE.operator} (${NETWORK})`}`)
       break
     }
     case 'pubkey': console.log((await signIn(kv)).id.pub); break
