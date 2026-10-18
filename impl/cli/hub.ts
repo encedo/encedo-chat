@@ -18,7 +18,7 @@ import { Groups } from './groups.ts'
 import type { KV } from '../lib/migrate.ts'
 import { anchorClock } from '../lib/clock.ts'
 import { hostOf } from '../lib/ice.ts'
-import { inviteFromPaste, inviteLink } from '../lib/invite.ts'
+import { inviteFromPaste, inviteLink, inviteNetwork, PUBLIC_NET } from '../lib/invite.ts'
 import { InviteStore, publishedLink, expired, type PubInvite } from './invites.ts'
 import { KnockDesk } from './knocks.ts'
 import { fingerprint } from './fp.ts'
@@ -165,6 +165,8 @@ export class Hub {
     const inv = inviteFromPaste(link)
     if (!inv) throw new Error('to nie jest link onchato ani kod zaproszenia')
     if (inv.pub === this.id.pub) throw new Error('to Twój własny klucz')
+    const here = this.networkId ?? PUBLIC_NET
+    if (inviteNetwork(inv) !== here) throw new Error(`to zaproszenie jest z sieci "${inviteNetwork(inv)}", a ten klient dziala w sieci "${here}" - kontakt z innej sieci nigdy sie nie spotka`)
     const fp = await fingerprint(inv.pub)
     const known = this.contactList.find((c) => c.pub === inv.pub)
     if (known) return { status: 'known', name: known.name, fp }

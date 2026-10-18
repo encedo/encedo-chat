@@ -19,7 +19,7 @@ import { setCoreBackend, coreStatus, onCoreFallback, type CoreBackend } from '..
 import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import { exportProfile, openBundle, applyBundle, conflictsWith, identityHere, keysOfProfile, localKV, FILE_EXT, type KV } from '../../lib/migrate.ts'
-import { decodeInvite, inviteLink, inviteFromPaste, type Invite } from '../../lib/invite.ts'
+import { decodeInvite, inviteLink, inviteFromPaste, setInviteNetwork, inviteNetwork, type Invite } from '../../lib/invite.ts'
 import { pickFirst, orderFrom, nodeKey } from '../../lib/nodepick.ts'
 import jsQR from './vendor/jsqr.cjs'
 import { type Verdict } from '../../lib/bookmac.ts'
@@ -123,6 +123,8 @@ const BUILTIN_NET = builtinNetwork(NET, published.nodes as PublishedNode[], __EC
  * of another network is opened by switching and reloading, never in place.
  */
 const ACTIVE = resolveActive(localKV(), BUILTIN_NET, Date.now())
+// Every invite link this page writes names its network (lib/invite.ts).
+setInviteNetwork(ACTIVE.id)
 /**
  * Make sure an identity of network `net` is opened in that network: true when
  * this page already is in it; otherwise switch (remember the network, and
@@ -2826,6 +2828,7 @@ async function showInvite(inv: Invite, nameOverride?: string) {
   // some window it came from, and that window is where Cancel belongs.
   pushModal('import-modal')
   clr('import-msg')
+  ;($('import-add') as HTMLButtonElement).disabled = false
   ;($('import-name') as HTMLInputElement).value = nameOverride || inv.name
   paintStoreOptions('import-store')
   // Nothing to answer on means nothing to say: an invite with no inbox has no
@@ -2837,11 +2840,22 @@ async function showInvite(inv: Invite, nameOverride?: string) {
   $('import-note-box').hidden = !inv.inbox
   $('import-fp').textContent = await fingerprint(inv.pub)
   if (inv.pub === session?.pub) setMsg('import-msg', tr('To Twój własny profil.'), 'err')
+  // A contact meets only inside one network (the id is in every topic): an
+  // invite from another one is said to be one, and cannot be added here.
+  const from = inviteNetwork(inv)
+  if (from !== ACTIVE.id) {
+    const there = networkById(localKV(), from, BUILTIN_NET, nowMs())
+    setMsg('import-msg', there
+      ? tr('To zaproszenie jest z sieci „{there}”, a ta tożsamość jest w sieci „{here}”. Kontakt z innej sieci nigdy się nie spotka — dodaj go z tożsamości w tamtej sieci.', { there: netLabel(there), here: netLabel(ACTIVE) })
+      : tr('To zaproszenie jest z sieci „{there}”, której nie ma na tym urządzeniu. Kontakt z innej sieci nigdy się nie spotka — najpierw dołącz do tamtej sieci (link „inna sieć” na ekranie logowania).', { there: from }), 'err')
+    ;($('import-add') as HTMLButtonElement).disabled = true
+  }
 }
 
 $('import-add').addEventListener('click', async () => {
   const inv = pendingInvite
   if (!inv || !session) return
+  if (inviteNetwork(inv) !== ACTIVE.id) return // said in the window; never added
   const name = val('import-name')
   if (!name) { setMsg('import-msg', tr('Podaj nazwę.'), 'err'); return }
   // Adding yourself would create a contact whose pair topic is the self-topic —

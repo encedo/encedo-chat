@@ -176,3 +176,30 @@ test('a pasted invite is read in every shape a person passes it on, and nothing 
   assert.equal(inviteFromPaste('https://example.com/'), null)
   assert.equal(inviteFromPaste('onchato-sn1:' + '0'.repeat(60)), null, 'a safety-number code is not an invite')
 })
+
+// ---- the network an invite is from (lib/activenet.ts) ----------------------
+import { setInviteNetwork, inviteNetwork, encodeInvite as encNet, decodeInvite as decNet, PUBLIC_NET } from '../lib/invite.ts'
+
+const NPUB = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)))
+
+test('network: a link from the public network carries no field and reads as the public network', () => {
+  setInviteNetwork(PUBLIC_NET)
+  const frag = encNet({ pub: NPUB, name: 'ala' })
+  assert.ok(!JSON.stringify(JSON.parse(Buffer.from(frag.slice(2), 'base64url').toString())).includes('"t"'))
+  assert.equal(inviteNetwork(decNet('#' + frag)!), PUBLIC_NET)
+})
+
+test('network: a page in another network writes its id into every link, and the reader gets it back', () => {
+  setInviteNetwork('acme-prod')
+  try {
+    const inv = decNet('#' + encNet({ pub: NPUB, name: 'ala' }))!
+    assert.equal(inv.net, 'acme-prod')
+    assert.equal(inviteNetwork(inv), 'acme-prod')
+  } finally { setInviteNetwork(PUBLIC_NET) }
+})
+
+test('network: a broken network field refuses the whole link, it never reads as the public network', () => {
+  const frag = (o: any) => '#i=' + Buffer.from(JSON.stringify({ p: NPUB, n: 'ala', ...o })).toString('base64url')
+  for (const t of ['', 'has space', 'main', 7, 'x'.repeat(65)]) assert.equal(decNet(frag({ t })), null, JSON.stringify(t))
+  assert.equal(decNet(frag({ t: 'acme-prod' }))?.net, 'acme-prod')
+})

@@ -91,7 +91,29 @@ export interface Invite {
    * key (what links before this field meant) is no longer opened by anybody.
    */
   key?: string
+  /**
+   * The network the inviter's identity lives in (lib/activenet.ts); absent is
+   * the public network. A contact only ever meets inside one network - the id
+   * is mixed into every topic - so a link from another network must be said
+   * to be one, not added as a contact that can never be reached.
+   */
+  net?: string
 }
+
+/** The public network's id: what an invite without a network field means. */
+export const PUBLIC_NET = 'main'
+const NET_ID = /^[A-Za-z0-9._-]{1,64}$/
+
+/**
+ * The network this process writes into its links. One per page and per
+ * terminal client, set once where the network is decided (app.ts ACTIVE, the
+ * CLI's --network), so no place that makes a link can forget it.
+ */
+let linkNetwork = PUBLIC_NET
+export function setInviteNetwork(id: string): void { linkNetwork = id }
+
+/** The network an invite is from. */
+export const inviteNetwork = (inv: Invite): string => inv.net ?? PUBLIC_NET
 
 /** A fresh inbox secret, base64. One per published invite — never shared
  *  between them, or retiring one would have to retire the others
@@ -123,6 +145,8 @@ export function encodeInvite(inv: Invite): string {
   if (inv.reply) o.r = 1
   if (inv.inbox) o.s = inv.inbox
   if (inv.key) o.k = inv.key
+  const net = inv.net ?? linkNetwork
+  if (net !== PUBLIC_NET) o.t = net
   return 'i=' + b64urlEncode(JSON.stringify(o))
 }
 
@@ -184,7 +208,17 @@ export function decodeInvite(hash: string): Invite | null {
     key = obj.k
   }
 
+  // The network, like the inbox: present-but-broken refuses the whole link
+  // rather than reading as the public network, which would add a contact the
+  // reader can never meet. "main" is never written, so it is not accepted.
+  let net: string | undefined
+  if (obj.t !== undefined) {
+    if (typeof obj.t !== 'string' || !NET_ID.test(obj.t) || obj.t === PUBLIC_NET) return null
+    net = obj.t
+  }
+
   const out: Invite = { pub: obj.p, name }
+  if (net) out.net = net
   if (obj.r) out.reply = true
   if (inbox) out.inbox = inbox
   if (key) out.key = key

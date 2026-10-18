@@ -3849,6 +3849,19 @@ async function main() {
         }, 400));`)
       const aLink = await linkOf(A), bLink = await linkOf(B)
       for (const l of [aLink, bLink]) if (!l.startsWith(origin + '/#i=')) throw new Error(`an invite in the joined network names another app: ${l}`)
+      for (const l of [aLink, bLink]) {
+        const t = JSON.parse(Buffer.from(l.slice(l.indexOf('#i=') + 3), 'base64url').toString()).t
+        if (t !== netId) throw new Error(`an invite in the joined network does not say so: t=${t}`)
+      }
+      // The other way round: the public network's link (from the invite scenario
+      // above) reaches an identity of the joined network. It must be said to be
+      // from another network, and it must not be addable.
+      await B.eval(`location.hash = ${JSON.stringify(share.link.slice(share.link.indexOf('#') + 1))}; return 1`)
+      await B.waitFor('a public invite opens in the joined network', `return document.getElementById('import-modal').classList.contains('open')`, 10_000)
+      const cross = await B.eval<any>(`return { msg: document.getElementById('import-msg').textContent, off: document.getElementById('import-add').disabled }`)
+      if (!cross.off || !cross.msg.includes('publiczna sieć onchato')) throw new Error(`a public invite was addable in another network: ${JSON.stringify(cross)}`)
+      await B.eval(`document.getElementById('import-cancel').click(); return 1`)
+      step('a link from the public network is named as such and cannot be added in the joined one')
       for (const [b, link, name] of [[B, aLink, 'siec-a'], [A, bLink, 'siec-b']] as [Page, string, string][]) {
         await b.eval(`location.hash = ${JSON.stringify(link.slice(link.indexOf('#') + 1))}; return 1`)
         await b.waitFor(`${name}'s invite opens`, `return document.getElementById('import-modal').classList.contains('open')`, 10_000)

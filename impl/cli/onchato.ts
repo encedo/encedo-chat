@@ -47,7 +47,7 @@ import { namesFor, migrateToNames, type Names } from '../lib/storenames.ts'
 import { hemContactBook, mergedContactBook, localOnlyManager, type ContactManager, type Identity } from '../lib/core.ts'
 import { setCoreBackend } from '../eh2/establish.ts'
 import { BadPassword } from '../lib/profile.ts'
-import { inviteFromPaste, inviteLink } from '../lib/invite.ts'
+import { inviteFromPaste, inviteLink, setInviteNetwork, inviteNetwork } from '../lib/invite.ts'
 import { safetyNumber, safetyGroups, safetyQr, parseSafetyQr } from '../lib/safety.ts'
 import { qrForTerminal } from './termqr.ts'
 import { fingerprint } from './fp.ts'
@@ -92,6 +92,8 @@ const args = rest.filter((a, i) => !a.startsWith('--') && !(i > 0 && rest[i - 1]
 const die = (msg: string): never => { console.error('onchato: ' + msg); process.exit(1) }
 /** The network topics are derived for (SPEC.md 5.1): the profile's, unless `--network` overrides it. */
 const NETWORK = opt('--network', NET.networkId)!
+// Every invite link this client writes names its network (lib/invite.ts).
+setInviteNetwork(NETWORK)
 // The handshake and the ratchet from core-rs (eh2/wasm.ts) by default;
 // `--core ts` selects the TypeScript engine.
 if (opt('--core') !== 'ts') setCoreBackend('wasm')
@@ -302,6 +304,9 @@ try {
       // An invite (link, fragment or bare code) first, through the app's own parser;
       // a raw key only as the explicit two-argument form.
       const inv = args[0] ? inviteFromPaste(args[0]) : null
+      // A contact meets only inside one network: a link from another one is
+      // refused here rather than saved as a contact that can never be reached.
+      if (inv && inviteNetwork(inv) !== NETWORK) die(`to zaproszenie jest z sieci "${inviteNetwork(inv)}", a ten klient dziala w sieci "${NETWORK}" - kontakt z innej sieci nigdy sie nie spotka`)
       // A running daemon holds this identity's session: the contact goes in
       // THROUGH it (live, no restart, its knocks repeat until accepted) - a
       // second session here would close both (one identity, one session).
