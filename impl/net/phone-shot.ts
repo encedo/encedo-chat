@@ -15,9 +15,9 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs'
+import { profileDir } from './profiledir.ts'
+import { rmSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
-import { tmpdir } from 'node:os'
 import { join, extname } from 'node:path'
 import { hemKid } from '../lib/descr.ts'
 
@@ -65,7 +65,7 @@ class Chrome {
   private waiting = new Map<number, { resolve: (v: any) => void; reject: (e: any) => void }>()
 
   async start(url: string) {
-    this.dir = mkdtempSync(join(tmpdir(), 'ec-shot-'))
+    this.dir = profileDir('shot')
     this.proc = spawn(CHROME, [
       '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${this.dir}`,
       '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--hide-scrollbars', url,

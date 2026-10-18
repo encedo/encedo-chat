@@ -32,6 +32,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir, homedir } from 'node:os'
+import { profileDir } from './profiledir.ts'
 import { join, extname } from 'node:path'
 import { hemKid } from '../lib/descr.ts'
 import { signNetwork, rootPubFor, pointerFor } from '../lib/netprofile.ts'
@@ -197,7 +198,7 @@ class Browser extends Page {
   constructor(name: string) { super(name) }
 
   async start(url: string): Promise<void> {
-    this.dir = mkdtempSync(join(tmpdir(), `ec-${this.name}-`))
+    this.dir = profileDir(this.name)
     this.proc = spawn(CHROME, [
       HEADFUL ? '--headless=false' : '--headless=new',
       // Let Chromium pick the port (see discover() for how we learn it): a
