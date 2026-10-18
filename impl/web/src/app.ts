@@ -54,8 +54,8 @@ import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
 import { iceServersFor, hostOf, stunFromNodes } from '../../lib/ice.ts'
 import { regionBlocked } from '../../lib/regioncheck.ts'
 import { anchorClock } from '../../lib/clock.ts'
-import { verifyManifest } from '../../lib/manifest.ts'
-import { parseNetworkProfile, sigUrl } from '../../lib/network.ts'
+import { fetchManifest, worstTry } from '../../lib/manifest.ts'
+import { parseNetworkProfile } from '../../lib/network.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
@@ -1292,8 +1292,10 @@ function nodeRowsHTML(list: NodeEntry[]): string {
  * its first months. Publish with
  * `ipfs add --cid-version=1 --raw-leaves --pin`.
  */
-/** Where the operator serves the signed release manifest (lib/manifest.ts); the root key is compiled in. */
-const MANIFEST_URL = NET.manifestUrls[0]
+/** Where the operator serves the signed release manifest (lib/manifest.ts): every
+ *  source the profile names is asked, the newest that verifies wins; the root key
+ *  is compiled in. The hosts, for messages. */
+const manifestHosts = () => NET.manifestUrls.map((u) => new URL(u).host).join(', ')
 
 /**
  * Replace the local list with the published one.
@@ -1313,17 +1315,16 @@ async function loadOfficialNodes(btnId: string, warn: (t: string) => void, redra
     // checked against the CID it names. Whoever can shape these responses
     // chooses the relays for every client - the first hop of every
     // conversation - so neither step is skipped.
-    const [mRes, sRes] = await Promise.all([
-      fetch(MANIFEST_URL, { cache: 'no-store' }), fetch(sigUrl(MANIFEST_URL), { cache: 'no-store' }),
-    ])
-    if (!mRes.ok || !sRes.ok) { warn(tr('Manifest wydania jest niedostępny ({s})', { s: String(mRes.status) })); return }
-    const verdict = verifyManifest(new Uint8Array(await mRes.arrayBuffer()), await sRes.text(), __EC_ROOT_PUB__, nowMs())
-    if (!verdict.ok) {
-      warn(verdict.why === 'expired' ? tr('Manifest wydania wygasł — nie wczytuję listy. Zaktualizuj aplikację.')
-        : tr('Manifest wydania NIE przeszedł weryfikacji ({why}) — nie wczytuję listy. Zgłoś to.', { why: verdict.why }))
+    const got = await fetchManifest(NET.manifestUrls, __EC_ROOT_PUB__, nowMs())
+    if (got.ok && got.tried.length) ecLog('release manifest: passed over ' + got.tried.map((t) => `${t.url} (${t.why})`).join(', '))
+    if (!got.ok) {
+      const why = worstTry(got.tried)
+      warn(why === 'http' ? tr('Manifest wydania jest niedostępny ({s})', { s: manifestHosts() })
+        : why === 'expired' ? tr('Manifest wydania wygasł — nie wczytuję listy. Zaktualizuj aplikację.')
+        : tr('Manifest wydania NIE przeszedł weryfikacji ({why}) — nie wczytuję listy. Zgłoś to.', { why }))
       return
     }
-    const listCid = verdict.manifest.nodes.cid
+    const listCid = got.manifest.nodes.cid
     const raw = await getBlob(listCid)
     if (!await cidMatches(listCid, raw)) {
       warn(isVerifiableCid(listCid)
@@ -7861,17 +7862,18 @@ async function offerUpdateInner() {
   // (THREAT-MODELS B2): without it there is no update, and the app says so
   // instead of installing on the CI key's word alone.
   let blob: ManifestBlob
-  try {
-    const [mRes, sRes] = await Promise.all([
-      fetch(MANIFEST_URL, { cache: 'no-store' }), fetch(sigUrl(MANIFEST_URL), { cache: 'no-store' }),
-    ])
-    if (!mRes.ok || !sRes.ok) throw new Error(`HTTP ${mRes.status}/${sRes.status}`)
-    blob = { manifest: b64(new Uint8Array(await mRes.arrayBuffer())), sig: (await sRes.text()).trim() }
-  } catch (e: any) {
-    ecLog('update refused: release manifest unavailable - ' + (e?.message ?? e))
-    toast(tr('Nie mogę potwierdzić aktualizacji: manifest wydania jest niedostępny. Spróbuję później.'))
+  // Every source is asked and the newest manifest that verifies here goes to the
+  // host, which checks it again with its own copy of the root key.
+  const rel = await fetchManifest(NET.manifestUrls, __EC_ROOT_PUB__, nowMs())
+  if (!rel.ok) {
+    const why = worstTry(rel.tried)
+    ecLog('update refused: release manifest - ' + rel.tried.map((t) => `${t.url} (${t.why})`).join(', '))
+    toast(why === 'http'
+      ? tr('Nie mogę potwierdzić aktualizacji: manifest wydania jest niedostępny. Spróbuję później.')
+      : tr('Nie mogę potwierdzić aktualizacji: manifest wydania nie przeszedł weryfikacji ({why}). Zgłoś to.', { why }))
     return
   }
+  blob = { manifest: b64(rel.raw), sig: rel.sig }
 
   // The bar exists because its absence was the reported bug: between the click
   // and the restart 0.5.16 showed NOTHING, and a person watching nothing

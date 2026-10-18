@@ -26,6 +26,7 @@
  */
 
 import { ed25519 } from '@noble/curves/ed25519'
+import { sigUrl } from './network.ts'
 
 export interface Manifest {
   v: 1
@@ -80,3 +81,54 @@ export function signManifest(raw: Uint8Array, privB64: string): string {
 
 export const rootPubOf = (privB64: string): string =>
   btoa(String.fromCharCode(...ed25519.getPublicKey(b64d(privB64.trim()))))
+
+/** What one source answered: a verified manifest, or why it was passed over. */
+export type ManifestTry = { url: string; why: 'http' | 'signature' | 'shape' | 'expired' | 'future' }
+
+export type ManifestFetch =
+  | { ok: true; raw: Uint8Array; sig: string; manifest: Manifest; from: string; tried: ManifestTry[] }
+  | { ok: false; tried: ManifestTry[] }
+
+/**
+ * Fetch the manifest from every source the network profile names and keep the
+ * NEWEST one that verifies (lib/network.ts `manifestUrls`, each with its
+ * `.sig` beside it).
+ *
+ * Why every source and the newest, not the first that answers: the signature
+ * makes a source's honesty irrelevant to WHAT it can serve, but not to WHEN -
+ * a mirror can replay an older manifest that still verifies and is still in
+ * date, and so steer clients back to an old node list or an old updater key.
+ * Asking all of them and keeping the latest `made` means one honest, current
+ * source is enough. A source that fails (HTTP, signature, shape, dates) is
+ * passed over and reported in `tried`; it is never trusted in part.
+ */
+export async function fetchManifest(
+  urls: string[], rootPubB64: string, now: number,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ManifestFetch> {
+  const one = async (url: string): Promise<{ ok: true; raw: Uint8Array; sig: string; manifest: Manifest; url: string } | ManifestTry> => {
+    try {
+      const [mRes, sRes] = await Promise.all([
+        fetchImpl(url, { cache: 'no-store' }), fetchImpl(sigUrl(url), { cache: 'no-store' }),
+      ])
+      if (!mRes.ok || !sRes.ok) return { url, why: 'http' }
+      const raw = new Uint8Array(await mRes.arrayBuffer())
+      const sig = (await sRes.text()).trim()
+      const v = verifyManifest(raw, sig, rootPubB64, now)
+      return v.ok ? { ok: true, raw, sig, manifest: v.manifest, url } : { url, why: v.why }
+    } catch {
+      return { url, why: 'http' }
+    }
+  }
+  const answers = await Promise.all(urls.map(one))
+  const tried = answers.filter((a): a is ManifestTry => !('ok' in a))
+  let best: { raw: Uint8Array; sig: string; manifest: Manifest; url: string } | null = null
+  for (const a of answers) if ('ok' in a && (!best || a.manifest.made > best.manifest.made)) best = a
+  return best ? { ok: true, raw: best.raw, sig: best.sig, manifest: best.manifest, from: best.url, tried } : { ok: false, tried }
+}
+
+/** The reason to show when no source verified: a verification failure outranks "unreachable". */
+export function worstTry(tried: ManifestTry[]): ManifestTry['why'] {
+  for (const why of ['signature', 'shape', 'future', 'expired'] as const) if (tried.some((t) => t.why === why)) return why
+  return 'http'
+}

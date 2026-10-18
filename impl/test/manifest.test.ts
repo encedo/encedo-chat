@@ -46,3 +46,48 @@ test('expired, from the future, or the wrong shape: refused even with a good sig
   const v2 = bytes({ ...good, v: 2 })
   assert.deepEqual(verifyManifest(v2, signManifest(v2, PRIV), PUB, NOW), { ok: false, why: 'shape' })
 })
+
+// ---- several sources (fetchManifest) ----------------------------------------
+import { fetchManifest, worstTry } from '../lib/manifest.ts'
+
+/** A fake fetch serving {url: [body, status]}; anything else is a 404. */
+function served(files: Record<string, [Uint8Array | string, number?]>): typeof fetch {
+  return (async (input: any) => {
+    const f = files[String(input)]
+    if (!f) return new Response('no', { status: 404 })
+    return new Response(f[0] as any, { status: f[1] ?? 200 })
+  }) as typeof fetch
+}
+const signed = (m: Manifest, key = PRIV) => { const raw = bytes(m); return { raw, sig: signManifest(raw, key) } }
+
+test('several sources: the NEWEST manifest that verifies wins, not the first to answer', async () => {
+  const old = signed({ ...good, made: NOW - 50_000, nodes: { cid: 'bafkreiold' } })
+  const fresh = signed({ ...good, made: NOW - 1_000, nodes: { cid: 'bafkreinew' } })
+  const r = await fetchManifest(['https://a.example/m.json', 'https://b.example/m.json'], PUB, NOW, served({
+    'https://a.example/m.json': [old.raw], 'https://a.example/m.sig': [old.sig],
+    'https://b.example/m.json': [fresh.raw], 'https://b.example/m.sig': [fresh.sig],
+  }))
+  assert.ok(r.ok && r.manifest.nodes.cid === 'bafkreinew' && r.from === 'https://b.example/m.json')
+})
+
+test('several sources: a forged or dead source is passed over and reported, never used', async () => {
+  const fresh = signed(good)
+  const forged = signed({ ...good, made: NOW, nodes: { cid: 'bafkreievil' } }, OTHER)
+  const r = await fetchManifest(['https://evil.example/m.json', 'https://dead.example/m.json', 'https://ok.example/m.json'], PUB, NOW, served({
+    'https://evil.example/m.json': [forged.raw], 'https://evil.example/m.sig': [forged.sig],
+    'https://ok.example/m.json': [fresh.raw], 'https://ok.example/m.sig': [fresh.sig],
+  }))
+  assert.ok(r.ok && r.manifest.nodes.cid === 'bafkreib')
+  assert.deepEqual(r.tried.map((t) => t.why).sort(), ['http', 'signature'])
+})
+
+test('several sources: when none verifies, the reason given is the verification failure, not "unreachable"', async () => {
+  const expired = signed({ ...good, made: NOW - 3 * 86_400_000, expires: NOW - 86_400_000 })
+  const r = await fetchManifest(['https://dead.example/m.json', 'https://x.example/m.json'], PUB, NOW, served({
+    'https://x.example/m.json': [expired.raw], 'https://x.example/m.sig': [expired.sig],
+  }))
+  assert.ok(!r.ok)
+  assert.equal(worstTry(r.tried), 'expired')
+  const none = await fetchManifest(['https://dead.example/m.json'], PUB, NOW, served({}))
+  assert.ok(!none.ok && worstTry(none.tried) === 'http')
+})
