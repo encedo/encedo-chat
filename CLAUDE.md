@@ -567,6 +567,7 @@ covered by an automated test**; two-identity walkthroughs are by hand.
 | `npm run crypto-bench` | engine-cost numbers for `performance.md` |
 | `npm run relay-load` / `-saturate` / `-flood` / `-hsrate` / `-chatload` | load/DoS toolkit |
 | `net/cli-*-test.ts` | CLI ↔ CLI scenarios |
+| `RELAY_DIR=<relay/> node net/relay-compat-test.ts` | this client (light + GossipSub) against another build's relay; CI runs it against the previous release tag's (`relay-compat`, the N-1 promise to operators) |
 | `node net/stun-probe.ts <host> [--bad]` | our STUN, and that it ignores everything else |
 
 `browser-test` switches: `GROUP_ONLY=1`, `FAILOVER=1`, `RELAY_NODE=<full

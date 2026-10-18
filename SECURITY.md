@@ -54,4 +54,7 @@ installer's own hash is not (`docs/THREAT-MODELS.md`, B2, B3).
 
 The protocol document carries a `spec_version` and the wire a `ver`
 (`docs/SPEC.md`, header); before 1.0 every client updates together and
-only the current version is served or accepted.
+only the current version is served or accepted. One promise is made across
+releases, for operators who run their own relays and update them on their own
+schedule: a new client works with the previous release's relay. CI holds it to
+that (`impl/net/relay-compat-test.ts`, job `relay-compat`).

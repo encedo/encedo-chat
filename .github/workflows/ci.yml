@@ -65,6 +65,41 @@ jobs:
       - name: A build for another network names no onchato.com host
         run: node scripts/check-network-neutral.mjs
 
+  # relay N-1: an operator running its own network updates its relays on its
+  # own schedule, and until 1.0 nothing on the wire is versioned - so the
+  # promise that a new client works with the PREVIOUS release's relay is
+  # made only because this job tests it. The relay of the last release tag
+  # before this commit, two sessions of this client (light and GossipSub),
+  # presence and a message each way (impl/net/relay-compat-test.ts).
+  relay-compat:
+    name: this client against the previous release's relay (N-1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0 # the tags, to find the previous release
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: impl/package-lock.json
+
+      - run: npm ci
+        working-directory: impl
+
+      - name: The previous release's relay
+        run: |
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' HEAD^)
+          echo "previous release: $PREV"
+          git worktree add "$RUNNER_TEMP/prev" "$PREV"
+          cd "$RUNNER_TEMP/prev/relay" && npm ci
+
+      - name: This client against it
+        run: RELAY_DIR="$RUNNER_TEMP/prev/relay" node net/relay-compat-test.ts
+        working-directory: impl
+
   # core-rs: the Rust engine behind eh2/wasm.ts. Its own tests reproduce the
   # known-answer vectors of docs/kat/ (the same bytes as the TypeScript
   # engine); then the module is rebuilt from source on the pinned toolchain
