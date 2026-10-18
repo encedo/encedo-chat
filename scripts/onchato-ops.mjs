@@ -6,10 +6,12 @@
  *   release manifest ...           = release-manifest.mjs (node list CID, updater key)
  *   release approve-web <tag> ...  = approve-web.mjs (the web build of a tag)
  *
- *   network key  --yubikey [--slot 9c] | --file <keyfile>
+ *   network key  --yubikey [--slot 9c] | --file <keyfile> | --passphrase <root.kdf> | --passphrase-new <root.kdf>
  *       the root key's public half and fingerprint; `--file` on a path that does
- *       not exist yet makes a NEW key there (mode 0600, never overwritten)
- *   network sign <profile.json> --sign-yubikey [--slot 9c] | --sign <keyfile>
+ *       not exist yet makes a NEW key there (mode 0600, never overwritten);
+ *       `--passphrase-new` derives one from a passphrase (Argon2id, private salt;
+ *       lib/signer.mjs) and keeps only salt + public key
+ *   network sign <profile.json> --sign-yubikey [--slot 9c] | --sign <keyfile> | --sign-passphrase <root.kdf>
  *                [--nodes nodes.json] [--seq N] [--days 120] [--out network.json] [--root-pub <b64>]
  *       fills rootPub, seq, made, expires (and nodes from a node list file),
  *       checks the result the way an app will, signs the exact bytes, and opens
@@ -30,7 +32,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { signerFrom, newKeyFile } from './lib/signer.mjs'
+import { signerFrom, newKeyFile, newPassphraseKey, readKdf, readSecret } from './lib/signer.mjs'
 import { publicKeyYubikey } from './yubikey-sign.mjs'
 import { parseOperatorProfile, openEnvelope, rootFingerprint, pointerFor, parseNetworkPointer, fetchPointed } from '../impl/lib/netprofile.ts'
 import { qrMatrix, qrSvg } from '../impl/lib/qr.ts'
@@ -40,7 +42,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const [group, cmd, ...args] = process.argv.slice(2)
 const has = (n) => args.includes(n)
 const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : d }
-const WITH_VALUE = ['--slot', '--module', '--file', '--sign', '--nodes', '--seq', '--days', '--out', '--svg', '--root-pub']
+const WITH_VALUE = ['--slot', '--module', '--file', '--passphrase', '--passphrase-new', '--sign-passphrase', '--sign', '--nodes', '--seq', '--days', '--out', '--svg', '--root-pub']
 const positional = args.filter((a, i) => !a.startsWith('--') && !(i > 0 && WITH_VALUE.includes(args[i - 1])))
 const fail = (m) => { console.error(`[fail] ${m}`); process.exit(1) }
 const DAY = 86_400_000
@@ -49,8 +51,8 @@ const day = (ms) => new Date(ms).toISOString().slice(0, 10)
 const USAGE = `usage:
   onchato-ops release manifest [release-manifest.mjs options]
   onchato-ops release approve-web <tag> [approve-web.mjs options]
-  onchato-ops network key   --yubikey [--slot 9c] | --file <keyfile>
-  onchato-ops network sign  <profile.json> --sign-yubikey [--slot 9c] | --sign <keyfile> [--nodes nodes.json] [--seq N] [--days 120] [--out network.json]
+  onchato-ops network key   --yubikey [--slot 9c] | --file <keyfile> | --passphrase[-new] <root.kdf>
+  onchato-ops network sign  <profile.json> --sign-yubikey [--slot 9c] | --sign <keyfile> | --sign-passphrase <root.kdf> [--nodes nodes.json] [--seq N] [--days 120] [--out network.json]
   onchato-ops network link  <https://.../network.json> <network.json> [--svg qr.svg]
   onchato-ops network check <network.json | link> [--online]`
 
@@ -95,7 +97,16 @@ if (cmd === 'key') {
     const file = opt('--file')
     if (existsSync(file)) pub = signerFrom((n, d) => (n === '--sign' ? file : d), () => false).pub()
     else { pub = newKeyFile(file); console.log(`[ok] a new root key in ${file} (mode 600) - keep a copy offline; losing it means a new network`) }
-  } else fail(`network key needs --yubikey or --file <keyfile>\n${USAGE}`)
+  } else if (opt('--passphrase-new')) {
+    const file = opt('--passphrase-new')
+    const a = await readSecret('New network key passphrase: ')
+    if (process.stdin.isTTY && a !== await readSecret('The same again: ')) fail('the two passphrases differ - nothing written')
+    try { pub = newPassphraseKey(file, a) } catch (e) { fail(e.message) }
+    console.log(`[ok] a new network key from your passphrase; ${file} (mode 600) holds its salt and public key, nothing secret`)
+    console.log('Keep BOTH: the passphrase (in your head or a password manager) and a copy of this file (offline). Either alone is not enough; losing either means a new network.')
+  } else if (opt('--passphrase')) {
+    try { pub = readKdf(opt('--passphrase')).pub } catch (e) { fail(e.message) }
+  } else fail(`network key needs --yubikey, --file <keyfile> or --passphrase[-new] <root.kdf>\n${USAGE}`)
   console.log(`rootPub      ${pub}`)
   console.log(`fingerprint  ${await rootFingerprint(pub)}`)
   process.exit(0)
@@ -106,7 +117,7 @@ if (cmd === 'sign') {
   const src = positional[0]
   if (!src) fail(`network sign needs a profile.json\n${USAGE}`)
   const signer = signerFrom(opt, has)
-  if (!signer) fail('network sign needs --sign-yubikey or --sign <keyfile>')
+  if (!signer) fail('network sign needs --sign-yubikey, --sign <keyfile> or --sign-passphrase <root.kdf>')
   const missing = signer.preflight()
   if (missing.length) fail(`cannot sign with the ${signer.what}: missing ${missing.join('; ')}`)
   let draft
@@ -144,7 +155,7 @@ if (cmd === 'sign') {
   try { parseOperatorProfile(profile) } catch (e) { fail(`the profile would be refused: ${e.message}`) }
   const bytes = new TextEncoder().encode(JSON.stringify(profile))
   let sig
-  try { sig = signer.sign(bytes) } catch (e) { fail(e.message) }
+  try { await signer.unlock?.(); sig = signer.sign(bytes) } catch (e) { fail(e.message) }
   const text = JSON.stringify({ 'onchato-network': 1, profile: Buffer.from(bytes).toString('base64'), sig }) + '\n'
   const back = openEnvelope(text, Date.now())
   if (!back.ok) fail(`the signed file does not open (${back.why}${back.detail ? `: ${back.detail}` : ''}) - nothing written`)

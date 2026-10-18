@@ -8,11 +8,16 @@
  *   --sign <keyfile>                                    base64 private key, last
  *                                                       non-blank line (the format
  *                                                       release-manifest.mjs reads)
+ *   --sign-passphrase <root.kdf>                        a key DERIVED from a passphrase
+ *                                                       (Argon2id); the file holds only the
+ *                                                       salt, the parameters and the public
+ *                                                       key - nothing secret is ever stored
  */
 import { readFileSync, writeFileSync, existsSync, unlinkSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { createPrivateKey, createPublicKey, generateKeyPairSync, sign as edSign } from 'node:crypto'
+import { createPrivateKey, createPublicKey, generateKeyPairSync, sign as edSign, argon2Sync, randomBytes } from 'node:crypto'
+import { assessPassword, ENFORCE_MIN } from '../../impl/lib/passmeter.ts'
 import { signFileYubikey, publicKeyYubikey, yubikeyPreflight } from '../yubikey-sign.mjs'
 
 const b64e = (u) => Buffer.from(u).toString('base64')
@@ -40,6 +45,76 @@ export function newKeyFile(path, what = 'onchato operator root key') {
   return pubOf(privateKey)
 }
 
+// ---- a key derived from a passphrase ----------------------------------------
+//
+// The operator's choice "the key on the server" (OPERATOR-NODE-PLAN.md): the
+// Ed25519 seed is Argon2id(passphrase, salt), so nothing that signs is ever on
+// the disk. The salt is random and kept PRIVATE (root.kdf, mode 600, and the
+// operator's backup): the public key is in every profile, so with a public salt
+// anyone could guess passphrases against it offline. With a private one an
+// attacker needs the server or the backup first - the same bar as an encrypted
+// key file. The passphrase cannot be changed: it IS the key.
+const KDF = { alg: 'argon2id', memoryKiB: 262144, passes: 4, parallelism: 1 }
+
+function deriveSeed(passphrase, kdf) {
+  return argon2Sync('argon2id', {
+    message: Buffer.from(passphrase.normalize('NFC'), 'utf8'), nonce: Buffer.from(kdf.salt, 'base64'),
+    memory: kdf.memoryKiB, passes: kdf.passes, parallelism: kdf.parallelism, tagLength: 32,
+  })
+}
+
+/** Write a NEW root.kdf for this passphrase (refuses a weak one, never overwrites); returns the public key. */
+export function newPassphraseKey(path, passphrase) {
+  if (existsSync(path)) throw new Error(`${path} exists - refusing to replace a network's key`)
+  const s = assessPassword(passphrase)
+  if (s.score < ENFORCE_MIN) throw new Error(`the passphrase is too weak (${s.advice}) - use several unrelated words, 16+ characters`)
+  const kdf = { v: 1, ...KDF, salt: randomBytes(16).toString('base64') }
+  const pub = pubOf(keyOf(b64e(deriveSeed(passphrase, kdf))))
+  writeFileSync(path, JSON.stringify({ ...kdf, pub }, null, 2) + '\n', { mode: 0o600, flag: 'wx' })
+  return pub
+}
+
+/** The kdf file: its parameters, salt and public key. */
+export function readKdf(path) {
+  const k = JSON.parse(readFileSync(path, 'utf8'))
+  if (k.v !== 1 || k.alg !== 'argon2id' || !k.salt || !k.pub) throw new Error(`${path} is not an onchato root.kdf`)
+  if (process.platform !== 'win32' && (statSync(path).mode & 0o077)) console.error(`WARNING: ${path} is readable by others (chmod 600) - the salt is meant to stay private`)
+  return k
+}
+
+/** The key for a passphrase, checked against the public key the file names. */
+export function passphraseKey(path, passphrase) {
+  const kdf = readKdf(path)
+  const key = keyOf(b64e(deriveSeed(passphrase, kdf)))
+  if (pubOf(key) !== kdf.pub) throw new Error('wrong passphrase (the derived key is not this network\'s key) - nothing was signed')
+  return key
+}
+
+/** A secret from the terminal without echo, or the first line of stdin when it is not a terminal. */
+export async function readSecret(prompt) {
+  const input = process.stdin
+  if (!input.isTTY) {
+    let all = ''
+    for await (const chunk of input) all += chunk
+    return all.split('\n')[0].replace(/\r$/, '')
+  }
+  process.stderr.write(prompt)
+  input.setRawMode(true); input.resume(); input.setEncoding('utf8')
+  return await new Promise((ok, fail) => {
+    let got = ''
+    const on = (ch) => {
+      for (const c of ch) {
+        if (c === '\r' || c === '\n') { done(); return ok(got) }
+        if (c === '\u0003') { done(); return fail(new Error('cancelled')) }
+        if (c === '\u007f' || c === '\b') got = got.slice(0, -1)
+        else got += c
+      }
+    }
+    const done = () => { input.off('data', on); input.setRawMode(false); input.pause(); process.stderr.write('\n') }
+    input.on('data', on)
+  })
+}
+
 /** A signer from the command line's options, or null when none was named. */
 export function signerFrom(opt, has) {
   if (has('--sign-yubikey')) {
@@ -53,6 +128,19 @@ export function signerFrom(opt, has) {
         writeFileSync(tmp, bytes, { mode: 0o600 })
         try { return signFileYubikey(tmp, { slot, module }) } finally { try { unlinkSync(tmp) } catch {} }
       },
+    }
+  }
+  const kdfFile = opt('--sign-passphrase')
+  if (kdfFile) {
+    const kdf = readKdf(kdfFile)
+    let key = null
+    return {
+      what: `passphrase key ${kdfFile}`,
+      preflight: () => [],
+      pub: () => kdf.pub,
+      // Derived once, on the first signature, so the passphrase is asked after every check that can fail without it.
+      async unlock() { key = passphraseKey(kdfFile, await readSecret('Network key passphrase: ')) },
+      sign(bytes) { if (!key) throw new Error('not unlocked'); return b64e(edSign(null, Buffer.from(bytes), key)) },
     }
   }
   const file = opt('--sign')

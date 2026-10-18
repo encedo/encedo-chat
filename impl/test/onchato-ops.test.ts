@@ -70,3 +70,22 @@ test('network link prints a pointer the app parses, and a QR code', () => withDi
   assert.match(r.stdout.split('\n')[0], /^https:\/\/acme\.example\/onchato\/network\.json#onchato-net=b[a-z2-7]{50,}$/)
   assert.match(readFileSync(join(d, 'q.svg'), 'utf8'), /^<svg/)
 }))
+
+test('a passphrase key: weak refused, the same passphrase signs, a wrong one never does, nothing secret on disk', () => withDir((d) => {
+  const run = (input: string, ...a: string[]) => spawnSync(process.execPath, [OPS, ...a], { cwd: d, encoding: 'utf8', input })
+  writeFileSync(join(d, 'p.json'), JSON.stringify(PROFILE))
+  assert.match(run('haslo123\n', 'network', 'key', '--passphrase-new', 'root.kdf').stderr, /too weak/)
+  const PASS = 'zielony kubek dwa tramwaje nad Wisla'
+  const made = run(PASS + '\n', 'network', 'key', '--passphrase-new', 'root.kdf')
+  assert.equal(made.status, 0, made.stderr)
+  const kdf = JSON.parse(readFileSync(join(d, 'root.kdf'), 'utf8'))
+  assert.deepEqual(Object.keys(kdf).sort(), ['alg', 'memoryKiB', 'parallelism', 'passes', 'pub', 'salt', 'v'], 'the file holds a secret it should not')
+  assert.ok(kdf.memoryKiB >= 262144 && kdf.passes >= 4, 'weak Argon2 parameters')
+  assert.match(run(PASS + '\n', 'network', 'key', '--passphrase-new', 'root.kdf').stderr, /refusing to replace/)
+  const sign = (pw: string) => run(pw + '\n', 'network', 'sign', 'p.json', '--nodes', NODES, '--sign-passphrase', 'root.kdf', '--out', 'n.json')
+  assert.match(sign('zle haslo zupelnie inne niz tamto').stderr, /wrong passphrase/)
+  assert.throws(() => readFileSync(join(d, 'n.json')), 'a wrong passphrase wrote a file')
+  assert.equal(sign(PASS).status, 0)
+  const env = openEnvelope(readFileSync(join(d, 'n.json'), 'utf8'), Date.now())
+  assert.ok(env.ok && env.profile.rootPub === kdf.pub, 'signed under another key than the file names')
+}))
