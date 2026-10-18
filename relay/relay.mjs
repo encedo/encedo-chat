@@ -6,6 +6,7 @@
  * it never sees plaintext or keys. Both v5 and v6 clients use it unchanged.
  *
  *   node relay.mjs --pass <secret> --port 9001 [--host bs1.onchato.com] [--peers <ma>...]
+ *   node relay.mjs --key-file /data/node.key ...   (a random key of its own; any node but bs1-bs3)
  *                  [--max-topics 250] [--idle-ttl 120]
  *                  [--stats 15] [--stats-json <path>] [--quiet-msgs]
  *                  [--stats-redis redis://127.0.0.1:6379] [--stats-node bs1]
@@ -58,6 +59,7 @@ import * as lp from 'it-length-prefixed'
 import { pushable } from 'it-pushable'
 import { PROTOCOL as PICK_PROTOCOL, T as PICK_T, decodeFrame as decodePickFrame, encodeDeliver, encodeRefused, encodePicked, encodeAck, makePicks } from './pick.mjs'
 import { redisSink } from './redis.mjs'
+import { loadOrCreateSeed } from './nodekey.mjs'
 import { makeMetrics, metricsHandler, SAMPLE_MS, readCommit } from './metrics.mjs'
 import { createServer as createHttpServer, Server as HttpServer } from 'http'
 import { appendFile } from 'fs'
@@ -77,6 +79,9 @@ const getPeers = () => {
 }
 
 const PASS  = get('--pass', 'default-relay-pass')
+// A random key of the node's own (nodekey.mjs), for every node that is not one
+// of bs1-bs3. Wins over --pass.
+const KEY_FILE = get('--key-file', null)
 const PORT  = parseInt(get('--port', '9001'))
 // The address PORT listens on. Only nginx reaches it, over loopback, so that is
 // the default (since 2026-10-09): ufw closing 9001 used to be the only thing
@@ -157,11 +162,14 @@ const QUIET_MSGS = args.includes('--quiet-msgs')
 // http.createServer, which libp2p calls when it opens the WebSocket listener.
 const dump = createDump(process.env.DUMP)
 
-const seed    = createHash('sha256').update(PASS).digest()
+const keyed   = KEY_FILE ? loadOrCreateSeed(KEY_FILE) : null
+const seed    = keyed ? keyed.seed : createHash('sha256').update(PASS).digest()
 const privKey = await generateKeyPairFromSeed('Ed25519', seed)
 const peerId  = peerIdFromPrivateKey(privKey)
 
-console.log(`\nPass: "${PASS}" -> PeerId: ${peerId.toString()}`)
+console.log(keyed
+  ? `\nKey file: ${KEY_FILE}${keyed.made ? ' (new)' : ''} -> PeerId: ${peerId.toString()}`
+  : `\nPass: "${PASS}" -> PeerId: ${peerId.toString()}`)
 
 // it-ws, under @libp2p/websockets, calls server.listen(port) and drops the host
 // of the listen multiaddr, so `/ip4/127.0.0.1/...` alone still listened on every
