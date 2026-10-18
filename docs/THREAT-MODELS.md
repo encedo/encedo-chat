@@ -187,6 +187,8 @@ QR exists to make it cheap.
 third party that you wrote it; it has never meant they cannot keep it. Anyone
 you talk to can screenshot the conversation, and no design here changes that.
 
+**D3. The planted network profile** (another operator's network in this build, `ARCHITECTURE.md` Third-party nodes and networks). Someone persuades a person to import a network profile they control - a file, a pasted text; a link cannot do it. What it buys: a NEW identity in that network, whose node operator then sees that identity's IP address, topics, timing and sizes. What it does not buy: any existing identity (each stays in its own network for good), any contact, any content (end-to-end as everywhere). Controls: the import shows the operator's name and its key's fingerprint to compare out of band; the network is named on the sign-in card and on every profile of it; the key is pinned at first import, so a later file under another key is refused rather than swapped in.
+
 ### E. Physical
 
 **E1. A stolen HEM.** Locked; useless without the password (and, with

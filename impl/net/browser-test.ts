@@ -34,6 +34,7 @@ import { createServer, type Server } from 'node:http'
 import { tmpdir, homedir } from 'node:os'
 import { join, extname } from 'node:path'
 import { hemKid } from '../lib/descr.ts'
+import { signNetwork, rootPubFor } from '../lib/netprofile.ts'
 
 /**
  * By default this serves `web/dist` from THIS checkout, so it tests the code in
@@ -3779,6 +3780,90 @@ async function main() {
         return !!app && !window.__notReloaded && !window.__pub && getComputedStyle(app).display === 'none';
       `, 10_000)
       step('header sign-out, confirmed: the page reloaded and shows the sign-in screen')
+    }
+
+    // Another network, end to end (lib/netprofile.ts, lib/activenet.ts). A made-
+    // up operator's profile, signed here, names the same relays under its OWN
+    // network id: both browsers join it from the sign-in card, each makes a NEW
+    // identity there, they swap invite links and talk. If any part of the page
+    // still derived for the built-in network - topics, invite address, store -
+    // the two would never meet. Local only: the profile names this server's origin.
+    if (!GROUP_ONLY && SERVE_LOCAL) {
+      scenario('another network: both join it from a signed profile, make new identities there, and talk')
+      const origin = `http://127.0.0.1:${LOCAL_PORT}`
+      const netId = 'harness-' + Date.now().toString(36)
+      const relays: string[] = process.env.RELAY_NODE ? [process.env.RELAY_NODE]
+        : JSON.parse(readFileSync(new URL('../../infra/nodes.json', import.meta.url), 'utf8')).nodes.map((n: any) => n.addr)
+      const KEY = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64')
+      const at = Date.now()
+      const text = JSON.stringify(signNetwork({
+        v: 1, networkId: netId, operator: 'Harness Net', rootPub: rootPubFor(KEY), seq: 1, made: at - 60_000, expires: at + 86_400_000,
+        nodes: relays.map((addr, i) => ({ name: `n${i + 1}`, addr })), stores: [origin], app: { origin, path: '/' },
+        profileUrls: [`${origin}/network.json`], feedback: null, home: `${origin}/`, policy: {},
+      }, KEY))
+      for (const [b, handle] of [[A, 'siec-a'], [B, 'siec-b']] as [Page, string][]) {
+        // To the sign-in card: a reload is enough, a password stands between it and the app.
+        await b.eval(`location.reload(); return 1`)
+        await sleep(500)
+        await b.waitFor('the sign-in card', `const a = document.getElementById('app'); return !!a && a.hidden && !!document.getElementById('go-network')`, 20_000)
+        await b.waitFor('the join window', `
+          const m = document.getElementById('net-modal');
+          if (!m.classList.contains('open')) document.getElementById('go-network').click();
+          return m.classList.contains('open');`, 20_000)
+        await b.eval(`document.getElementById('net-paste').value = ${JSON.stringify(text)}; document.getElementById('net-go').click(); return 1`)
+        await b.waitFor('the consent page', `return !document.getElementById('net-step-confirm').hidden || !!document.getElementById('net-msg').textContent`, 10_000)
+        const shown = await b.eval<any>(`return { facts: document.getElementById('net-facts').textContent, msg: document.getElementById('net-msg').textContent }`)
+        if (shown.msg || !shown.facts.includes('Harness Net') || !shown.facts.includes(netId) || !/([0-9a-f]{4}\s){7}[0-9a-f]{4}/.test(shown.facts)) {
+          throw new Error(`${b.name}: the consent page does not name the operator, the network and the key: ${JSON.stringify(shown)}`)
+        }
+        await b.eval(`document.getElementById('net-go').click(); return 1`)
+        // Joined: the page reloads INTO that network and opens its first identity's window by itself.
+        await sleep(500)
+        await b.waitFor('the new identity window, in the joined network', `
+          const m = document.getElementById('soft-modal'), n = document.getElementById('soft-net');
+          return !!m && m.classList.contains('open') && !!n && !n.hidden && n.textContent.includes('Harness Net')`, 20_000)
+        await b.eval(`
+          document.getElementById('soft-name').value = ${JSON.stringify(handle)};
+          document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)};
+          document.getElementById('soft-pass2').value = ${JSON.stringify(SOFT_PASS)};
+          return 1;`)
+        const made = await pressSoftGo(b, `the identity ${handle} in the joined network`)
+        if (made !== 'done') throw new Error(`${b.name}: no identity in the joined network - ${await softError(b)}`)
+        const where = await b.eval<any>(`return { last: localStorage.getItem('ec-last-net'), bound: localStorage.getItem('ec-soft-net-' + ${JSON.stringify(handle)}) }`)
+        if (where.last !== netId || where.bound !== netId) throw new Error(`${b.name}: the identity is not bound to the joined network: ${JSON.stringify(where)}`)
+        if (!b.console.some((l) => l.includes(`network=${netId}`))) throw new Error(`${b.name}: the page did not start in the joined network`)
+        await b.waitFor('the first-run card', `return document.getElementById('welcome-modal').classList.contains('open')`, 20_000)
+        await b.eval(`document.getElementById('welcome-close').click(); return 1`)
+      }
+      step(`both joined "${netId}" from a signed profile and made new identities bound to it`)
+      // Each one's invite link, and each imports the other's: the link must name
+      // the network's own app, and the import goes through the usual window.
+      const linkOf = (b: Page) => b.eval<string>(`
+        document.getElementById('btn-settings').click();
+        document.getElementById('btn-share').click();
+        return new Promise((res) => setTimeout(() => {
+          const l = document.getElementById('share-link').value;
+          document.getElementById('share-close').click();
+          document.getElementById('btn-close-drawer').click();
+          res(l);
+        }, 400));`)
+      const aLink = await linkOf(A), bLink = await linkOf(B)
+      for (const l of [aLink, bLink]) if (!l.startsWith(origin + '/#i=')) throw new Error(`an invite in the joined network names another app: ${l}`)
+      for (const [b, link, name] of [[B, aLink, 'siec-a'], [A, bLink, 'siec-b']] as [Page, string, string][]) {
+        await b.eval(`location.hash = ${JSON.stringify(link.slice(link.indexOf('#') + 1))}; return 1`)
+        await b.waitFor(`${name}'s invite opens`, `return document.getElementById('import-modal').classList.contains('open')`, 10_000)
+        await b.eval(`document.getElementById('import-name').value = ${JSON.stringify(name)}; document.getElementById('import-add').click(); return 1`)
+        await b.waitFor(`${name} in the contact list`, `return [...document.querySelectorAll('#pane-contacts .contact')].some((c) => c.textContent.includes(${JSON.stringify(name)}))`, 15_000)
+      }
+      await openContact(A, 'siec-b')
+      await openContact(B, 'siec-a')
+      await roundTrip(A, B, 'another network')
+      // Meeting is not enough: two pages that both fell back to the built-in
+      // network would meet too. The engine must have derived for the joined one.
+      for (const b of [A, B]) if (!b.console.some((l) => l.includes(`opening conversation: network=${netId}`))) {
+        throw new Error(`${b.name}: the conversation was not opened in the joined network`)
+      }
+      step('two identities of the joined network found each other and talked, on topics of that network')
     }
 
     if (GROUP_ONLY) {

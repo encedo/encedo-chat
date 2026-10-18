@@ -56,11 +56,11 @@ import { regionBlocked } from '../../lib/regioncheck.ts'
 import { anchorClock } from '../../lib/clock.ts'
 import { fetchManifest, worstTry } from '../../lib/manifest.ts'
 import { parseNetworkProfile } from '../../lib/network.ts'
-import { refreshNetwork } from '../../lib/netprofile.ts'
+import { refreshNetwork, loadRegistry, openEnvelope, registerNetwork, rootFingerprint, type OperatorProfile, type NetworkEnvelope } from '../../lib/netprofile.ts'
 import type { PublishedNode } from '../../lib/nodelist.ts'
 import {
   builtinNetwork, resolveActive, networkById, bindingOf, setBinding, setLastNet, nodesKey, transportKey,
-  softBindingKey, hemBindingKey, OPEN_PROFILE_KEY,
+  softBindingKey, hemBindingKey, OPEN_PROFILE_KEY, OPEN_CREATE_KEY, type ActiveNetwork,
 } from '../../lib/activenet.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { boxHeight } from '../../lib/composer.ts'
@@ -796,6 +796,15 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   // A HEM identity is in the network this device recorded for it, the built-in
   // one when nothing is recorded (lib/activenet.ts). Another network than this
   // page's means a reload into it - and the device's password once more.
+  // On a device that knows more than one network, a HEM identity seen here for
+  // the first time is asked about once; the answer is written down even when it
+  // is the built-in network, so the question is not asked again.
+  if (!localStorage.getItem(hemBindingKey(id.kid)) && knownNetworks().length > 1) {
+    const pick = await pickNetwork(tr('W której sieci jest ta tożsamość?'),
+      tr('To urządzenie zna więcej niż jedną sieć. Tożsamość HEM „{h}" zostanie na tym urządzeniu przypisana do wybranej sieci na stałe.', { h: id.handle }))
+    if (!pick) return
+    localStorage.setItem(hemBindingKey(id.kid), pick)
+  }
   if (!inNetworkOrSwitch(bindingOf(localKV(), hemBindingKey(id.kid), BUILTIN_NET))) return
   const pubkey = await pubKeyReader(hem)(id.kid)
   rememberMethod('hem')
@@ -1042,7 +1051,10 @@ function renderLoginProfiles(boot = false) {
     const av = document.createElement('span'); av.className = 'av'
     av.textContent = n.slice(0, 2).toUpperCase()
     const who = document.createElement('span'); who.className = 'who'; who.textContent = n; who.title = n
-    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = tr('software')
+    // The tag says the identity's network when it is not the built-in one: one
+    // list for every network, each profile with its own (the user's call).
+    const tagNet = networkById(localKV(), bindingOf(localKV(), softBindingKey(n), BUILTIN_NET), BUILTIN_NET, nowMs())
+    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = tagNet && !tagNet.builtin ? tagNet.operator : tr('software')
     b.append(av, who, tag)
     b.addEventListener('click', () => {
       if (inNetworkOrSwitch(bindingOf(localKV(), softBindingKey(n), BUILTIN_NET), () => localStorage.setItem(OPEN_PROFILE_KEY, n))) openSoftModal(n)
@@ -1064,8 +1076,15 @@ function renderLoginProfiles(boot = false) {
   // Only at boot: after that, this function is how somebody gets BACK to the
   // profiles, and sending them straight out again would make that link dead.
   if (boot && lastMethod() === 'hem') showHemForm()
+  paintNetworkLine()
   // A reload that switched the network to open a profile: open it now.
   if (boot) {
+    if (localStorage.getItem(OPEN_CREATE_KEY)) {
+      localStorage.removeItem(OPEN_CREATE_KEY)
+      // Just joined this network: its first identity, in the way it allows.
+      if (ACTIVE.policy.softwareProfiles === false) showHemForm()
+      else openSoftModal(undefined, true)
+    }
     const open = localStorage.getItem(OPEN_PROFILE_KEY)
     localStorage.removeItem(OPEN_PROFILE_KEY)
     if (open && names.includes(open) && bindingOf(localKV(), softBindingKey(open), BUILTIN_NET) === ACTIVE.id) openSoftModal(open)
@@ -1109,6 +1128,8 @@ function openSoftModal(name?: string, creating = false) {
   const start = creating ? '' : (name ?? localStorage.getItem(LAST_PROFILE) ?? '')
   ;($('soft-name') as HTMLInputElement).value = start; ($('soft-pass') as HTMLInputElement).value = ''
   softMode(creating)
+  const sn = document.getElementById('soft-net')
+  if (sn) { sn.hidden = !creating || knownNetworks().length < 2; sn.textContent = tr('Nowa tożsamość w sieci: {n}', { n: netLabel(ACTIVE) }) }
   // Focus lands where there is still something to type — on the password when
   // the name came back by itself, which is the common case after the first run.
   $(!creating && start ? 'soft-pass' : 'soft-name').focus()
@@ -1241,6 +1262,9 @@ async function softLogin() {
     }
 
     let id: Identity
+    if (!raw && ACTIVE.policy.softwareProfiles === false) {
+      setMsg('soft-msg', tr('Ta sieć wymaga tożsamości w HEM.'), 'err'); return
+    }
     if (!raw) {
       // Twice, and compared before anything is written: there is no verifier
       // stored anywhere, so a typo sealed into the profile is unrecoverable and
@@ -2428,7 +2452,7 @@ function dropModal(id: string) {
   else $('scrim').classList.remove('open')
 }
 
-const paintScanButton = () => { $('btn-scan').hidden = $('paste-scan').hidden = !scanSupported() }
+const paintScanButton = () => { $('btn-scan').hidden = $('paste-scan').hidden = $('net-scan').hidden = !scanSupported() }
 // Focus only where a keyboard is already on the desk: on a phone, focusing
 // the field pops the software keyboard OVER the modal before the person can
 // reach the scan button — and scan is the primary door there.
@@ -3350,14 +3374,28 @@ function closeScan() {
 MODAL_EXIT['scan-modal'] = () => {
   stopScanCamera()
   scanVerify = null
+  scanNetwork = false
   const sub = document.querySelector('#scan-modal .msub') as HTMLElement | null
   if (sub?.dataset.was != null) { sub.textContent = sub.dataset.was; delete sub.dataset.was }
 }
 
 /** Set while the scanner checks a safety number instead of reading an invite. */
 let scanVerify: { expect: string; name: string } | null = null
+/** Set while the scanner reads a network profile for the join window. */
+let scanNetwork = false
 
 function handleScanned(text: string) {
+  if (scanNetwork) {
+    // A network profile: handed to the join window, which checks it exactly as
+    // it checks a file - the signature, the dates, the pinned key.
+    if (!openEnvelope(text, nowMs()).ok && !/"onchato-network"/.test(text)) {
+      setMsg('scan-msg', tr('To nie jest kod profilu sieci — pokaż kod QR, który dał operator.'), 'err'); return
+    }
+    closeScan()
+    ;($('net-paste') as HTMLTextAreaElement).value = text
+    ;($('net-go') as HTMLButtonElement).click()
+    return
+  }
   if (scanVerify) {
     const n = parseSafetyQr(text)
     // Not a safety code: keep looking, as for an invite.
@@ -6375,6 +6413,127 @@ function openMigrate(mode: 'export' | 'import') {
 function closeMigrate() { dropModal('mig-modal') }
 $('mig-cancel')?.addEventListener('click', closeMigrate)
 $('go-migrate')?.addEventListener('click', () => openMigrate('import'))
+
+// ---- networks: join one, switch, ask (lib/netprofile.ts, lib/activenet.ts) ----
+
+/** The built-in network and every network imported on this device. */
+function knownNetworks(): ActiveNetwork[] {
+  const kv = localKV(), now = nowMs()
+  const out = [BUILTIN_NET]
+  for (const id of loadRegistry(kv, now).keys()) { const n = networkById(kv, id, BUILTIN_NET, now); if (n) out.push(n) }
+  return out
+}
+/** How a network is named to a person. */
+function netLabel(n: ActiveNetwork): string {
+  return n.builtin && n.id === 'main' ? tr('publiczna sieć onchato') : n.operator
+}
+/** The card's network line and what the network's policy allows; quiet on a device that knows one network. */
+function paintNetworkLine() {
+  const many = knownNetworks().length > 1
+  $('login-net').hidden = !many
+  if (many) $('login-net-name').textContent = tr('Sieć: {n}', { n: netLabel(ACTIVE) }) + (ACTIVE.expired ? ' ' + tr('(profil sieci wygasł)') : '')
+  const softOff = ACTIVE.policy.softwareProfiles === false
+  for (const id of ['go-soft', 'go-create']) { const el = document.getElementById(id); if (el) el.hidden = softOff }
+}
+
+/** Ask for a network: resolves with its id, or null when the window is closed. */
+let netPickDone: ((id: string | null) => void) | null = null
+MODAL_EXIT['netpick-modal'] = () => { const d = netPickDone; netPickDone = null; d?.(null) }
+function pickNetwork(title: string, note: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    $('netpick-title').textContent = title
+    $('netpick-note').textContent = note
+    const box = $('netpick-list'); box.textContent = ''
+    for (const n of knownNetworks()) {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'pick'
+      const av = document.createElement('span'); av.className = 'av'; av.textContent = netLabel(n).slice(0, 2).toUpperCase()
+      const who = document.createElement('span'); who.className = 'who'; who.textContent = netLabel(n)
+      const tag = document.createElement('span'); tag.className = 'tag'
+      tag.textContent = [n.id, n.id === ACTIVE.id ? tr('obecna') : '', n.expired ? tr('wygasł') : ''].filter(Boolean).join(' · ')
+      b.append(av, who, tag)
+      b.addEventListener('click', () => { netPickDone = null; resolve(n.id); dropModal('netpick-modal') })
+      box.appendChild(b)
+    }
+    netPickDone = resolve
+    pushModal('netpick-modal')
+  })
+}
+$('netpick-cancel')?.addEventListener('click', () => dropModal('netpick-modal'))
+$('login-net-change')?.addEventListener('click', async () => {
+  const id = await pickNetwork(tr('Sieć'), tr('Wybierz sieć, w której chcesz się zalogować albo założyć tożsamość.'))
+  if (id) inNetworkOrSwitch(id)
+})
+
+let netPending: { profile: OperatorProfile; envelope: NetworkEnvelope } | null = null
+function netStep(confirm: boolean) {
+  $('net-step-load').hidden = confirm
+  $('net-step-confirm').hidden = !confirm
+  $('net-go').textContent = confirm ? tr('Dołącz i utwórz tożsamość') : tr('Dalej')
+}
+$('go-network')?.addEventListener('click', () => {
+  netPending = null
+  ;($('net-file') as HTMLInputElement).value = ''
+  ;($('net-paste') as HTMLTextAreaElement).value = ''
+  clr('net-msg'); netStep(false)
+  pushModal('net-modal')
+  // A phone reads the operator's QR code; a desktop takes the file or the text.
+  paintScanButton()
+})
+$('net-scan')?.addEventListener('click', () => {
+  scanNetwork = true
+  const sub = document.querySelector('#scan-modal .msub') as HTMLElement | null
+  if (sub) { sub.dataset.was = sub.textContent ?? ''; sub.textContent = tr('Zeskanuj kod QR profilu sieci, który dał Ci jej operator.') }
+  void openScan()
+})
+$('net-cancel')?.addEventListener('click', () => dropModal('net-modal'))
+const NET_REFUSED: Record<string, () => string> = {
+  shape: () => tr('To nie jest poprawny plik profilu sieci onchato.'),
+  signature: () => tr('Podpis profilu się nie zgadza — plik został zmieniony albo nie pochodzi od operatora.'),
+  reserved: () => tr('Ten profil podaje się za publiczną sieć onchato — odrzucony.'),
+  expired: () => tr('Profil sieci wygasł — poproś operatora o aktualny.'),
+  future: () => tr('Profil jest datowany w przyszłości — sprawdź zegar urządzenia.'),
+  key: () => tr('Sieć o tym identyfikatorze jest już na tym urządzeniu pod INNYM kluczem — to nie ten sam operator albo klucz wymieniono. Nie dołączam.'),
+  rollback: () => tr('Ten profil jest starszy niż ten, który już jest na tym urządzeniu.'),
+}
+$('net-go')?.addEventListener('click', async () => {
+  clr('net-msg')
+  if (!netPending) {
+    const file = ($('net-file') as HTMLInputElement).files?.[0]
+    const text = file ? await file.text() : val('net-paste')
+    if (!text) { setMsg('net-msg', tr('Wybierz plik albo wklej treść profilu sieci.'), 'err'); return }
+    const r = openEnvelope(text, nowMs())
+    if (!r.ok) { setMsg('net-msg', NET_REFUSED[r.why]() + (r.why === 'shape' && r.detail ? ` (${r.detail})` : ''), 'err'); return }
+    if (r.profile.networkId === BUILTIN_NET.id) { setMsg('net-msg', NET_REFUSED.reserved(), 'err'); return }
+    const held = loadRegistry(localKV(), nowMs()).get(r.profile.networkId)
+    if (held && held.profile.rootPub !== r.profile.rootPub) { setMsg('net-msg', NET_REFUSED.key(), 'err'); return }
+    netPending = { profile: r.profile, envelope: r.envelope }
+    const p = r.profile
+    const facts: [string, string, string?][] = [
+      [tr('Operator'), p.operator],
+      [tr('Identyfikator sieci'), p.networkId],
+      // Two lines of four groups: read out and compared group by group.
+      [tr('Odcisk klucza operatora'), (await rootFingerprint(p.rootPub)).replace(/^((?:\S+ ){3}\S+) /, '$1\n'), 'net-fp'],
+      [tr('Węzły'), `${p.nodes.length} — ${p.nodes.map((n) => hostOf(n.addr) ?? n.name).join(', ')}`],
+      [tr('Ważny do'), new Date(p.expires).toLocaleDateString()],
+    ]
+    const rules = [p.policy.softwareProfiles === false ? tr('tylko tożsamości HEM') : '', p.policy.transport === 'node-only' ? tr('treść tylko przez węzeł') : ''].filter(Boolean)
+    if (rules.length) facts.push([tr('Zasady'), rules.join(', ')])
+    const dl = $('net-facts'); dl.textContent = ''
+    for (const [k, v, cls] of facts) {
+      const dt = document.createElement('dt'); dt.textContent = k
+      const dd = document.createElement('dd'); dd.textContent = v; if (cls) dd.className = cls
+      dl.append(dt, dd)
+    }
+    netStep(true)
+    return
+  }
+  const r = registerNetwork(localKV(), netPending.envelope, nowMs())
+  if (!r.ok) { setMsg('net-msg', NET_REFUSED[r.why](), 'err'); return }
+  // Into the network just joined, by reload, with its first identity to make.
+  setLastNet(localKV(), r.profile.networkId, BUILTIN_NET)
+  localStorage.setItem(OPEN_CREATE_KEY, '1')
+  location.reload()
+})
 $('btn-export')?.addEventListener('click', () => openMigrate('export'))
 
 async function runExport(password: string): Promise<boolean> {

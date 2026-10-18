@@ -51,6 +51,8 @@ export interface ActiveNetwork {
 export const LAST_NET_KEY = 'ec-last-net'
 /** A profile to open right after a reload that switched the network. */
 export const OPEN_PROFILE_KEY = 'ec-open-profile'
+/** After the reload into a network just joined: open the window for its first identity. */
+export const OPEN_CREATE_KEY = 'ec-open-create'
 
 export const softBindingKey = (name: string) => `ec-soft-net-${name}`
 export const hemBindingKey = (kid: string) => `ec-hem-net-${kid}`

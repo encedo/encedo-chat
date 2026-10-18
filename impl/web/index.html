@@ -1083,6 +1083,15 @@
   .build-row{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
   .home-link{margin-top:14px;font-family:var(--mono);font-size:10.5px;color:var(--muted);opacity:.75;text-decoration:none}
   .home-link:hover{color:var(--accent);opacity:1;text-decoration:underline}
+  .login-net{font-size:12px;color:var(--muted);margin:0 0 10px}
+  .login-net a{color:var(--accent);cursor:pointer}
+  .soft-net{color:var(--accent)}
+  .net-facts{display:grid;grid-template-columns:max-content 1fr;gap:6px 12px;margin:4px 0 12px;font-size:13px}
+  .net-facts dt{color:var(--muted)}
+  .net-facts dd{margin:0;min-width:0;overflow-wrap:anywhere}
+  /* NOT .fp: that one is the contact fingerprint's, nowrap + ellipsis, and it cut
+     this one off at the one place it must be read in full. */
+  .net-facts .net-fp{font-family:var(--mono);letter-spacing:.02em;white-space:pre-line}
   /* The row REPLACES a label, so it has to carry the label's own spacing:
      `.label-row label{margin:0}` takes it away, and without this the counter
      sits directly on the frame of the field below it. */
@@ -1350,6 +1359,10 @@
            the time. It leads because returning IS the common case: the old card
            asked for a HEM address first, which is the rarer path and the one
            that needs hardware nobody has on their first evening. -->
+      <!-- Which network this card is for. Shown only on a device that knows
+           more than the built-in network (lib/activenet.ts): an identity lives
+           in one network, and the profiles below are listed with theirs. -->
+      <div class="login-net" id="login-net" hidden><span id="login-net-name"></span> · <a id="login-net-change" data-i18n="zmień">zmień</a></div>
       <div id="login-profiles-sec" hidden>
         <p class="sub" data-i18n="Wybierz profil.">Wybierz profil.</p>
         <div class="plist" id="login-profiles"></div>
@@ -1409,7 +1422,9 @@
         <!-- The way IN for a profile carried from another browser. It has to be
              here, on the login card, because the browser it arrives in is empty
              by definition — there is no Settings to reach yet. -->
-        <a id="go-migrate" data-i18n="importuj profil">importuj profil</a></div>
+        <a id="go-migrate" data-i18n="importuj profil">importuj profil</a>
+        <!-- Joining an operator's network: a new identity from its signed profile. -->
+        <a id="go-network" data-i18n="inna sieć">inna sieć</a></div>
       <div class="nodes-sec">
         <button class="nodes-toggle" id="nodes-toggle" title="Węzły sieci — wybierz/edytuj" data-i18n-title="Węzły sieci — wybierz/edytuj">+</button>
         <div class="nodes-panel" id="nodes-panel" hidden>
@@ -1648,6 +1663,7 @@
   <div class="modal" id="soft-modal">
     <h2 data-i18n="Profil software">Profil software</h2>
     <div class="msub" id="soft-sub" data-i18n="Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.">Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.</div>
+    <div class="msub soft-net" id="soft-net" hidden></div>
     <label data-i18n="Nazwa profilu">Nazwa profilu</label>
     <!-- Real autocomplete tokens, unlike the HEM field above: this is the demo
          path, and letting the browser's password manager carry the password is
@@ -1725,6 +1741,40 @@
     <input id="mig-pass" type="password" autocomplete="current-password">
     <div class="msg" id="mig-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="mig-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="mig-cancel" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
+  <!-- Joining another network (lib/netprofile.ts): the operator's signed
+       profile, from a file or pasted, then a page that names the operator and
+       the fingerprint of its key, to compare on another channel. A network is
+       joined only as a NEW identity; nothing that exists here moves. -->
+  <div class="modal" id="net-modal">
+    <h2 data-i18n="Dołącz do innej sieci">Dołącz do innej sieci</h2>
+    <div id="net-step-load">
+      <!-- On a phone the operator's QR code is the easy way in; the file and the
+           pasted text are what a desktop uses (the same split as invites). -->
+      <button class="btn" id="net-scan" type="button" hidden style="margin:2px 0 10px;background:var(--accent-soft);color:var(--accent)" data-i18n="📷 Zeskanuj kod QR">📷 Zeskanuj kod QR</button>
+      <div class="msub" data-i18n="Plik profilu sieci dostajesz od jej operatora. Na tym urządzeniu powstanie dla niej nowa, osobna tożsamość — te, które już tu są, zostają w swoich sieciach.">Plik profilu sieci dostajesz od jej operatora. Na tym urządzeniu powstanie dla niej nowa, osobna tożsamość — te, które już tu są, zostają w swoich sieciach.</div>
+      <label for="net-file" data-i18n="Plik profilu sieci">Plik profilu sieci</label>
+      <input id="net-file" type="file" accept=".json,.onchato-network,application/json">
+      <label for="net-paste" data-i18n="…albo wklej jego treść">…albo wklej jego treść</label>
+      <textarea id="net-paste" spellcheck="false"></textarea>
+    </div>
+    <div id="net-step-confirm" hidden>
+      <dl class="net-facts" id="net-facts"></dl>
+      <div class="msub" data-i18n="Porównaj odcisk z tym, który operator podał innym kanałem — na swojej stronie albo osobiście. Operator tej sieci zobaczy adres IP Twojego urządzenia i to, kiedy się z kimś spotykasz; treści rozmów nie zobaczy nikt poza Tobą i rozmówcą.">Porównaj odcisk z tym, który operator podał innym kanałem — na swojej stronie albo osobiście. Operator tej sieci zobaczy adres IP Twojego urządzenia i to, kiedy się z kimś spotykasz; treści rozmów nie zobaczy nikt poza Tobą i rozmówcą.</div>
+    </div>
+    <div class="msg" id="net-msg"></div>
+    <div class="modal-actions"><button class="btn-send" id="net-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="net-cancel" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
+  <!-- Which network: the built-in one and every network imported here. Switches
+       the sign-in card, and is asked once for a HEM identity on a device that
+       knows more than one network. -->
+  <div class="modal" id="netpick-modal">
+    <h2 id="netpick-title"></h2>
+    <div class="msub" id="netpick-note"></div>
+    <div class="plist" id="netpick-list"></div>
+    <div class="modal-actions"><button class="btn-ghost" id="netpick-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
   <!-- Shown once, to an account with no contacts and no groups: the app is
