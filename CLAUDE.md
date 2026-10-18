@@ -90,7 +90,8 @@ names its lines.
 - Root `*.md` — `README`, `SECURITY`, `CLI`, `hem_usage` (**which operations
   reach the HSM and what they cost** — read it before adding anything that talks
   to the device), plus design records and plans
-  (`MOBILE-PLAN`, `EMBED-PLAN`, `CLI-PLAN`, `performance`)
+  (`MOBILE-PLAN`, `EMBED-PLAN`, `CLI-PLAN`, `OPERATOR-NODE-PLAN`, `performance`;
+  `OPERATOR-GUIDE` is the operator's guide, a DRAFT until the node image ships)
   — those are records, SPEC wins where they differ;
   superseded plans go to `docs/archive/`.
 
