@@ -1,0 +1,12 @@
+*
+!scripts/onchato-ops.mjs
+!scripts/yubikey-sign.mjs
+!scripts/lib/signer.mjs
+!impl/lib/netprofile.ts
+!impl/lib/nodelist.ts
+!impl/lib/cid.ts
+!impl/lib/wc.ts
+!impl/lib/qr.ts
+!impl/lib/passmeter.ts
+!impl/cli/termqr.ts
+!impl/net/stun-probe.ts

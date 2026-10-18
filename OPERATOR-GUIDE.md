@@ -1,10 +1,11 @@
 # Running your own onchato network
 
-> **DRAFT (2026-10-18).** The setup script and the node image it installs
-> (`OPERATOR-NODE-PLAN.md`) are **not built yet**; this is their planned
-> interface. `scripts/onchato-ops.mjs` (appendix B) works today. The guide is
-> checked step by step against a real one-node network (`acme-blbx` on
-> `blbx.pl`) before it moves to `docs/`.
+> **DRAFT (2026-10-18).** The setup script and the node image are built and
+> pass end to end on a test machine (`node/onchato-setup.sh --local-test`), but
+> not yet on a real server, and the script is **not yet attached to releases**:
+> until it is, take it from the repository (`node/onchato-setup.sh`). The file
+> store is not in the image yet. The guide is checked step by step against a
+> real one-node network (`acme-blbx` on `blbx.pl`) before it moves to `docs/`.
 
 Your people keep using our apps (desktop, Android, iOS, or the web at
 `app.onchato.com`). You run the network under them: after they join it, every
@@ -35,7 +36,7 @@ Then it asks:
 | Your organisation's name | `Acme (test)` | what people see when they join |
 | An e-mail for the certificate | `it@blbx.pl` | Let's Encrypt writes there before a certificate lapses |
 | Share files and voice notes? | yes | adds the file store on this server |
-| Where is the signing key kept? | on this server | see "The key" below |
+| Where is the signing key kept? | on this server | see "The key" below; then the passphrase, twice |
 
 It sets everything up, checks it from outside, and ends with:
 
@@ -57,10 +58,14 @@ your key, and every phone that joins remembers that key. **You cannot change
 where the key lives later without starting a new network**, so the script asks
 once:
 
-- **On this server** (the default). The simplest: the server also renews the
-  profile itself, so it never expires. The price: whoever takes over the server
-  can sign a false profile. The script shows the key once so you can keep a copy
-  offline.
+- **On this server, from a passphrase** (the default). You choose a passphrase
+  (several unrelated words, 16+ characters); the key is derived from it with
+  Argon2id and a random salt, and is never stored. The server keeps only the
+  salt and the public key (`/var/lib/onchato/root.kdf`). **Back up that file and
+  remember the passphrase, separately**: both are needed to sign, neither alone
+  is enough. The passphrase cannot be changed later. The profile is valid a
+  year; `sudo bash onchato-setup.sh --renew` asks for the passphrase and signs it
+  again (`--check` warns 30 days ahead).
 - **On your own computer**, optionally in a YubiKey. The script prepares the
   profile and shows one command to run on your computer
   (`onchato-ops network sign ...`, appendix B); you copy the signed file back and
@@ -85,7 +90,7 @@ through your company directory (for larger ones), are planned
   (`/etc/onchato/setup.env`) and offers them as defaults. A new server name or
   new rules make a new profile version, which the apps pick up by themselves
   within a day.
-- **Backups:** the key (if it is on the server) and `/var/lib/onchato`.
+- **Backups:** `/var/lib/onchato` (above all `root.kdf`) and, kept apart from it, the passphrase.
 
 ## What you never see
 

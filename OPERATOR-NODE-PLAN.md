@@ -1,6 +1,9 @@
 # Operator node plan: the Docker node image (C4), bs-setup for any domain, access tiers
 
-Status: **plan, nothing built** (2026-10-18). Phase C of operator networks
+Status (2026-10-18): **built and tested locally** - the relay's `--key-file`,
+the image + compose (`node/`), the setup script (`node/onchato-setup.sh`,
+`--local-test` passes end to end), the passphrase key. Not yet: `bs-setup.sh
+--domain`, the file store in the image, the script as a release asset. Phase C of operator networks
 (`docs/ARCHITECTURE.md`, "Another operator's network"). The guide an operator
 follows is drafted beside this one in `OPERATOR-GUIDE.md`. When this ships, the
 guide moves to `docs/` and this file goes to `docs/archive/`.
@@ -91,10 +94,14 @@ The operator's whole path is one download and one run: the guide's quick start.
   `feedback: null`, `policy.transport: node-only`. Advanced (flags, not
   questions): more nodes, HEM-only, a feedback URL.
 - **The root key, asked once and said to be permanent** (devices pin it):
-  - *on the server* (default): a software key in `/var/lib/onchato/root.key`
-    (0600), shown once for an offline copy; a monthly timer re-signs the
-    profile with a higher `seq`, so it never expires. A server takeover can sign
-    a false profile - the guide says so.
+  - *on the server* (default, the user's call 2026-10-18): the key is
+    DERIVED from a passphrase, Argon2id (256 MiB, 4 passes) with a random
+    16-byte salt; `/var/lib/onchato/root.kdf` (0600) holds only the salt, the
+    parameters and the public key (`onchato-ops network key --passphrase-new`,
+    `sign --sign-passphrase`). The salt is private: the public key is in every
+    profile, so a public salt would let anyone guess offline. Validity 365 days;
+    `--renew` asks for the passphrase (no unattended renewal: the server holds
+    nothing that signs). The passphrase cannot change - it is the key.
   - *on the operator's computer*: the script writes `profile.json`, prints the
     `onchato-ops network sign` command (YubiKey or key file), waits for the
     signed `network.json` to be copied back, checks it (`openEnvelope` under
