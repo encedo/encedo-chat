@@ -27,6 +27,7 @@ import type { KV } from '../lib/migrate.ts'
 import { regionBlocked } from '../lib/regioncheck.ts'
 import { anchorClock } from '../lib/clock.ts'
 import { hostOf } from '../lib/ice.ts'
+import { NET } from './network.ts'
 
 /** Said when the nodes answer 451 (GEOBLOKADA.md); also the CLI's exit message. */
 export const REGION_MSG = 'onchato nie jest dostępne w Twoim regionie - RKV sp. z o.o. nie świadczy usługi w krajach objętych międzynarodowymi sankcjami. Pomyłka bazy lokalizacji? office@rkv.pl'
@@ -59,7 +60,6 @@ export interface ClientOpts {
 
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0))
 const nodeName = (addr: string) => addr.match(/dns4\/([^./]+)/)?.[1] ?? addr.slice(0, 12)
-const APP_ORIGIN = 'https://app.onchato.com'
 
 /** `win` is null for a 1:1 opened only to carry group keys: it gets a window when
  *  there is something to show, not for every member of every group. */
@@ -443,7 +443,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
         catch (e: any) { print(w.active, warn(e?.message ?? String(e))) }
         break
       }
-      case 'invite': print(w.active, sys(`Twój link: ${inviteLink(APP_ORIGIN, '/', { pub: o.id.pub, name: o.id.handle })}`)); break
+      case 'invite': print(w.active, sys(`Twój link: ${inviteLink(NET.app.origin, NET.app.path, { pub: o.id.pub, name: o.id.handle })}`)); break
       case 'clear': w.current().lines.length = 0; sc.drawWindow(w.current()); repaintStatus(); break
       case 'help':
         for (const h of ['/win N (Alt+N) · /query <nr|kontakt|grupa> · /close · /list · /who', '/groups · /group new <nazwa> <kontakt|nr>… - grupy; w oknie grupy piszesz do wszystkich, @Imię wzmiankuje', 'admin, w oknie grupy: /add <kontakt|nr> · /kick <kto> · /rename <nazwa>', '/me <akcja> · /react <emoji> · /verify · /invite · /clear · /quit', '/send <plik> · /get [id] - pliki (odbiorca ma ok. 5 min na pobranie)', '/knocks · /accept N · /ignore N - pukanie do Twoich zaproszeń (onchato-cli invites new)'])

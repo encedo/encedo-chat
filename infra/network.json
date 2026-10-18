@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "networkId": "main",
+  "operator": "RKV sp. z o.o.",
+  "app": { "origin": "https://app.onchato.com", "path": "/" },
+  "legacyApp": [{ "origin": "https://onchato.com", "path": "/chat" }],
+  "stores": ["https://onchato.com"],
+  "manifestUrls": ["https://onchato.com/release/manifest.json"],
+  "feedback": "https://onchato.com/feedback",
+  "home": "https://onchato.com/"
+}

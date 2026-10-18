@@ -55,7 +55,10 @@ names its lines.
   traces every observable action to JSONL — **never on production**
   (`relay/README.md` § Dump). A new node from a clean Ubuntu is
   `infra/bs-setup.sh` / `relay/DEPLOY.md`.
-- `infra/` — `nodes.json` (the compiled-in node list), `deploy-on-tag.sh` +
+- `infra/` — `nodes.json` (the compiled-in node list), `network.json` (the
+  network profile, `lib/network.ts`: store, manifest URL, feedback, invite
+  address, network id; `EC_NETWORK_PROFILE` / `ONCHATO_NETWORK_PROFILE` swap
+  it), `deploy-on-tag.sh` +
   systemd units (tag-driven web deploy), `nginx/` (the web host's site file and
   the relay-node template; deploy in `infra/nginx/README.md`), `fput/` (the
   upload prefixer), `feedback/`, `stun/`, `health/`, `dash/`, `release/`,
@@ -659,8 +662,9 @@ grep the bundle's own `v<version> (<commit>)` stamp.
 **The app has its own origin: `https://app.onchato.com/`** (since 0.6.47;
 `onchato.com/chat` is a 301 keeping `#i=`). Browser storage shares its origin
 with nothing — not the landing, not `/f`. `/f` and `/feedback` stay on
-`onchato.com`; the app calls them cross-origin (`SITE_ORIGIN`; CORS + CORP are
-load-bearing under COEP `require-corp`). Old invite links are `LEGACY_PATH`.
+`onchato.com`; the app calls them cross-origin (`NET.stores` / `NET.feedback`
+from `infra/network.json`; CORS + CORP are load-bearing under COEP
+`require-corp`). Old invite links are the profile's `legacyApp`.
 Moving the origin wipes every browser's local state — never casually.
 
 **nginx** is versioned at `infra/nginx/onchato.com`; the procedure and its traps

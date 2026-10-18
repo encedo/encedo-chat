@@ -41,13 +41,6 @@ export const MAX_STUN = 3
 export const STUN_PORT = 3478
 
 /**
- * The one host named in code, and only for a caller with no node list — today
- * that is the self-test when it is run before a session exists. Everything on
- * the message path derives its servers from the nodes instead.
- */
-export const STUN_FALLBACK_HOST = 'bs1.onchato.com'
-
-/**
  * The host inside a multiaddr, for the address forms a node list can hold.
  * `null` for anything else, including a hostname pasted without a protocol —
  * which the node list already refuses for dialling (`lib/nodelist.ts`).

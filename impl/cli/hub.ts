@@ -22,8 +22,10 @@ import { inviteFromPaste, inviteLink } from '../lib/invite.ts'
 import { InviteStore, publishedLink, expired, type PubInvite } from './invites.ts'
 import { KnockDesk } from './knocks.ts'
 import { fingerprint } from './fp.ts'
+import { NET } from './network.ts'
 
-export const APP_ORIGIN = 'https://app.onchato.com', APP_PATH = '/'
+/** Where invite links point: the network profile's app (the CLI has no address bar either). */
+export const APP_ORIGIN = NET.app.origin, APP_PATH = NET.app.path
 
 export type HubEvent =
   | { t: 'msg'; from: string; pub: string; text: string; ts: number; id: string; group?: string }

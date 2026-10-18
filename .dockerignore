@@ -12,6 +12,7 @@
 !hem-sdk-js/hem-sdk.js
 !hem-sdk-js/LICENSE
 !infra/nodes.json
+!infra/network.json
 !relay/pick.mjs
 !relay/load.mjs
 !LICENSE

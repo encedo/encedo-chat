@@ -34,6 +34,7 @@ import { listProfiles, createProfile, openProfile, exportProfileFile, importProf
 import { hemSignIn, hemCreate, type HemChoice } from './identity.ts'
 import { runClient } from './client.ts'
 import { Hub, type HubEvent, APP_ORIGIN, APP_PATH } from './hub.ts'
+import { NET } from './network.ts'
 import { serve, connectDaemon, ask, lineReader, socketPath } from './daemon.ts'
 import { Queue } from './queue.ts'
 import { existsSync, unlinkSync } from 'node:fs'
@@ -89,8 +90,8 @@ const [cmd, ...rest] = process.argv.slice(2)
 const opt = (name: string, def?: string) => { const i = rest.indexOf(name); return i >= 0 && rest[i + 1] && !rest[i + 1].startsWith('--') ? rest[i + 1] : def }
 const args = rest.filter((a, i) => !a.startsWith('--') && !(i > 0 && rest[i - 1].startsWith('--') && opt(rest[i - 1]) === a))
 const die = (msg: string): never => { console.error('onchato: ' + msg); process.exit(1) }
-/** The network topics are derived for (SPEC.md 5.1); `main` is the operator's. */
-const NETWORK = opt('--network', 'main')!
+/** The network topics are derived for (SPEC.md 5.1): the profile's, unless `--network` overrides it. */
+const NETWORK = opt('--network', NET.networkId)!
 // The handshake and the ratchet from core-rs (eh2/wasm.ts) by default;
 // `--core ts` selects the TypeScript engine.
 if (opt('--core') !== 'ts') setCoreBackend('wasm')

@@ -36,7 +36,7 @@ const KINDS: FbKind[] = ['bug', 'idea', 'question', 'hem']
 export interface FeedbackDeps {
   version: string
   commit: string
-  /** Where the record goes — `https://onchato.com/feedback` in every real build. */
+  /** Where the record goes: the network profile's `feedback` (infra/network.json). */
   endpoint: string
   /** The Settings › Diagnostics report, or `null` while the probe is still running. */
   diagnostics: () => string | null

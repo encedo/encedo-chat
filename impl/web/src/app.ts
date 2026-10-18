@@ -51,10 +51,11 @@ import { safetyNumber, safetyGroups, safetyQr, parseSafetyQr } from '../../lib/s
 import { invQrView } from './invqr.ts'
 import { foreignMembers, OwedInvites } from './groupview.ts'
 import { assessPassword, ENFORCE_MIN } from '../../lib/passmeter.ts'
-import { iceServersFor, hostOf } from '../../lib/ice.ts'
+import { iceServersFor, hostOf, stunFromNodes } from '../../lib/ice.ts'
 import { regionBlocked } from '../../lib/regioncheck.ts'
 import { anchorClock } from '../../lib/clock.ts'
 import { verifyManifest } from '../../lib/manifest.ts'
+import { parseNetworkProfile, sigUrl } from '../../lib/network.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
@@ -542,6 +543,19 @@ declare const __EC_DIARY__: boolean
 declare const __EC_ROOT_PUB__: string
 declare const __EC_VERSION__: string
 declare const __EC_COMMIT__: string
+declare const __EC_NETWORK_PROFILE__: string
+
+/**
+ * The network profile this build was made for (`infra/network.json`, or
+ * EC_NETWORK_PROFILE at build time; lib/network.ts): the file store, the
+ * release manifest, the feedback sink, where invite links point. Declared up
+ * here, before anything reads it: babel turns `const` into `var`, so a read
+ * above a lower declaration yields `undefined` instead of throwing (the node
+ * list refresh fetched `undefined/release/manifest.json` from 0.7.13 to
+ * 2026-10-13 that way). A profile that does not validate stops the app here,
+ * with the reason, rather than pointing it at half a network.
+ */
+const NET = parseNetworkProfile(JSON.parse(__EC_NETWORK_PROFILE__))
 
 /**
  * Which build is on screen — `v0.1.1 (a1b2c3d4)`, in the login card and at the
@@ -1279,13 +1293,7 @@ function nodeRowsHTML(list: NodeEntry[]): string {
  * `ipfs add --cid-version=1 --raw-leaves --pin`.
  */
 /** Where the operator serves the signed release manifest (lib/manifest.ts); the root key is compiled in. */
-// SITE_ORIGIN must be declared BEFORE this line: babel's transform-block-scoping
-// turns const into var, which removes the temporal-dead-zone throw, so using it
-// before its `const` lower down yielded `undefined/release/manifest.json` (every
-// manifest fetch 302'd to the app and failed the signature check - web node-list
-// refresh was broken from 0.7.13 until this was found, 2026-10-13).
-const SITE_ORIGIN = 'https://onchato.com'
-const MANIFEST_URL = `${SITE_ORIGIN}/release/manifest.json`
+const MANIFEST_URL = NET.manifestUrls[0]
 
 /**
  * Replace the local list with the published one.
@@ -1306,7 +1314,7 @@ async function loadOfficialNodes(btnId: string, warn: (t: string) => void, redra
     // chooses the relays for every client - the first hop of every
     // conversation - so neither step is skipped.
     const [mRes, sRes] = await Promise.all([
-      fetch(MANIFEST_URL, { cache: 'no-store' }), fetch(MANIFEST_URL.replace(/\.json$/, '.sig'), { cache: 'no-store' }),
+      fetch(MANIFEST_URL, { cache: 'no-store' }), fetch(sigUrl(MANIFEST_URL), { cache: 'no-store' }),
     ])
     if (!mRes.ok || !sRes.ok) { warn(tr('Manifest wydania jest niedostępny ({s})', { s: String(mRes.status) })); return }
     const verdict = verifyManifest(new Uint8Array(await mRes.arrayBuffer()), await sRes.text(), __EC_ROOT_PUB__, nowMs())
@@ -2573,7 +2581,7 @@ function ownInvite(href: string): Invite | null {
   let u: URL
   try { u = new URL(href) } catch { return null }
   const at = (origin: string, path: string) => u.origin === origin && u.pathname.replace(/\/$/, '') === path.replace(/\/$/, '')
-  if (!at(CANONICAL_ORIGIN, CANONICAL_PATH) && !at(SITE_ORIGIN, LEGACY_PATH) && !at(location.origin, location.pathname)) return null
+  if (!at(NET.app.origin, NET.app.path) && !NET.legacyApp.some((a) => at(a.origin, a.path)) && !at(location.origin, location.pathname)) return null
   return decodeInvite(u.hash)
 }
 
@@ -2587,34 +2595,30 @@ window.addEventListener('hashchange', () => {
 
 /**
  * -----------------------------------------------------------------------------
- * WHERE INVITE LINKS POINT — change these two lines to point a build at another
- * deployment (your own domain, your own path), then rebuild.
+ * WHERE INVITE LINKS POINT - the profile's `app` (infra/network.json); a build
+ * for another deployment changes it there, not here.
  * -----------------------------------------------------------------------------
  *
- * They matter only OUTSIDE a browser. On the web the address bar is the source
+ * It matters only OUTSIDE a browser. On the web the address bar is the source
  * of truth: the link names the origin the user is actually looking at, so
  * someone self-hosting hands out their own address and a test deployment hands
  * out itself. Nothing here overrides that.
  *
  * Inside the desktop and Android builds there is no address bar, and
- * `location.origin` is the app's own internal scheme — a valid origin that
+ * `location.origin` is the app's own internal scheme - a valid origin that
  * means nothing anywhere else. Sharing your key from a phone produced a link
  * that looked right and that nobody could open.
+ *
+ * The profile's `stores` and `feedback` sit on the product's site, not on the
+ * app's origin, on purpose: since 0.7.0 the app has an origin of its own
+ * (app.onchato.com) and the keys in its storage share it with nothing - not with
+ * the marketing pages, and above all not with the store, whose path gateway
+ * serves what strangers upload. Packaged builds have always talked to the store
+ * across origins; the web app does the same. `legacyApp` lists where the app
+ * lived before (onchato.com/chat until 0.7.0): links already handed out still
+ * say it, nginx redirects it to the app and the fragment rides along, so it is
+ * still OUR invite.
  */
-const CANONICAL_ORIGIN = 'https://app.onchato.com'
-const CANONICAL_PATH = '/'
-/**
- * The product's own site: the landing, /how, /privacy - and the file store
- * (/f) and the feedback sink, which stay HERE on purpose. Since 0.7.0 the app
- * has an origin of its own (app.onchato.com) and the keys in its storage share
- * it with nothing: not with the marketing pages, and above all not with the
- * store, whose path gateway serves what strangers upload. Packaged builds have
- * always talked to the store across origins; the web app now does the same.
- */
-/** Where the app lived until 0.7.0. Links already handed out still say this
- *  (and builds not yet updated go on saying it); nginx redirects it to the app
- *  and the fragment rides along, so it is still OUR invite. */
-const LEGACY_PATH = '/chat'
 
 /**
  * A packaged build has no origin that serves the file store, so it is told one.
@@ -2631,13 +2635,13 @@ const LEGACY_PATH = '/chat'
  * `/f` blocks in nginx must answer with `Access-Control-Allow-Origin`. Ship the
  * two together or the packaged apps stay exactly as broken.
  */
-if (isDesktopShell() || location.origin === CANONICAL_ORIGIN) setStoreOrigin(SITE_ORIGIN)
+if (isDesktopShell() || location.origin === NET.app.origin) setStoreOrigin(NET.stores[0])
 // The login card's way back to the landing. The markup carries the same address
 // so the link survives a dead bundle; this makes the constant the one that decides,
 // so a moved domain cannot leave a stale link on the screen people log in from.
 {
   const home = document.getElementById('home-link') as HTMLAnchorElement | null
-  if (home) { home.href = SITE_ORIGIN + '/'; home.textContent = new URL(SITE_ORIGIN).host }
+  if (home) { home.href = NET.home; home.textContent = new URL(NET.home).host }
 }
 
 /**
@@ -2668,8 +2672,8 @@ const openShare = async (returnMode = false) => {
   // browser and PASTED by someone with the app, whereas a bare payload can only
   // be pasted — and `inviteFromPaste` accepts either, so nothing is lost.
   ;($('share-link') as HTMLInputElement).value = inviteLink(
-    inAppShell ? CANONICAL_ORIGIN : location.origin,
-    inAppShell ? CANONICAL_PATH : location.pathname,
+    inAppShell ? NET.app.origin : location.origin,
+    inAppShell ? NET.app.path : location.pathname,
     { pub: session.pub, name: session.handle, reply: returnMode })
   $('share-fp').textContent = fpCache.get(session.pub) ?? await fingerprint(session.pub)
   // The same link as a QR, so the exchange can happen across a table instead of
@@ -4834,8 +4838,8 @@ function inviteUrlFor(inv: PubInvite): string {
   // Never a link without its key: it would decode as broken on the other side.
   if (!key) throw new Error('the invite key is not derived yet')
   return inviteLink(
-    inAppShell ? CANONICAL_ORIGIN : location.origin,
-    inAppShell ? CANONICAL_PATH : location.pathname,
+    inAppShell ? NET.app.origin : location.origin,
+    inAppShell ? NET.app.path : location.pathname,
     { pub: session!.pub, name: session!.handle, inbox: inv.secret, key })
 }
 
@@ -5492,7 +5496,7 @@ ecLog(`app start — debug=${DEBUG} network=${__EC_NETWORK__} transport=${USE_LI
 // quietly go back to naming an address only this device understands. This line
 // is where you check, on the device, instead of reasoning about it.
 ecLog(`origin: ${location.origin}${location.pathname}`
-  + ` — invites will say ${inAppShell ? `${CANONICAL_ORIGIN}${CANONICAL_PATH} (app shell: no address bar to quote)` : 'this origin'}`)
+  + ` — invites will say ${inAppShell ? `${NET.app.origin}${NET.app.path} (app shell: no address bar to quote)` : 'this origin'}`)
 
 /**
  * What this platform can actually do, checked before anything needs it.
@@ -6552,7 +6556,7 @@ $('btn-webrtc-probe')?.addEventListener('click', async () => {
       // The self-test must dial what the app dials, or its verdict is about a
       // server nobody uses. Same derivation as the conversation path; `?stun=0`
       // leaves nothing to ask, so the stage falls back to the first node.
-    }, (iceServersFor(location.search, chosenRelays())[0]?.urls),
+    }, (iceServersFor(location.search, chosenRelays())[0]?.urls ?? stunFromNodes(chosenRelays())[0]?.urls),
       // No RTCPeerConnection but a host that has one: the loopback runs there.
       typeof RTCPeerConnection === 'undefined' && rustRtc ? tauriRtcSelftest : undefined)
     ecLog(formatWebrtcProbe(lastWebrtcProbe))
@@ -6595,7 +6599,7 @@ $('btn-diag-copy')?.addEventListener('click', async () => {
 const FEEDBACK_URL = (() => {
   const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
   const q = local ? new URLSearchParams(location.search).get('fb') : null
-  return q || `${SITE_ORIGIN}/feedback`
+  return q || NET.feedback
 })()
 initFeedback({
   version: __EC_VERSION__,
@@ -7859,7 +7863,7 @@ async function offerUpdateInner() {
   let blob: ManifestBlob
   try {
     const [mRes, sRes] = await Promise.all([
-      fetch(MANIFEST_URL, { cache: 'no-store' }), fetch(MANIFEST_URL.replace(/\.json$/, '.sig'), { cache: 'no-store' }),
+      fetch(MANIFEST_URL, { cache: 'no-store' }), fetch(sigUrl(MANIFEST_URL), { cache: 'no-store' }),
     ])
     if (!mRes.ok || !sRes.ok) throw new Error(`HTTP ${mRes.status}/${sRes.status}`)
     blob = { manifest: b64(new Uint8Array(await mRes.arrayBuffer())), sig: (await sRes.text()).trim() }

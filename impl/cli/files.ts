@@ -19,9 +19,10 @@ import { newFileKey, encryptBytes, decryptBytes, MAX_FILE, type FileManifest } f
 import { unwrapBlob } from '../lib/fileenvelope.ts'
 import { putBlob, getBlob, setStoreOrigin } from '../net/ipfs.ts'
 import type { FileMeta } from '../lib/envelope.ts'
+import { NET } from './network.ts'
 
-/** The store lives on the product's site, as for the packaged apps (app.ts SITE_ORIGIN). */
-setStoreOrigin(process.env.ONCHATO_STORE ?? 'https://onchato.com')
+/** The network profile's store, as for the packaged apps; ONCHATO_STORE overrides it. */
+setStoreOrigin(process.env.ONCHATO_STORE ?? NET.stores[0])
 
 export const FILE_TTL_MS = 5 * 60_000   // the app's value: the store sweeps after ~5 min
 const b64 = (u: Uint8Array) => Buffer.from(u).toString('base64')

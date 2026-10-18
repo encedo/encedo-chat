@@ -40,7 +40,6 @@
  * only way to tell them apart was to read a transport badge and guess.
  */
 
-import { STUN_FALLBACK_HOST, STUN_PORT } from './ice.ts'
 
 export interface ProbeStage {
   id: string
@@ -63,16 +62,14 @@ export interface WebrtcProbeResult {
   stages: ProbeStage[]
 }
 
-/**
- * The STUN server this probe dials, when the caller does not name one.
- *
- * WARNING: It is only a fallback for a caller that has no node list to hand. The app
- * passes what it actually uses (`lib/ice.ts` derives it from the nodes, because
- * a node runs STUN as part of being a node) — probing a server the app does not
- * use would answer a question nobody asked, which is exactly what this constant
- * did while it named Google's.
+/*
+ * The STUN server this probe dials is the caller's: the app passes what it
+ * actually uses (`lib/ice.ts` derives it from the nodes, because a node runs
+ * STUN as part of being a node). There is no default - probing a server the
+ * app does not use would answer a question nobody asked, which is what the
+ * default did while it named Google's, and later a node of one network baked
+ * into every build. With no server named, the stage is skipped and says why.
  */
-const DEFAULT_PROBE_STUN = `stun:${STUN_FALLBACK_HOST}:${STUN_PORT}`
 
 const LOOPBACK_MS = 10_000
 const ICE_MS = 4_000
@@ -120,7 +117,7 @@ const err = (e: any) => `${e?.name ?? 'Error'}: ${e?.message ?? e}`
  */
 export type HostLoopback = () => Promise<{ bytes: number; ms: number }>
 
-export async function probeWebrtc(onStage?: (s: ProbeStage) => void, stun = DEFAULT_PROBE_STUN, hostLoopback?: HostLoopback): Promise<WebrtcProbeResult> {
+export async function probeWebrtc(onStage?: (s: ProbeStage) => void, stun?: string, hostLoopback?: HostLoopback): Promise<WebrtcProbeResult> {
   const stages: ProbeStage[] = []
   const RTC = (globalThis as any).RTCPeerConnection as typeof RTCPeerConnection | undefined
   const open: RTCPeerConnection[] = []
@@ -214,7 +211,8 @@ export async function probeWebrtc(onStage?: (s: ProbeStage) => void, stun = DEFA
     }
 
     // And the network question, kept apart from every platform one above.
-    await run('stun', 'network', async () => {
+    if (!stun) skip('stun', 'network', 'pominięte — brak węzła, od którego można wziąć serwer STUN')
+    else await run('stun', 'network', async () => {
       const p = new RTC({ iceServers: [{ urls: stun }] }); open.push(p)
       p.createDataChannel('stun-probe')
       await p.setLocalDescription(await p.createOffer())

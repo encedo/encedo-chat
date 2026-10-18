@@ -30,6 +30,17 @@ module.exports = (_env, argv) => {
   // it to 0.
   const allowKeys = process.env.EC_ALLOW_KEYS !== '0'
   if (prod && !allowKeys) console.log('[build] ?keys=1 disabled — no key material can be printed by this bundle')
+  // The network profile (lib/network.ts): the store, the manifest, the feedback
+  // sink, where invite links point. `infra/network.json` is the public network;
+  // EC_NETWORK_PROFILE=<file> builds for another one. Read as text here and
+  // validated by the app at start, so a broken file stops the app with the
+  // reason instead of half-pointing it somewhere.
+  const profilePath = process.env.EC_NETWORK_PROFILE
+    ? path.resolve(process.env.EC_NETWORK_PROFILE)
+    : path.resolve(__dirname, '..', '..', 'infra', 'network.json')
+  const profileText = require('fs').readFileSync(profilePath, 'utf8')
+  const profile = JSON.parse(profileText)
+  if (process.env.EC_NETWORK_PROFILE) console.log(`[build] network profile ${profilePath} (network ${profile.networkId})`)
   return {
     context: path.resolve(__dirname),
     entry: { app: './src/app.ts' },
@@ -96,10 +107,11 @@ module.exports = (_env, argv) => {
       },
       new webpack.DefinePlugin({
         __EC_ALLOW_KEYS__: JSON.stringify(allowKeys),
-        // The network this build derives its topics for (SPEC.md 5.1). A
-        // self-hosted network is a build with its own id and node list; the
+        // The network this build derives its topics for (SPEC.md 5.1): the
+        // profile's, unless EC_NETWORK overrides it for development. The
         // installed app has no flag for it, by design.
-        __EC_NETWORK__: JSON.stringify(process.env.EC_NETWORK || 'main'),
+        __EC_NETWORK__: JSON.stringify(process.env.EC_NETWORK || profile.networkId),
+        __EC_NETWORK_PROFILE__: JSON.stringify(profileText),
         // The desktop's connection diary on disk (SPEC.md 10). On by
         // default - it is the one witness to "no dot in the morning" - and a
         // deployment that wants no plain record of contact presence on disk

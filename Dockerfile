@@ -27,7 +27,7 @@ COPY impl/package.json impl/package-lock.json impl/
 RUN cd impl && npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 
 COPY hem-sdk-js/hem-sdk.js hem-sdk-js/LICENSE hem-sdk-js/
-COPY infra/nodes.json infra/
+COPY infra/nodes.json infra/network.json infra/
 # The client shares these two with the relay (net/light.ts, lib/nodepick.ts).
 COPY relay/pick.mjs relay/load.mjs relay/
 COPY LICENSE ./
