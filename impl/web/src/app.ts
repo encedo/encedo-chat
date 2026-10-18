@@ -6577,7 +6577,14 @@ async function runImport(password: string): Promise<string> {
   // an identity, and one wrong click would end every conversation it has.
   if (clash) throw new Error(tr('Profil o nazwie „{name}” już tu jest — nie nadpiszę go', { name: clash }))
   if (identityHere(localKV(), bundle)) throw new Error(tr('Ta tożsamość już tu jest, pod inną nazwą — nie nadpiszę jej'))
-  applyBundle(localKV(), bundle)
+  // A profile of another network brings that network (lib/migrate.ts); refused
+  // whole when the device holds a network of that id under another key.
+  try { applyBundle(localKV(), bundle, nowMs()) } catch (e: any) {
+    if (bundle.net) throw new Error(/another operator key/.test(e?.message ?? '')
+      ? tr('Ten profil należy do sieci „{net}”, która jest już na tym urządzeniu pod INNYM kluczem operatora — nie importuję.', { net: bundle.net.id })
+      : tr('Profil sieci „{net}” w pliku nie przeszedł weryfikacji — nie importuję.', { net: bundle.net.id }))
+    throw e
+  }
   return bundle.name
 }
 

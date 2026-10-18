@@ -47,6 +47,8 @@
  */
 
 import { seal, unseal, isSealedProfile, type SealedProfile } from './profile.ts'
+import { importNetwork, REGISTRY_KEY } from './netprofile.ts'
+import { softBindingKey } from './activenet.ts'
 
 /** The storage this works over. An interface so the logic can be tested
  *  without a browser, and so the harness can seed one directly. */
@@ -92,6 +94,13 @@ export interface Bundle {
    *  tell this identity is already here without opening anything. */
   prefix?: string
   keys: Record<string, string>
+  /**
+   * The network the identity lives in, when it is not the built-in one: its id
+   * and the operator's signed profile (lib/netprofile.ts), so the device it
+   * lands on knows the network - an identity moved without it would be a
+   * profile that cannot open anywhere (lib/activenet.ts).
+   */
+  net?: { id: string; envelope: unknown }
 }
 
 /** The file as it lands on disk. */
@@ -114,10 +123,15 @@ export const isMigrationFile = (v: any): v is MigrationFile =>
 export function collectProfile(store: KV, name: string, kid: string, prefix = ''): Record<string, string> {
   const out: Record<string, string> = {}
   const identity = 'ec-soft-id-' + name
+  // Its network, and that network's node list and transport setting, when it
+  // is not the built-in one (lib/activenet.ts): they belong to the network the
+  // identity cannot leave, so they move with it.
+  const net = store.get(softBindingKey(name))
+  const netKeys = net ? [softBindingKey(name), `ec-nodes:${net}`, `ec-transport:${net}`] : []
   for (const k of store.keys()) {
     if (!k.startsWith('ec-')) continue
     if (NOT_PORTABLE.includes(k)) continue
-    const mine = k === identity || ownedBy(k, kid, prefix) || BROWSER_KEYS.includes(k)
+    const mine = k === identity || ownedBy(k, kid, prefix) || BROWSER_KEYS.includes(k) || netKeys.includes(k)
     if (!mine) continue
     const v = store.get(k)
     if (v !== null) out[k] = v
@@ -158,6 +172,14 @@ export async function exportProfile(
   const keys = collectProfile(store, name, kid, prefix)
   if (!keys['ec-soft-id-' + name]) throw new Error('no sealed identity for ' + name)
   const bundle: Bundle = { v: 1, name, kid, made, keys, ...(prefix ? { prefix } : {}) }
+  const net = store.get(softBindingKey(name))
+  if (net) {
+    let registry: any = {}
+    try { registry = JSON.parse(store.get(REGISTRY_KEY) || '{}') } catch { registry = {} }
+    // A binding with no profile behind it would move an identity nobody can open.
+    if (!registry[net]) throw new Error(`the network ${net} of ${name} is not on this device`)
+    bundle.net = { id: net, envelope: registry[net] }
+  }
   return { mark: FILE_MARK, v: 1, sealed: await seal(password, JSON.stringify(bundle)) }
 }
 
@@ -199,10 +221,19 @@ export function identityHere(store: KV, bundle: Bundle): boolean {
 
 /** Write the profile in. Refuses on a conflict rather than trusting the caller
  *  to have asked. */
-export function applyBundle(store: KV, bundle: Bundle): number {
+export function applyBundle(store: KV, bundle: Bundle, now = Date.now()): number {
   const clash = conflictsWith(store, bundle)
   if (clash) throw new Error('a profile named ' + clash + ' is already here')
   if (identityHere(store, bundle)) throw new Error('this identity is already here under another name')
+  // The network first: if it cannot be taken (forged, or here under another
+  // key), nothing of the identity is written.
+  if (bundle.net) {
+    const r = importNetwork(store, bundle.net.envelope, now)
+    if (!r.ok) throw new Error(r.why === 'key'
+      ? `the network ${bundle.net.id} is already on this device under another operator key`
+      : `the network profile in the file does not open (${r.why})`)
+    if (r.id !== bundle.net.id) throw new Error('the network profile in the file is for another network')
+  }
   let n = 0
   for (const [k, v] of Object.entries(bundle.keys)) {
     if (!k.startsWith('ec-') || NOT_PORTABLE.includes(k)) continue // a file is not to be trusted about this

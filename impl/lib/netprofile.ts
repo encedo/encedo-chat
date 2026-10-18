@@ -261,3 +261,25 @@ export async function refreshNetwork(
   if (changed) { const r = registerNetwork(kv, best.envelope, now); if (!r.ok) return { ok: false, why: r.why, tried } }
   return { ok: true, profile: changed ? best.profile : held.profile, changed, tried }
 }
+
+/**
+ * A network arriving inside a moved profile (lib/migrate.ts). Accepted like an
+ * import from the sign-in card - signature, the pinned key of a network already
+ * here - with two differences that follow from what the file is: an EXPIRED
+ * profile is kept (it still names the network's nodes, and the identity in the
+ * file belongs to that network whatever its date), and an OLDER one than the
+ * device holds is not an error - the device's newer copy simply stays.
+ */
+export function importNetwork(kv: KVLike, raw: unknown, now: number):
+  { ok: true; id: string; kept: 'added' | 'newer' | 'already' } | { ok: false; why: RefuseWhy; detail?: string } {
+  const r = openEnvelope(raw, now, undefined, { allowExpired: true })
+  if (!r.ok) return r
+  const held = loadRegistry(kv, now).get(r.profile.networkId)
+  if (held && held.profile.rootPub !== r.profile.rootPub) return { ok: false, why: 'key' }
+  if (held && r.profile.seq <= held.profile.seq) return { ok: true, id: r.profile.networkId, kept: 'already' }
+  let all: any = {}
+  try { all = JSON.parse(kv.get(REGISTRY_KEY) || '{}') } catch { all = {} }
+  all[r.profile.networkId] = r.envelope
+  kv.set(REGISTRY_KEY, JSON.stringify(all))
+  return { ok: true, id: r.profile.networkId, kept: held ? 'newer' : 'added' }
+}

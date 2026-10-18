@@ -156,3 +156,67 @@ test('since the names hide the KID, a profile\'s keys are found by its storage p
   assert.equal(identityHere(kv({ [PRE + 'f'.repeat(32)]: 'x' }), { ...bundle, kid: 'ffffffffffffffffffffffffffffffff' }), true, 'found by the prefix alone')
   assert.throws(() => keysOfProfile(store, 'Ala', A, 'ec-zz-'), /not a storage prefix/)
 })
+
+// ---- a profile of another network moves with its network --------------------
+import { signNetwork, rootPubFor, loadRegistry, REGISTRY_KEY } from '../lib/netprofile.ts'
+
+const NKEY = Buffer.from(new Uint8Array(32).fill(5)).toString('base64')
+const NOTHER = Buffer.from(new Uint8Array(32).fill(6)).toString('base64')
+const NNOW = 1_800_000_000_000
+const NADDR = '/dns4/n1.acme.example/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5'
+const acmeEnv = (seq: number, key = NKEY, over: Record<string, unknown> = {}) => signNetwork({
+  v: 1, networkId: 'acme', operator: 'ACME S.A.', rootPub: rootPubFor(key), seq, made: NNOW - 86_400_000, expires: NNOW + 86_400_000,
+  nodes: [{ name: 'n1', addr: NADDR }], stores: ['https://files.acme.example'], app: { origin: 'https://chat.acme.example', path: '/' },
+  profileUrls: ['https://acme.example/n.json'], feedback: null, home: 'https://acme.example/', policy: {}, ...over,
+}, key)
+const inAcme = () => {
+  const s = full()
+  s.set('ec-soft-net-Lab1', 'acme')
+  s.set('ec-nodes:acme', '[{"name":"n1"}]')
+  s.set('ec-transport:acme', 'relay')
+  s.set('ec-nodes:other', '[{"name":"x"}]') // another network's list does not travel
+  s.set(REGISTRY_KEY, JSON.stringify({ acme: acmeEnv(3) }))
+  return s
+}
+
+test('network: a profile of another network takes its network, its node list and its transport, and nothing of other networks', async () => {
+  const keys = collectProfile(inAcme(), 'Lab1', KID)
+  assert.equal(keys['ec-soft-net-Lab1'], 'acme')
+  assert.ok(keys['ec-nodes:acme'] && keys['ec-transport:acme'])
+  assert.equal(keys['ec-nodes:other'], undefined)
+  const bundle = await openBundle(await exportProfile(inAcme(), 'Lab1', KID, PASS, NNOW), PASS)
+  assert.equal(bundle.net?.id, 'acme')
+})
+
+test('network: the device it lands on learns the network, and the identity opens in it', async () => {
+  const bundle = await openBundle(await exportProfile(inAcme(), 'Lab1', KID, PASS, NNOW), PASS)
+  const there = kv()
+  applyBundle(there, bundle, NNOW)
+  assert.equal(there.get('ec-soft-net-Lab1'), 'acme')
+  assert.equal(loadRegistry(there, NNOW).get('acme')?.profile.seq, 3)
+})
+
+test('network: a device holding that network under ANOTHER key refuses the whole import; a newer copy stays newer', async () => {
+  const bundle = await openBundle(await exportProfile(inAcme(), 'Lab1', KID, PASS, NNOW), PASS)
+  const foreign = kv({ [REGISTRY_KEY]: JSON.stringify({ acme: acmeEnv(9, NOTHER) }) })
+  assert.throws(() => applyBundle(foreign, bundle, NNOW), /another operator key/)
+  assert.equal(foreign.get('ec-soft-id-Lab1'), null, 'nothing of the identity was written')
+  const newer = kv({ [REGISTRY_KEY]: JSON.stringify({ acme: acmeEnv(7) }) })
+  applyBundle(newer, bundle, NNOW)
+  assert.equal(loadRegistry(newer, NNOW).get('acme')?.profile.seq, 7)
+})
+
+test('network: an expired network profile in the file is still taken - the identity belongs to it whatever its date', async () => {
+  const s = inAcme()
+  s.set(REGISTRY_KEY, JSON.stringify({ acme: acmeEnv(3, NKEY, { expires: NNOW + 1000 }) }))
+  const bundle = await openBundle(await exportProfile(s, 'Lab1', KID, PASS, NNOW), PASS)
+  const there = kv()
+  applyBundle(there, bundle, NNOW + 86_400_000)
+  assert.equal(loadRegistry(there, NNOW + 86_400_000).get('acme')?.expired, true)
+})
+
+test('network: an export refuses a binding with no network profile behind it', async () => {
+  const s = full()
+  s.set('ec-soft-net-Lab1', 'gone')
+  await assert.rejects(exportProfile(s, 'Lab1', KID, PASS, NNOW), /not on this device/)
+})
