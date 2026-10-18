@@ -3894,6 +3894,13 @@ async function main() {
         throw new Error(`${b.name}: the conversation was not opened in the joined network`)
       }
       step('two identities of the joined network found each other and talked, on topics of that network')
+      // Settings -> Network says which network this is, who runs it, and its key.
+      await A.eval(`document.getElementById('btn-settings').click(); return 1`)
+      await A.waitFor('the network named in Settings', `
+        const w = document.getElementById('net-which'); const t = w ? w.textContent : '';
+        return t.includes('Harness Net') && t.includes(${JSON.stringify(netId)}) && /([0-9a-f]{4}\\s){7}[0-9a-f]{4}/.test(t);`, 15_000)
+      await A.eval(`document.getElementById('btn-close-drawer').click(); return 1`)
+      step('Settings -> Network names the joined network, its operator and the key fingerprint')
     }
 
     if (GROUP_ONLY) {

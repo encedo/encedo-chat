@@ -2537,6 +2537,16 @@ function paintTransportSetting() {
     row.style.opacity = canDirect ? '' : '.5'
     row.title = canDirect ? '' : tr('Ta przeglądarka nie ma WebRTC — nie ma czym prowadzić rozmowy bez węzła')
   }
+  // A network whose policy says node-only offers nothing else (transportMode
+  // already answers 'relay' there); the two other rows say why they are off.
+  if (ACTIVE.policy.transport === 'node-only') {
+    for (const v of ['auto', 'direct']) {
+      const r = document.querySelector(`#tmode input[value="${v}"]`) as HTMLInputElement | null
+      const l = r?.closest('label') as HTMLElement | null
+      if (r) r.disabled = true
+      if (l) { l.style.opacity = '.5'; l.title = tr('Sieć {op} pozwala tylko na treść przez węzeł', { op: ACTIVE.operator }) }
+    }
+  }
 }
 $('chip-profile').addEventListener('click', () => openDrawer())
 for (const el of document.querySelectorAll('#tmode input')) {
@@ -5201,7 +5211,7 @@ const NODES_NOTE = tr('Kolejność decyduje o wyborze: pierwszy aktywny węzeł 
  */
 function ensureNetworkShell() {
   if ($('net-live')) return
-  $('net-box').innerHTML = `<div id="net-live"></div>
+  $('net-box').innerHTML = `<div class="net-which" id="net-which"></div><div id="net-live"></div>
     <div class="nodes-panel net-nodes">
       <div class="nodes-head"><span>${tr('Węzły sieci')}</span> <button class="node-add" id="net-node-add" type="button">${tr('+ dodaj')}</button></div>
       <div id="net-nodes-list"></div>
@@ -5218,6 +5228,52 @@ function ensureNetworkShell() {
       client?.setRelays(chosenRelays())
       renderNetwork()
     }, 'net-nodes-official')()
+  void paintNetworkWhich()
+}
+
+/**
+ * Which network this identity lives in, at the top of the Network tab: for
+ * another operator's network who runs it, the key's fingerprint, the profile's
+ * version and date, and a way to fetch a newer one. Painted when the pane is
+ * built; the profile changes only by that button or a reload.
+ */
+async function paintNetworkWhich() {
+  const box = document.getElementById('net-which'); if (!box) return
+  box.textContent = ''
+  const dl = document.createElement('dl'); dl.className = 'net-facts'
+  const add = (k: string, v: string, cls?: string) => {
+    const dt = document.createElement('dt'); dt.textContent = k
+    const dd = document.createElement('dd'); dd.textContent = v; if (cls) dd.className = cls
+    dl.append(dt, dd)
+  }
+  box.append(dl)
+  // The section heading above already says "Network": the rows say which one.
+  if (ACTIVE.builtin) { add(tr('Sieć'), `${netLabel(ACTIVE)} (${ACTIVE.id})`); return }
+  const p = loadRegistry(localKV(), nowMs()).get(ACTIVE.id)?.profile
+  if (!p) return
+  add(tr('Operator'), p.operator)
+  add(tr('Identyfikator sieci'), p.networkId)
+  add(tr('Odcisk klucza operatora'), (await rootFingerprint(p.rootPub)).replace(/^((?:\S+ ){3}\S+) /, '$1\n'), 'net-fp')
+  add(tr('Ważny do'), new Date(p.expires).toLocaleDateString() + (ACTIVE.expired ? ' — ' + tr('wygasł') : ''))
+  add(tr('Wersja profilu'), String(p.seq))
+  const rules = [p.policy.softwareProfiles === false ? tr('tylko tożsamości HEM') : '', p.policy.transport === 'node-only' ? tr('treść tylko przez węzeł') : ''].filter(Boolean)
+  if (rules.length) add(tr('Zasady'), rules.join(', '))
+  const note = document.createElement('div'); note.className = 'net-note'
+  note.textContent = tr('Ta tożsamość należy do tej sieci na stałe. Inna sieć oznacza nową tożsamość — z ekranu logowania.')
+  const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'node-official'; btn.textContent = tr('Odśwież profil sieci')
+  btn.addEventListener('click', async () => {
+    btn.disabled = true
+    try {
+      const r = await refreshNetwork(localKV(), ACTIVE.id, nowMs())
+      if (!r.ok) { toast(tr('Profil sieci jest niedostępny albo nie przeszedł weryfikacji ({why}).', { why: r.why })); return }
+      if (!r.changed) { toast(tr('Masz najnowszą wersję profilu sieci.')); return }
+      // The page took its nodes and stores at load: a reload is what applies them.
+      const { ok } = await ask(tr('Jest nowsza wersja profilu sieci'),
+        tr('Wersja {seq} jest już zapisana. Nowe węzły i ustawienia zaczną działać po przeładowaniu strony.', { seq: r.profile.seq }), tr('Przeładuj'))
+      if (ok) location.reload(); else void paintNetworkWhich()
+    } finally { btn.disabled = false }
+  })
+  box.append(note, btn)
 }
 /**
  * The protocol's name as Settings shows it. The pick/push client is ours, over
