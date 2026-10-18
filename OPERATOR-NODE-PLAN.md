@@ -71,6 +71,42 @@ same code our nodes run, no fork.
 
 Not in the image: the web app front (C6) and the admin panel (section 5).
 
+### The setup script (`onchato-setup.sh`, the user's call 2026-10-18)
+
+The operator's whole path is one download and one run: the guide's quick start.
+
+- **Delivery**: a release asset (`releases/latest/download/onchato-setup.sh`),
+  its SHA-256 in the release notes; the guide says download, read, run.
+  `curl | sudo bash` works but is not what the guide leads with. The script
+  checks out the SAME tag it came from, so script, image and apps stay in the
+  N-1 window.
+- **Preflight**: root, Ubuntu 24.04 / Debian 12 (apt), x86_64 or arm64, free
+  80/443/3478, the DNS name resolving to this machine, RAM. Docker missing on a
+  known system: installed from apt (`docker.io` + compose plugin). Anything
+  else: say what is missing, point at the guide, stop.
+- **Questions** (answers kept in `/etc/onchato/setup.env`, offered as defaults
+  on a re-run): server name, organisation name, certificate e-mail, files yes/no,
+  where the root key lives; derived without asking: `networkId` from the
+  domain, `profileUrls` on the node itself, `app` = `app.onchato.com`,
+  `feedback: null`, `policy.transport: node-only`. Advanced (flags, not
+  questions): more nodes, HEM-only, a feedback URL.
+- **The root key, asked once and said to be permanent** (devices pin it):
+  - *on the server* (default): a software key in `/var/lib/onchato/root.key`
+    (0600), shown once for an offline copy; a monthly timer re-signs the
+    profile with a higher `seq`, so it never expires. A server takeover can sign
+    a false profile - the guide says so.
+  - *on the operator's computer*: the script writes `profile.json`, prints the
+    `onchato-ops network sign` command (YubiKey or key file), waits for the
+    signed `network.json` to be copied back, checks it (`openEnvelope` under
+    the expected key) and publishes it. No auto-renewal.
+- **End**: the external checks (`/health`, the WebSocket 101, STUN,
+  `network check --online`), then the fingerprint, the join link and its QR
+  code in the terminal (`qrForTerminal`).
+- **`--check`** reruns every test; **`--update`** = fetch the latest release
+  tag, rebuild, restart, check.
+- **Target: about five minutes** on a 1-vCPU VM, most of it the image build and
+  the certificate.
+
 ## 3. `bs-setup.sh` for any domain
 
 The script stays for systemd installs (our nodes, and operators who prefer no
@@ -152,12 +188,14 @@ After C4 and the Acme deployment.
 ## 6. Order
 
 1. Relay `--key-file` + the image + compose (C4), tested locally.
-2. `bs-setup.sh --domain`.
-3. Acme on `blbx.pl` with the image, the guide corrected against what really
+2. `onchato-setup.sh` over it (preflight, questions, key choice, checks, QR),
+   as a release asset.
+3. `bs-setup.sh --domain`.
+4. Acme on `blbx.pl` with the script, the guide corrected against what really
    happened.
-4. Access tier B (design note above settled first).
-5. The panel as an extension of `infra/dash`.
-6. C and D with an enterprise pilot.
+5. Access tier B (design note above settled first).
+6. The panel as an extension of `infra/dash`.
+7. C and D with an enterprise pilot.
 
 ## Open questions
 
