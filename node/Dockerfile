@@ -5,13 +5,9 @@
 #   docker build -f node/Dockerfile --build-arg GIT_COMMIT=$(git rev-parse HEAD) -t onchato-node .
 #
 # The compose file next to this one runs it twice (relay, stun) beside nginx,
-# certbot and Redis. No build step: the relay is plain .mjs.
-#
-# Node 22, as on bs1-bs3 (relay/DEPLOY.md step 2), and NOT 24: @libp2p/crypto
-# 5.x derives an Ed25519 public key from a JWK with `x: ''`, which Node 24.22
-# refuses (ERR_CRYPTO_INVALID_JWK) - the relay dies at start. Found 2026-10-18
-# building this image; move only together with a libp2p that does not do that.
-FROM node:22-bookworm-slim
+# certbot and Redis. No build step: the relay is plain .mjs. Node 24, as the
+# CLI image and CI (relay/nodekey.mjs: why the relay builds its key itself).
+FROM node:24-bookworm-slim
 ARG GIT_COMMIT=unknown
 ENV NODE_ENV=production GIT_COMMIT=$GIT_COMMIT
 WORKDIR /app

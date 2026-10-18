@@ -43,7 +43,6 @@ import { circuitRelayServer } from '@libp2p/circuit-relay-v2'
 import { identify } from '@libp2p/identify'
 import { gossipsub } from '@chainsafe/libp2p-gossipsub'
 import { createPeerScoreParams } from '@chainsafe/libp2p-gossipsub/score'
-import { generateKeyPairFromSeed } from '@libp2p/crypto/keys'
 import { peerIdFromPrivateKey } from '@libp2p/peer-id'
 import { multiaddr } from '@multiformats/multiaddr'
 import { createHash } from 'crypto'
@@ -59,7 +58,7 @@ import * as lp from 'it-length-prefixed'
 import { pushable } from 'it-pushable'
 import { PROTOCOL as PICK_PROTOCOL, T as PICK_T, decodeFrame as decodePickFrame, encodeDeliver, encodeRefused, encodePicked, encodeAck, makePicks } from './pick.mjs'
 import { redisSink } from './redis.mjs'
-import { loadOrCreateSeed } from './nodekey.mjs'
+import { loadOrCreateSeed, privateKeyFromSeed } from './nodekey.mjs'
 import { makeMetrics, metricsHandler, SAMPLE_MS, readCommit } from './metrics.mjs'
 import { createServer as createHttpServer, Server as HttpServer } from 'http'
 import { appendFile } from 'fs'
@@ -164,7 +163,7 @@ const dump = createDump(process.env.DUMP)
 
 const keyed   = KEY_FILE ? loadOrCreateSeed(KEY_FILE) : null
 const seed    = keyed ? keyed.seed : createHash('sha256').update(PASS).digest()
-const privKey = await generateKeyPairFromSeed('Ed25519', seed)
+const privKey = privateKeyFromSeed(seed)   // not generateKeyPairFromSeed: Node 24.22 (nodekey.mjs)
 const peerId  = peerIdFromPrivateKey(privKey)
 
 console.log(keyed
