@@ -146,6 +146,7 @@ confidentiality.
 | **A. Open** | the QR code / profile only; a clone of onchato, a parallel network. A leaked QR lets anyone in. | open communities, tests |
 | **B. Join code** | the QR code **and** a code from the admin (TOTP-like, short-lived); the device gets a ticket the admin can revoke | **small deployments** |
 | **C. Sign-in and pairing** | sign in on the desktop (OIDC; test on the web with `encedo-oidc`), then pair the phone from the desktop, as Slack does | enterprise |
+| **C+. Sign-in, anonymous tickets** | as C, but the node gets blind-signed tickets (Privacy Pass): it learns "someone of ours", not who | enterprise, EU workforce privacy |
 | **D. Device certificates** | MDM-provisioned | enterprise |
 
 The decided shape:
@@ -184,6 +185,57 @@ link in a packaged app), the phone pairs by a QR code the desktop shows. Mobile
 OIDC directly is harder (system browser, app links), hence pairing first. Web
 can be tested against `encedo-oidc` now.
 
+### C+: anonymous tickets (Privacy Pass) - an option on top of C
+
+**Why.** A C ticket names the account, so the node's log becomes a presence
+record per employee ("j.nowak connected 07:52 from X, left 16:10"). End-to-end
+encryption does not touch that. In the EU it is a works-council and GDPR matter,
+and a node log is what gets breached or subpoenaed.
+
+**How** (IETF Privacy Pass: RFC 9576 architecture, 9577 HTTP auth, 9578
+issuance; blind RSA, RFC 9474 - the publicly verifiable token type):
+
+1. The app signs in (OIDC) to the **issuer** (beside `encedo-oidc`), makes a
+   batch of random tokens (e.g. 50), blinds them, and has the issuer sign them;
+   the issuer checks the account is active and within its quota, and never sees
+   the tokens.
+2. The app unblinds: valid signatures on tokens the issuer never saw.
+3. Each connection carries one token (in the WebSocket path, the same gate as
+   B/C). The node verifies it offline with the issuer's public key and records
+   it as spent.
+
+The issuer knows "account X took 50 tokens on Tuesday"; the node knows "a valid
+token connected at 07:52". Joining the two logs does not link a token to an
+account - that is the mathematics, not a policy.
+
+**Limits, to be written into `docs/THREAT-MODELS.md` with it:**
+
+- **The address stays.** One operator running issuer and node, a device taking
+  tokens and connecting from the same IP: linkable by address and time. It
+  holds when tokens are fetched ahead and in batches (not just before a
+  connection), or behind carrier NAT. What it removes for certain is the name in
+  the node's logs - the logs that leak.
+- **No revoking a single token** (nobody knows whose it is). Revocation = the
+  issuer stops issuing to the account + the issuer key rotates (e.g. every
+  24 h), so a dismissed account loses access within one rotation, not at once.
+- **Tokens are spent.** One per connection, and a phone reconnects many times a
+  day: batch size and per-account quota to be chosen. The quota is also the
+  abuse control, kept at the issuer, without the node knowing who is who.
+- **The node keeps a spent list**, cleared at each key rotation.
+
+**Fit and cost.** Same gate on the node; only the ticket type changes, so the
+verifier is built pluggable from the start (B: a device ticket, C: an OIDC
+ticket, C+: a blind-signed token). Work: an issuance endpoint beside
+`encedo-oidc`, the verifier + spent list on the node, a token batch in the app.
+Libraries exist (`@cloudflare/blindrsa-ts`, `@cloudflare/privacypass-ts`,
+RFC-conformant); an RSA-2048 token is about 400 base64 characters, fine in a
+path. It is the network-access layer, not the end-to-end protocol, so EH-2 and
+the review are untouched. Watch: anonymous rate-limited credentials (ARC, an
+IETF draft) - multi-use tokens, not a standard yet.
+
+**Order:** after B and C, as an enterprise option. Its pitch: "the node knows an
+employee is connected, not which one" - a single-sign-on gate cannot say that.
+
 ## 5. The admin panel
 
 An overlay over the same commands, like `infra/dash` today: it runs on the
@@ -202,7 +254,7 @@ After C4 and the Acme deployment.
    happened.
 5. Access tier B (design note above settled first).
 6. The panel as an extension of `infra/dash`.
-7. C and D with an enterprise pilot.
+7. C and D with an enterprise pilot; C+ (anonymous tickets) as its option.
 
 ## Open questions
 
