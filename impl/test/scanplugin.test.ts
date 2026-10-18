@@ -102,7 +102,9 @@ test('the page goes transparent while the native scanner runs', () => {
   // and looks broken.
   const html = read('web', 'index.html')
   assert.match(html, /html\.scanning,html\.scanning body\{background:transparent!important\}/)
-  assert.match(html, /html\.scanning #app\{visibility:hidden\}/)
+  // The app AND the sign-in card: a network's QR code is scanned before anyone
+  // signs in ("inna sieć"), and the card stood over the camera (0.7.51, Android).
+  assert.match(html, /html\.scanning #app,html\.scanning #login\{visibility:hidden\}/)
   // The scanner is opened from the "add a peer" modal, which is a SIBLING of
   // #app: hiding the app leaves it standing on top of the camera picture.
   assert.match(html, /html\.scanning \.modal:not\(#scan-modal\)[^{]*\{display:none\}/)
