@@ -1,0 +1,8 @@
+# The node image needs only these (the root .dockerignore is the CLI image's).
+*
+!relay/package.json
+!relay/package-lock.json
+!relay/*.mjs
+!infra/stun/stun.mjs
+!infra/geoip/geoip.mjs
+!node/entry.sh

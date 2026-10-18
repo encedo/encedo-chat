@@ -2,6 +2,7 @@
  * relay-compat-test.ts - this client against ANOTHER build's relay.
  *
  *   RELAY_DIR=<path to a relay/ checkout> node net/relay-compat-test.ts
+ *   RELAY_ADDR=<multiaddr of a running node> node net/relay-compat-test.ts   (no relay started: e.g. a node of the Docker image)
  *
  * An operator running a network of its own takes the apps from us and updates
  * its relays on its own schedule, so the day an app update lands, its relays
@@ -56,8 +57,8 @@ let ok = false
 try {
   let version = '?'
   try { version = JSON.parse(readFileSync(join(RELAY_DIR, 'package.json'), 'utf8')).version } catch {}
-  console.log(`relay under test: ${RELAY_DIR} (relay ${version})`)
-  const R = await startRelay()
+  console.log(process.env.RELAY_ADDR ? `relay under test: ${process.env.RELAY_ADDR}` : `relay under test: ${RELAY_DIR} (relay ${version})`)
+  const R = process.env.RELAY_ADDR ?? await startRelay()
   const params = { networkId: 'compat-test', dateUTC: new Date().toISOString().slice(0, 10) }
   const a = await softId('a'), b = await softId('b')
   const A = await startSession(a.id, { relays: [R], transport: 'light', params } as any)

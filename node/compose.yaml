@@ -1,0 +1,59 @@
+# One onchato node (OPERATOR-NODE-PLAN.md). Settings: node.env (see
+# node.env.example); onchato-setup.sh writes it and runs this.
+#
+#   docker compose --env-file node.env up -d --build
+#
+# Host networking throughout: STUN is UDP 3478, the mesh is IPv6 9002, and the
+# per-address limits in nginx need the real client address. The relay (9001),
+# its metrics (9003) and Redis listen on loopback only.
+name: onchato
+
+x-node: &node
+  env_file: node.env
+  restart: unless-stopped
+  network_mode: host
+
+services:
+  relay:
+    <<: *node
+    build: { context: .., dockerfile: node/Dockerfile, args: { GIT_COMMIT: "${GIT_COMMIT:-unknown}" } }
+    image: onchato-node
+    command: relay
+    volumes: [ "node-data:/data" ]
+    depends_on: [ redis ]
+
+  stun:
+    <<: *node
+    image: onchato-node
+    command: stun
+    volumes: [ "node-data:/data:ro" ]
+    depends_on: [ relay ]
+
+  nginx:
+    <<: *node
+    build: { context: .., dockerfile: node/nginx/Dockerfile }
+    image: onchato-nginx
+    volumes:
+      - "letsencrypt:/etc/letsencrypt:ro"
+      - "acme-webroot:/var/www/html"
+      - "profile:/srv/onchato:ro"
+
+  certbot:
+    <<: *node
+    image: certbot/certbot:v3.0.1
+    entrypoint: [ "/bin/sh", "/onchato-certbot.sh" ]
+    volumes:
+      - "./certbot.sh:/onchato-certbot.sh:ro"
+      - "letsencrypt:/etc/letsencrypt"
+      - "acme-webroot:/var/www/html"
+
+  redis:
+    <<: *node
+    image: redis:7.4-alpine
+    command: [ "sh", "-c", "exec redis-server --bind 127.0.0.1 --port $${REDIS_PORT:-6379} --protected-mode yes --save '' --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru" ]
+
+volumes:
+  node-data:
+  letsencrypt:
+  acme-webroot:
+  profile:
