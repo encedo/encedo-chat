@@ -1021,7 +1021,10 @@
      readable - which get their own dark plate, since the picture behind them is
      whatever the camera is pointed at. `<video>` has no part in this path. */
   html.scanning,html.scanning body{background:transparent!important}
-  html.scanning #app{visibility:hidden}
+  /* The sign-in card too: a network's QR code is scanned BEFORE anyone signs in
+     ("inna sieć"), and the card stood between the eye and the preview -
+     reported from Android, 0.7.51. */
+  html.scanning #app,html.scanning #login{visibility:hidden}
   /* ...and everything that is NOT the app: the scanner is opened FROM a modal
      ("Dodaj peera"), which is a sibling of #app and therefore untouched by
      hiding it. Reported from a phone (0.5.60): the camera was running, the
