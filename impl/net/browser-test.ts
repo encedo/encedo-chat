@@ -3899,8 +3899,12 @@ async function main() {
       await A.waitFor('the network named in Settings', `
         const w = document.getElementById('net-which'); const t = w ? w.textContent : '';
         return t.includes('Harness Net') && t.includes(${JSON.stringify(netId)}) && /([0-9a-f]{4}\\s){7}[0-9a-f]{4}/.test(t);`, 15_000)
+      // Diagnostics says it too: a bug report from this network must not read as ours.
+      await A.waitFor('the network in Diagnostics', `
+        const t = document.getElementById('diag-caps')?.textContent ?? '';
+        return t.includes('network: ' + ${JSON.stringify(netId)} + ' (Harness Net, seq ');`, 15_000)
       await A.eval(`document.getElementById('btn-close-drawer').click(); return 1`)
-      step('Settings -> Network names the joined network, its operator and the key fingerprint')
+      step('Settings -> Network names the joined network, its operator and the key fingerprint; Diagnostics names it too')
     }
 
     if (GROUP_ONLY) {

@@ -6842,6 +6842,18 @@ function engineReport(): string[] {
   return [`${mark} ${e.text}`, ...coreStatus().fallbacks.map((f) => `[fail] ${f.from} -> ${f.to}: ${f.reason}`)]
 }
 
+/**
+ * Which network this page works in. A report from an operator's network that
+ * did not say so would be read against our nodes; seq and the date tell an
+ * operator whether the device holds the profile they last published.
+ */
+function networkReport(): { ok: boolean; text: string } {
+  if (ACTIVE.builtin) return { ok: true, text: `network: ${ACTIVE.id} (built-in, ${ACTIVE.operator})` }
+  const p = loadRegistry(localKV(), nowMs()).get(ACTIVE.id)?.profile
+  const when = p ? `, seq ${p.seq}, valid to ${new Date(p.expires).toISOString().slice(0, 10)}` : ''
+  return { ok: !ACTIVE.expired, text: `network: ${ACTIVE.id} (${ACTIVE.operator}${when}${ACTIVE.expired ? ', EXPIRED' : ''})` }
+}
+
 /** A capability's note in the UI language, sentence by sentence. */
 function capNote(c: { note?: string; noteParts?: string[] }): string {
   return (c.noteParts ?? (c.note ? [c.note] : [])).map((p) => tr(p)).join(' ')
@@ -6865,6 +6877,8 @@ function paintCaps() {
   // host unless it did not answer - and a silent fall back to the page is the
   // one thing that changes what a compromised webview can read.
   rows.push(engineLine())
+  const net = networkReport()
+  rows.push(diagLine(net.ok ? 'ok' : 'bad', net.text))
   for (const f of coreStatus().fallbacks) rows.push(diagLine('bad', `${f.from} -> ${f.to}: ${f.reason}`))
   box.innerHTML = [escapeHtml(capReport.ua), ...rows].join('<br>')
   paintDiagnostics()
@@ -6899,6 +6913,7 @@ $('btn-webrtc-probe')?.addEventListener('click', async () => {
 })
 
 $('btn-diag-copy')?.addEventListener('click', async () => {
+  const net = networkReport()
   const text = [
     capReport ? formatReport(capReport) : 'platform: ' + tr('(sonda jeszcze nie skończyła)'),
     // The capability list only knows the webview; the report must carry the
@@ -6910,6 +6925,7 @@ $('btn-diag-copy')?.addEventListener('click', async () => {
     // line could not tell a native shell from one that fell back to WASM (the
     // first 0.7.31 report from macOS had the screen line and not this one).
     ...engineReport(),
+    `${net.ok ? '[ok]' : '[fail]'} ${net.text}`,
     lastWebrtcProbe ? formatWebrtcProbe(lastWebrtcProbe) : 'webrtc: (nie sprawdzano)',
     `build: ${$('build-id-settings')?.textContent ?? '?'}`,
   ].join('\n')
@@ -6941,7 +6957,7 @@ else initFeedback({
   commit: __EC_COMMIT__,
   endpoint: FEEDBACK_URL,
   diagnostics: () => capReport
-    ? formatReport(capReport) + (lastWebrtcProbe ? '\n' + formatWebrtcProbe(lastWebrtcProbe) : '')
+    ? formatReport(capReport) + '\n' + networkReport().text + (lastWebrtcProbe ? '\n' + formatWebrtcProbe(lastWebrtcProbe) : '')
     : null,
   toast,
 })
