@@ -58,7 +58,9 @@ names its lines.
 - `infra/` — `nodes.json` (the compiled-in node list), `network.json` (the
   network profile, `lib/network.ts`: store, manifest URL, feedback, invite
   address, network id; `EC_NETWORK_PROFILE` / `ONCHATO_NETWORK_PROFILE` swap
-  it), `deploy-on-tag.sh` +
+  it, `EC_NODES` swaps the node list at build time;
+  `scripts/check-network-neutral.mjs`, in CI, builds for a made-up network and
+  fails on any `onchato.com` left in `index.html` or a script), `deploy-on-tag.sh` +
   systemd units (tag-driven web deploy), `nginx/` (the web host's site file and
   the relay-node template; deploy in `infra/nginx/README.md`), `fput/` (the
   upload prefixer), `feedback/`, `stun/`, `health/`, `dash/`, `release/`,
@@ -70,7 +72,7 @@ names its lines.
   outside the repo.
 - `scripts/` — release tooling (`approve-web.mjs`, `release-manifest.mjs`,
   `release-cid.mjs`, `yubikey-sign.mjs`), `export-kat.mjs`, `web-monitor.mjs`,
-  `build-icons.mjs`.
+  `build-icons.mjs`, `check-network-neutral.mjs`.
 - `tools/onchato-bot/` — a command bot OVER the CLI daemon's socket (Python,
   stdlib only, no keys): config maps a message to a fixed argv, admins by key
   fingerprint, `dodaj <link>` + `tak <code>` adds a contact live. Its own tests

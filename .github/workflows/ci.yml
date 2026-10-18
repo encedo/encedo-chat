@@ -59,6 +59,12 @@ jobs:
         run: npm run web:build
         working-directory: impl
 
+      # A build for another network (a made-up profile and node list) must not
+      # name the public network's hosts anywhere the app runs: any hit is a
+      # constant that escaped infra/network.json (lib/network.ts).
+      - name: A build for another network names no onchato.com host
+        run: node scripts/check-network-neutral.mjs
+
   # core-rs: the Rust engine behind eh2/wasm.ts. Its own tests reproduce the
   # known-answer vectors of docs/kat/ (the same bytes as the TypeScript
   # engine); then the module is rebuilt from source on the pinned toolchain

@@ -46,7 +46,9 @@ module.exports = (_env, argv) => {
     entry: { app: './src/app.ts' },
     // content-hash in prod so every deploy busts the browser cache (index.html,
     // served fresh, points at the new name); stable name in dev for clean HMR.
-    output: { filename: prod ? '[name].[contenthash].bundle.js' : '[name].bundle.js', path: path.resolve(__dirname, 'dist'), clean: true },
+    // EC_OUT builds somewhere else than dist/ (the network-neutrality check builds
+    // a throwaway bundle and must not overwrite the one the harness serves).
+    output: { filename: prod ? '[name].[contenthash].bundle.js' : '[name].bundle.js', path: process.env.EC_OUT ? path.resolve(process.env.EC_OUT) : path.resolve(__dirname, 'dist'), clean: true },
     resolve: {
       extensions: ['.ts', '.js', '.mjs'],
       // The HEM SDK dynamically imports node:https/http/url only in its Node path
@@ -125,6 +127,9 @@ module.exports = (_env, argv) => {
         __EC_COMMIT__: JSON.stringify(COMMIT),
       }),
       new webpack.NormalModuleReplacementPlugin(/^node:/, (r) => { r.request = r.request.replace(/^node:/, '') }),
+      // EC_NODES=<file> compiles in another node list than infra/nodes.json -
+      // with EC_NETWORK_PROFILE, everything a build for another network changes.
+      ...(process.env.EC_NODES ? [new webpack.NormalModuleReplacementPlugin(/infra[\\/]nodes\.json$/, (r) => { r.request = path.resolve(process.env.EC_NODES) })] : []),
       // ONE bundle, no lazily loaded chunks. The SRI below pins only the
       // <script> tags of index.html; a chunk the webpack runtime fetches later
       // carries no integrity, and `script-src 'self'` lets any file from this
@@ -134,7 +139,11 @@ module.exports = (_env, argv) => {
       // bundle, index.html's CID covers every line of JS. Cost: ~7 KB loaded
       // up front that used to load on demand.
       new webpack.optimize.LimitChunkCountPlugin({ maxChunks: 1 }),
-      new HtmlWebpackPlugin({ template: './index.html', filename: 'index.html', chunks: ['app'] }),
+      // The app page takes two values from the network profile: the home link
+      // the markup carries so that it survives a dead bundle (app.ts sets the
+      // same one at start).
+      new HtmlWebpackPlugin({ template: './index.html', filename: 'index.html', chunks: ['app'],
+        templateParameters: { netHome: profile.home, netHomeHost: new URL(profile.home).host } }),
       // The CSP in index.html names the inline script by HASH, and the hash has
       // to be of what is EMITTED: html-webpack-plugin minifies the page, so a
       // hash taken from the source file is wrong by a few characters and the
@@ -234,6 +243,10 @@ module.exports = (_env, argv) => {
       type: 'filesystem',
       cacheDirectory: path.resolve(__dirname, '../.webpack-cache'),
       buildDependencies: { config: [__filename] },
+      // A build with another node list (EC_NODES) keeps its own cache: a module
+      // replacement is not part of what the cache keys on, so a shared one could
+      // hand the public list to a build for another network, or the reverse.
+      name: `${argv.mode || 'none'}${process.env.EC_NODES ? '-nodes-' + crypto.createHash('sha256').update(path.resolve(process.env.EC_NODES)).digest('hex').slice(0, 8) : ''}`,
     },
     optimization: { minimize: prod },
     performance: { hints: false },

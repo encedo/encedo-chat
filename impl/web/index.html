@@ -1427,7 +1427,7 @@
              CANONICAL_ORIGIN, and hardcoded here so it still works if the bundle
              never runs — which is exactly the case where somebody is stuck on this
              screen looking for a way out. -->
-        <a class="home-link" id="home-link" href="https://onchato.com/" target="_blank" rel="noopener noreferrer">onchato.com</a>
+        <a class="home-link" id="home-link" href="<%= netHome %>" target="_blank" rel="noopener noreferrer"><%= netHomeHost %></a>
         <div class="build-id" id="build-id-login"></div>
       </div>
     </div>
@@ -1814,7 +1814,7 @@
          read by the system camera opens the BROWSER, not this app. -->
     <button class="btn" id="paste-scan" hidden style="margin:2px 0 10px;background:var(--accent-soft);color:var(--accent)" data-i18n="📷 Zeskanuj kod QR">📷 Zeskanuj kod QR</button>
     <label data-i18n="Link albo kod zaproszenia">Link albo kod zaproszenia</label>
-    <textarea id="paste-input" placeholder="https://app.onchato.com/#i=… albo sam kod" data-i18n-placeholder="https://app.onchato.com/#i=… albo sam kod"></textarea>
+    <textarea id="paste-input" placeholder="…/#i=… albo sam kod" data-i18n-placeholder="…/#i=… albo sam kod"></textarea>
     <div class="msg" id="paste-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="paste-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="paste-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
@@ -2004,7 +2004,7 @@
     <label class="ask-remember" style="margin-top:12px">
       <input type="checkbox" id="fb-diag" checked><span data-i18n="Dołącz dane techniczne (wersja, platforma, diagnostyka)">Dołącz dane techniczne (wersja, platforma, diagnostyka)</span>
     </label>
-    <div class="hint" style="margin-top:8px;min-height:0" data-i18n="Nie wysyłamy nic o Twojej tożsamości, kluczach ani rozmowach. Serwer onchato.com zobaczy Twój adres IP i godzinę — jak przy każdym żądaniu.">Nie wysyłamy nic o Twojej tożsamości, kluczach ani rozmowach. Serwer onchato.com zobaczy Twój adres IP i godzinę — jak przy każdym żądaniu.</div>
+    <div class="hint" style="margin-top:8px;min-height:0" data-i18n="Nie wysyłamy nic o Twojej tożsamości, kluczach ani rozmowach. Serwer, który przyjmuje zgłoszenie, zobaczy Twój adres IP i godzinę — jak przy każdym żądaniu.">Nie wysyłamy nic o Twojej tożsamości, kluczach ani rozmowach. Serwer, który przyjmuje zgłoszenie, zobaczy Twój adres IP i godzinę — jak przy każdym żądaniu.</div>
     <button type="button" class="fb-link" id="fb-peek" data-i18n="Pokaż, co dokładnie wyślę">Pokaż, co dokładnie wyślę</button>
     <div class="diag fb-pre" id="fb-pre" hidden></div>
     <div class="msg" id="fb-msg"></div>

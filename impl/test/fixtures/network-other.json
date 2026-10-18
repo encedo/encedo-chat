@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "networkId": "acme-test",
+  "operator": "ACME Test",
+  "app": { "origin": "https://chat.acme.example", "path": "/" },
+  "stores": ["https://files.acme.example"],
+  "manifestUrls": ["https://acme.example/onchato/manifest.json"],
+  "feedback": "https://acme.example/onchato/feedback",
+  "home": "https://acme.example/"
+}

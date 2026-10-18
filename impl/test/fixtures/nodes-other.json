@@ -1,0 +1,6 @@
+{
+  "v": 1,
+  "nodes": [
+    { "name": "n1.acme.example", "addr": "/dns4/n1.acme.example/tcp/443/wss/http-path/%2Frelay/p2p/12D3KooWLcDzqtSAetckwdzzqYbLTsN6wHFx8T4uKr5Yn1GUvSt5" }
+  ]
+}

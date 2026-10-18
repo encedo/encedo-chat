@@ -1385,7 +1385,7 @@ function bindNodeEditor(listId: string, addId: string, warn: (t: string) => void
     saveNodes(list); redraw(); onChange()
   })
   $(addId).addEventListener('click', () => {
-    const addr = (prompt(tr('Multiaddr węzła (np. /dns4/bs2.onchato.com/tcp/443/wss/http-path/%2Frelay/p2p/12D3Koo…):')) || '').trim()
+    const addr = (prompt(tr('Multiaddr węzła (np. /dns4/wezel.example.org/tcp/443/wss/http-path/%2Frelay/p2p/12D3Koo…):')) || '').trim()
     if (!addr) return
     if (!addr.startsWith('/') || !addr.includes('/p2p/')) { warn(tr('To nie wygląda na multiaddr (…/p2p/<PeerId>).')); return }
     const host = addr.match(/\/dns[46]\/([^/]+)/)?.[1] ?? addr.match(/\/ip[46]\/([^/]+)/)?.[1] ?? tr('węzeł')
