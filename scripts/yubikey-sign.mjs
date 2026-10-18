@@ -57,3 +57,36 @@ export function signFileYubikey(file, { slot = '9c', module } = {}) {
     return Buffer.from(readFileSync(tmp)).toString('base64')
   } finally { try { unlinkSync(tmp) } catch {} }
 }
+
+/**
+ * The Ed25519 public key in a PIV slot, base64 (32 bytes) - what a network
+ * profile names as its root (scripts/ops/network.mjs). ykcs11 hands it back as
+ * DER SubjectPublicKeyInfo: for Ed25519 that is a fixed 12-byte header
+ * (30 2a 30 05 06 03 2b 65 70 03 21 00) and the 32-byte key. Anything else is
+ * refused rather than guessed at.
+ */
+export function publicKeyYubikey({ slot = '9c', module } = {}) {
+  const id = SLOT_ID[slot.toLowerCase()]
+  if (!id) throw new Error(`unknown PIV slot ${slot}`)
+  const mod = module ?? MODULES.find(existsSync) ?? 'libykcs11.so'
+  if (!tokenPresent(mod)) throw new Error(`no YubiKey to read - ${NO_TOKEN}`)
+  const tmp = join(tmpdir(), `onchato-yk-${process.pid}-${Date.now()}.der`)
+  try {
+    try {
+      execFileSync('pkcs11-tool', ['--module', mod, '--read-object', '--type', 'pubkey', '--id', id, '--output-file', tmp], { stdio: ['ignore', 'ignore', 'inherit'] })
+    } catch (e) {
+      if (e.code === 'ENOENT') throw new Error('pkcs11-tool is not installed (apt install opensc)')
+      throw new Error(`pkcs11-tool could not read the public key in slot ${slot} (exit ${e.status ?? e.signal})`)
+    }
+    const pub = ed25519FromSpki(readFileSync(tmp))
+    if (!pub) throw new Error(`slot ${slot} did not give back an Ed25519 public key - pass --root-pub <base64> to name it yourself (the signature is still checked against it)`)
+    return pub
+  } finally { try { unlinkSync(tmp) } catch {} }
+}
+
+/** The 32-byte key inside an Ed25519 SubjectPublicKeyInfo (DER), base64; null for anything else. */
+export function ed25519FromSpki(der) {
+  const head = Buffer.from('302a300506032b6570032100', 'hex')
+  const b = Buffer.from(der)
+  return b.length === 44 && b.subarray(0, 12).equals(head) ? b.subarray(12).toString('base64') : null
+}

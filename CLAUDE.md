@@ -71,8 +71,12 @@ names its lines.
   is here; the list itself is kept on the operator's machine, never in the repo). The operator note is `GEOBLOKADA.md`
   outside the repo.
 - `scripts/` — release tooling (`approve-web.mjs`, `release-manifest.mjs`,
-  `release-cid.mjs`, `yubikey-sign.mjs`), `export-kat.mjs`, `web-monitor.mjs`,
-  `build-icons.mjs`, `check-network-neutral.mjs`.
+  `release-cid.mjs`, `yubikey-sign.mjs`), `onchato-ops.mjs` (one entry point:
+  `release manifest|approve-web` route to those two, `network key|sign|link|check`
+  is an operator's signed network profile; `lib/signer.mjs` = YubiKey or key
+  file behind one interface, `node:crypto` because `scripts/` has no
+  `node_modules`), `export-kat.mjs`, `web-monitor.mjs`, `build-icons.mjs`,
+  `check-network-neutral.mjs`.
 - `tools/onchato-bot/` — a command bot OVER the CLI daemon's socket (Python,
   stdlib only, no keys): config maps a message to a fixed argv, admins by key
   fingerprint, `dodaj <link>` + `tak <code>` adds a contact live. Its own tests
