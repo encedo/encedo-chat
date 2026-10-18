@@ -7,7 +7,11 @@ Description=onchato — look for a new release tag
 [Timer]
 OnBootSec=3min
 OnUnitActiveSec=5min
-# The interval is wall-clock, so a host that was off does not fire a backlog.
+# The interval is monotonic, counted from the START of the last run (not the
+# clock's whole minutes), so the ticks drift and a run that builds for minutes
+# still starts the next one five minutes after its own start. Persistent only
+# matters for OnCalendar timers; kept false so it says what is meant: a host
+# that was off does not fire a backlog.
 Persistent=false
 AccuracySec=30s
 
