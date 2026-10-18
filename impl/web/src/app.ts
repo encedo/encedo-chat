@@ -56,6 +56,12 @@ import { regionBlocked } from '../../lib/regioncheck.ts'
 import { anchorClock } from '../../lib/clock.ts'
 import { fetchManifest, worstTry } from '../../lib/manifest.ts'
 import { parseNetworkProfile } from '../../lib/network.ts'
+import { refreshNetwork } from '../../lib/netprofile.ts'
+import type { PublishedNode } from '../../lib/nodelist.ts'
+import {
+  builtinNetwork, resolveActive, networkById, bindingOf, setBinding, setLastNet, nodesKey, transportKey,
+  softBindingKey, hemBindingKey, OPEN_PROFILE_KEY,
+} from '../../lib/activenet.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
@@ -95,6 +101,47 @@ import type { GroupSkdEnv } from '../../lib/envelope.ts'
 // The published relay list, compiled in — see DEFAULT_NODES below for why.
 import published from '../../../infra/nodes.json'
 
+declare const __EC_NETWORK_PROFILE__: string
+declare const __EC_NETWORK__: string
+/**
+ * The network profile this build was made for (`infra/network.json`, or
+ * EC_NETWORK_PROFILE at build time; lib/network.ts): the release manifest, and
+ * for the built-in network the file store, the feedback sink, where invite
+ * links point. Declared up here, before anything reads it: babel turns `const`
+ * into `var`, so a read above a lower declaration yields `undefined` instead of
+ * throwing (the node list refresh fetched `undefined/release/manifest.json`
+ * from 0.7.13 to 2026-10-13 that way). A profile that does not validate stops
+ * the app here, with the reason, rather than pointing it at half a network.
+ */
+const NET = parseNetworkProfile(JSON.parse(__EC_NETWORK_PROFILE__))
+/** The built-in network: this build's profile and its compiled-in node list. */
+const BUILTIN_NET = builtinNetwork(NET, published.nodes as PublishedNode[], __EC_NETWORK__)
+/**
+ * The network THIS PAGE works in, from load to reload (lib/activenet.ts): the
+ * one the last identity signed in to, else the built-in one. Its node list,
+ * stores, invite address and feedback sink are the ones used below. An identity
+ * of another network is opened by switching and reloading, never in place.
+ */
+const ACTIVE = resolveActive(localKV(), BUILTIN_NET, Date.now())
+/**
+ * Make sure an identity of network `net` is opened in that network: true when
+ * this page already is in it; otherwise switch (remember the network, and
+ * `then` - what to reopen after the reload) and reload, and say false. A
+ * network this device no longer knows is refused with a message rather than
+ * reloaded into, which would land in the built-in network and loop.
+ */
+function inNetworkOrSwitch(net: string, then?: () => void): boolean {
+  if (net === ACTIVE.id) return true
+  if (!networkById(localKV(), net, BUILTIN_NET, Date.now())) {
+    toast(tr('Ta tożsamość należy do sieci „{net}", której profilu nie ma już na tym urządzeniu.', { net }))
+    return false
+  }
+  setLastNet(localKV(), net, BUILTIN_NET)
+  then?.()
+  location.reload()
+  return false
+}
+
 // ---- network nodes (relays): an editable list, chosen at login -------------
 // The user keeps a list of relay multiaddrs and ticks which to use this session;
 // the first enabled one is the relay we dial. Full multiaddrs so a node with its
@@ -108,15 +155,15 @@ import published from '../../../infra/nodes.json'
 // the second copy. `enabled` is the client's own idea and is not in the file.
 
 interface NodeEntry { name: string; addr: string; enabled: boolean; w?: number }
-const DEFAULT_NODES: NodeEntry[] = (published.nodes as Array<{ name: string; addr: string; w?: number }>)
+const DEFAULT_NODES: NodeEntry[] = ACTIVE.nodes
   .map((n) => ({ name: n.name, addr: n.addr, enabled: true, ...(typeof n.w === 'number' ? { w: n.w } : {}) }))
 /** The floor under every dial: the first published node. */
 const RELAY = DEFAULT_NODES[0].addr
 function loadNodes(): NodeEntry[] {
-  try { const v = JSON.parse(localStorage.getItem('ec-nodes') || 'null'); if (Array.isArray(v) && v.length) return v } catch {}
+  try { const v = JSON.parse(localStorage.getItem(nodesKey(ACTIVE)) || 'null'); if (Array.isArray(v) && v.length) return v } catch {}
   return DEFAULT_NODES.map((n) => ({ ...n }))
 }
-function saveNodes(list: NodeEntry[]) { try { localStorage.setItem('ec-nodes', JSON.stringify(list)) } catch {} }
+function saveNodes(list: NodeEntry[]) { try { localStorage.setItem(nodesKey(ACTIVE), JSON.stringify(list)) } catch {} }
 /**
  * The node drawn for THIS session, remembered.
  *
@@ -179,7 +226,9 @@ function showRegionBlocked() {
   box.id = 'region-blocked'
   box.setAttribute('role', 'alertdialog')
   const h = document.createElement('h2'); h.textContent = tr('onchato nie jest dostępne w Twoim regionie')
-  const p = document.createElement('p'); p.textContent = tr('RKV sp. z o.o., operator onchato, nie świadczy usługi w krajach objętych międzynarodowymi sankcjami. Jeśli jesteś poza takim krajem, napisz na office@rkv.pl — baza lokalizacji mogła się pomylić.')
+  const p = document.createElement('p'); p.textContent = ACTIVE.builtin
+    ? tr('RKV sp. z o.o., operator onchato, nie świadczy usługi w krajach objętych międzynarodowymi sankcjami. Jeśli jesteś poza takim krajem, napisz na office@rkv.pl — baza lokalizacji mogła się pomylić.')
+    : tr('Operator tej sieci ({op}) nie świadczy usługi w Twoim regionie.', { op: ACTIVE.operator })
   box.append(h, p)
   document.body.appendChild(box)
 }
@@ -270,7 +319,8 @@ const linkBuilder = () => (typeof RTCPeerConnection === 'undefined' && rustRtc ?
  * consulted. An explicit choice is stored, so anyone who picked `auto` keeps
  * it; only "never opened Settings" moves.
  */
-const TRANSPORT_KEY = 'ec-transport'
+/** Per network: the built-in one keeps `ec-transport` (lib/activenet.ts). */
+const TRANSPORT_KEY = transportKey(ACTIVE)
 /**
  * Three postures, and the third one is a promise rather than a preference.
  *
@@ -282,8 +332,8 @@ const TRANSPORT_KEY = 'ec-transport'
  *            than quietly taking the road the setting refuses.
  */
 type TransportMode = 'auto' | 'relay' | 'direct'
-const transportMode = (): TransportMode =>
-  ((v) => (v === 'auto' || v === 'direct' ? v : 'relay'))(localStorage.getItem(TRANSPORT_KEY))
+const transportMode = (): TransportMode => ACTIVE.policy.transport === 'node-only' ? 'relay'
+  : ((v) => (v === 'auto' || v === 'direct' ? v : 'relay'))(localStorage.getItem(TRANSPORT_KEY))
 /** The direct plane is negotiated only where it was CHOSEN (see above), and
  *  never when `?webrtc=0` says otherwise. */
 const wantsDirect = () => !WEBRTC_OFF && transportMode() !== 'relay'
@@ -538,24 +588,11 @@ const HEM_STATUS_MS = 5_000     // the sign-in gate: is it in a state to be talk
  * key from that bundle.
  */
 declare const __EC_ALLOW_KEYS__: boolean
-declare const __EC_NETWORK__: string
 declare const __EC_DIARY__: boolean
 declare const __EC_ROOT_PUB__: string
 declare const __EC_VERSION__: string
 declare const __EC_COMMIT__: string
-declare const __EC_NETWORK_PROFILE__: string
 
-/**
- * The network profile this build was made for (`infra/network.json`, or
- * EC_NETWORK_PROFILE at build time; lib/network.ts): the file store, the
- * release manifest, the feedback sink, where invite links point. Declared up
- * here, before anything reads it: babel turns `const` into `var`, so a read
- * above a lower declaration yields `undefined` instead of throwing (the node
- * list refresh fetched `undefined/release/manifest.json` from 0.7.13 to
- * 2026-10-13 that way). A profile that does not validate stops the app here,
- * with the reason, rather than pointing it at half a network.
- */
-const NET = parseNetworkProfile(JSON.parse(__EC_NETWORK_PROFILE__))
 
 /**
  * Which build is on screen — `v0.1.1 (a1b2c3d4)`, in the login card and at the
@@ -756,8 +793,13 @@ let renameIdentity: ((next: string) => Promise<boolean>) | null = null
 async function signInAs(hem: any, id: { kid: string; handle: string }) {
   // The same broad read the contact book uses; the narrow `use:<kid>` token is
   // still taken later, by the ECDH that genuinely needs it.
+  // A HEM identity is in the network this device recorded for it, the built-in
+  // one when nothing is recorded (lib/activenet.ts). Another network than this
+  // page's means a reload into it - and the device's password once more.
+  if (!inNetworkOrSwitch(bindingOf(localKV(), hemBindingKey(id.kid), BUILTIN_NET))) return
   const pubkey = await pubKeyReader(hem)(id.kid)
   rememberMethod('hem')
+  setLastNet(localKV(), ACTIVE.id, BUILTIN_NET)
   const hemId = hemIdentityFrom(hem, id.kid, id.handle, pubkey)
   const renameOnHem = hemRenameIdentity(hem, id.kid)
   renameIdentity = async (next: string) => { await renameOnHem(next); return true }
@@ -1002,7 +1044,9 @@ function renderLoginProfiles(boot = false) {
     const who = document.createElement('span'); who.className = 'who'; who.textContent = n; who.title = n
     const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = tr('software')
     b.append(av, who, tag)
-    b.addEventListener('click', () => openSoftModal(n))
+    b.addEventListener('click', () => {
+      if (inNetworkOrSwitch(bindingOf(localKV(), softBindingKey(n), BUILTIN_NET), () => localStorage.setItem(OPEN_PROFILE_KEY, n))) openSoftModal(n)
+    })
     box.appendChild(b)
   }
   const has = names.length > 0
@@ -1020,6 +1064,12 @@ function renderLoginProfiles(boot = false) {
   // Only at boot: after that, this function is how somebody gets BACK to the
   // profiles, and sending them straight out again would make that link dead.
   if (boot && lastMethod() === 'hem') showHemForm()
+  // A reload that switched the network to open a profile: open it now.
+  if (boot) {
+    const open = localStorage.getItem(OPEN_PROFILE_KEY)
+    localStorage.removeItem(OPEN_PROFILE_KEY)
+    if (open && names.includes(open) && bindingOf(localKV(), softBindingKey(open), BUILTIN_NET) === ACTIVE.id) openSoftModal(open)
+  }
 }
 
 /** Show the HEM form, and stand the profile list down while it is up. */
@@ -1204,7 +1254,11 @@ async function softLogin() {
       let generated = ''
       id = await browserSoftwareIdentity(name, () => null, (v) => { generated = v })
       localStorage.setItem(softKey(name), JSON.stringify(await seal(pass, generated)))
+      // Born in this page's network, and in it for good (lib/activenet.ts).
+      setBinding(localKV(), softBindingKey(name), ACTIVE.id, BUILTIN_NET)
     } else {
+      // Typed rather than picked from the list: the same rule, its network first.
+      if (!inNetworkOrSwitch(bindingOf(localKV(), softBindingKey(name), BUILTIN_NET), () => localStorage.setItem(OPEN_PROFILE_KEY, name))) return
       const blob = JSON.parse(raw)
       // A profile from before passwords existed. Not migrated by decision — the
       // ones in the wild are developer tests — but it must not read as a wrong
@@ -1228,13 +1282,18 @@ async function softLogin() {
       const inner = JSON.parse(await unseal(pw, blob))
       inner.handle = next
       localStorage.setItem(softKey(next), JSON.stringify(await seal(pw, JSON.stringify(inner))))
-      if (next !== activeSoftProfile) localStorage.removeItem(softKey(activeSoftProfile))
+      if (next !== activeSoftProfile) {
+        setBinding(localKV(), softBindingKey(next), ACTIVE.id, BUILTIN_NET)
+        localStorage.removeItem(softKey(activeSoftProfile))
+        localStorage.removeItem(softBindingKey(activeSoftProfile))
+      }
       localStorage.setItem(LAST_PROFILE, next)
       activeSoftProfile = next
       return true
     }
     rememberMethod('soft')
     localStorage.setItem(LAST_PROFILE, name)
+    setLastNet(localKV(), ACTIVE.id, BUILTIN_NET)
     const idKey2 = await identityKey(id.pub)
     const names = await openNames(id, idKey2)
     const local = await makeLocalBook(names, localStorage, id)
@@ -1310,6 +1369,15 @@ async function loadOfficialNodes(btnId: string, warn: (t: string) => void, redra
   const btn = $(btnId) as HTMLButtonElement
   btn.disabled = true; const label = btn.textContent; btn.textContent = tr('Pobieram…')
   try {
+    // Another network's list is in its own signed profile: refresh that from
+    // the addresses it names, under the key pinned at import (lib/netprofile.ts).
+    if (!ACTIVE.builtin) {
+      const r = await refreshNetwork(localKV(), ACTIVE.id, nowMs())
+      if (r.tried.length) ecLog('network profile: passed over ' + r.tried.map((t) => `${t.url} (${t.why})`).join(', '))
+      if (!r.ok) { warn(tr('Profil sieci jest niedostępny albo nie przeszedł weryfikacji ({why}) — nie wczytuję listy.', { why: r.why })); return }
+      await applyOfficialNodes(r.profile.nodes, redraw, onChange)
+      return
+    }
     // WHICH list is asked for comes from the release manifest, signed by the
     // operator's offline root key and dated; the bytes that come back are then
     // checked against the CID it names. Whoever can shape these responses
@@ -1333,25 +1401,29 @@ async function loadOfficialNodes(btnId: string, warn: (t: string) => void, redra
       return
     }
     const text = new TextDecoder().decode(raw)
-    const nodes = parseNodeList(text)
-    // Asked before applying: this REPLACES a list the user may have edited by
-    // hand, and the button sits one tap from the one that adds a node.
-    const { ok } = await ask(
-      tr('Wczytać oficjalną listę?'),
-      tr('Zastąpi Twoją listę {n} węzłami z publikacji. Twoje własne wpisy znikną.', { n: nodes.length }),
-      tr('Zastąp'))
-    if (!ok) return
-    // Every node on, as in the compiled-in DEFAULT_NODES: failover and the
-    // weighted first pick choose among enabled nodes only, so ticking just the
-    // first (a leftover of the one-relay model) pinned the client to it.
-    saveNodes(nodes.map((n) => ({ ...n, enabled: true })))
-    redraw(); onChange()
-    toast(tr('Wczytano {n} węzłów', { n: nodes.length }))
+    await applyOfficialNodes(parseNodeList(text), redraw, onChange)
   } catch (e: any) {
     // Includes ExpiredError: the list is pinned, so a 404 means the publication
     // is gone rather than that it timed out, and saying "try again" would be a lie.
     warn(tr('Nie udało się wczytać listy: ') + (e?.message ?? e))
   } finally { btn.disabled = false; btn.textContent = label ?? tr('Wczytaj oficjalną listę węzłów') }
+}
+
+/** Replace the list with a published one, asked first. */
+async function applyOfficialNodes(nodes: PublishedNode[], redraw: () => void, onChange: () => void) {
+  // Asked before applying: this REPLACES a list the user may have edited by
+  // hand, and the button sits one tap from the one that adds a node.
+  const { ok } = await ask(
+    tr('Wczytać oficjalną listę?'),
+    tr('Zastąpi Twoją listę {n} węzłami z publikacji. Twoje własne wpisy znikną.', { n: nodes.length }),
+    tr('Zastąp'))
+  if (!ok) return
+  // Every node on, as in the compiled-in DEFAULT_NODES: failover and the
+  // weighted first pick choose among enabled nodes only, so ticking just the
+  // first (a leftover of the one-relay model) pinned the client to it.
+  saveNodes(nodes.map((n) => ({ ...n, enabled: true })))
+  redraw(); onChange()
+  toast(tr('Wczytano {n} węzłów', { n: nodes.length }))
 }
 
 /**
@@ -1515,7 +1587,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     relays: chosenRelays(),   // 3b: fall through the enabled node list if one is down
     gkBackend,                // §8 bucket A: a HEM identity mints GK in the HSM
     transport: USE_LIGHT ? 'light' : 'libp2p',
-    networkId: __EC_NETWORK__,
+    networkId: ACTIVE.id,
     loadBalance: USE_LB,
     // Capacity weights from the published list, by the name a node announces.
     nodeWeights: Object.fromEntries(loadNodes().filter((n) => typeof n.w === 'number').map((n) => [nodeKey(n.addr), n.w as number])),
@@ -2582,7 +2654,7 @@ function ownInvite(href: string): Invite | null {
   let u: URL
   try { u = new URL(href) } catch { return null }
   const at = (origin: string, path: string) => u.origin === origin && u.pathname.replace(/\/$/, '') === path.replace(/\/$/, '')
-  if (!at(NET.app.origin, NET.app.path) && !NET.legacyApp.some((a) => at(a.origin, a.path)) && !at(location.origin, location.pathname)) return null
+  if (!at(ACTIVE.app.origin, ACTIVE.app.path) && !ACTIVE.legacyApp.some((a) => at(a.origin, a.path)) && !at(location.origin, location.pathname)) return null
   return decodeInvite(u.hash)
 }
 
@@ -2636,13 +2708,14 @@ window.addEventListener('hashchange', () => {
  * `/f` blocks in nginx must answer with `Access-Control-Allow-Origin`. Ship the
  * two together or the packaged apps stay exactly as broken.
  */
-if (isDesktopShell() || location.origin === NET.app.origin) setStoreOrigins(NET.stores)
+// Another network's stores are never on this page's origin, so they are always set.
+if (!ACTIVE.builtin || isDesktopShell() || location.origin === NET.app.origin) setStoreOrigins(ACTIVE.stores)
 // The login card's way back to the landing. The markup carries the same address
 // so the link survives a dead bundle; this makes the constant the one that decides,
 // so a moved domain cannot leave a stale link on the screen people log in from.
 {
   const home = document.getElementById('home-link') as HTMLAnchorElement | null
-  if (home) { home.href = NET.home; home.textContent = new URL(NET.home).host }
+  if (home) { home.href = ACTIVE.home; home.textContent = new URL(ACTIVE.home).host }
 }
 
 /**
@@ -2673,8 +2746,10 @@ const openShare = async (returnMode = false) => {
   // browser and PASTED by someone with the app, whereas a bare payload can only
   // be pasted — and `inviteFromPaste` accepts either, so nothing is lost.
   ;($('share-link') as HTMLInputElement).value = inviteLink(
-    inAppShell ? NET.app.origin : location.origin,
-    inAppShell ? NET.app.path : location.pathname,
+    // Another network's links name ITS app, wherever this page runs: a link
+    // with this page's address would send the recipient to the wrong network.
+    inAppShell || !ACTIVE.builtin ? ACTIVE.app.origin : location.origin,
+    inAppShell || !ACTIVE.builtin ? ACTIVE.app.path : location.pathname,
     { pub: session.pub, name: session.handle, reply: returnMode })
   $('share-fp').textContent = fpCache.get(session.pub) ?? await fingerprint(session.pub)
   // The same link as a QR, so the exchange can happen across a table instead of
@@ -3360,7 +3435,7 @@ function renderProfiles() {
   // needs the old one, and we hold exactly one.
   $('btn-passwd').hidden = !activeSoftProfile
   // The "ask about HEM" line is for the person whose key lives in this browser.
-  const hemAsk = document.getElementById('hem-ask-settings'); if (hemAsk) hemAsk.hidden = !activeSoftProfile
+  const hemAsk = document.getElementById('hem-ask-settings'); if (hemAsk) hemAsk.hidden = !activeSoftProfile || !ACTIVE.feedback
 }
 
 async function removeProfile(name: string) {
@@ -3398,6 +3473,7 @@ async function removeProfile(name: string) {
   }
   // A profile in the pre-password format has no KID to find; only its blob goes.
   for (const k of kid ? keysOfProfile(localKV(), name, kid, prefix) : [softKey(name)]) localStorage.removeItem(k)
+  localStorage.removeItem(softBindingKey(name))
   if (localStorage.getItem(LAST_PROFILE) === name) localStorage.removeItem(LAST_PROFILE)
   // Deleting the identity you are holding leaves a session with nothing behind
   // it — reload rather than let the app run on a key that no longer exists.
@@ -4839,8 +4915,10 @@ function inviteUrlFor(inv: PubInvite): string {
   // Never a link without its key: it would decode as broken on the other side.
   if (!key) throw new Error('the invite key is not derived yet')
   return inviteLink(
-    inAppShell ? NET.app.origin : location.origin,
-    inAppShell ? NET.app.path : location.pathname,
+    // Another network's links name ITS app, wherever this page runs: a link
+    // with this page's address would send the recipient to the wrong network.
+    inAppShell || !ACTIVE.builtin ? ACTIVE.app.origin : location.origin,
+    inAppShell || !ACTIVE.builtin ? ACTIVE.app.path : location.pathname,
     { pub: session!.pub, name: session!.handle, inbox: inv.secret, key })
 }
 
@@ -5489,7 +5567,7 @@ if (DEBUG) (globalThis as any).__diag = diag
 // The harness puts the header out of step with the engine and expects it back.
 if (DEBUG) (globalThis as any).__linkDesync = (s: typeof linkState) => { linkState = s; paintStatus() }
 
-ecLog(`app start — debug=${DEBUG} network=${__EC_NETWORK__} transport=${USE_LIGHT ? 'libp2p-light (pick/push)' : 'libp2p'}`
+ecLog(`app start — debug=${DEBUG} network=${ACTIVE.id}${ACTIVE.builtin ? '' : ` (${ACTIVE.operator})`} transport=${USE_LIGHT ? 'libp2p-light (pick/push)' : 'libp2p'}`
   + ` rotation=${FORCED_ROTATION_SEC == null ? 'per-pair offset' : `forced ${String(Math.floor(FORCED_ROTATION_SEC / 3600)).padStart(2, '0')}:${String(Math.floor((FORCED_ROTATION_SEC % 3600) / 60)).padStart(2, '0')} UTC`};`
   + ' add ?debug=1 for the full trace, ?rot=<hour> to force the rollover time')
 // Printed because the app-shell test is a guess about somebody else's software:
@@ -5497,7 +5575,7 @@ ecLog(`app start — debug=${DEBUG} network=${__EC_NETWORK__} transport=${USE_LI
 // quietly go back to naming an address only this device understands. This line
 // is where you check, on the device, instead of reasoning about it.
 ecLog(`origin: ${location.origin}${location.pathname}`
-  + ` — invites will say ${inAppShell ? `${NET.app.origin}${NET.app.path} (app shell: no address bar to quote)` : 'this origin'}`)
+  + ` — invites will say ${inAppShell || !ACTIVE.builtin ? `${ACTIVE.app.origin}${ACTIVE.app.path} (${inAppShell ? 'app shell: no address bar to quote' : 'another network'})` : 'this origin'}`)
 
 /**
  * What this platform can actually do, checked before anything needs it.
@@ -6600,9 +6678,12 @@ $('btn-diag-copy')?.addEventListener('click', async () => {
 const FEEDBACK_URL = (() => {
   const local = location.hostname === 'localhost' || location.hostname === '127.0.0.1'
   const q = local ? new URLSearchParams(location.search).get('fb') : null
-  return q || NET.feedback
+  return q || ACTIVE.feedback
 })()
-initFeedback({
+// A network that takes no feedback (its profile says null) gets no form, and
+// none of the lines that open it.
+if (!FEEDBACK_URL) for (const id of ['btn-feedback', 'hem-ask-login', 'hem-ask-settings']) { const el = document.getElementById(id); if (el) el.hidden = true }
+else initFeedback({
   version: __EC_VERSION__,
   commit: __EC_COMMIT__,
   endpoint: FEEDBACK_URL,

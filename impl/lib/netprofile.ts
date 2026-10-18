@@ -229,3 +229,35 @@ export function registerNetwork(kv: KVLike, raw: unknown, now: number): Register
   kv.set(REGISTRY_KEY, JSON.stringify(all))
   return { ok: true, profile: r.profile, replaced: !!pinned }
 }
+
+/**
+ * Refresh a known network from the addresses its profile names: every one is
+ * asked, each answer goes through registerNetwork (pinned key, seq never
+ * backwards), and the highest seq that opens is kept - the same reasoning as
+ * the release manifest: a source can replay an older profile, so one current
+ * source must be enough to win. Resolves with the profile now held, and what
+ * each source said.
+ */
+export async function refreshNetwork(
+  kv: KVLike, id: string, now: number, fetchImpl: typeof fetch = fetch,
+): Promise<{ ok: true; profile: OperatorProfile; changed: boolean; tried: { url: string; why: string }[] } | { ok: false; why: string; tried: { url: string; why: string }[] }> {
+  const held = loadRegistry(kv, now).get(id)
+  if (!held) return { ok: false, why: 'unknown', tried: [] }
+  const tried: { url: string; why: string }[] = []
+  const answers = await Promise.all(held.profile.profileUrls.map(async (url) => {
+    try {
+      const res = await fetchImpl(url, { cache: 'no-store' })
+      if (!res.ok) { tried.push({ url, why: 'http' }); return null }
+      const r = openEnvelope(await res.text(), now, { rootPub: held.profile.rootPub, seq: held.profile.seq })
+      if (!r.ok) { tried.push({ url, why: r.why }); return null }
+      if (r.profile.networkId !== id) { tried.push({ url, why: 'shape' }); return null }
+      return r
+    } catch { tried.push({ url, why: 'http' }); return null }
+  }))
+  let best: { profile: OperatorProfile; envelope: NetworkEnvelope } | null = null
+  for (const a of answers) if (a && (!best || a.profile.seq > best.profile.seq)) best = a
+  if (!best) return tried.length ? { ok: false, why: tried[0].why, tried } : { ok: false, why: 'http', tried }
+  const changed = best.profile.seq > held.profile.seq
+  if (changed) { const r = registerNetwork(kv, best.envelope, now); if (!r.ok) return { ok: false, why: r.why, tried } }
+  return { ok: true, profile: changed ? best.profile : held.profile, changed, tried }
+}

@@ -109,3 +109,35 @@ test('the fingerprint is eight groups of four hex digits, and differs between ke
   assert.match(a, /^([0-9a-f]{4} ){7}[0-9a-f]{4}$/)
   assert.notEqual(a, await rootFingerprint(rootPubFor(OTHER)))
 })
+
+// ---- refresh -------------------------------------------------------------
+import { refreshNetwork } from '../lib/netprofile.ts'
+
+const servedEnv = (files: Record<string, unknown>) => (async (u: any) => {
+  const f = files[String(u)]
+  return f === undefined ? new Response('no', { status: 404 }) : new Response(JSON.stringify(f))
+}) as typeof fetch
+
+test('refresh: every source is asked, the highest seq under the pinned key wins; an older or foreign one does not', async () => {
+  const kv = memKV()
+  const urls = ['https://a.acme.example/n.json', 'https://b.acme.example/n.json', 'https://c.acme.example/n.json']
+  assert.ok(registerNetwork(kv, env({ seq: 5, profileUrls: urls }), NOW).ok)
+  const r = await refreshNetwork(kv, 'acme', NOW, servedEnv({
+    [urls[0]]: env({ seq: 4, profileUrls: urls }),          // replayed older
+    [urls[1]]: env({ seq: 99, profileUrls: urls }, OTHER),  // another key
+    [urls[2]]: env({ seq: 7, profileUrls: urls }),           // current
+  }))
+  assert.ok(r.ok && r.changed && r.profile.seq === 7, JSON.stringify(r))
+  assert.equal(loadRegistry(kv, NOW).get('acme')?.profile.seq, 7)
+  assert.deepEqual(r.tried.map((t) => t.why).sort(), ['key', 'rollback'])
+})
+
+test('refresh: nothing newer is "unchanged", not an error; nothing reachable is an error', async () => {
+  const kv = memKV()
+  const urls = ['https://a.acme.example/n.json']
+  assert.ok(registerNetwork(kv, env({ seq: 5, profileUrls: urls }), NOW).ok)
+  const same = await refreshNetwork(kv, 'acme', NOW, servedEnv({ [urls[0]]: env({ seq: 5, profileUrls: urls }) }))
+  assert.ok(same.ok && !same.changed)
+  const dead = await refreshNetwork(kv, 'acme', NOW, servedEnv({}))
+  assert.ok(!dead.ok && dead.why === 'http')
+})

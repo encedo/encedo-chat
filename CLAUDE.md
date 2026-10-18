@@ -195,6 +195,31 @@ unit tests.
   through `lib/migrate.ts` unchanged. One contact book for both:
   `lib/localbook.ts`.
 
+### Networks — `lib/network.ts`, `lib/netprofile.ts`, `lib/activenet.ts`
+
+One build, several networks. The built-in one is `infra/network.json` +
+`infra/nodes.json`; any other arrives as an operator's **signed envelope**
+(`netprofile.ts`: profile bytes + Ed25519 by the operator's root key, nodes
+inline, `seq`/`expires`, policy) kept in `ec-networks`; the first import pins
+the key, a refresh never lowers `seq`, the id `main` is reserved.
+
+- **An identity lives in one network for good** (the user's call, 2026-10-18):
+  joining another network is a NEW identity. The binding sits UNSEALED beside
+  the profile because the network must be known before the password:
+  `ec-soft-net-<name>`, `ec-hem-net-<KID>`; absent = the built-in network.
+- **The page works in ONE network from load to reload** (`ACTIVE` in app.ts,
+  `resolveActive`: the last network signed in to, `ec-last-net`). Opening an
+  identity of another network sets `ec-last-net` (+ `ec-open-profile`) and
+  RELOADS — nothing drawn, dialled or anchored for one network leaks into the
+  other (`inNetworkOrSwitch`). A network the device no longer knows is
+  refused, never reloaded into (it would loop through the built-in one).
+- **Node lists and transport belong to the network**: the built-in one keeps
+  `ec-nodes`/`ec-transport`, another gets `ec-nodes:<id>`/`ec-transport:<id>`.
+  "Load the official list" refreshes another network from its own
+  `profileUrls`, never from the release manifest.
+- **`ACTIVE` must stay declared at the top of app.ts** (babel turns `const`
+  into `var`; a read above it is `undefined`, not an error).
+
 ### Links in a message — `lib/linkify.ts`
 
 A URL is **found but not made clickable**: the address stays inert text and a
