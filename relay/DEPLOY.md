@@ -301,7 +301,7 @@ sudo install -D -m 644 infra/nginx/onchato-geoblock.conf /etc/nginx/snippets/onc
 sudo install -m 644 infra/geoip/onchato-geoip.service infra/geoip/onchato-geoip.timer infra/geoip/onchato-abuse.service infra/geoip/onchato-abuse.timer /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now onchato-geoip.timer onchato-abuse.timer
 sudo node infra/geoip/geoip-update.mjs && sudo systemctl restart onchato-stun
-sed "s/__HOST__/$HOST/g" infra/nginx/relay-node.conf | sudo tee /etc/nginx/sites-available/$HOST >/dev/null
+sed "s/__HOST__/$HOST/g; s#__HOME__#https://onchato.com#g" infra/nginx/relay-node.conf | sudo tee /etc/nginx/sites-available/$HOST >/dev/null
 sudo ln -s /etc/nginx/sites-available/$HOST /etc/nginx/sites-enabled/$HOST
 sudo nginx -t && sudo systemctl reload nginx
 sudo certbot renew --dry-run --no-random-sleep-on-renew   # proves renewal survives the redirect

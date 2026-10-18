@@ -374,7 +374,7 @@ else
   # Two nginx connections per client: the stock 768 is a ~380-client ceiling.
   run "$SUDO sed -i -E 's/worker_connections [0-9]+;/worker_connections 4096;/' /etc/nginx/nginx.conf"
   run "grep -q worker_rlimit_nofile /etc/nginx/nginx.conf || $SUDO sed -i -E 's/^(worker_processes [^;]+;)/\\1\\nworker_rlimit_nofile 8192;/' /etc/nginx/nginx.conf"
-  sed "s/__HOST__/$HOST/g" "$TEMPLATE_REPO/infra/nginx/relay-node.conf" | put "/etc/nginx/sites-available/$HOST"
+  sed "s/__HOST__/$HOST/g; s#__HOME__#https://onchato.com#g" "$TEMPLATE_REPO/infra/nginx/relay-node.conf" | put "/etc/nginx/sites-available/$HOST"
   run "$SUDO ln -sf /etc/nginx/sites-available/$HOST /etc/nginx/sites-enabled/$HOST"
   run "$SUDO nginx -t && $SUDO systemctl reload nginx"
 fi

@@ -49,7 +49,8 @@ Two more traps on the same host:
 ## The relay nodes (bs2, bs3, …) — two more files
 
 A relay-only box does not get a copy of `onchato.com`; it gets
-`relay-node.conf`, a **template** (`__HOST__` → the node's name, rendered with
+`relay-node.conf`, a **template** (`__HOST__` → the node's name, `__HOME__` → the
+operator's home page, rendered with
 `sed`, symlinked into `sites-enabled` under the hostname), plus
 `relay-limits.conf` in `/etc/nginx/conf.d/` for the two per-IP zones the site
 uses — those are http-level directives and cannot live in a site file. On the
