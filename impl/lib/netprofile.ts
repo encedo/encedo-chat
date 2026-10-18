@@ -23,6 +23,7 @@
 import { ed25519 } from '@noble/curves/ed25519'
 import { parseNodeList, type PublishedNode } from './nodelist.ts'
 import type { AppAddress } from './network.ts'
+import { cidV1Raw, cidMatches, isVerifiableCid } from './cid.ts'
 
 /** The id the compiled-in public network uses; no imported network may claim it. */
 export const PUBLIC_NETWORK_ID = 'main'
@@ -282,4 +283,54 @@ export function importNetwork(kv: KVLike, raw: unknown, now: number):
   all[r.profile.networkId] = r.envelope
   kv.set(REGISTRY_KEY, JSON.stringify(all))
   return { ok: true, id: r.profile.networkId, kept: held ? 'newer' : 'added' }
+}
+
+// ---- a short pointer, for a QR code ----------------------------------------
+
+/**
+ * A network profile is 1-1.5 KB and grows with every node - a dense QR code.
+ * A POINTER is ~120 characters whatever the network's size: where the signed
+ * file is served, and the CID of its exact bytes, in the fragment (which a
+ * browser never sends to the server):
+ *
+ *   https://acme.example/onchato/network.json#onchato-net=bafkrei...
+ *
+ * The address can be any server at all: bytes that do not hash to the CID are
+ * refused before anything is parsed, and the bytes that do are then checked
+ * like any other profile (signature, dates, pinned key). A CID alone would not
+ * do - fetching by CID needs a store, and the new network's store is inside
+ * the profile not yet held. The full envelope stays accepted wherever text is
+ * (a file, a paste): it is what works offline.
+ */
+export const POINTER_TAG = 'onchato-net='
+
+export interface NetworkPointer { url: string; cid: string }
+
+/** A pointer in some text, or null. Only a CIDv1 of raw sha2-256 bytes is accepted - the one form lib/cid.ts can check. */
+export function parseNetworkPointer(text: string): NetworkPointer | null {
+  const m = /(https?:\/\/[^\s#]+)#onchato-net=(b[a-z2-7]{50,})/.exec(text.trim())
+  if (!m) return null
+  let u: URL
+  try { u = new URL(m[1]) } catch { return null }
+  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && isLoopback(u.hostname))) return null
+  if (u.username || u.password) return null
+  if (!isVerifiableCid(m[2])) return null
+  return { url: u.href, cid: m[2] }
+}
+
+/** The pointer for a file served at `url` with exactly these bytes (the operator's tool; tests). */
+export async function pointerFor(url: string, fileBytes: Uint8Array): Promise<string> {
+  return `${url.split('#')[0]}#${POINTER_TAG}${await cidV1Raw(fileBytes)}`
+}
+
+/** Fetch what a pointer names and check it IS what the pointer names; the text, or why not. */
+export async function fetchPointed(p: NetworkPointer, fetchImpl: typeof fetch = fetch): Promise<{ ok: true; text: string } | { ok: false; why: 'http' | 'cid' }> {
+  let bytes: Uint8Array
+  try {
+    const res = await fetchImpl(p.url, { cache: 'no-store' })
+    if (!res.ok) return { ok: false, why: 'http' }
+    bytes = new Uint8Array(await res.arrayBuffer())
+  } catch { return { ok: false, why: 'http' } }
+  if (!await cidMatches(p.cid, bytes)) return { ok: false, why: 'cid' }
+  return { ok: true, text: new TextDecoder().decode(bytes) }
 }

@@ -34,7 +34,7 @@ import { createServer, type Server } from 'node:http'
 import { tmpdir, homedir } from 'node:os'
 import { join, extname } from 'node:path'
 import { hemKid } from '../lib/descr.ts'
-import { signNetwork, rootPubFor } from '../lib/netprofile.ts'
+import { signNetwork, rootPubFor, pointerFor } from '../lib/netprofile.ts'
 
 /**
  * By default this serves `web/dist` from THIS checkout, so it tests the code in
@@ -77,6 +77,9 @@ const collect = (req: any): Promise<Buffer[]> => new Promise((resolve, reject) =
   req.on('data', (c: Buffer) => parts.push(c)); req.on('end', () => resolve(parts)); req.on('error', reject)
 })
 
+/** Extra files the local server answers with, by path (a scenario puts them here). */
+const SERVED = new Map<string, string>()
+
 function serveDist(): Server {
   if (!existsSync(join(DIST, 'index.html'))) {
     console.error(`no build at ${DIST} — run: npm run web:build`)
@@ -84,6 +87,8 @@ function serveDist(): Server {
   }
   const srv = createServer(async (req, res) => {
     const path = (req.url ?? '/').split('?')[0]
+    const extra = SERVED.get(path)
+    if (extra !== undefined) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(extra); return }
 
     // Stand in for the production nginx: the app talks to its own origin at
     // `/f`, which is proxied to the IPFS node. Without this the file scenario
@@ -3801,7 +3806,11 @@ async function main() {
         nodes: relays.map((addr, i) => ({ name: `n${i + 1}`, addr })), stores: [origin], app: { origin, path: '/' },
         profileUrls: [`${origin}/network.json`], feedback: null, home: `${origin}/`, policy: {},
       }, KEY))
-      for (const [b, handle] of [[A, 'siec-a'], [B, 'siec-b']] as [Page, string][]) {
+      // A joins from the whole profile (a file, a paste); B from the short link a
+      // phone scans: the file is fetched and must hash to the CID in the link.
+      SERVED.set('/network.json', text)
+      const pointer = await pointerFor(`${origin}/network.json`, new TextEncoder().encode(text))
+      for (const [b, handle, given] of [[A, 'siec-a', text], [B, 'siec-b', pointer]] as [Page, string, string][]) {
         // To the sign-in card: a reload is enough, a password stands between it and the app.
         await b.eval(`location.reload(); return 1`)
         await sleep(500)
@@ -3810,10 +3819,18 @@ async function main() {
           const m = document.getElementById('net-modal');
           if (!m.classList.contains('open')) document.getElementById('go-network').click();
           return m.classList.contains('open');`, 20_000)
-        await b.eval(`document.getElementById('net-paste').value = ${JSON.stringify(text)}; document.getElementById('net-go').click(); return 1`)
-        await b.waitFor('the consent page', `return !document.getElementById('net-step-confirm').hidden || !!document.getElementById('net-msg').textContent`, 10_000)
+        if (given === pointer) {
+          // The same address with another file behind it: refused on the hash.
+          // One byte more: still a valid file, a different CID (the name is base64 inside, so editing it would change nothing).
+          SERVED.set('/network.json', text + '\n')
+          await b.eval(`document.getElementById('net-paste').value = ${JSON.stringify(given)}; document.getElementById('net-go').click(); return 1`)
+          await b.waitFor('a swapped file refused on its CID', `return /NIE zgadza/.test(document.getElementById('net-msg').textContent)`, 10_000)
+          SERVED.set('/network.json', text)
+        }
+        await b.eval(`document.getElementById('net-paste').value = ${JSON.stringify(given)}; document.getElementById('net-go').click(); return 1`)
+        await b.waitFor('the consent page', `return !document.getElementById('net-step-confirm').hidden || /NIE|Nie /.test(document.getElementById('net-msg').textContent)`, 10_000)
         const shown = await b.eval<any>(`return { facts: document.getElementById('net-facts').textContent, msg: document.getElementById('net-msg').textContent }`)
-        if (shown.msg || !shown.facts.includes('Harness Net') || !shown.facts.includes(netId) || !/([0-9a-f]{4}\s){7}[0-9a-f]{4}/.test(shown.facts)) {
+        if ((given === pointer && !shown.facts.includes('127.0.0.1')) || /NIE|Nie /.test(shown.msg) || !shown.facts.includes('Harness Net') || !shown.facts.includes(netId) || !/([0-9a-f]{4}\s){7}[0-9a-f]{4}/.test(shown.facts)) {
           throw new Error(`${b.name}: the consent page does not name the operator, the network and the key: ${JSON.stringify(shown)}`)
         }
         await b.eval(`document.getElementById('net-go').click(); return 1`)
@@ -3835,7 +3852,7 @@ async function main() {
         await b.waitFor('the first-run card', `return document.getElementById('welcome-modal').classList.contains('open')`, 20_000)
         await b.eval(`document.getElementById('welcome-close').click(); return 1`)
       }
-      step(`both joined "${netId}" from a signed profile and made new identities bound to it`)
+      step(`both joined "${netId}" - A from the whole signed profile, B from the short link with its CID (a swapped file behind it refused) - and made new identities bound to it`)
       // Each one's invite link, and each imports the other's: the link must name
       // the network's own app, and the import goes through the usual window.
       const linkOf = (b: Page) => b.eval<string>(`

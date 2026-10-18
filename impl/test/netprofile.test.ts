@@ -141,3 +141,30 @@ test('refresh: nothing newer is "unchanged", not an error; nothing reachable is 
   const dead = await refreshNetwork(kv, 'acme', NOW, servedEnv({}))
   assert.ok(!dead.ok && dead.why === 'http')
 })
+
+// ---- the short pointer (QR) ----------------------------------------------
+import { parseNetworkPointer, pointerFor, fetchPointed } from '../lib/netprofile.ts'
+
+test('pointer: a short link names the file and the CID of its bytes; fetched bytes must hash to it', async () => {
+  const file = new TextEncoder().encode(JSON.stringify(env()))
+  const ptr = await pointerFor('https://acme.example/onchato/network.json', file)
+  assert.ok(ptr.length < 140, `a pointer is short: ${ptr.length}`)
+  const p = parseNetworkPointer(`zeskanowano: ${ptr} `)!
+  assert.equal(p.url, 'https://acme.example/onchato/network.json')
+  const serve = (bytes: Uint8Array) => (async () => new Response(bytes as any)) as unknown as typeof fetch
+  const got = await fetchPointed(p, serve(file))
+  assert.ok(got.ok && openEnvelope(got.text, NOW).ok)
+  // The same file with one byte changed - another server, or the right one tampered with.
+  const other = file.slice(); other[10] ^= 1
+  const bad = await fetchPointed(p, serve(other))
+  assert.ok(!bad.ok && bad.why === 'cid')
+})
+
+test('pointer: plain http (except loopback), a CIDv0 or junk is not a pointer', () => {
+  const cid = 'bafkreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsck7e7aqa4s52zy'
+  assert.ok(parseNetworkPointer(`https://a.example/n.json#onchato-net=${cid}`))
+  assert.ok(parseNetworkPointer(`http://127.0.0.1:9333/n.json#onchato-net=${cid}`))
+  assert.equal(parseNetworkPointer(`http://a.example/n.json#onchato-net=${cid}`), null)
+  assert.equal(parseNetworkPointer('https://a.example/n.json#onchato-net=QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG'), null)
+  assert.equal(parseNetworkPointer('https://a.example/n.json'), null)
+})

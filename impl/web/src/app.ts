@@ -56,7 +56,7 @@ import { regionBlocked } from '../../lib/regioncheck.ts'
 import { anchorClock } from '../../lib/clock.ts'
 import { fetchManifest, worstTry } from '../../lib/manifest.ts'
 import { parseNetworkProfile } from '../../lib/network.ts'
-import { refreshNetwork, loadRegistry, openEnvelope, registerNetwork, rootFingerprint, type OperatorProfile, type NetworkEnvelope } from '../../lib/netprofile.ts'
+import { refreshNetwork, loadRegistry, openEnvelope, registerNetwork, rootFingerprint, parseNetworkPointer, fetchPointed, type OperatorProfile, type NetworkEnvelope } from '../../lib/netprofile.ts'
 import type { PublishedNode } from '../../lib/nodelist.ts'
 import {
   builtinNetwork, resolveActive, networkById, bindingOf, setBinding, setLastNet, nodesKey, transportKey,
@@ -3402,7 +3402,7 @@ function handleScanned(text: string) {
   if (scanNetwork) {
     // A network profile: handed to the join window, which checks it exactly as
     // it checks a file - the signature, the dates, the pinned key.
-    if (!openEnvelope(text, nowMs()).ok && !/"onchato-network"/.test(text)) {
+    if (!parseNetworkPointer(text) && !openEnvelope(text, nowMs()).ok && !/"onchato-network"/.test(text)) {
       setMsg('scan-msg', tr('To nie jest kod profilu sieci — pokaż kod QR, który dał operator.'), 'err'); return
     }
     closeScan()
@@ -6513,8 +6513,24 @@ $('net-go')?.addEventListener('click', async () => {
   clr('net-msg')
   if (!netPending) {
     const file = ($('net-file') as HTMLInputElement).files?.[0]
-    const text = file ? await file.text() : val('net-paste')
+    let text = file ? await file.text() : val('net-paste')
     if (!text) { setMsg('net-msg', tr('Wybierz plik albo wklej treść profilu sieci.'), 'err'); return }
+    // A short pointer (what a phone scans): the file is fetched from where it
+    // says and must hash to the CID it carries before anything else is read.
+    const ptr = parseNetworkPointer(text)
+    let from = ''
+    if (ptr) {
+      setMsg('net-msg', tr('Pobieram profil sieci…'), 'ok')
+      const got = await fetchPointed(ptr)
+      clr('net-msg')
+      if (!got.ok) {
+        setMsg('net-msg', got.why === 'cid'
+          ? tr('Pobrany plik NIE zgadza się z kodem — nie jest tym, który wskazał operator. Nie dołączam.')
+          : tr('Nie udało się pobrać profilu sieci z {host} — sprawdź połączenie albo poproś operatora o plik.', { host: new URL(ptr.url).host }), 'err')
+        return
+      }
+      text = got.text; from = new URL(ptr.url).host
+    }
     const r = openEnvelope(text, nowMs())
     if (!r.ok) { setMsg('net-msg', NET_REFUSED[r.why]() + (r.why === 'shape' && r.detail ? ` (${r.detail})` : ''), 'err'); return }
     if (r.profile.networkId === BUILTIN_NET.id) { setMsg('net-msg', NET_REFUSED.reserved(), 'err'); return }
@@ -6530,6 +6546,7 @@ $('net-go')?.addEventListener('click', async () => {
       [tr('Węzły'), `${p.nodes.length} — ${p.nodes.map((n) => hostOf(n.addr) ?? n.name).join(', ')}`],
       [tr('Ważny do'), new Date(p.expires).toLocaleDateString()],
     ]
+    if (from) facts.push([tr('Pobrano z'), from])
     const rules = [p.policy.softwareProfiles === false ? tr('tylko tożsamości HEM') : '', p.policy.transport === 'node-only' ? tr('treść tylko przez węzeł') : ''].filter(Boolean)
     if (rules.length) facts.push([tr('Zasady'), rules.join(', ')])
     const dl = $('net-facts'); dl.textContent = ''
