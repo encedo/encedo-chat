@@ -6,7 +6,9 @@
  *   node net/allowlist-test.ts
  *
  * Two listed identities (one light, one GossipSub) see each other and talk; an
- * unlisted one does not get in; one taken off the list is dropped.
+ * unlisted one does not get in, enrols with the administrator's code through the
+ * real enrolment service (relay/enroll.mjs) and then does; one taken off the
+ * list is dropped.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -16,6 +18,9 @@ import { tmpdir } from 'node:os'
 import { generateKeyPair, privateKeyToProtobuf } from '@libp2p/crypto/keys'
 import { startSession, type Identity } from '../lib/core.ts'
 import { netPeerId } from '../lib/netkey.ts'
+import { enrollDevice, deviceStatus } from '../lib/enroll.ts'
+// @ts-ignore - plain .mjs
+import { toBase32, totpAt } from '../../relay/enroll.mjs'
 import { generateX25519 } from '../lib/x25519.ts'
 import { b64 } from '../lib/wc.ts'
 
@@ -27,6 +32,20 @@ const dir = mkdtempSync(join(tmpdir(), 'ec-allow-'))
 const LIST = join(dir, 'peers.txt')
 const procs: ChildProcess[] = []
 let relayLog = ''
+
+const ENROLL_PORT = 9992
+const SEED = Buffer.from('harness-totp-seed-20')
+function startEnroll(): Promise<void> {
+  writeFileSync(join(dir, 'totp.seed'), toBase32(SEED) + '\n')
+  return new Promise((ok, fail) => {
+    const p = spawn('node', ['enroll.mjs'], { cwd: RELAY_DIR, env: { ...process.env, ALLOW_PEERS: LIST, NETWORK_ID: 'allowlist-test', ENROLL_PORT: String(ENROLL_PORT) } })
+    procs.push(p)
+    let out = ''
+    const t = setTimeout(() => fail(new Error(`the enrolment service did not start:\n${out}`)), 10_000)
+    const read = (d: Buffer) => { out += d; relayLog += d; if (out.includes('[ok] enroll on')) { clearTimeout(t); ok() } }
+    p.stdout.on('data', read); p.stderr.on('data', read)
+  })
+}
 
 function startRelay(): Promise<string> {
   return new Promise((ok, fail) => {
@@ -48,6 +67,8 @@ try {
   const kA = await netKey(), kB = await netKey(), kX = await netKey()
   writeFileSync(LIST, `${netPeerId(kA)} A\n${netPeerId(kB)} B\n`)
   const R = await startRelay()
+  await startEnroll()
+  const EURL = `http://127.0.0.1:${ENROLL_PORT}/onchato/enroll`
   const params = { networkId: 'allowlist-test', dateUTC: new Date().toISOString().slice(0, 10) }
   const a = await softId('a'), b = await softId('b'), x = await softId('x')
   const A = await startSession(a.id, { relays: [R], transport: 'light', params, peerKey: kA } as any)
@@ -74,13 +95,27 @@ try {
   if (X && X.netStatus().connected) throw new Error('a device NOT on the list got a connection')
   if (X && X.netStatus().self !== netPeerId(kX)) throw new Error('the unlisted session did not use its key')
   console.log(`  [ok] a device not on the list is not let in${xIn ? ' (its session started, with no connection)' : ''}`)
+  await X?.close?.()
+
+  // It enrols with the administrator's code, over HTTP, and then gets in.
+  if ((await deviceStatus(EURL, 'allowlist-test', kX))?.listed !== false) throw new Error('the status check did not say "not listed"')
+  const wrong = await enrollDevice(EURL, 'allowlist-test', kX, '00000000')
+  if (wrong.ok) throw new Error('a wrong code enrolled the device')
+  const right = await enrollDevice(EURL, 'allowlist-test', kX, totpAt(SEED, Math.floor(Date.now() / 30000)), 'harness x')
+  if (!right.ok) throw new Error(`the right code did not enrol: ${JSON.stringify(right)}`)
+  if ((await deviceStatus(EURL, 'allowlist-test', kX))?.listed !== true) throw new Error('enrolled, but the status check says not listed')
+  await sleep(2500) // the relay re-reads the list (allowlist.mjs, every 2 s)
+  const X2 = await startSession(x.id, { relays: [R], transport: 'light', params, peerKey: kX } as any)
+  if (!await until(() => X2.netStatus().connected, 15_000)) throw new Error('an enrolled device was still not let in')
+  console.log('  [ok] it enrols with the administrator\'s code (a wrong one refused) and is then let in')
+  await X2.close?.()
 
   // Taken off the list: dropped.
   writeFileSync(LIST, `${netPeerId(kA)} A\n`)
   if (!await until(() => relayLog.includes('is off the list - closing'), 10_000)) throw new Error('a device taken off the list was not dropped')
   console.log('  [ok] a device taken off the list is dropped')
   ok = true
-  await A.close?.(); await B.close?.(); await X?.close?.()
+  await A.close?.(); await B.close?.()
 } catch (e: any) {
   console.log(`[fail] ${e?.message ?? e}`)
 } finally {
