@@ -1131,6 +1131,11 @@ function openSoftModal(name?: string, creating = false) {
   // window — and one careless press away from a confusing error.
   const start = creating ? '' : (name ?? localStorage.getItem(LAST_PROFILE) ?? '')
   ;($('soft-name') as HTMLInputElement).value = start; ($('soft-pass') as HTMLInputElement).value = ''
+  // The browser's password manager fills a writable password field by itself,
+  // with whichever password it holds for this site - another identity's, once
+  // there are two. Read-only until the person touches it: then it offers its
+  // list, and they choose.
+  ;($('soft-pass') as HTMLInputElement).readOnly = true
   softMode(creating)
   // Focus lands where there is still something to type — on the password when
   // the name came back by itself, which is the common case after the first run.
@@ -1192,6 +1197,7 @@ function paintMeter(box: HTMLElement, pw: string, visible: boolean) {
 const paintSoftMeter = () =>
   paintMeter($('pwm-soft'), ($('soft-pass') as HTMLInputElement).value, !$('soft-pass2-wrap').hidden)
 $('soft-pass').addEventListener('input', paintSoftMeter)
+for (const ev of ['pointerdown', 'keydown']) $('soft-pass').addEventListener(ev, () => { ($('soft-pass') as HTMLInputElement).readOnly = false })
 $('pw-new').addEventListener('input', () =>
   paintMeter($('pwm-new'), ($('pw-new') as HTMLInputElement).value, true))
 
