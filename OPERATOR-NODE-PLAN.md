@@ -7,8 +7,8 @@ machine) and the script as a release asset (from 0.7.59). The file store (Kubo o
 prefixer + the sweeper, profile `store`, tested locally) and the network page on
 the home domain (live on blbx.pl) are in. Phase C of operator networks
 (`docs/ARCHITECTURE.md`, "Another operator's network"). The guide an operator
-follows is drafted beside this one in `OPERATOR-GUIDE.md`. When this ships, the
-guide moves to `docs/` and this file goes to `docs/archive/`.
+follows is `docs/OPERATOR.md`. When phase C is done this file goes to
+`docs/archive/`.
 
 First deployment it is built against: a one-node test network "Acme" on
 `blbx.pl` (`acme-blbx`), on a VM that is being prepared.
@@ -170,11 +170,18 @@ The decided shape:
 
 - Join: scan the QR, the app asks for the admin's code, `POST /enroll {code}`
   to a node returns a random device ticket; the node stores its hash.
-- The code: the admin's TOTP (authenticator app; the node holds the secret) or
-  one-time codes issued from the CLI/panel. Open: which, or both.
-- **A 6-digit code is brute-forceable** across a 30 s window unless enrollment
-  is rate-limited hard (per IP and globally) or the code is longer (8 base32
-  characters). Decide with the rate numbers.
+- **The code (the user's decisions, 2026-10-19): TOTP, 8 digits**, from the
+  administrator's authenticator (Microsoft Authenticator; Google Authenticator
+  shows 6 digits only). The admin adds the network's seed once (an
+  `otpauth://...&digits=8` QR the setup prints) and reads codes out to the people
+  joining. Checked **when a device registers**, never on the network page: the
+  page and its join code can stay public and long-lived, TOTP does not protect
+  them and does not need to. Why 8: one guess hits with ~3 in a million at 6
+  digits (the neighbouring 30 s windows accepted), so even 20 failures an hour
+  network-wide reach ~50% over a year; at 8 digits ~0.5%. Registration is still
+  rate-limited per address and network-wide, with a pause after repeated
+  failures. To verify on the admin's phone before release: Microsoft
+  Authenticator shows 8 digits from our QR.
 - Revocation: `onchato-ops access revoke <device>`; tickets have no expiry of
   their own, or a long one with silent renewal - open.
 - Privacy: the operator learns which device is online and when (it already sees

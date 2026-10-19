@@ -13,7 +13,7 @@ relay)
     --local-topics-only --leaf-announce --pick --announce-load \
     --max-connections "$MAX_CONNS" --max-topics "$MAX_TOPICS" --max-topics-per-peer 150 \
     --stats 15 --quiet-msgs --metrics-port 9003
-  # More nodes: the mesh over IPv6 9002 (OPERATOR-GUIDE.md, appendix A).
+  # More nodes: the mesh over IPv6 9002 (docs/OPERATOR.md, appendix A).
   if [ -n "${V6_HOST:-}" ]; then set -- "$@" --v6-port 9002 --v6-host "$V6_HOST"; fi
   if [ -n "${PEERS:-}" ]; then set -- "$@" --peers $PEERS; fi
   if [ -n "${SIBLINGS:-}" ]; then set -- "$@" --siblings "$SIBLINGS"; fi

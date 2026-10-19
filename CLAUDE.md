@@ -14,6 +14,7 @@ carries no history: that is `git log`.
   alternatives, the PQ roadmap, open questions, implementation map.
 - `docs/ARCHITECTURE.md` — product & infrastructure, shipped state + roadmap rows.
 - `docs/THREAT-MODELS.md` — deployment profiles P1–P3, controls vs intentions.
+- `docs/OPERATOR.md` — running another operator's network (the setup script).
 - `docs/AUDIT.md` — the auditor's entry point; `docs/kat/` the known-answer
   vectors; `docs/proverif/` the models (CI: `proverif.yml`); `docs/PROTOCOL.md`
   is a stub pointing at SPEC.
@@ -90,8 +91,9 @@ names its lines.
 - Root `*.md` — `README`, `SECURITY`, `CLI`, `hem_usage` (**which operations
   reach the HSM and what they cost** — read it before adding anything that talks
   to the device), plus design records and plans
-  (`MOBILE-PLAN`, `EMBED-PLAN`, `CLI-PLAN`, `OPERATOR-NODE-PLAN`, `performance`;
-  `OPERATOR-GUIDE` is the operator's guide, a DRAFT until the node image ships)
+  (`MOBILE-PLAN`, `EMBED-PLAN`, `CLI-PLAN`, `OPERATOR-NODE-PLAN`, `performance`);
+  the operator's guide is `docs/OPERATOR.md` (the node image, `node/`, and
+  `node/onchato-setup.sh`, attached to every release)
   — those are records, SPEC wins where they differ;
   superseded plans go to `docs/archive/`.
 

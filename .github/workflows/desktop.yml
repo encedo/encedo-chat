@@ -765,7 +765,7 @@ jobs:
   # artifact of the `android` job in this run; replaced if it is already there.
   # Android red means this job red and a release with no APK - visibly, not by
   # omission. Not for the manifest-only repair (`inputs.tag`).
-  # The operator's setup script (node/onchato-setup.sh, OPERATOR-GUIDE): on the
+  # The operator's setup script (node/onchato-setup.sh, docs/OPERATOR.md): on the
   # release, so `releases/latest/download/onchato-setup.sh` is one fixed URL. Its
   # install default is THIS tag (the first __RELEASE_TAG__ only; --update keeps
   # looking for the newest), so the script, the node image and the apps stay one

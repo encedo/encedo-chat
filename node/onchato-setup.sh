@@ -8,7 +8,7 @@
 #        bash onchato-setup.sh --local-test   on a developer machine: no root, no DNS, no
 #                                             firewall, a self-signed certificate
 #
-# What it installs, and why: OPERATOR-GUIDE.md and OPERATOR-NODE-PLAN.md in the
+# What it installs, and why: docs/OPERATOR.md and OPERATOR-NODE-PLAN.md in the
 # repository. Answers are kept in /etc/onchato/setup.env; data in /var/lib/onchato;
 # code in /opt/onchato. Code is ASCII (repo rule).
 set -euo pipefail
