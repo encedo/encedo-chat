@@ -52,7 +52,34 @@ services:
     image: redis:7.4-alpine
     command: [ "sh", "-c", "exec redis-server --bind 127.0.0.1 --port $${REDIS_PORT:-6379} --protected-mode yes --save '' --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru" ]
 
+  # --- the file store, only with STORE=here (COMPOSE_PROFILES=store in node.env) ---
+  kubo:
+    <<: *node
+    profiles: [ store ]
+    image: ipfs/kubo:v0.34.1
+    command: [ "daemon", "--offline", "--migrate=true" ]
+    volumes:
+      - "kubo-data:/data/ipfs"
+      - "./kubo-init.sh:/container-init.d/001-onchato.sh:ro"
+
+  fput:
+    <<: *node
+    profiles: [ store ]
+    image: onchato-node
+    command: fput
+    depends_on: [ kubo ]
+
+  sweeper:
+    <<: *node
+    profiles: [ store ]
+    image: curlimages/curl:8.11.1
+    entrypoint: [ "sh", "-c", "while :; do sh /ipfs-ttl.sh; sleep 60; done" ]
+    environment: { IPFS_API: "http://127.0.0.1:5001", TTL: "300" }
+    volumes: [ "../infra/ipfs-ttl.sh:/ipfs-ttl.sh:ro" ]
+    depends_on: [ kubo ]
+
 volumes:
+  kubo-data:
   node-data:
   letsencrypt:
   acme-webroot:

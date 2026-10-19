@@ -118,6 +118,27 @@ questions() {
   [ -n "$OPERATOR" ] || die "the organisation's name is needed"
   if [ "$LOCAL_TEST" = 1 ]; then ACME_EMAIL=${ACME_EMAIL:-test@localhost}
   else ask ACME_EMAIL "An e-mail for the certificate (Let's Encrypt)" "${ACME_EMAIL:-}"; fi
+  if [ -z "${FILES:-}" ]; then
+    say ""
+    say "Files and voice notes need a store (text and calls work without one)."
+    say "  1) on this server (about 200 MB of RAM; files are deleted after 5 minutes)"
+    say "  2) an existing store - you give its address, it is tested first"
+    say "  3) none: text only"
+    ask FILES_CHOICE "1, 2 or 3" "1"
+    case "$FILES_CHOICE" in
+      2) ask FILES "The store's address (e.g. https://onchato.com)" "" ;;
+      3) FILES=none ;;
+      *) FILES=here ;;
+    esac
+  fi
+  case "$FILES" in
+    here|none) ;;
+    https://*|http://localhost*|http://127.0.0.1*)
+      FILES=${FILES%/}
+      local why; why=$(store_probe "$FILES") || die "the store at $FILES did not pass: $why - choose another, or 1/3"
+      ok "the store at $FILES takes a file and gives it back the way the apps expect" ;;
+    *) die "a store address must start with https:// (got: $FILES)" ;;
+  esac
   if [ -z "${KEY_MODE:-}" ]; then
     say ""
     say "Where is the network's signing key kept? This cannot be changed later without a new network."
@@ -137,11 +158,34 @@ NODE_HOST='$NODE_HOST'
 OPERATOR='${OPERATOR//\'/}'
 ACME_EMAIL='$ACME_EMAIL'
 KEY_MODE='$KEY_MODE'
+FILES='$FILES'
 DOMAIN='$DOMAIN'
 NETWORK_ID='$NETWORK_ID'
 HOME_URL='$HOME_URL'
 ENV
   chmod 600 "$ETC/setup.env"
+}
+
+# A store is what the apps can use when an upload to <origin>/f answers with a
+# CID, and <origin>/f/<cid> gives the bytes back with the 8-byte prefix in front
+# (the apps strip it when decrypting - infra/fput) and with the CORS and CORP
+# headers a page on another origin needs. Prints the reason when it is not.
+store_probe() {
+  local url=${1%/} k= f got hdr resp cid
+  [ "$LOCAL_TEST" = 1 ] && k=-k
+  f=$(mktemp); got=$(mktemp); head -c 64 /dev/urandom > "$f"
+  resp=$(curl -fsS $k -m 30 -H "Origin: $APP_ORIGIN" -F "file=@$f;filename=b;type=application/octet-stream" "$url/f" 2>/dev/null) \
+    || { rm -f "$f" "$got"; echo "an upload to $url/f was refused"; return 1; }
+  cid=$(printf '%s' "$resp" | grep -o '"Hash":"[^"]*"' | cut -d'"' -f4)
+  [ -n "$cid" ] || { rm -f "$f" "$got"; echo "the upload answered without a CID"; return 1; }
+  hdr=$(curl -fsS $k -m 30 -D - -o "$got" -H "Origin: $APP_ORIGIN" "$url/f/$cid" 2>/dev/null) \
+    || { rm -f "$f" "$got"; echo "the download of $cid was refused"; return 1; }
+  printf '%s' "$hdr" | grep -qi '^access-control-allow-origin: \*' || { rm -f "$f" "$got"; echo "the download has no CORS header"; return 1; }
+  printf '%s' "$hdr" | grep -qi '^cross-origin-resource-policy: cross-origin' || { rm -f "$f" "$got"; echo "the download has no Cross-Origin-Resource-Policy"; return 1; }
+  if [ "$(head -c 4 "$got")" != ECF1 ] || ! tail -c +9 "$got" | cmp -s - "$f"; then
+    rm -f "$f" "$got"; echo "the store does not give the file back with the prefix the apps strip"; return 1
+  fi
+  rm -f "$f" "$got"
 }
 
 dns_check() {
@@ -223,6 +267,7 @@ REDIS_PORT=${REDIS_PORT:-6379}
 $( [ "$LOCAL_TEST" = 1 ] && echo CERT_MODE=self )
 $( [ "$LOCAL_TEST" = 0 ] && [ -n "${CERT_MODE:-}" ] && echo "CERT_MODE=$CERT_MODE" )
 $( [ -n "${HOME_SITE:-}" ] && echo "HOME_SITE=$HOME_SITE" )
+$( [ "${FILES:-}" = here ] && printf 'STORE=here\nCOMPOSE_PROFILES=store' )
 $( [ -n "${PEERS:-}" ] && echo "PEERS=$PEERS" )
 $( [ -n "${SIBLINGS:-}" ] && echo "SIBLINGS=$SIBLINGS" )
 $( [ -n "${V6_HOST:-}" ] && echo "V6_HOST=$V6_HOST" )
@@ -254,12 +299,15 @@ make_key() {
 }
 
 write_profile() {
-  export NETWORK_ID OPERATOR NODE_HOST HOME_URL APP_ORIGIN PEER_ID
-  docker run --rm --user "$(id -u):$(id -g)" -v "$DATA:/data" -e NETWORK_ID -e OPERATOR -e NODE_HOST -e HOME_URL -e APP_ORIGIN -e PEER_ID \
+  # The store the apps upload to: this node (here; and with none, where /f
+  # simply answers 404 - the profile needs one), or the one tested above.
+  case "${FILES:-here}" in here|none) STORE_ORIGIN="https://$NODE_HOST" ;; *) STORE_ORIGIN=$FILES ;; esac
+  export NETWORK_ID OPERATOR NODE_HOST HOME_URL APP_ORIGIN PEER_ID STORE_ORIGIN
+  docker run --rm --user "$(id -u):$(id -g)" -v "$DATA:/data" -e NETWORK_ID -e OPERATOR -e NODE_HOST -e HOME_URL -e APP_ORIGIN -e PEER_ID -e STORE_ORIGIN \
     --entrypoint node onchato-ops -e '
     const fs = require("fs"), e = process.env
     const profile = { v: 1, networkId: e.NETWORK_ID, operator: e.OPERATOR,
-      app: { origin: e.APP_ORIGIN, path: "/" }, stores: ["https://" + e.NODE_HOST],
+      app: { origin: e.APP_ORIGIN, path: "/" }, stores: [e.STORE_ORIGIN],
       profileUrls: ["https://" + e.NODE_HOST + "/onchato/network.json"],
       feedback: null, home: e.HOME_URL, policy: { transport: "node-only" } }
     const nodes = { v: 1, nodes: [{ name: e.NODE_HOST, addr: "/dns4/" + e.NODE_HOST + "/tcp/443/wss/http-path/%2Frelay/p2p/" + e.PEER_ID }] }
@@ -320,6 +368,13 @@ checks() {
     check "the network profile is served, signed, with CORS" "ops --network host -- network check network.json --online"
     ops -- network check network.json 2>/dev/null | grep -E 'valid|WARNING' || true
   else printf '[fail] no network profile yet\n'; bad=1; fi
+  case "${FILES:-}" in
+    here) local j; for j in $(seq 1 20); do store_probe "https://$NODE_HOST" >/dev/null && break; sleep 3; done
+          check "files: the store on this node takes a file and gives it back prefixed" "store_probe https://$NODE_HOST" ;;
+    none) warn "files: no store - text and calls only (re-run and choose 1 or 2 to add one)" ;;
+    '') ;;
+    *)    check "files: the store at $FILES still works" "store_probe $FILES" ;;
+  esac
   if [ -n "${HOME_SITE:-}" ]; then
     local i; for i in $(seq 1 30); do curl -fs $k --max-time 5 "https://$HOME_SITE/join.png" >/dev/null 2>&1 && break; sleep 4; done
     check "the network page https://$HOME_SITE/ is served" "curl -fs $k --max-time 5 https://$HOME_SITE/ | grep -q onchato-net="

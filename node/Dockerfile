@@ -1,4 +1,4 @@
-# onchato-node - one image for a node's relay and STUN (OPERATOR-NODE-PLAN.md).
+# onchato-node - one image for a node's relay, STUN and upload prefixer (OPERATOR-NODE-PLAN.md).
 # Built on the server from a release tag, no registry; the context is the repo
 # root (the relay, STUN and the geoip matcher live in different directories):
 #
@@ -17,6 +17,9 @@ RUN cd relay && npm ci --omit=dev --no-audit --no-fund && npm cache clean --forc
 COPY relay/*.mjs relay/
 COPY infra/stun/stun.mjs infra/stun/
 COPY infra/geoip/geoip.mjs infra/geoip/
+# The file store's upload prefixer (STORE=here): the same service as onchato.com's.
+COPY infra/fput/fput.mjs infra/fput/prefix.mjs infra/fput/
+COPY impl/lib/fileenvelope.ts impl/lib/
 COPY node/entry.sh /usr/local/bin/onchato-node
 # Readable by the `node` user whatever umask the server cloned the code with
 # (a hardened 077 left the relay unable to open relay.mjs: EACCES).

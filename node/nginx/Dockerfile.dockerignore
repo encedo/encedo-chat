@@ -4,3 +4,5 @@
 !node/nginx/onchato-extra-profile.conf
 !node/nginx/start.sh
 !node/nginx/home-site.conf
+!node/nginx/onchato-extra-store.conf
+!node/nginx/store-limits.conf

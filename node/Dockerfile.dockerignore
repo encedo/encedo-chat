@@ -6,3 +6,6 @@
 !infra/stun/stun.mjs
 !infra/geoip/geoip.mjs
 !node/entry.sh
+!infra/fput/fput.mjs
+!infra/fput/prefix.mjs
+!impl/lib/fileenvelope.ts

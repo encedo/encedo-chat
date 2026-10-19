@@ -1,5 +1,5 @@
 #!/bin/sh
-# onchato-node entry: `relay` or `stun`, flags rendered from the environment
+# onchato-node entry: `relay`, `stun` or `fput`, flags rendered from the environment
 # (node.env, read by compose). The relay flags are the ones our nodes run
 # (relay/onchato-relay.service); only what differs per node comes from env.
 set -eu
@@ -29,6 +29,13 @@ stun)
   export GEO_LIST="${GEO_LIST:-/data/geoip/blocked-cidrs.txt,/data/geoip/abuse-cidrs.txt}"
   cd /app/infra/stun
   exec node stun.mjs
+  ;;
+fput)
+  # The upload prefixer in front of the local Kubo (STORE=here): eight bytes
+  # before every upload, the sweeper's ledger name (infra/fput/README.md).
+  export IPFS_RPC="http://127.0.0.1:${KUBO_API_PORT:-5001}" HOST=127.0.0.1 PORT=9202
+  cd /app/infra/fput
+  exec node fput.mjs
   ;;
 *)
   exec "$@"

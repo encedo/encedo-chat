@@ -1,11 +1,10 @@
 # Running your own onchato network
 
-> **DRAFT (2026-10-18).** The setup script and the node image are built and
-> pass end to end on a test machine (`node/onchato-setup.sh --local-test`), but
-> not yet on a real server, and the script is **not yet attached to releases**:
-> until it is, take it from the repository (`node/onchato-setup.sh`). The file
-> store is not in the image yet. The guide is checked step by step against a
-> real one-node network (`acme-blbx` on `blbx.pl`) before it moves to `docs/`.
+> **DRAFT (2026-10-19).** The setup script and the node image run on a real
+> server (the test network `blbx.pl`, set up from the v0.7.58 tag), but the
+> script is **not yet attached to releases**: until it is, take it from the
+> repository (`node/onchato-setup.sh`, raw from a release tag). The guide moves
+> to `docs/` once it has been followed step by step.
 
 Your people keep using our apps (desktop, Android, iOS, or the web at
 `app.onchato.com`). You run the network under them: after they join it, every
@@ -35,7 +34,7 @@ Then it asks:
 | The server's name | `n1.blbx.pl` | where the apps connect |
 | Your organisation's name | `Acme (test)` | what people see when they join |
 | An e-mail for the certificate | `it@blbx.pl` | Let's Encrypt writes there before a certificate lapses |
-| Share files and voice notes? | yes | adds the file store on this server |
+| Files and voice notes? | 1 | 1: a store on this server (deleted after 5 minutes); 2: an existing store you name (tested first, e.g. https://onchato.com); 3: none, text only |
 | Where is the signing key kept? | on this server | see "The key" below; then the passphrase, twice |
 
 It sets everything up, checks it from outside, and ends with:

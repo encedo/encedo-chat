@@ -1,9 +1,11 @@
 # Operator node plan: the Docker node image (C4), bs-setup for any domain, access tiers
 
-Status (2026-10-18): **built and tested locally** - the relay's `--key-file`,
+Status (2026-10-19): **built, tested locally and on a real server (blbx.pl)** - the relay's `--key-file`,
 the image + compose (`node/`), the setup script (`node/onchato-setup.sh`,
 `--local-test` passes end to end), the passphrase key. Not yet: `bs-setup.sh
---domain`, the file store in the image, the script as a release asset. Phase C of operator networks
+--domain`, the script as a release asset. The file store (Kubo offline + the
+prefixer + the sweeper, profile `store`, tested locally) and the network page on
+the home domain (live on blbx.pl) are in. Phase C of operator networks
 (`docs/ARCHITECTURE.md`, "Another operator's network"). The guide an operator
 follows is drafted beside this one in `OPERATOR-GUIDE.md`. When this ships, the
 guide moves to `docs/` and this file goes to `docs/archive/`.

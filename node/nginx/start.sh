@@ -19,6 +19,15 @@ cp /etc/onchato/relay-limits.conf /etc/nginx/conf.d/relay-limits.conf
 # site includes the snippet, so it gets an empty one.
 [ -f /etc/nginx/snippets/onchato-geoblock.conf ] || : > /etc/nginx/snippets/onchato-geoblock.conf
 
+# The file store on this node (STORE=here): /f and /f/<cid> inside the node's
+# site, and their limit zones at http level. Removed when the store is not here.
+if [ "${STORE:-}" = here ]; then
+  cp /etc/onchato/onchato-extra-store.conf /etc/nginx/snippets/onchato-extra-store.conf
+  cp /etc/onchato/store-limits.conf /etc/nginx/conf.d/store-limits.conf
+else
+  rm -f /etc/nginx/snippets/onchato-extra-store.conf /etc/nginx/conf.d/store-limits.conf
+fi
+
 render() {
   if cert "$NODE_HOST"; then
     sed "s/__HOST__/$NODE_HOST/g; s#__HOME__#$HOME_URL#g" /etc/onchato/relay-node.conf > "$SITE"
