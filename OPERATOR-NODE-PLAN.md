@@ -187,6 +187,38 @@ The decided shape:
 - Privacy: the operator learns which device is online and when (it already sees
   the address). Write it into `docs/THREAT-MODELS.md` when built.
 
+### B as chosen (2026-10-19): a stable PeerId on an allowlist
+
+The user's idea, after a bearer token was rejected for breaking "no tracking":
+in a network whose profile says `policy.access: "allowlist"`, each identity
+keeps its own libp2p key (sealed with its profile), so its PeerId is stable;
+the node lets in only PeerIds on its list. A device joins once, with the
+administrator's TOTP code (8 digits), proving it holds the key; revoking is
+taking it off the list. It is tracking, but explicit and bounded: only with that
+policy (never the public network, never an open one), said on the consent
+screen, a pseudonym (a key unrelated to the identity key), one key per identity
+per network. Proof of possession is the Noise handshake itself - no bearer
+secret on the wire, in a URL or in a log.
+
+**Step 0, done 2026-10-19** (a throwaway probe, libp2p 2.2 as pinned):
+- `connectionGater.denyInboundEncryptedConnection(peerId)` refuses a peer off
+  the list right after the Noise handshake; a listed one connects;
+- a stored key (`privateKeyToProtobuf`/`privateKeyFromProtobuf`) gives the same
+  PeerId on every start;
+- taking a peer off the list and closing its connections drops it within a
+  second.
+- Found: the refused client sees only a generic error (`MuxerUnavailableError`,
+  unexpected end of input), indistinguishable from a network fault. The app
+  needs another way to learn "not on the list" (e.g. a signed status check at
+  the enrol endpoint) so it says so and stops retrying.
+- TOTP: the implementation matches RFC 6238's 8-digit SHA-1 vectors; whether
+  Microsoft Authenticator shows 8 digits from `digits=8` is checked on the
+  administrator's phone.
+
+The estimate and order (two releases: the gate, the profile field and the
+stable key first, inert; then enrolment, screens, setup and dashboard) are in
+the session notes of 2026-10-19; about 25-35 hours.
+
 ### C (to refine)
 
 Desktop signs in through OIDC (PKCE in the browser; the system browser + deep
