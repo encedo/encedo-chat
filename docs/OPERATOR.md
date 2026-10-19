@@ -136,6 +136,34 @@ Planned (`OPERATOR-NODE-PLAN.md`, section 4):
   administrator's authenticator app, checked when a device registers.
 - **Tier C, for larger organisations:** sign-in through your directory (OIDC).
 
+## The dashboard
+
+Every node runs a read-only dashboard that listens on its own loopback only,
+so nothing new faces the internet. Open it through SSH (the port on the left is
+any free port of yours):
+
+```bash
+ssh -L 8088:127.0.0.1:8088 root@chat.example.com     # then open http://localhost:8088
+```
+
+It shows:
+
+- the node: connections and topics against their limits, CPU, messages and
+  refusals per second, the certificate, the relay's version, and whether each
+  service answers (relay, STUN, nginx, the file store, Redis);
+- 24 hours of connections (with statistics on);
+- the network profile: version, expiry, fingerprint, and every address it is
+  served at, with its HTTP status and CORS header;
+- the file store, the disk and the memory.
+
+It holds no key and cannot change anything. A network of several nodes can be
+watched from one place by running it on your own machine, over SSH to every
+node the profile lists:
+
+```bash
+node node/dash/dash.mjs https://chat.example.com/onchato/network.json   # then http://localhost:8088
+```
+
 ## Keeping it running
 
 | command | what it does |
@@ -181,6 +209,7 @@ identity for your network; their existing one is untouched.
 | network page | `https://<home domain>/`, when that domain points here | 443 |
 | file store (choice 1) | Kubo (offline) + the upload service + the sweeper | 443 at `/f` only |
 | statistics (optional) | Redis, 30 days, loopback | no |
+| dashboard | container, 127.0.0.1:8088 (SSH tunnel) | no |
 
 On the test VPS, checked from outside: 5001, 4001, 8089, 9202, 6379, 9001 and
 9003 are closed. Everything lives in `/opt/onchato` (code, built on the server
