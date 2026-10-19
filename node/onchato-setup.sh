@@ -61,6 +61,19 @@ preflight() {
   if ss -lun "sport = :3478" | grep -q 3478 && ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^onchato-stun'; then
     die "port 3478/udp is already in use (STUN needs it)"
   fi
+  # The system first: a fresh VPS image is often weeks behind, and a node faces
+  # the internet. Upgraded without questions; a needed reboot is offered at the end.
+  if [ "$ID" = ubuntu ] || [ "$ID" = debian ]; then
+    say "Updating the system (apt upgrade)..."
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq \
+      && DEBIAN_FRONTEND=noninteractive apt-get -y -qq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade >/dev/null \
+      || die "apt upgrade failed - run it by hand and look at the error"
+    ok "the system is up to date"
+  fi
+  if sshd -T 2>/dev/null | grep -qx 'passwordauthentication yes'; then
+    warn "SSH accepts passwords on this machine (some VPS images ship that way). Keys only is safer:"
+    warn "  printf 'PasswordAuthentication no\nPermitRootLogin prohibit-password\n' > /etc/ssh/sshd_config.d/00-local.conf && systemctl reload ssh"
+  fi
   # buildx too: without it Docker falls back to the legacy builder, which ignores
   # the per-image node/**/Dockerfile.dockerignore and takes the CLI image's root
   # .dockerignore instead (found on bs4: the ops image missed its files).
@@ -68,7 +81,7 @@ preflight() {
     case "$ID" in
       ubuntu)
         say "Installing Docker from Ubuntu's own packages..."
-        apt-get update -qq && apt-get install -y -qq docker.io docker-compose-v2 docker-buildx git curl >/dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io docker-compose-v2 docker-buildx git curl >/dev/null
         systemctl enable --now docker >/dev/null ;;
       *)
         die "Docker with the compose plugin is needed and this script installs it only on Ubuntu.
@@ -187,6 +200,9 @@ HOME_URL=$HOME_URL
 MAX_CONNS=${MAX_CONNS:-400}
 REDIS_PORT=${REDIS_PORT:-6379}
 $( [ "$LOCAL_TEST" = 1 ] && echo CERT_MODE=self )
+$( [ -n "${PEERS:-}" ] && echo "PEERS=$PEERS" )
+$( [ -n "${SIBLINGS:-}" ] && echo "SIBLINGS=$SIBLINGS" )
+$( [ -n "${V6_HOST:-}" ] && echo "V6_HOST=$V6_HOST" )
 ENV
   say "Building and starting the node (the first time takes a few minutes)..."
   compose up -d --build --quiet-pull >/dev/null 2>&1 || { compose up -d --build; die "the node did not start"; }
@@ -292,3 +308,9 @@ case "$MODE" in
     say "A renewed profile has a new hash: print the new QR code above (the old one is refused)." ;;
 esac
 [ "$bad" = 0 ] || { say ""; die "some checks failed - see above"; }
+if [ "$LOCAL_TEST" = 0 ] && [ -f /var/run/reboot-required ]; then
+  say ""
+  warn "the system update needs a reboot (a new kernel or library). The node comes back by itself."
+  if [ -t 0 ]; then read -r -p "Reboot now? [y/N] " r || true; case "$r" in y|Y|yes) reboot ;; esac
+  else say "Reboot when convenient: sudo reboot"; fi
+fi
