@@ -104,3 +104,22 @@ test('a passphrase key: weak refused, the same passphrase signs, a wrong one nev
   const env = openEnvelope(readFileSync(join(d, 'n.json'), 'utf8'), Date.now())
   assert.ok(env.ok && env.profile.rootPub === kdf.pub, 'signed under another key than the file names')
 }))
+
+test('access: a seed (never replaced silently), the list, a label, revoking one device, unlocking', () => withDir((d) => {
+  const A = '12D3KooWCFSDy7y2BPVXNHbXArZP711UGubaUfpb3inMGPwJmCxb', B = '12D3KooWETFuqVqjexJQWc63EATd84gCigZLzw1ZX8FKvRLjgHLt'
+  const acc = (...a: string[]) => ops(d, 'access', ...a, '--dir', d)
+  assert.equal(acc('seed').status, 0)
+  const seed = readFileSync(join(d, 'totp.seed'), 'utf8')
+  assert.match(seed.trim(), /^[A-Z2-7]{32}$/)
+  acc('seed'); assert.equal(readFileSync(join(d, 'totp.seed'), 'utf8'), seed, 'a second "seed" replaced the seed')
+  assert.match(acc('qr', '--label', 'Acme').stdout, /8 digits/)
+  writeFileSync(join(d, 'peers.txt'), `${A} Jan # enrolled x\n${B} # enrolled y\n`)
+  writeFileSync(join(d, 'enroll.locked'), 'now\n')
+  assert.match(acc('list').stdout, /2 device\(s\)[\s\S]*LOCKED/)
+  assert.equal(acc('label', B.slice(-8), 'Ewa', 'laptop').status, 0)
+  assert.equal(acc('revoke', A.slice(-8)).status, 0)
+  const after = readFileSync(join(d, 'peers.txt'), 'utf8')
+  assert.ok(!after.includes(A) && after.includes(`${B} Ewa laptop # enrolled y`), after)
+  assert.notEqual(acc('revoke', 'zzzzzzzz').status, 0, 'revoking an unknown device succeeded')
+  acc('unlock'); assert.doesNotMatch(acc('list').stdout, /LOCKED/)
+}))

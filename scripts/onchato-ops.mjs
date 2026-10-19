@@ -25,10 +25,18 @@
  *       link) what each profileUrl serves, including the CORS header the app
  *       needs to fetch it
  *
+ *   access seed|qr|list|revoke|label|unlock [--dir /data/allow]
+ *       a network that admits devices by list (relay/enroll.mjs): the TOTP seed and
+ *       the QR for the administrator's authenticator (8 digits - Google
+ *       Authenticator, Aegis, 2FAS; not Microsoft's, which shows 6), the devices on
+ *       the list, taking one off, a note on one, and unlocking enrolment after
+ *       too many wrong codes. On a node: docker run ... onchato-ops access ...
+ *
  * The release scripts stay where they are (CLAUDE.md and relay/DEPLOY.md call
  * them by name); this routes to them.
  */
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync, renameSync, unlinkSync, mkdirSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { deflateSync } from 'node:zlib'
 import { execFileSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
@@ -43,7 +51,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const [group, cmd, ...args] = process.argv.slice(2)
 const has = (n) => args.includes(n)
 const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : d }
-const WITH_VALUE = ['--png', '--slot', '--module', '--file', '--passphrase', '--passphrase-new', '--sign-passphrase', '--sign', '--nodes', '--seq', '--days', '--out', '--svg', '--root-pub']
+const WITH_VALUE = ['--dir', '--label', '--png', '--slot', '--module', '--file', '--passphrase', '--passphrase-new', '--sign-passphrase', '--sign', '--nodes', '--seq', '--days', '--out', '--svg', '--root-pub']
 const positional = args.filter((a, i) => !a.startsWith('--') && !(i > 0 && WITH_VALUE.includes(args[i - 1])))
 const fail = (m) => { console.error(`[fail] ${m}`); process.exit(1) }
 const DAY = 86_400_000
@@ -55,7 +63,8 @@ const USAGE = `usage:
   onchato-ops network key   --yubikey [--slot 9c] | --file <keyfile> | --passphrase[-new] <root.kdf>
   onchato-ops network sign  <profile.json> --sign-yubikey [--slot 9c] | --sign <keyfile> | --sign-passphrase <root.kdf> [--nodes nodes.json] [--seq N] [--days 120] [--out network.json]
   onchato-ops network link  <https://.../network.json> <network.json> [--svg qr.svg] [--png qr.png]
-  onchato-ops network check <network.json | link> [--online]`
+  onchato-ops network check <network.json | link> [--online]
+  onchato-ops access seed|qr [--label <name>] [--png f]|list|revoke <peer>|label <peer> <text>|unlock [--dir /data/allow]`
 
 // ---- release: the existing scripts ------------------------------------------
 if (group === 'release') {
@@ -64,6 +73,61 @@ if (group === 'release') {
   try { execFileSync(process.execPath, [join(HERE, script), ...args], { stdio: 'inherit' }) } catch (e) { process.exit(e.status ?? 1) }
   process.exit(0)
 }
+// ---- access: devices admitted by list --------------------------------------------
+if (group === 'access') {
+  const dir = opt('--dir', '/data/allow')
+  const listFile = `${dir}/peers.txt`, seedFile = `${dir}/totp.seed`
+  const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+  const b32 = (buf) => { let bits = '', out = ''; for (const x of buf) bits += x.toString(2).padStart(8, '0'); for (let i = 0; i + 5 <= bits.length; i += 5) out += B32[parseInt(bits.slice(i, i + 5), 2)]; return out }
+  const lines = () => { try { return readFileSync(listFile, 'utf8').split('\n') } catch { return [] } }
+  const entries = () => lines().map((l, i) => { const m = l.match(/^\s*(12D3KooW\S+)\s*([^#]*?)\s*(?:#\s*(.*))?$/); return m ? { i, id: m[1], label: m[2], note: m[3] ?? '' } : null }).filter(Boolean)
+  const write = (ls) => { mkdirSync(dir, { recursive: true }); writeFileSync(listFile + '.tmp', ls.join('\n').replace(/\n*$/, '\n')); renameSync(listFile + '.tmp', listFile) }
+  const pick = (q) => {
+    const hits = entries().filter((e) => e.id === q || (q.length >= 6 && e.id.endsWith(q)))
+    if (hits.length !== 1) fail(hits.length ? `"${q}" matches ${hits.length} devices - give more of the PeerId` : `no device "${q}" on the list`)
+    return hits[0]
+  }
+  const uri = (label) => `otpauth://totp/${encodeURIComponent('onchato:' + label)}?secret=${readFileSync(seedFile, 'utf8').trim()}&issuer=onchato&algorithm=SHA1&digits=8&period=30`
+  switch (cmd) {
+    case 'seed':
+      if (existsSync(seedFile) && !has('--new')) { console.log(`[ok] ${seedFile} exists (--new replaces it: every authenticator must then scan again)`); process.exit(0) }
+      mkdirSync(dir, { recursive: true }); writeFileSync(seedFile, b32(randomBytes(20)) + '\n', { mode: 0o600 })
+      console.log(`[ok] a new enrolment seed in ${seedFile}`); process.exit(0)
+    case 'qr': {
+      if (!existsSync(seedFile)) fail(`no seed in ${dir} (access seed)`)
+      const u = uri(opt('--label', 'network'))
+      console.log('Scan with an authenticator that shows 8 digits (Google Authenticator, Aegis, 2FAS - not Microsoft Authenticator):')
+      console.log(qrForTerminal(u))
+      if (opt('--png')) { writeFileSync(opt('--png'), qrPng(u, 8)); console.log(`[ok] the same as a picture: ${opt('--png')}`) }
+      process.exit(0)
+    }
+    case 'list': {
+      const es = entries()
+      console.log(`${es.length} device(s) on the list (${listFile})`)
+      for (const e of es) console.log(`  ${e.id.slice(-12)}  ${(e.label || '-').padEnd(24)} ${e.note}`)
+      if (existsSync(`${dir}/enroll.locked`)) console.log(`WARNING: enrolment is LOCKED since ${readFileSync(`${dir}/enroll.locked`, 'utf8').trim()} - access unlock`)
+      let f = 0; try { f = Number(readFileSync(`${dir}/enroll.failures`, 'utf8')) || 0 } catch {}
+      if (f) console.log(`${f} wrong code(s) since the last unlock`)
+      process.exit(0)
+    }
+    case 'revoke': {
+      const e = pick(positional[0] ?? fail('which device? (access list)'))
+      const ls = lines(); ls.splice(e.i, 1); write(ls)
+      console.log(`[ok] ${e.id.slice(-12)} ${e.label} taken off the list - the node drops it within seconds`); process.exit(0)
+    }
+    case 'label': {
+      const e = pick(positional[0] ?? fail('which device?'))
+      const text = positional.slice(1).join(' ').replace(/[^\p{L}\p{N} ._,()-]/gu, '').slice(0, 60)
+      const ls = lines(); ls[e.i] = `${e.id} ${text}${e.note ? ' # ' + e.note : ''}`; write(ls)
+      console.log(`[ok] ${e.id.slice(-12)} is now "${text}"`); process.exit(0)
+    }
+    case 'unlock':
+      for (const f of ['enroll.locked', 'enroll.failures']) { try { unlinkSync(`${dir}/${f}`) } catch {} }
+      console.log('[ok] enrolment unlocked, the wrong-code count reset'); process.exit(0)
+    default: fail(`unknown access command ${cmd ?? ''}\n${USAGE}`)
+  }
+}
+
 if (group !== 'network') { console.error(USAGE); process.exit(group ? 1 : 0) }
 
 /** What an app shows a person on import, plus what an operator wants to see. */
