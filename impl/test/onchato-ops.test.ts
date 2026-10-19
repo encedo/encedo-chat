@@ -6,6 +6,8 @@ import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { generateKeyPairSync } from 'node:crypto'
+import { inflateSync } from 'node:zlib'
+import { qrMatrix } from '../lib/qr.ts'
 import { openEnvelope, rootPubFor } from '../lib/netprofile.ts'
 // @ts-ignore - plain .mjs, no types
 import { signerFrom, newKeyFile } from '../../scripts/lib/signer.mjs'
@@ -65,10 +67,23 @@ test('network link prints a pointer the app parses, and a QR code', () => withDi
   writeFileSync(join(d, 'p.json'), JSON.stringify(PROFILE))
   ops(d, 'network', 'key', '--file', 'root.key')
   ops(d, 'network', 'sign', 'p.json', '--nodes', NODES, '--sign', 'root.key', '--out', 'n.json')
-  const r = ops(d, 'network', 'link', 'https://acme.example/onchato/network.json', 'n.json', '--svg', 'q.svg')
+  const r = ops(d, 'network', 'link', 'https://acme.example/onchato/network.json', 'n.json', '--svg', 'q.svg', '--png', 'q.png')
   assert.equal(r.status, 0, r.stderr)
-  assert.match(r.stdout.split('\n')[0], /^https:\/\/acme\.example\/onchato\/network\.json#onchato-net=b[a-z2-7]{50,}$/)
+  const link = r.stdout.split('\n')[0]
+  assert.match(link, /^https:\/\/acme\.example\/onchato\/network\.json#onchato-net=b[a-z2-7]{50,}$/)
   assert.match(readFileSync(join(d, 'q.svg'), 'utf8'), /^<svg/)
+  // The PNG: a real one, the size of the matrix + quiet zone at 10 px, the same
+  // modules as the matrix (top-left finder dark, quiet zone light).
+  const png = readFileSync(join(d, 'q.png'))
+  assert.equal(png.subarray(1, 4).toString(), 'PNG')
+  const w = png.readUInt32BE(16), n = qrMatrix(link).length
+  assert.equal(w, (n + 8) * 10)
+  const idat = png.indexOf('IDAT'), len = png.readUInt32BE(idat - 4)
+  const px = inflateSync(png.subarray(idat + 4, idat + 4 + len))
+  const at = (x: number, y: number) => px[y * (w + 1) + 1 + x]
+  assert.equal(at(5, 5), 255, 'the quiet zone is not light')
+  assert.equal(at(45, 45), 0, 'the finder corner is not dark')
+  assert.equal(at(40 + 15, 40 + 15), qrMatrix(link)[1][1] ? 0 : 255)
 }))
 
 test('a passphrase key: weak refused, the same passphrase signs, a wrong one never does, nothing secret on disk', () => withDir((d) => {

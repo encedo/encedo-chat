@@ -17,7 +17,7 @@
  *       checks the result the way an app will, signs the exact bytes, and opens
  *       the written envelope again before saying ok. Without --seq: one above
  *       the --out file's when it is there under the same key, else 1.
- *   network link <https://.../network.json> <network.json> [--svg qr.svg]
+ *   network link <https://.../network.json> <network.json> [--svg qr.svg] [--png qr.png]
  *       the pointer an app scans (the URL + the file's CID) and its QR code -
  *       the full envelope does not fit a QR code, the pointer does
  *   network check <network.json | pointer link> [--online]
@@ -29,6 +29,7 @@
  * them by name); this routes to them.
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { deflateSync } from 'node:zlib'
 import { execFileSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -42,7 +43,7 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 const [group, cmd, ...args] = process.argv.slice(2)
 const has = (n) => args.includes(n)
 const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] && !args[i + 1].startsWith('--') ? args[i + 1] : d }
-const WITH_VALUE = ['--slot', '--module', '--file', '--passphrase', '--passphrase-new', '--sign-passphrase', '--sign', '--nodes', '--seq', '--days', '--out', '--svg', '--root-pub']
+const WITH_VALUE = ['--png', '--slot', '--module', '--file', '--passphrase', '--passphrase-new', '--sign-passphrase', '--sign', '--nodes', '--seq', '--days', '--out', '--svg', '--root-pub']
 const positional = args.filter((a, i) => !a.startsWith('--') && !(i > 0 && WITH_VALUE.includes(args[i - 1])))
 const fail = (m) => { console.error(`[fail] ${m}`); process.exit(1) }
 const DAY = 86_400_000
@@ -53,7 +54,7 @@ const USAGE = `usage:
   onchato-ops release approve-web <tag> [approve-web.mjs options]
   onchato-ops network key   --yubikey [--slot 9c] | --file <keyfile> | --passphrase[-new] <root.kdf>
   onchato-ops network sign  <profile.json> --sign-yubikey [--slot 9c] | --sign <keyfile> | --sign-passphrase <root.kdf> [--nodes nodes.json] [--seq N] [--days 120] [--out network.json]
-  onchato-ops network link  <https://.../network.json> <network.json> [--svg qr.svg]
+  onchato-ops network link  <https://.../network.json> <network.json> [--svg qr.svg] [--png qr.png]
   onchato-ops network check <network.json | link> [--online]`
 
 // ---- release: the existing scripts ------------------------------------------
@@ -87,6 +88,28 @@ function openOrFail(text, label) {
   const r = openEnvelope(text, Date.now(), undefined, { allowExpired: true })
   if (!r.ok) fail(`${label}: refused (${r.why}${r.detail ? `: ${r.detail}` : ''})`)
   return r
+}
+
+/** A QR code as a grayscale PNG (an SVG does not open everywhere - a phone's
+ *  gallery, some chat apps). Quiet zone of 4 modules, `scale` pixels each. */
+function qrPng(text, scale = 10) {
+  const m = qrMatrix(text), q = 4, n = m.length, W = (n + 2 * q) * scale
+  const raw = Buffer.alloc((W + 1) * W)
+  for (let y = 0; y < W; y++) {
+    const my = Math.floor(y / scale) - q
+    for (let x = 0; x < W; x++) {
+      const mx = Math.floor(x / scale) - q
+      raw[y * (W + 1) + 1 + x] = my >= 0 && mx >= 0 && my < n && mx < n && m[my][mx] === 1 ? 0 : 255
+    }
+  }
+  const crc = (b) => { let c = ~0; for (const v of b) { c ^= v; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)) } return ~c >>> 0 }
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length)
+    const body = Buffer.concat([Buffer.from(type), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(body))
+    return Buffer.concat([len, body, c])
+  }
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(W, 0); ihdr.writeUInt32BE(W, 4); ihdr[8] = 8; ihdr[9] = 0
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))])
 }
 
 // ---- network key -----------------------------------------------------------
@@ -179,6 +202,7 @@ if (cmd === 'link') {
   try { qrMatrix(link) } catch { fail(`the link is ${link.length} bytes - too long for a QR code; use a shorter URL`) }
   console.log(qrForTerminal(link))
   if (opt('--svg')) { writeFileSync(opt('--svg'), qrSvg(link, { size: 512 })); console.log(`[ok] QR code in ${opt('--svg')}`) }
+  if (opt('--png')) { writeFileSync(opt('--png'), qrPng(link)); console.log(`[ok] QR code in ${opt('--png')}`) }
   console.log('The link names the file\'s exact bytes: re-signing changes it, so print a new code after every upload.')
   process.exit(0)
 }
