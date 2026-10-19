@@ -1,6 +1,7 @@
 #!/bin/sh
 # The certificate for NODE_HOST: issued over HTTP-01 through nginx's webroot,
-# then `certbot renew` twice a day. CERT_MODE=self makes a self-signed one
+# then `certbot renew` twice a day. CERT_MODE=staging uses the test CA;
+# CERT_MODE=self makes a self-signed one
 # instead (a test box with no public DNS); the apps refuse it, curl -k does not.
 set -eu
 : "${NODE_HOST:?NODE_HOST is not set (node.env)}"
@@ -30,7 +31,10 @@ PY
 fi
 : "${ACME_EMAIL:?ACME_EMAIL is not set (node.env)}"
 until [ -f "$LIVE/fullchain.pem" ]; do
+  # CERT_MODE=staging: Let's Encrypt's test CA - for a machine rebuilt again and
+  # again (5 real certificates per name per week); apps refuse it, curl -k does not.
   certbot certonly --webroot -w /var/www/html -d "$NODE_HOST" --email "$ACME_EMAIL" --agree-tos --non-interactive --no-eff-email \
+    $( [ "${CERT_MODE:-}" = staging ] && echo --staging ) \
     || { echo "onchato-certbot: no certificate yet (DNS? port 80?) - again in 60 s"; sleep 60; }
 done
 while true; do certbot renew --webroot -w /var/www/html --quiet || true; sleep 43200; done

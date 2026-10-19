@@ -200,6 +200,7 @@ HOME_URL=$HOME_URL
 MAX_CONNS=${MAX_CONNS:-400}
 REDIS_PORT=${REDIS_PORT:-6379}
 $( [ "$LOCAL_TEST" = 1 ] && echo CERT_MODE=self )
+$( [ "$LOCAL_TEST" = 0 ] && [ -n "${CERT_MODE:-}" ] && echo "CERT_MODE=$CERT_MODE" )
 $( [ -n "${PEERS:-}" ] && echo "PEERS=$PEERS" )
 $( [ -n "${SIBLINGS:-}" ] && echo "SIBLINGS=$SIBLINGS" )
 $( [ -n "${V6_HOST:-}" ] && echo "V6_HOST=$V6_HOST" )
