@@ -5,7 +5,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { generateKeyPair } from '@libp2p/crypto/keys'
 import { peerIdFromPrivateKey } from '@libp2p/peer-id'
-import { makeEnroll, totpAt, enrollMessage, statusMessage, toBase32, fromBase32, LOCK_AFTER, PER_IP_FAILURES, STEP_S } from './enroll.mjs'
+import { makeEnroll, totpAt, enrollMessage, statusMessage, toBase32, fromBase32, ed25519OfPeerId, LOCK_AFTER, PER_IP_FAILURES, STEP_S } from './enroll.mjs'
+import { peerIdFromString } from '@libp2p/peer-id'
 import { parseAllowlist } from './allowlist.mjs'
 
 test('TOTP: RFC 6238 appendix B, SHA-1, 8 digits', () => {
@@ -77,4 +78,13 @@ test('guessing: an address is slowed after a few wrong codes; the network locks 
     unlinkSync(join(s.dir, 'enroll.locked')); unlinkSync(join(s.dir, 'enroll.failures'))
     assert.equal((await s.attempt(s.code(), s.key, s.peerId, '5.5.5.5')).status, 200, 'unlocking did not reopen enrolment')
   } finally { rmSync(s.dir, { recursive: true, force: true }) }
+})
+
+test('the key read out of a PeerId is the one libp2p reads; anything else is no key', async () => {
+  for (let i = 0; i < 20; i++) {
+    const k = await generateKeyPair('Ed25519'), id = peerIdFromPrivateKey(k).toString()
+    assert.deepEqual(new Uint8Array(ed25519OfPeerId(id)), peerIdFromString(id).publicKey.raw, id)
+  }
+  assert.equal(ed25519OfPeerId('QmYyQSo1c1Ym7orWxLYvCrM2EmxFTANf8wXmmE7DWjhx5N'), null, 'an RSA/sha256 PeerId is not an Ed25519 key')
+  assert.equal(ed25519OfPeerId('12D3KooW0OIl'), null)
 })

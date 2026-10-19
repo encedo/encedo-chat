@@ -24,7 +24,7 @@ import { createServer } from 'node:http'
 import { createHmac, randomBytes } from 'node:crypto'
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { peerIdFromString } from '@libp2p/peer-id'
+import { createPublicKey, verify as edVerify } from 'node:crypto'
 import { parseAllowlist } from './allowlist.mjs'
 
 export const DIGITS = 8
@@ -66,11 +66,36 @@ export function totpMatch(key, code, nowMs) {
 export const enrollMessage = (networkId, nonce, code) => new TextEncoder().encode(`onchato-enroll-v1\n${networkId}\n${nonce}\n${code}`)
 export const statusMessage = (networkId, nonce) => new TextEncoder().encode(`onchato-status-v1\n${networkId}\n${nonce}`)
 
+// ---- a PeerId's own key, without libp2p -------------------------------------------
+// An Ed25519 PeerId (12D3KooW...) is base58btc of an identity multihash of the
+// key's protobuf: 0x00 0x24 | 0x08 0x01 0x12 0x20 | 32 key bytes. Read here with
+// no dependency, so this service needs nothing installed (and the app's tests can
+// load it); a test holds it to @libp2p/peer-id.
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+function base58(s) {
+  let n = 0n
+  for (const c of s) { const v = B58.indexOf(c); if (v < 0) throw new Error('not base58'); n = n * 58n + BigInt(v) }
+  const out = []
+  while (n > 0n) { out.unshift(Number(n % 256n)); n /= 256n }
+  for (const c of s) { if (c !== '1') break; out.unshift(0) }
+  return Buffer.from(out)
+}
+const ED_HEAD = Buffer.from([0x00, 0x24, 0x08, 0x01, 0x12, 0x20])
+const SPKI_ED = Buffer.from('302a300506032b6570032100', 'hex')
+/** The Ed25519 public key inside a PeerId, or null for anything else. */
+export function ed25519OfPeerId(peerId) {
+  try {
+    const b = base58(peerId)
+    return b.length === 38 && b.subarray(0, 6).equals(ED_HEAD) ? b.subarray(6) : null
+  } catch { return null }
+}
+
 async function signedBy(peerId, msg, sigB64) {
   try {
-    const id = peerIdFromString(peerId)
-    if (!id.publicKey) return false
-    return await id.publicKey.verify(msg, Buffer.from(sigB64, 'base64'))
+    const raw = ed25519OfPeerId(peerId)
+    if (!raw) return false
+    const key = createPublicKey({ key: Buffer.concat([SPKI_ED, raw]), format: 'der', type: 'spki' })
+    return edVerify(null, Buffer.from(msg), key, Buffer.from(sigB64, 'base64'))
   } catch { return false }
 }
 
