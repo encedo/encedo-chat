@@ -60,7 +60,7 @@ import { refreshNetwork, loadRegistry, openEnvelope, registerNetwork, rootFinger
 import type { PublishedNode } from '../../lib/nodelist.ts'
 import {
   builtinNetwork, resolveActive, networkById, bindingOf, setBinding, setLastNet, nodesKey, transportKey,
-  softBindingKey, hemBindingKey, OPEN_PROFILE_KEY, OPEN_CREATE_KEY, autoRefreshNetwork, NETWORK_REFRESH_MS, type ActiveNetwork,
+  softBindingKey, hemBindingKey, OPEN_PROFILE_KEY, OPEN_CREATE_KEY, LOGIN_NOTICE_KEY, autoRefreshNetwork, NETWORK_REFRESH_MS, type ActiveNetwork,
 } from '../../lib/activenet.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { loadOrCreateNetKey, netPeerId } from '../../lib/netkey.ts'
@@ -1041,6 +1041,20 @@ const LAST_METHOD = 'ec-last-method'
 const rememberMethod = (m: 'soft' | 'hem') => { try { localStorage.setItem(LAST_METHOD, m) } catch {} }
 const lastMethod = (): string => { try { return localStorage.getItem(LAST_METHOD) ?? '' } catch { return '' } }
 
+/** The reason the page came back to the card by itself, once. */
+function paintLoginNotice() {
+  let n: { why?: string; net?: string } | null = null
+  try { n = JSON.parse(localStorage.getItem(LOGIN_NOTICE_KEY) ?? 'null'); localStorage.removeItem(LOGIN_NOTICE_KEY) } catch {}
+  const el = document.getElementById('login-notice'); if (!el) return
+  const net = n?.net ?? ''
+  el.textContent = n?.why === 'revoked'
+    ? tr('Węzeł sieci „{net}" nie wpuszcza już tego urządzenia, więc nastąpiło wylogowanie. Zaloguj się ponownie i wpisz bieżący kod od administratora sieci.', { net })
+    : n?.why === 'not-enrolled'
+      ? tr('Bez kodu od administratora węzeł sieci „{net}" nie wpuści tego urządzenia. Zaloguj się ponownie, gdy będziesz go mieć.', { net })
+      : ''
+  el.hidden = !el.textContent
+}
+
 function renderLoginProfiles(boot = false) {
   // Written by a build that offered a HEM row. Removed on sight rather than
   // left to sit: it is the address and the handle, and nothing reads it now.
@@ -1083,6 +1097,7 @@ function renderLoginProfiles(boot = false) {
   paintNetworkPolicy()
   // A reload that switched the network to open a profile: open it now.
   if (boot) {
+    paintLoginNotice()
     if (localStorage.getItem(OPEN_CREATE_KEY)) {
       localStorage.removeItem(OPEN_CREATE_KEY)
       // Just joined this network: its first identity, in the way it allows.
@@ -1615,19 +1630,41 @@ if (sweptPreKid) ecLog(`cleared ${sweptPreKid} local entries written before iden
  * policy, feedback) is read at load and waits for the next one.
  */
 let netRefreshTimer: ReturnType<typeof setInterval> | null = null
-async function refreshNetworkQuietly() {
+/**
+ * True when the page is leaving: a new access rule changes how this device
+ * dials (a stable key, the administrator's code), and a session that started
+ * under the old one cannot be patched - the page reloads into the new rule and
+ * reopens the same profile.
+ */
+async function refreshNetworkQuietly(): Promise<boolean> {
   const kept = localStorage.getItem(nodesKey(ACTIVE))
   const r = await autoRefreshNetwork(localKV(), ACTIVE, nowMs())
-  if (!r.changed) { if (r.why) ecLog(`network profile: not refreshed (${r.why})`); return }
+  if (!r.changed) { if (r.why) ecLog(`network profile: not refreshed (${r.why})`); return false }
   ecLog(`network profile: now version ${r.profile.seq}${r.nodesFollowed ? ', node list follows it' : kept ? ', your own node list kept' : ''}`)
+  if ((r.profile.policy?.access ?? 'open') !== (ACTIVE.policy.access ?? 'open')) {
+    ecLog(`network profile: access is now ${r.profile.policy?.access ?? 'open'} - reloading into it`)
+    if (activeSoftProfile) localStorage.setItem(OPEN_PROFILE_KEY, activeSoftProfile)
+    reloadPage('network access changed')
+    return true
+  }
   setStoreOrigins(r.profile.stores)
   if (r.nodesFollowed) client?.setRelays(chosenRelays())
   else if (!kept) client?.setRelays(r.profile.nodes.map((n) => n.addr))
+  return false
 }
+/** Daily; the sign-in's own refresh runs in enterApp, before anything dials. */
 function startNetworkRefresh() {
   if (ACTIVE.builtin) return
-  void refreshNetworkQuietly()
   if (!netRefreshTimer) netRefreshTimer = setInterval(() => void refreshNetworkQuietly(), NETWORK_REFRESH_MS)
+}
+/**
+ * Back to the sign-in card, saying why there. In a network that admits devices
+ * by list, a device that is not on it can do nothing: the conversations behind
+ * a "connecting" badge only pretend otherwise.
+ */
+function leaveToSignIn(why: 'revoked' | 'not-enrolled') {
+  try { localStorage.setItem(LOGIN_NOTICE_KEY, JSON.stringify({ why, net: netLabel(ACTIVE) })) } catch {}
+  reloadPage(`signed out: ${why}`)
 }
 
 async function enterApp(id: Identity, book: ContactManager, sourceLabel: string, kid?: string, gkBackend?: GkBackend) {
@@ -1643,6 +1680,14 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   // A network that admits devices by list (policy.access "allowlist") knows this
   // device by a stable key of this identity's (lib/netkey.ts); anywhere else a
   // fresh key, a new PeerId every session, as always.
+  // Another network's profile first, before anything dials: the rule a node
+  // enforces may have changed, and a device that dials under the old one is
+  // refused - and could never learn the new one, which used to be fetched only
+  // once connected. A few seconds at most; a slow answer is applied when it comes.
+  if (!ACTIVE.builtin) {
+    const refreshed = refreshNetworkQuietly().catch(() => false)
+    if (await Promise.race([refreshed, new Promise<boolean>((ok) => setTimeout(() => ok(false), 5000))])) return
+  }
   let peerKey: Uint8Array | undefined
   if (ACTIVE.policy.access === 'allowlist' && storeNames) {
     peerKey = (await loadOrCreateNetKey(localKV(), await ensureCacheBase(), storeNames, (m) => ecLog(m, 'debug'))) ?? undefined
@@ -1652,7 +1697,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     // refuses - and a refused connection looks like a network fault.
     if (peerKey) {
       const st = await checkEnrolled(peerKey)
-      if (st && !st.listed) await enrollFlow(peerKey, st.locked)
+      if (st && !st.listed && !(await enrollFlow(peerKey, st.locked))) { leaveToSignIn('not-enrolled'); return }
     }
   }
   clientReady = startSession(id, {
@@ -5310,10 +5355,7 @@ function enrollFlow(key: Uint8Array, locked: boolean): Promise<boolean> {
     $('enroll-code').focus()
   })
 }
-$('enroll-cancel')?.addEventListener('click', () => {
-  dropModal('enroll-modal')
-  toast(tr('To urządzenie nie jest jeszcze wpuszczone do sieci. Kod wpiszesz w Ustawieniach → Sieć.'))
-})
+$('enroll-cancel')?.addEventListener('click', () => dropModal('enroll-modal'))
 $('enroll-go')?.addEventListener('click', async () => {
   const code = ($('enroll-code') as HTMLInputElement).value.replace(/\s/g, '')
   if (!/^\d{8}$/.test(code)) { setMsg('enroll-msg', tr('Kod ma 8 cyfr.'), 'err'); return }
@@ -5338,13 +5380,26 @@ $('enroll-go')?.addEventListener('click', async () => {
       : tr('Węzeł odmówił ({why}).', { why: r.error }), 'err')
   } finally { btn.disabled = false }
 })
-/** A connection that drops in such a network: was this device taken off the list? */
+/**
+ * A connection that drops in such a network: was this device taken off the
+ * list? Asked at most every 15 s - and a drop inside that window is asked about
+ * when it ends, while the link is still down: the link reports only changes,
+ * so a drop swallowed by the window (a first refusal while the node was still
+ * reading the list, then the real revocation) was never asked about at all.
+ */
 let revokedAskedAt = 0
+let revokedRecheck: ReturnType<typeof setTimeout> | null = null
 async function maybeRevoked() {
-  if (!netPeerKey || Date.now() - revokedAskedAt < 60_000) return
+  if (!netPeerKey) return
+  const wait = revokedAskedAt + 15_000 - Date.now()
+  if (wait > 0) {
+    if (!revokedRecheck) revokedRecheck = setTimeout(() => { revokedRecheck = null; if (linkState !== 'online') void maybeRevoked() }, wait)
+    return
+  }
   revokedAskedAt = Date.now()
   const st = await checkEnrolled(netPeerKey)
-  if (st && !st.listed) { toast(tr('Ten węzeł nie wpuszcza już tego urządzenia.')); void enrollFlow(netPeerKey, st.locked) }
+  ecLog(`access: the node says this device is ${st ? (st.listed ? 'on its list' : 'NOT on its list') : 'unknown (no answer)'}`)
+  if (st && !st.listed) leaveToSignIn('revoked')
 }
 
 async function paintNetworkWhich() {

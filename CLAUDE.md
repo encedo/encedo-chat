@@ -224,17 +224,26 @@ the key, a refresh never lowers `seq`, the id `main` is reserved.
   `ec-nodes`/`ec-transport`, another gets `ec-nodes:<id>`/`ec-transport:<id>`.
   "Load the official list" refreshes another network from its own
   `profileUrls`, never from the release manifest.
-- **Another network's profile refreshes itself** at sign-in and every 24 h
-  (`autoRefreshNetwork`, the user's call 2026-10-18): same checks as the
-  button. A kept node list follows the new profile only while it equals the
-  old profile's list (all on, same addresses) - an edited list is the
-  person's. Live: node list + stores; app address/policy/feedback wait for the
-  next load. The CLI does not refresh (yet).
+- **Another network's profile refreshes itself** at sign-in - BEFORE the
+  session dials (at most 5 s), because a node that changed its access rule
+  refuses a device dialling under the old one, which then could never fetch
+  the new one - and every 24 h (`autoRefreshNetwork`, the user's call
+  2026-10-18): same checks as the button. A kept node list follows the new
+  profile only while it equals the old profile's list (all on, same
+  addresses) - an edited list is the person's. Live: node list + stores; a
+  changed `policy.access` reloads the page into it and reopens the same
+  profile; app address/other policy/feedback wait for the next load. The CLI
+  does not refresh (yet).
 - **Devices admitted by list** (`policy.access: "allowlist"`, access tier B): only
   then does an identity dial with a stable libp2p key (`lib/netkey.ts`, sealed
   record `netkey`, one per identity, not exported - it is the device's), and the
   network's relays run `--allow-peers` (`relay/allowlist.mjs`). Everywhere else a
   fresh key, a new PeerId every session - the 'no tracking' default.
+  A device not on the list has nothing to do in the app: "not now" at the
+  code, and a revocation noticed while signed in, go back to the sign-in card
+  with the reason (`leaveToSignIn`, `ec-login-notice`). browser-test covers
+  the rule change, "not now" and the code; NOT the revocation (the page dials
+  wss only, the harness node has no TLS) - check that one on a real node.
 - **`ACTIVE` must stay declared at the top of app.ts** (babel turns `const`
   into `var`; a read above it is `undefined`, not an error).
 

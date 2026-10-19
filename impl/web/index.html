@@ -171,6 +171,7 @@
   .login-card{width:min(380px,100%);background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 30px rgba(18,38,63,.06);padding:28px}
   .login-card h1{margin:0 0 4px;font-size:20px;color:var(--text)}
   .login-card .sub{margin:0 0 20px;color:var(--muted);font-size:13px}
+  .login-notice{margin:0 0 16px;padding:10px 12px;border-radius:8px;background:var(--warn-soft);color:var(--text);font-size:13px;line-height:1.45}
   label{display:block;font-size:12px;color:var(--muted);margin:14px 0 6px}
   .row{display:flex;gap:8px;align-items:center}
   input,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px}
@@ -1367,9 +1368,9 @@
            the time. It leads because returning IS the common case: the old card
            asked for a HEM address first, which is the rarer path and the one
            that needs hardware nobody has on their first evening. -->
-      <!-- Which network this card is for. Shown only on a device that knows
-           more than the built-in network (lib/activenet.ts): an identity lives
-           in one network, and the profiles below are listed with theirs. -->
+      <!-- Why the page came back here by itself (a device the network no
+           longer admits); written before the reload, read once. -->
+      <p class="login-notice" id="login-notice" role="status" hidden></p>
       <div id="login-profiles-sec" hidden>
         <p class="sub" data-i18n="Wybierz profil.">Wybierz profil.</p>
         <div class="plist" id="login-profiles"></div>

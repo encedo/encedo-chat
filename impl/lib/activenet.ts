@@ -53,6 +53,8 @@ export const LAST_NET_KEY = 'ec-last-net'
 export const OPEN_PROFILE_KEY = 'ec-open-profile'
 /** After the reload into a network just joined: open the window for its first identity. */
 export const OPEN_CREATE_KEY = 'ec-open-create'
+/** Why the page went back to the sign-in card by itself: `{ why, net }`, read once at load. */
+export const LOGIN_NOTICE_KEY = 'ec-login-notice'
 
 export const softBindingKey = (name: string) => `ec-soft-net-${name}`
 export const hemBindingKey = (kid: string) => `ec-hem-net-${kid}`
