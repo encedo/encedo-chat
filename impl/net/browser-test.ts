@@ -36,6 +36,8 @@ import { profileDir } from './profiledir.ts'
 import { join, extname } from 'node:path'
 import { hemKid } from '../lib/descr.ts'
 import { signNetwork, rootPubFor, pointerFor } from '../lib/netprofile.ts'
+// @ts-ignore - plain .mjs
+import { toBase32, totpAt } from '../../relay/enroll.mjs'
 
 /**
  * By default this serves `web/dist` from THIS checkout, so it tests the code in
@@ -155,6 +157,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
  */
 abstract class Page {
   readonly console: string[] = []
+  /** Listeners for protocol events (CDP only: a scenario answering Fetch.requestPaused). */
+  readonly events: ((msg: any) => void | Promise<void>)[] = []
   name: string
   constructor(name: string) { this.name = name }
 
@@ -310,6 +314,7 @@ class Browser extends Page {
 
   private onMessage(raw: string) {
     const msg = JSON.parse(raw)
+    if (msg.method) for (const f of this.events) void Promise.resolve().then(() => f(msg)).catch((e) => this.console.push(`HARNESS EVENT ERROR: ${e?.message ?? e}`))
     if (msg.id && this.waiting.has(msg.id)) {
       const w = this.waiting.get(msg.id)!
       this.waiting.delete(msg.id)
@@ -3946,6 +3951,127 @@ async function main() {
         return t.includes('network: ' + ${JSON.stringify(netId)} + ' (Harness Net, seq ');`, 15_000)
       await A.eval(`document.getElementById('btn-close-drawer').click(); return 1`)
       step('Settings -> Network names the joined network, its operator and the key fingerprint; Diagnostics names it too')
+    }
+
+    // A network that starts admitting devices by list while one of its devices
+    // is in use (access tier B; relay --allow-peers, relay/enroll.mjs). Found on
+    // blbx.pl: the profile carrying the new rule was fetched only once
+    // connected, and the node refuses a device that dials under the old rule -
+    // so the device never learned it. Then: "not now" and a revocation must land
+    // on the sign-in card with the reason, not in a chat stuck on "connecting".
+    // The enrolment URL is https://<first node host>/onchato/enroll; the page's
+    // requests to it are answered here, from the real service on loopback (CDP
+    // Fetch, so Chromium only).
+    if (!GROUP_ONLY && SERVE_LOCAL && B instanceof Browser) {
+      scenario('a network turns to devices admitted by list: the device learns it at sign-in, "not now" goes back to the sign-in card, the code lets it in')
+      const origin = `http://127.0.0.1:${LOCAL_PORT}`
+      const RELAY_DIR = join(import.meta.dirname, '..', '..', 'relay')
+      const dir = mkdtempSync(join(tmpdir(), 'ec-allow-bt-'))
+      const LIST = join(dir, 'peers.txt'); writeFileSync(LIST, '')
+      const netId = 'harness-allow-' + Date.now().toString(36)
+      const SEED = Buffer.from('harness-browser-totp')
+      writeFileSync(join(dir, 'totp.seed'), toBase32(SEED) + '\n')
+      const RPORT = 9995, EPORT = 9994
+      const procs: ChildProcess[] = []
+      let log = ''
+      const started = (args: string[], env: Record<string, string>, ready: (l: string) => boolean) => new Promise<void>((ok, fail) => {
+        const p = spawn('node', args, { cwd: RELAY_DIR, env: { ...process.env, ...env } }); procs.push(p)
+        const t = setTimeout(() => fail(new Error(`did not start: node ${args[0]}\n${log.slice(-600)}`)), 20_000)
+        const read = (d: Buffer) => { log += d; if (ready(log)) { clearTimeout(t); ok() } }
+        p.stdout!.on('data', read); p.stderr!.on('data', read)
+      })
+      const b = B
+      try {
+        await started(['relay.mjs', '--key-file', join(dir, 'node.key'), '--port', String(RPORT), '--pick', '--quiet-msgs', '--allow-peers', LIST], {},
+          (l) => /PeerId: 12D3\w+/.test(l) && l.includes('Relay uruchomiony'))
+        await started(['enroll.mjs'], { ALLOW_PEERS: LIST, NETWORK_ID: netId, ENROLL_PORT: String(EPORT) }, (l) => l.includes('[ok] enroll on'))
+        const relayId = log.match(/PeerId: (12D3\w+)/)![1]
+        const KEY = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64')
+        const at = Date.now()
+        const signed = (seq: number, policy: any) => JSON.stringify(signNetwork({
+          v: 1, networkId: netId, operator: 'Harness Allow', rootPub: rootPubFor(KEY), seq, made: at - 60_000, expires: at + 86_400_000,
+          nodes: [{ name: 'n1', addr: `/dns4/localhost/tcp/${RPORT}/ws/p2p/${relayId}` }], stores: [origin], app: { origin, path: '/' },
+          profileUrls: [`${origin}/allow.json`], feedback: null, home: `${origin}/`, policy,
+        }, KEY))
+        SERVED.set('/allow.json', signed(1, {}))
+        // https://localhost/onchato/enroll... -> the service on loopback.
+        b.events.push(async (m: any) => {
+          if (m.method !== 'Fetch.requestPaused') return
+          const { requestId, request } = m.params
+          const path = new URL(request.url).pathname
+          const cors = [{ name: 'access-control-allow-origin', value: '*' }, { name: 'access-control-allow-headers', value: 'content-type' }, { name: 'access-control-allow-methods', value: 'GET, POST' }]
+          if (request.method === 'OPTIONS') { await b.send('Fetch.fulfillRequest', { requestId, responseCode: 204, responseHeaders: cors }, true); return }
+          const r = await fetch(`http://127.0.0.1:${EPORT}${path}`, { method: request.method, headers: { 'content-type': 'application/json' }, body: request.method === 'POST' ? request.postData : undefined })
+          const body = Buffer.from(await r.arrayBuffer()).toString('base64')
+          await b.send('Fetch.fulfillRequest', { requestId, responseCode: r.status, responseHeaders: [...cors, { name: 'content-type', value: 'application/json' }], body }, true)
+        })
+        await b.send('Fetch.enable', { patterns: [{ urlPattern: 'https://localhost/onchato/enroll*' }] }, true)
+        const tapAt = async (expr: string) => {
+          const r = JSON.parse(await b.eval<string>(`const e = ${expr}; e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 })`))
+          await b.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 }, true)
+          await sleep(60)
+          await b.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 }, true)
+        }
+        await b.send('Page.bringToFront', {}, true)
+        // Joined while the network is open, an identity made in it.
+        await b.eval(`location.reload(); return 1`); await sleep(500)
+        await b.waitFor('the sign-in card', `const a = document.getElementById('app'); return !!a && a.hidden && !!document.getElementById('go-network')`, 20_000)
+        await b.waitFor('the join window', `const m = document.getElementById('net-modal'); if (!m.classList.contains('open')) document.getElementById('go-network').click(); return m.classList.contains('open');`, 20_000)
+        await b.eval(`document.getElementById('net-paste').value = ${JSON.stringify(signed(1, {}))}; document.getElementById('net-go').click(); return 1`)
+        await b.waitFor('the consent page', `return !document.getElementById('net-step-confirm').hidden`, 10_000)
+        await b.eval(`document.getElementById('net-go').click(); return 1`); await sleep(500)
+        await b.waitFor('the new identity window', `const m = document.getElementById('soft-modal'); return !!m && m.classList.contains('open')`, 20_000)
+        await b.eval(`
+          document.getElementById('soft-name').value = 'allow-b';
+          document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)};
+          document.getElementById('soft-pass2').value = ${JSON.stringify(SOFT_PASS)}; return 1;`)
+        if (await pressSoftGo(b, 'the identity in the open network') !== 'done') throw new Error(`${b.name}: no identity in the open network - ${await softError(b)}`)
+        await b.waitFor('the first-run card', `return document.getElementById('welcome-modal').classList.contains('open')`, 20_000)
+        await b.eval(`document.getElementById('welcome-close').click(); return 1`)
+        // The operator turns the network to devices admitted by list.
+        SERVED.set('/allow.json', signed(2, { access: 'allowlist' }))
+        const signIn = async (what: string) => {
+          await b.waitFor(`the soft window (${what})`, `
+            const m = document.getElementById('soft-modal');
+            if (!m.classList.contains('open')) { const row = [...document.querySelectorAll('#login-profiles .pick')].find((r) => r.textContent.includes('allow-b')); row && row.click() }
+            return m.classList.contains('open');`, 20_000)
+          await b.eval(`document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)}; document.getElementById('soft-go').click(); return 1`)
+        }
+        await b.eval(`location.reload(); return 1`); await sleep(500)
+        await b.eval(`window.__notReloaded = 1; return 1`)
+        await signIn('signing in under the old rule')
+        // The sign-in fetches the new profile before dialling, reloads into the
+        // rule and reopens the same profile; signed in again, the code is asked.
+        await b.waitFor('the reload into the new rule, the same profile reopened', `
+          const m = document.getElementById('soft-modal');
+          return !window.__notReloaded && m.classList.contains('open') && document.getElementById('soft-name').value === 'allow-b' && !document.getElementById('soft-pass').value`, 30_000)
+        await signIn('signing in under the new rule')
+        await b.waitFor('the administrator\'s code asked', `return document.getElementById('enroll-modal').classList.contains('open')`, 30_000)
+        step('a profile turned to devices admitted by list is learnt at sign-in, before dialling: the page reloads into it, and the code is asked')
+        // "Not now": back to the sign-in card, with the reason.
+        await b.eval(`window.__notReloaded = 1; return 1`)
+        await tapAt(`document.getElementById('enroll-cancel')`)
+        await b.waitFor('the sign-in card with the reason, after a reload', `
+          const n = document.getElementById('login-notice'), a = document.getElementById('app');
+          return !window.__notReloaded && a.hidden && !!n && !n.hidden && n.textContent.includes('Harness Allow') && /kodu od administratora/.test(n.textContent)`, 20_000)
+        step('"not now" leaves for the sign-in card, which says why - not a chat stuck on "connecting"')
+        // The code: on the list, and in.
+        await signIn('signing in with the code at hand')
+        await b.waitFor('the code asked again', `return document.getElementById('enroll-modal').classList.contains('open')`, 30_000)
+        await b.eval(`document.getElementById('enroll-code').value = ${JSON.stringify(totpAt(SEED, Math.floor(Date.now() / 30000)))}; document.getElementById('enroll-go').click(); return 1`)
+        await b.waitFor('enrolled', `return !document.getElementById('enroll-modal').classList.contains('open')`, 15_000)
+        if (!readFileSync(LIST, 'utf8').trim()) throw new Error(`${b.name}: the code was accepted but the device is not on the node's list`)
+        await b.waitFor('the app', `return !document.getElementById('app').hidden`, 20_000)
+        // NOT covered here: a revocation going back to the card. The page never
+        // dials a plain ws:// (the browser transport takes wss only), so this
+        // local node cannot be reached without TLS - checked live on a real node.
+        step('the code puts the device on the node\'s list and opens the app')
+      } finally {
+        await b.send('Fetch.disable', {}, true).catch(() => {})
+        b.events.length = 0
+        for (const p of procs) p.kill('SIGKILL')
+        rmSync(dir, { recursive: true, force: true })
+      }
     }
 
     if (GROUP_ONLY) {
