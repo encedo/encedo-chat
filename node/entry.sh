@@ -7,6 +7,9 @@ set -eu
 case "${1:-relay}" in
 relay)
   : "${NODE_HOST:?NODE_HOST is not set (node.env)}"
+  # The list's directory exists on every node (empty on an open one): the
+  # dashboard mounts it, and a mount of a missing subpath would not start.
+  mkdir -p /data/allow
   MAX_CONNS=${MAX_CONNS:-400}
   MAX_TOPICS=${MAX_TOPICS:-$((MAX_CONNS * 4))}
   set -- node /app/relay/relay.mjs --port 9001 --key-file /data/node.key --host "$NODE_HOST" \

@@ -38,6 +38,7 @@ import { createSocket } from 'node:dgram'
 import { randomBytes } from 'node:crypto'
 import { statfsSync } from 'node:fs'
 import { openEnvelope, rootFingerprint } from '../../impl/lib/netprofile.ts'
+import { qrSvg } from '../../impl/lib/qr.ts'
 
 const args = process.argv.slice(2)
 const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] ? args[i + 1] : d }
@@ -213,13 +214,33 @@ async function pollLocal({ name }) {
   try { const f = statfsSync('/data/profile'); disk = { size: f.blocks * f.bsize, used: (f.blocks - f.bfree) * f.bsize, pct: Math.round(((f.blocks - f.bfree) / f.blocks) * 100) } } catch {}
   let mem = null
   try { const mi = Object.fromEntries(readFileSync('/proc/meminfo', 'utf8').split('\n').map((l) => l.split(/:\s+/)).filter((a) => a.length === 2).map(([k, v]) => [k, parseInt(v)])); mem = { total: Math.round(mi.MemTotal / 1024), used: Math.round((mi.MemTotal - mi.MemAvailable) / 1024) } } catch {}
+  if (env.ACCESS === 'allowlist') services.push(['enroll', await tcpOpen(9204)])
   st.last = {
     t, m, msgsPerS: rate('msgs'), refusedPerS: rate('refused'),
+    access: env.ACCESS === 'allowlist' ? readAccess() : null,
     containers: services.map(([n, ok]) => ({ name: n, state: ok ? 'running' : 'down' })),
     disk, mem, store: storeInfo, stats: Boolean(env.REDIS_PORT), redisPort: env.REDIS_PORT, homeSite: env.HOME_SITE || null,
   }
   if (m) { st.samples.push({ t, conns: m.conns, topics: m.topics }); if (st.samples.length > 360) st.samples.shift() }
   st.error = m ? null : { at: Date.now(), msg: 'the relay does not answer on 127.0.0.1:9003' }
+}
+
+// ---- devices admitted by list (on the node; the list's directory is mounted) ------
+const ALLOW_DIR = '/data/allow'
+/** The list as the administrator reads it: a PeerId's tail, the label, when; plus the lock. */
+function readAccess() {
+  const devices = []
+  try {
+    for (const l of readFileSync(`${ALLOW_DIR}/peers.txt`, 'utf8').split('\n')) {
+      const m = l.match(/^\s*(12D3KooW\S+)\s*([^#]*?)\s*(?:#\s*(.*))?$/)
+      if (m) devices.push({ id: m[1].slice(-12), label: m[2], note: m[3] ?? '' })
+    }
+  } catch {}
+  let locked = null, failures = 0
+  try { locked = readFileSync(`${ALLOW_DIR}/enroll.locked`, 'utf8').trim() } catch {}
+  try { failures = Number(readFileSync(`${ALLOW_DIR}/enroll.failures`, 'utf8')) || 0 } catch {}
+  let seed = false; try { seed = readFileSync(`${ALLOW_DIR}/totp.seed`, 'utf8').trim().length > 0 } catch {}
+  return { devices, locked, failures, seed }
 }
 
 async function historyLocal({ name }) {
@@ -268,6 +289,19 @@ createServer((req, res) => {
     res.end(JSON.stringify({ now: Date.now(), every: EVERY_S, source: SOURCE, onNode: ON_NODE, net, nodes: nodes(), state }))
     return
   }
+  // The authenticator QR, on the node only, on a press: the page shows it for
+  // 15 seconds. Every showing goes to the log (docker logs onchato-dash-1).
+  if (req.url === '/access-qr' && req.method === 'POST' && ON_NODE) {
+    let seed = ''
+    try { seed = readFileSync(`${ALLOW_DIR}/totp.seed`, 'utf8').trim() } catch {}
+    if (!seed) { res.writeHead(404, { 'content-type': 'application/json' }); res.end('{"error":"no seed"}'); return }
+    const label = net.profile?.operator ?? process.env.NODE_HOST
+    const uri = `otpauth://totp/${encodeURIComponent('onchato:' + label)}?secret=${seed}&issuer=onchato&algorithm=SHA1&digits=8&period=30`
+    console.log(`[dash] the authenticator QR was shown (${new Date().toISOString()})`)
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+    res.end(JSON.stringify({ svg: qrSvg(uri, { size: 260, dark: '#000', light: '#fff' }), seconds: 15 }))
+    return
+  }
   if (req.url === '/' || req.url === '/index.html') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" })
     res.end(PAGE); return
@@ -282,6 +316,12 @@ createServer((req, res) => {
   await slow(); await fast()
   setInterval(fast, EVERY_S * 1000)
   setInterval(slow, 5 * 60_000)
+  // Started with the node (onchato-setup.sh writes the profile and nginx gets its
+  // certificate after): until both are read, read them again every 15 s.
+  const early = setInterval(() => {
+    if (net.profile && Object.values(state).every((s) => s.cert && !s.cert.error)) clearInterval(early)
+    else void slow()
+  }, 15_000)
   const p = net.profile
   console.log(`onchato operator dash: http://localhost:${PORT}  (${p ? `${p.operator}, ${p.networkId}, ${nodes().length} node(s)` : `profile: ${net.error}`}; every ${EVERY_S}s ${ON_NODE ? 'on this node, loopback only' : `over SSH as ${SSH_USER}`})`)
 })

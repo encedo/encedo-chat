@@ -67,8 +67,12 @@ services:
     build: { context: .., dockerfile: node/ops/Dockerfile }
     image: onchato-ops
     entrypoint: [ "sh", "-c", "exec node /app/node/dash/dash.mjs --on-node --port $${DASH_PORT:-8088}" ]
-    # The profile only: root.kdf (the key's private salt) stays out of this container.
-    volumes: [ "${ONCHATO_PROFILE_DIR:-/var/lib/onchato/profile}:/data/profile:ro" ]
+    # The profile, and the device list's directory of the node's volume (the list,
+    # the enrolment lock, the authenticator seed for the 15-second QR) - read only.
+    # Not root.kdf, not the node's own key.
+    volumes:
+      - "${ONCHATO_PROFILE_DIR:-/var/lib/onchato/profile}:/data/profile:ro"
+      - { type: volume, source: node-data, target: /data/allow, read_only: true, volume: { subpath: allow } }
     depends_on: [ relay ]
 
   # --- devices admitted by list, only with ACCESS=allowlist (profile 'allowlist') ---

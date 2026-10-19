@@ -62,6 +62,8 @@
   .blind b{color:var(--text)}
   .err-line{color:var(--err);font-size:13px}
   .muted{color:var(--muted)}
+  .qr-box{display:grid;justify-items:start;gap:6px} .qr-box[hidden]{display:none}
+  #qr-svg{background:#fff;padding:8px;border-radius:6px;line-height:0}
   @media (max-width:900px){.grid2{grid-template-columns:minmax(0,1fr)}.strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
   @media (max-width:420px){.strip{grid-template-columns:minmax(0,1fr)}}
 </style>
@@ -106,6 +108,17 @@
     </section>
   </div>
 
+  <section class="card" id="access-card" hidden>
+    <h2>Urządzenia wpuszczone do sieci <span id="access-badge" class="badge">–</span></h2>
+    <div class="tbl"><table><thead><tr><th class="label">Urządzenie</th><th class="label">Opis</th><th class="label">Dodane</th></tr></thead><tbody id="devices"></tbody></table></div>
+    <div class="muted" style="font-size:13px">Cofnięcie i opis: <span class="mono">onchato-ops access revoke|label</span> (na węźle). Panel tylko czyta.</div>
+    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center">
+      <button id="qr-btn" type="button" style="font:600 13px system-ui;padding:8px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);cursor:pointer">Pokaż kod QR do aplikacji uwierzytelniającej (15 s)</button>
+      <span id="qr-note" class="muted" style="font-size:12.5px">Dla Google Authenticator, Aegis, 2FAS (8 cyfr). Każde pokazanie jest zapisywane w logu panelu.</span>
+    </div>
+    <div id="qr-box" class="qr-box" hidden><div id="qr-svg"></div><span id="qr-left" class="muted" style="font-size:12.5px"></span></div>
+  </section>
+
   <div class="blind"><b>Czego ten panel nie widzi, z założenia:</b> treści wiadomości, plików i głosówek (szyfrowanie end-to-end), kto z kim rozmawia (tematy pochodzą z sekretów par), list kontaktów ani składu grup. Nie trzyma też klucza sieci: profil podpisuje się poza nim (<span class="mono">onchato-ops network sign</span>).</div>
 </main>
 <script>
@@ -146,7 +159,7 @@ function render(d) {
     tr.append(el('td', '', n1(last?.msgsPerS)))
     tr.append(el('td', '', n1(last?.refusedPerS)))
     const c = el('td'); const cd = st.cert
-    c.append(cd?.error ? badge('err', cd.error) : cd ? badge(cd.days < 14 ? 'err' : cd.days < 30 ? 'warn' : 'good', `${cd.days} dni`) : document.createTextNode('–')); tr.append(c)
+    c.append(cd?.error ? Object.assign(badge('err', cd.error.length > 34 ? cd.error.slice(0, 32) + '…' : cd.error), { title: cd.error }) : cd ? badge(cd.days < 14 ? 'err' : cd.days < 30 ? 'warn' : 'good', `${cd.days} dni`) : document.createTextNode('–')); tr.append(c)
     tr.append(el('td', 'mono', m?.commit ?? '–'))
     tb.append(tr)
     if (st.error) { const e = el('tr'); const td = el('td', 'err-line', `${n.host}: ${st.error.msg} (${ago(d.now - st.error.at)})`); td.colSpan = 9; e.append(td); tb.append(e) }
@@ -216,13 +229,39 @@ function render(d) {
     mrow('Skład plików', `na ${store.host}: ${n0(store.ledger)} plików w księdze, magazyn ${bytes(store.repo)}`)
     $('s-files').textContent = n0(store.ledger); $('s-files-s').textContent = `plików teraz w składzie (żyją 5 minut), ${bytes(store.repo)}`
   } else if (p) {
-    mrow('Skład plików', p.stores.join(', ') + ' (poza tymi węzłami)')
-    $('s-files').textContent = 'zewnętrzny'; $('s-files-s').textContent = p.stores.join(', ')
+    // A store named as one of these nodes but not run on them: files are off.
+    const own = d.nodes.some((n) => p.stores.includes('https://' + n.host))
+    mrow('Skład plików', own ? 'brak (pliki i głosówki wyłączone)' : p.stores.join(', ') + ' (poza tymi węzłami)')
+    $('s-files').textContent = own ? 'brak' : 'zewnętrzny'; $('s-files-s').textContent = own ? 'tylko tekst i rozmowy' : p.stores.join(', ')
+  }
+
+  // devices admitted by list (on the node)
+  let acc = null
+  for (const n of d.nodes) { const a = d.state[n.name]?.last?.access; if (a) { acc = a; break } }
+  $('access-card').hidden = !acc
+  if (acc) {
+    $('access-badge').replaceWith(Object.assign(acc.locked ? badge('err', 'dodawanie zablokowane') : badge('good', `${acc.devices.length} urządzeń`), { id: 'access-badge' }))
+    const tb2 = $('devices'); tb2.replaceChildren()
+    for (const dv of acc.devices) { const tr = el('tr'); tr.append(el('td', 'mono', '…' + dv.id), el('td', '', dv.label || '–'), el('td', 'muted', dv.note.replace(/^enrolled\s*/, ''))); tb2.append(tr) }
+    if (!acc.devices.length) { const tr = el('tr'); const td = el('td', 'muted', 'Jeszcze nikt.'); td.colSpan = 3; tr.append(td); tb2.append(tr) }
+    if (acc.locked) $('qr-note').textContent = `Dodawanie zablokowane od ${acc.locked} po ${acc.failures} błędnych kodach: onchato-ops access unlock.`
+    $('qr-btn').hidden = !acc.seed || !d.onNode
   }
 
   const lv = $('live'); lv.className = 'badge ' + (healthy === d.nodes.length && d.nodes.length ? 'good' : healthy ? 'warn' : 'err')
   lv.textContent = `odczyt ${new Date(d.now).toLocaleTimeString('pl-PL')}`
 }
+
+let qrTimer = null
+$('qr-btn').addEventListener('click', async () => {
+  const r = await fetch('/access-qr', { method: 'POST' })
+  if (!r.ok) return
+  const j = await r.json()
+  $('qr-svg').innerHTML = j.svg; $('qr-box').hidden = false
+  let left = j.seconds
+  const tick = () => { $('qr-left').textContent = `Zniknie za ${left} s`; if (left-- <= 0) { clearInterval(qrTimer); $('qr-svg').replaceChildren(); $('qr-box').hidden = true } }
+  clearInterval(qrTimer); tick(); qrTimer = setInterval(tick, 1000)
+})
 
 async function poll() {
   try { render(await (await fetch('/data', { cache: 'no-store' })).json()) }
