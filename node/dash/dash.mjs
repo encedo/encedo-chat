@@ -253,7 +253,8 @@ async function slow() {
     await (ON_NODE ? historyLocal(n) : historyNode(n))
     const st = (state[n.name] ??= { host: n.host, samples: [], history: [] })
     st.cert = await certDays(n.host)
-    const home = st.last?.homeSite
+    // On the node it is known before the first reading of the services.
+    const home = st.last?.homeSite ?? (ON_NODE ? process.env.HOME_SITE || null : null)
     st.homeCert = home ? { host: home, ...(await certDays(home)) } : null
   }))
 }
