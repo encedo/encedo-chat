@@ -8,10 +8,6 @@
 #        bash onchato-setup.sh --local-test   on a developer machine: no root, no DNS, no
 #                                             firewall, a self-signed certificate
 #
-# Rebuilding the same machine often: ONCHATO_LE_BACKUP=<tar.gz of the letsencrypt
-# volume> puts the earlier certificate back (Let's Encrypt allows 5 per name per
-# week); CERT_MODE=staging uses Let's Encrypt's test CA instead.
-#
 # What it installs, and why: OPERATOR-GUIDE.md and OPERATOR-NODE-PLAN.md in the
 # repository. Answers are kept in /etc/onchato/setup.env; data in /var/lib/onchato;
 # code in /opt/onchato. Code is ASCII (repo rule).
@@ -210,18 +206,7 @@ $( [ -n "${SIBLINGS:-}" ] && echo "SIBLINGS=$SIBLINGS" )
 $( [ -n "${V6_HOST:-}" ] && echo "V6_HOST=$V6_HOST" )
 ENV
   say "Building and starting the node (the first time takes a few minutes)..."
-  compose build --quiet >/dev/null 2>&1 || { compose build; die "the node images did not build"; }
-  # A certificate kept from an earlier install of this name (a tar.gz of the
-  # letsencrypt volume): a machine rebuilt again and again does not run into
-  # Let's Encrypt's 5 certificates per name per week.
-  if [ -n "${ONCHATO_LE_BACKUP:-}" ]; then
-    [ -f "$ONCHATO_LE_BACKUP" ] || die "no such file: $ONCHATO_LE_BACKUP"
-    docker volume create onchato_letsencrypt >/dev/null
-    docker run --rm -i --user root -v onchato_letsencrypt:/le --entrypoint tar onchato-node xzf - -C /le < "$ONCHATO_LE_BACKUP" \
-      || die "could not restore $ONCHATO_LE_BACKUP"
-    ok "certificate restored from $ONCHATO_LE_BACKUP"
-  fi
-  compose up -d --quiet-pull >/dev/null 2>&1 || { compose up -d; die "the node did not start"; }
+  compose up -d --build --quiet-pull >/dev/null 2>&1 || { compose up -d --build; die "the node did not start"; }
   docker build -q -f "$DIR/node/ops/Dockerfile" -t onchato-ops "$DIR" >/dev/null || die "the ops image did not build"
   local i
   for i in $(seq 1 60); do PEER_ID=$(compose logs relay 2>/dev/null | grep -o 'PeerId: 12D3[A-Za-z0-9]*' | tail -1 | cut -d' ' -f2 || true); [ -n "$PEER_ID" ] && break; sleep 2; done
