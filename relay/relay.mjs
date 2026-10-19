@@ -59,7 +59,7 @@ import { pushable } from 'it-pushable'
 import { PROTOCOL as PICK_PROTOCOL, T as PICK_T, decodeFrame as decodePickFrame, encodeDeliver, encodeRefused, encodePicked, encodeAck, makePicks } from './pick.mjs'
 import { redisSink } from './redis.mjs'
 import { loadOrCreateSeed, privateKeyFromSeed } from './nodekey.mjs'
-import { makeMetrics, metricsHandler, SAMPLE_MS, readCommit } from './metrics.mjs'
+import { makeMetrics, metricsHandler, SAMPLE_MS, readCommit, commitFromEnv } from './metrics.mjs'
 import { createServer as createHttpServer, Server as HttpServer } from 'http'
 import { appendFile } from 'fs'
 
@@ -618,7 +618,8 @@ if (ANNOUNCE_LOAD) {
 if (metrics) {
   // The build this process runs, once: a dashboard showing three nodes should
   // say when one of them is behind.
-  const commit = readCommit(new URL('..', import.meta.url).pathname.replace(/\/$/, ''))
+  // No .git in the Docker image (node/Dockerfile): it carries the commit as GIT_COMMIT.
+  const commit = readCommit(new URL('..', import.meta.url).pathname.replace(/\/$/, '')) ?? commitFromEnv(process.env.GIT_COMMIT)
   let due = Date.now() + 1_000
   setInterval(() => { const late = Date.now() - due; due = Date.now() + 1_000; if (late > 0) metrics.lag(late) }, 1_000).unref?.()
   setInterval(() => metrics.sample(), SAMPLE_MS).unref?.()

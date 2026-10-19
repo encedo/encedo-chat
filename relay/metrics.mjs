@@ -103,3 +103,8 @@ export function readCommit(repoDir, { readFile = (p) => readFileSync(p, 'utf8') 
     return sha && /^[0-9a-f]{40}$/.test(sha) ? sha.slice(0, 7) : null
   } catch { return null }
 }
+
+/** The commit the image was built from (`--build-arg GIT_COMMIT`), short; null when absent or not a hash. */
+export function commitFromEnv(v) {
+  return typeof v === 'string' && /^[0-9a-f]{7,40}$/.test(v.trim()) ? v.trim().slice(0, 7) : null
+}

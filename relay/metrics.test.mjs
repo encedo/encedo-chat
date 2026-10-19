@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { makeMetrics, metricsHandler, readCommit } from './metrics.mjs'
+import { makeMetrics, metricsHandler, readCommit, commitFromEnv } from './metrics.mjs'
 
 const clock = () => { let t = 1_000_000; return { now: () => t, add: (ms) => { t += ms } } }
 
@@ -74,4 +74,12 @@ test('the commit is read from .git: a branch ref, a packed ref, a detached HEAD,
   assert.equal(readCommit('/repo', fs({ HEAD: sha + '\n' })), 'fac40ed')
   assert.equal(readCommit('/repo', fs({})), null)
   assert.equal(readCommit('/repo', fs({ HEAD: 'ref: refs/heads/main\n', 'refs/heads/main': 'garbage' })), null)
+})
+
+test('the Docker image names its commit through GIT_COMMIT; anything else is no commit', () => {
+  assert.equal(commitFromEnv('c8a9cb8'), 'c8a9cb8')
+  assert.equal(commitFromEnv('c8a9cb8f0e1d2c3b4a5968778695a4b3c2d1e0f9'), 'c8a9cb8')
+  assert.equal(commitFromEnv('unknown'), null)
+  assert.equal(commitFromEnv(undefined), null)
+  assert.equal(commitFromEnv(''), null)
 })
