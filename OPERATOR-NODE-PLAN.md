@@ -228,7 +228,14 @@ the session notes of 2026-10-19; about 25-35 hours.
 `netkey`, SPEC 10, not exported), passed by the app and the CLI only under that
 policy; the node image passes `ALLOW_PEERS`. Proven by net/allowlist-test.ts.
 
-**Release 2, next:** the enrolment service (`/onchato/enroll`: challenge,
+**Release 2, built 2026-10-19:** relay/enroll.mjs (+ tests), lib/enroll.ts,
+the enrolment service and nginx block in the node image (compose profile
+`allowlist`), onchato-setup.sh's "who can join" with the seed and the
+authenticator QR (`--access-qr`), `onchato-ops access`, the app's consent line,
+code window, Settings line and revocation check, the CLI's `--access-code`, and
+the dashboard's devices card with the 15-second QR. Tested end to end locally
+(a device refused, enrolled through nginx/TLS, connected, revoked); on a real
+network next. Originally planned as: the enrolment service (`/onchato/enroll`: challenge,
 signature by the device key, TOTP 8 digits, limits, a pause after repeated
 failures), the app's "code from the administrator" step and the consent text
 about the stable device number, a clear "not on the list" instead of retrying

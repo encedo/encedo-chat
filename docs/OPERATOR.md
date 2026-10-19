@@ -49,6 +49,7 @@ Then it asks:
 | an e-mail for the certificate | `it@example.com` | Let's Encrypt writes there before a certificate lapses |
 | files and voice notes? | `1` | 1: a store on this server; 2: an existing store; 3: text only. See "Files" |
 | keep statistics? | `y` | connections and traffic per 15 minutes, kept 30 days, for a dashboard (Redis, a few MB of RAM); without them only a line in the relay's log |
+| who can join | `1` | 1: anyone with the join code; 2: only devices you let in, with an 8-digit code from your authenticator. See "Who can join" |
 | where the signing key is kept | `1` | 1: derived from a passphrase on this server; 2: on your own computer or a YubiKey. See "The key" |
 
 With the key on the server it then asks for the passphrase, twice.
@@ -127,14 +128,54 @@ minutes, until the other side downloads them. The script offers three choices:
 
 ## Who can join
 
-Today, anyone who has the join code. The network page shows it publicly, so
-treat it like an open door. That is tier A, an open network.
+The script asks once:
 
-Planned (`OPERATOR-NODE-PLAN.md`, section 4):
+1. **Anyone with the join code** (an open network). The network page shows the
+   code publicly, so treat it like an open door.
+2. **Only devices you let in.** Joining then takes the join code **and** a
+   current 8-digit code from your authenticator app.
 
-- **Tier B, for small teams:** the join code plus a code from the
-  administrator's authenticator app, checked when a device registers.
-- **Tier C, for larger organisations:** sign-in through your directory (OIDC).
+**Setting up choice 2.** At the end of the setup the script shows a QR code.
+Add it **once** to an authenticator that shows 8 digits: Google Authenticator,
+Aegis or 2FAS. Not Microsoft Authenticator: it shows 6 digits, and those are not
+accepted. You can see the QR again later:
+
+- `sudo bash onchato-setup.sh --access-qr`;
+- or the dashboard's button, which shows it for 15 seconds; every showing is
+  logged.
+
+**How a person joins.** They join the network as usual. On the first sign-in,
+the app asks for "a code from the administrator": you read them the current
+code, or send it, and it is valid for about a minute. The app enrols the device
+and connects. The terminal client asks the same way, or takes `--access-code`.
+
+**What the node knows.** In such a network every device dials with a fixed
+number of its own: a key unrelated to the person's identity key, one per
+identity on that device. So the node recognises a device from one session to the
+next, but does not know who it is. The app says this on the screen where people
+join. In an open network, and in ours, every session uses a fresh number
+instead.
+
+**Managing devices.** On the server:
+
+```bash
+A="docker run --rm --user 1000:1000 -v onchato_node-data:/data onchato-ops access"
+$A list --dir /data/allow                     # devices, with the name each gave and when
+$A label <end of a PeerId> "Jan, phone" --dir /data/allow
+$A revoke <end of a PeerId> --dir /data/allow  # off the list; the node drops it within seconds
+$A unlock --dir /data/allow                   # after too many wrong codes, see below
+```
+
+**Guessing the code.**
+
+- Each code works once.
+- An address gets 5 wrong tries per 10 minutes.
+- After 20 wrong codes in total, adding devices **locks** until you unlock it.
+  The dashboard and `access list` show the lock. Someone with the join code can
+  then annoy you (nobody new gets in), but cannot get in.
+
+Sign-in through your company directory (OIDC) is planned for larger
+organisations (`OPERATOR-NODE-PLAN.md`, section 4).
 
 ## The dashboard
 
@@ -210,6 +251,7 @@ identity for your network; their existing one is untouched.
 | file store (choice 1) | Kubo (offline) + the upload service + the sweeper | 443 at `/f` only |
 | statistics (optional) | Redis, 30 days, loopback | no |
 | dashboard | container, 127.0.0.1:8088 (SSH tunnel) | no |
+| enrolment (choice 2 of "who can join") | container, behind nginx at `/onchato/enroll` | 443 only |
 
 On the test VPS, checked from outside: 5001, 4001, 8089, 9202, 6379, 9001 and
 9003 are closed. Everything lives in `/opt/onchato` (code, built on the server
