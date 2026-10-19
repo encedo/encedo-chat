@@ -3,3 +3,4 @@
 !infra/nginx/relay-limits.conf
 !node/nginx/onchato-extra-profile.conf
 !node/nginx/start.sh
+!node/nginx/home-site.conf

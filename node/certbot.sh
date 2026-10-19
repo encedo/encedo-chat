@@ -5,11 +5,17 @@
 # instead (a test box with no public DNS); the apps refuse it, curl -k does not.
 set -eu
 : "${NODE_HOST:?NODE_HOST is not set (node.env)}"
-LIVE=/etc/letsencrypt/live/$NODE_HOST
+# The node's name, and the operator's home domain when the network page is
+# served here (HOME_SITE). One certificate per name: either can be renewed or
+# dropped without the other.
+NAMES="$NODE_HOST ${HOME_SITE:-}"
+have() { [ -f "/etc/letsencrypt/live/$1/fullchain.pem" ]; }
+
 if [ "${CERT_MODE:-letsencrypt}" = self ]; then
-  if [ ! -f "$LIVE/fullchain.pem" ]; then
-    mkdir -p "$LIVE"
-    python3 - "$NODE_HOST" "$LIVE" <<'PY'
+  for name in $NAMES; do
+    have "$name" && continue
+    LIVE=/etc/letsencrypt/live/$name; mkdir -p "$LIVE"
+    python3 - "$name" "$LIVE" <<'PY'
 import sys, datetime
 from cryptography import x509
 from cryptography.x509.oid import NameOID
@@ -25,16 +31,18 @@ cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_ke
 open(f"{live}/privkey.pem", "wb").write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
 open(f"{live}/fullchain.pem", "wb").write(cert.public_bytes(serialization.Encoding.PEM))
 PY
-    echo "onchato-certbot: self-signed certificate for $NODE_HOST (test only)"
-  fi
+    echo "onchato-certbot: self-signed certificate for $name (test only)"
+  done
   exec sleep infinity
 fi
 : "${ACME_EMAIL:?ACME_EMAIL is not set (node.env)}"
-until [ -f "$LIVE/fullchain.pem" ]; do
-  # CERT_MODE=staging: Let's Encrypt's test CA - for a machine rebuilt again and
-  # again (5 real certificates per name per week); apps refuse it, curl -k does not.
-  certbot certonly --webroot -w /var/www/html -d "$NODE_HOST" --email "$ACME_EMAIL" --agree-tos --non-interactive --no-eff-email \
-    $( [ "${CERT_MODE:-}" = staging ] && echo --staging ) \
-    || { echo "onchato-certbot: no certificate yet (DNS? port 80?) - again in 60 s"; sleep 60; }
+for name in $NAMES; do
+  until have "$name"; do
+    # CERT_MODE=staging: Let's Encrypt's test CA - for a machine rebuilt again and
+    # again (5 real certificates per name per week); apps refuse it, curl -k does not.
+    certbot certonly --webroot -w /var/www/html -d "$name" --email "$ACME_EMAIL" --agree-tos --non-interactive --no-eff-email \
+      $( [ "${CERT_MODE:-}" = staging ] && echo --staging ) \
+      || { echo "onchato-certbot: no certificate for $name yet (DNS? port 80?) - again in 60 s"; sleep 60; }
+  done
 done
 while true; do certbot renew --webroot -w /var/www/html --quiet || true; sleep 43200; done

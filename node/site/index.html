@@ -1,0 +1,52 @@
+<!doctype html>
+<!-- The network page (OPERATOR-NODE-PLAN.md, access tier A: an open network, the join code is public).
+     Written by onchato-setup.sh into /var/lib/onchato/profile/site/ at install and --renew. -->
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sieć __OPERATOR__</title>
+<style>
+  :root { --bg: #f4f6f7; --card: #fff; --ink: #18232b; --mute: #5c6b74; --line: #d9e0e4; --accent: #1d6670; color-scheme: light dark; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #10171a; --card: #182226; --ink: #e2e9ec; --mute: #93a3ab; --line: #27343a; --accent: #6bbcc4; } }
+  * { box-sizing: border-box }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 34rem; margin: 0 auto; padding: 32px 16px 48px; display: grid; gap: 18px; }
+  h1 { font-size: 1.6rem; margin: 0; }
+  .lead { margin: 4px 0 0; color: var(--mute); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; display: grid; gap: 14px; }
+  .qr { justify-self: center; width: min(100%, 280px); height: auto; border-radius: 8px; background: #fff; padding: 6px; image-rendering: pixelated; }
+  .label { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); }
+  .fp { font-family: ui-monospace, Menlo, monospace; font-size: 1.05rem; letter-spacing: .04em; }
+  .link { font-family: ui-monospace, Menlo, monospace; font-size: .8rem; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; user-select: all; }
+  ol { margin: 0; padding-left: 1.2rem; display: grid; gap: 6px; }
+  a { color: var(--accent); }
+  .note { font-size: .85rem; color: var(--mute); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Sieć __OPERATOR__</h1>
+    <p class="lead">Niezależna sieć onchato (__NETWORK_ID__) na serwerze __NODE_HOST__.</p>
+  </header>
+  <section class="card">
+    <img class="qr" src="join.png" alt="Kod QR do dołączenia do sieci __OPERATOR__" width="490" height="490">
+    <ol>
+      <li>Otwórz aplikację onchato na telefonie (albo <a href="__APP__">__APP_HOST__</a>).</li>
+      <li>Na ekranie logowania wybierz „inna sieć” i zeskanuj kod.</li>
+      <li>Porównaj odcisk klucza poniżej i załóż nową tożsamość w tej sieci.</li>
+    </ol>
+    <div>
+      <div class="label">Odcisk klucza operatora</div>
+      <div class="fp">__FP1__<br>__FP2__</div>
+    </div>
+    <div>
+      <div class="label">Link (zamiast skanowania)</div>
+      <div class="link">__LINK__</div>
+    </div>
+  </section>
+  <p class="note">Rozmowy są szyfrowane end-to-end: ten serwer je przekazuje, ale ich nie odczyta. Kto ma ten kod, może dołączyć do sieci.</p>
+</main>
+</body>
+</html>

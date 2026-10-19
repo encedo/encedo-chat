@@ -145,6 +145,18 @@ ENV
 }
 
 dns_check() {
+  # The network page (access tier A: an open network, its join code public) on
+  # the home domain - when that domain points at this server too. Elsewhere it
+  # is the operator's own site and is left alone.
+  HOME_SITE=
+  if [ "$DOMAIN" != "$NODE_HOST" ] && [ "${HOME_URL%/}" = "https://$DOMAIN" ]; then
+    if [ "$LOCAL_TEST" = 1 ]; then HOME_SITE=${ONCHATO_TEST_HOME_SITE:-}
+    else
+      local h; h=$(getent ahostsv4 "$DOMAIN" | awk '{print $1; exit}')
+      case " $(hostname -I 2>/dev/null) " in *" $h "*) [ -n "$h" ] && HOME_SITE=$DOMAIN ;; esac
+    fi
+  fi
+  [ -n "$HOME_SITE" ] && ok "$HOME_SITE points here too: the network page will be served there"
   [ "$LOCAL_TEST" = 1 ] && return
   local want mine
   want=$(getent ahostsv4 "$NODE_HOST" | awk '{print $1; exit}')
@@ -210,6 +222,7 @@ MAX_CONNS=${MAX_CONNS:-400}
 REDIS_PORT=${REDIS_PORT:-6379}
 $( [ "$LOCAL_TEST" = 1 ] && echo CERT_MODE=self )
 $( [ "$LOCAL_TEST" = 0 ] && [ -n "${CERT_MODE:-}" ] && echo "CERT_MODE=$CERT_MODE" )
+$( [ -n "${HOME_SITE:-}" ] && echo "HOME_SITE=$HOME_SITE" )
 $( [ -n "${PEERS:-}" ] && echo "PEERS=$PEERS" )
 $( [ -n "${SIBLINGS:-}" ] && echo "SIBLINGS=$SIBLINGS" )
 $( [ -n "${V6_HOST:-}" ] && echo "V6_HOST=$V6_HOST" )
@@ -273,6 +286,29 @@ sign_profile() {
   chmod 644 "$DATA/profile/network.json"
 }
 
+# The network page: the join code as a PNG and a page around it, from the
+# template in the repo. Written again on --renew (a new signature, a new code).
+write_site() {
+  [ -n "${HOME_SITE:-}" ] || return 0
+  mkdir -p "$DATA/profile/site"; chmod 755 "$DATA/profile/site"
+  ops -- network link "https://$NODE_HOST/onchato/network.json" network.json --png site/join.png >/dev/null || die "the join code was not drawn"
+  local fp; fp=$(ops -- network check network.json 2>/dev/null | awk '/root key/ {print $3,$4,$5,$6,$7,$8,$9,$10}')
+  export OPERATOR NETWORK_ID NODE_HOST APP_ORIGIN FP="$fp"
+  docker run --rm --user "$(id -u):$(id -g)" -v "$DATA:/data" -v "$DIR/node/site:/tpl:ro" \
+    -e OPERATOR -e NETWORK_ID -e NODE_HOST -e APP_ORIGIN -e FP --entrypoint node onchato-ops -e '
+    const fs = require("fs"), e = process.env
+    const esc = (t) => String(t).replace(/[&<>"\x27]/g, (c) => "&#" + c.charCodeAt(0) + ";")
+    const link = process.argv[1]
+    const fp = e.FP.split(" ")
+    const v = { OPERATOR: esc(e.OPERATOR), NETWORK_ID: esc(e.NETWORK_ID), NODE_HOST: esc(e.NODE_HOST),
+      APP: esc(e.APP_ORIGIN + "/"), APP_HOST: esc(new URL(e.APP_ORIGIN).host),
+      FP1: esc(fp.slice(0, 4).join(" ")), FP2: esc(fp.slice(4).join(" ")), LINK: esc(link) }
+    const out = fs.readFileSync("/tpl/index.html", "utf8").replace(/__([A-Z0-9_]+)__/g, (m, k) => (k in v ? v[k] : m))
+    fs.writeFileSync("/data/profile/site/index.html", out)' \
+    "$(ops -- network link "https://$NODE_HOST/onchato/network.json" network.json | head -1)" || die "the network page was not written"
+  chmod 644 "$DATA/profile/site/"*
+}
+
 # ---- 5. checks and the join code -----------------------------------------------
 checks() {
   local k=; [ "$LOCAL_TEST" = 1 ] && k=-k
@@ -284,6 +320,10 @@ checks() {
     check "the network profile is served, signed, with CORS" "ops --network host -- network check network.json --online"
     ops -- network check network.json 2>/dev/null | grep -E 'valid|WARNING' || true
   else printf '[fail] no network profile yet\n'; bad=1; fi
+  if [ -n "${HOME_SITE:-}" ]; then
+    local i; for i in $(seq 1 30); do curl -fs $k --max-time 5 "https://$HOME_SITE/join.png" >/dev/null 2>&1 && break; sleep 4; done
+    check "the network page https://$HOME_SITE/ is served" "curl -fs $k --max-time 5 https://$HOME_SITE/ | grep -q onchato-net="
+  fi
 }
 
 join_code() {
@@ -294,6 +334,7 @@ join_code() {
   ok "the network $NETWORK_ID is running"
   say "     Operator key fingerprint: $fp  (people compare it when they join)"
   say "     QR code as a file: $DATA/profile/join.svg"
+  [ -n "${HOME_SITE:-}" ] && say "     The network page, with the code: https://$HOME_SITE/"
   say "     People join in the onchato app: sign-in screen, \"another network\", scan or paste the link above."
 }
 
@@ -301,11 +342,11 @@ join_code() {
 load_answers
 case "$MODE" in
   install)
-    preflight; questions; dns_check; firewall; fetch_code; start_node; make_key; sign_profile; checks; join_code ;;
+    preflight; questions; dns_check; firewall; fetch_code; start_node; make_key; sign_profile; write_site; checks; join_code ;;
   check)
     [ -n "${NODE_HOST:-}" ] || die "not set up yet (no $ETC/setup.env)"
     [ -n "${ONCHATO_SRC:-}" ] && DIR=$ONCHATO_SRC
-    checks ;;
+    dns_check >/dev/null; checks ;;
   update)
     [ -n "${NODE_HOST:-}" ] || die "not set up yet"
     preflight; REF=${ONCHATO_REF:-__RELEASE_TAG__}; fetch_code; start_node; checks ;;
@@ -314,7 +355,7 @@ case "$MODE" in
     [ -n "${ONCHATO_SRC:-}" ] && DIR=$ONCHATO_SRC
     PEER_ID=$(compose logs relay 2>/dev/null | grep -o 'PeerId: 12D3[A-Za-z0-9]*' | tail -1 | cut -d' ' -f2 || true)
     [ -n "$PEER_ID" ] || die "the relay is not running"
-    sign_profile; checks; join_code
+    dns_check; sign_profile; write_site; checks; join_code
     say "A renewed profile has a new hash: print the new QR code above (the old one is refused)." ;;
 esac
 [ "$bad" = 0 ] || { say ""; die "some checks failed - see above"; }
