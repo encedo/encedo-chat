@@ -152,8 +152,6 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '…albo wklej link lub treść': '…or paste the link or the contents',
     'Porównaj odcisk z tym, który operator podał innym kanałem — na swojej stronie albo osobiście. Operator tej sieci zobaczy adres IP Twojego urządzenia i to, kiedy się z kimś spotykasz; treści rozmów nie zobaczy nikt poza Tobą i rozmówcą.': 'Compare the fingerprint with the one the operator gave you another way — on its website or in person. The operator of this network will see your device\'s IP address and when you meet someone; nobody but you and the other person sees what you say.',
     'publiczna sieć onchato': 'the public onchato network',
-    'Sieć: {n}': 'Network: {n}',
-    '(profil sieci wygasł)': '(network profile expired)',
     'Nowa tożsamość w sieci: {n}': 'A new identity in the network: {n}',
     'Wybierz sieć dla nowej tożsamości. Strona przeładuje się w wybranej sieci i od razu otworzy to okno.': 'Choose the network for the new identity. The page reloads in that network and opens this window again.',
     'Ta sieć wymaga tożsamości w HEM.': 'This network requires an identity in a HEM.',

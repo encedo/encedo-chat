@@ -1058,7 +1058,7 @@ function renderLoginProfiles(boot = false) {
     // The tag says the identity's network when it is not the built-in one: one
     // list for every network, each profile with its own (the user's call).
     const tagNet = networkById(localKV(), bindingOf(localKV(), softBindingKey(n), BUILTIN_NET), BUILTIN_NET, nowMs())
-    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = tagNet && !tagNet.builtin ? tagNet.operator : tr('software')
+    const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = tagNet && !tagNet.builtin ? tagNet.operator + (tagNet.expired ? ' · ' + tr('wygasł') : '') : tr('software')
     b.append(av, who, tag)
     b.addEventListener('click', () => {
       if (inNetworkOrSwitch(bindingOf(localKV(), softBindingKey(n), BUILTIN_NET), () => localStorage.setItem(OPEN_PROFILE_KEY, n))) openSoftModal(n)
@@ -1080,7 +1080,7 @@ function renderLoginProfiles(boot = false) {
   // Only at boot: after that, this function is how somebody gets BACK to the
   // profiles, and sending them straight out again would make that link dead.
   if (boot && lastMethod() === 'hem') showHemForm()
-  paintNetworkLine()
+  paintNetworkPolicy()
   // A reload that switched the network to open a profile: open it now.
   if (boot) {
     if (localStorage.getItem(OPEN_CREATE_KEY)) {
@@ -6611,15 +6611,12 @@ function netLabel(n: ActiveNetwork): string {
   return n.builtin && n.id === 'main' ? tr('publiczna sieć onchato') : n.operator
 }
 /**
- * The card's network line and what the network's policy allows; quiet on a
- * device that knows one network. Only a statement: each profile already knows
- * its network and switches on click, and a new identity's network is chosen
- * in the window that makes it.
+ * What the network's policy allows on the card. The card names no network:
+ * each profile carries its own on its tag and switches on click, and a new
+ * identity's network is named in the window that makes it - which network the
+ * page happens to be in says nothing to the person choosing.
  */
-function paintNetworkLine() {
-  const many = knownNetworks().length > 1
-  $('login-net').hidden = !many
-  if (many) $('login-net-name').textContent = tr('Sieć: {n}', { n: netLabel(ACTIVE) }) + (ACTIVE.expired ? ' ' + tr('(profil sieci wygasł)') : '')
+function paintNetworkPolicy() {
   const softOff = ACTIVE.policy.softwareProfiles === false
   for (const id of ['go-soft', 'go-create']) { const el = document.getElementById(id); if (el) el.hidden = softOff }
 }
