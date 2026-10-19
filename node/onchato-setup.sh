@@ -132,10 +132,18 @@ dns_check() {
 firewall() {
   [ "$LOCAL_TEST" = 1 ] && return
   if command -v ufw >/dev/null; then
-    ufw allow OpenSSH >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
-    ufw allow 3478/udp comment 'onchato STUN' >/dev/null
-    ufw status | grep -q 'Status: active' || ufw --force enable >/dev/null
-    ok "firewall: SSH, 80, 443, 3478/udp open, everything else closed"
+    # An active firewall is the operator's: SSH stays as they set it (it may be
+    # open to two addresses only). A fresh one gets SSH from anywhere, or the
+    # enable below would lock the operator out.
+    if ufw status | grep -q 'Status: active'; then
+      ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null; ufw allow 3478/udp comment 'onchato STUN' >/dev/null
+      ok "firewall: 80, 443, 3478/udp opened; SSH left as it was"
+    else
+      ufw allow OpenSSH >/dev/null; ufw allow 80/tcp >/dev/null; ufw allow 443/tcp >/dev/null
+      ufw allow 3478/udp comment 'onchato STUN' >/dev/null
+      ufw --force enable >/dev/null
+      ok "firewall: SSH, 80, 443, 3478/udp open, everything else closed"
+    fi
   else
     warn "no ufw here: open 80/tcp, 443/tcp and 3478/udp in your provider's firewall, nothing else"
   fi
