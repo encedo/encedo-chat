@@ -3,6 +3,7 @@
  *
  *   RELAY_DIR=<path to a relay/ checkout> node net/relay-compat-test.ts
  *   RELAY_ADDR=<multiaddr of a running node> node net/relay-compat-test.ts   (no relay started: e.g. a node of the Docker image)
+ *   ... RELAY_ADDR_B=<another node>   the GossipSub session on that node instead: two nodes of one mesh
  *
  * An operator running a network of its own takes the apps from us and updates
  * its relays on its own schedule, so the day an app update lands, its relays
@@ -62,7 +63,9 @@ try {
   const params = { networkId: 'compat-test', dateUTC: new Date().toISOString().slice(0, 10) }
   const a = await softId('a'), b = await softId('b')
   const A = await startSession(a.id, { relays: [R], transport: 'light', params } as any)
-  const B = await startSession(b.id, { relays: [R], transport: 'libp2p', params } as any)
+  const RB = process.env.RELAY_ADDR_B ?? R
+  if (RB !== R) console.log(`second session on: ${RB}`)
+  const B = await startSession(b.id, { relays: [RB], transport: 'libp2p', params } as any)
   let seenA = false, seenB = false
   const gotA: string[] = [], gotB: string[] = []
   let convB: any = null
