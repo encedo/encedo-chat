@@ -7,6 +7,7 @@
  *
  *   node relay.mjs --pass <secret> --port 9001 [--host bs1.onchato.com] [--peers <ma>...]
  *   node relay.mjs --key-file /data/node.key ...   (a random key of its own; any node but bs1-bs3)
+ *   node relay.mjs ... --allow-peers <file>       (only listed PeerIds and the siblings get in: allowlist.mjs)
  *                  [--max-topics 250] [--idle-ttl 120]
  *                  [--stats 15] [--stats-json <path>] [--quiet-msgs]
  *                  [--stats-redis redis://127.0.0.1:6379] [--stats-node bs1]
@@ -59,6 +60,7 @@ import { pushable } from 'it-pushable'
 import { PROTOCOL as PICK_PROTOCOL, T as PICK_T, decodeFrame as decodePickFrame, encodeDeliver, encodeRefused, encodePicked, encodeAck, makePicks } from './pick.mjs'
 import { redisSink } from './redis.mjs'
 import { loadOrCreateSeed, privateKeyFromSeed } from './nodekey.mjs'
+import { watchAllowlist, refuse } from './allowlist.mjs'
 import { makeMetrics, metricsHandler, SAMPLE_MS, readCommit, commitFromEnv } from './metrics.mjs'
 import { createServer as createHttpServer, Server as HttpServer } from 'http'
 import { appendFile } from 'fs'
@@ -95,6 +97,21 @@ const PEERS = getPeers()
 // every client looks like 127.0.0.1, and bs1 dials nobody, so neither address
 // nor direction can tell a sibling from a client.
 const SIBLINGS = siblingSet(get('--siblings', '').split(',').filter(Boolean), PEERS)
+// A network whose profile says policy.access "allowlist" (allowlist.mjs): only
+// the PeerIds on this list, and the siblings, get past the Noise handshake. OFF
+// without the flag - the public network and open networks never set it.
+const ALLOW_FILE = get('--allow-peers', null)
+let relayRef = null
+let refusedSince = 0
+const ALLOW = ALLOW_FILE ? watchAllowlist(ALLOW_FILE, {
+  onChange: (ids) => {
+    // Taken off the list: out now, not at its next reconnect.
+    for (const c of relayRef?.getConnections() ?? []) {
+      if (refuse(c.remotePeer, ids, SIBLINGS)) { console.log(`[allowlist] ${c.remotePeer.toString().slice(-8)} is off the list - closing`); c.close().catch(() => {}) }
+    }
+  },
+}) : null
+if (ALLOW) setInterval(() => { if (refusedSince) { console.log(`[allowlist] refused ${refusedSince} connection(s) from devices not on the list in the last minute`); refusedSince = 0 } }, 60_000).unref()
 // OFF by default: the code goes out inert and is turned on one node at a time.
 const LOCAL_TOPICS = process.argv.includes('--local-topics-only')
 // Say how full this node is, on the mesh, for clients choosing where to dial
@@ -196,7 +213,10 @@ const relay = await createLibp2p({
   transports: [webSockets({ filter: (addrs) => addrs.filter((ma) => /\/(wss?)(\/|$)/.test(ma.toString())) })],
   connectionEncrypters: [noise()],
   streamMuxers: [yamux()],
-  connectionGater: { denyDialMultiaddr: () => false },
+  connectionGater: {
+    denyDialMultiaddr: () => false,
+    ...(ALLOW ? { denyInboundEncryptedConnection: (peerId) => { const r = refuse(peerId, ALLOW.ids, SIBLINGS); if (r) refusedSince++; return r } } : {}),
+  },
   connectionManager: {
     maxConnections: MAX_CONNS,  // default 520 (512 clients + inter-relay headroom); --max-connections for load tests
 
@@ -527,6 +547,8 @@ if (PEERS.length > 0) {
 }
 
 console.log(`\n[ok] Relay uruchomiony na porcie ${PORT} (${BIND})`)
+relayRef = relay
+console.log(ALLOW ? `Dostep: TYLKO urzadzenia z listy (${ALLOW.ids.size}) ${ALLOW_FILE} + ${SIBLINGS.size} przekaznik(ow)` : 'Dostep: otwarty (bez --allow-peers)')
 // Print the topic budget: it is the setting that decides whether a room forms
 // at all, and after a deploy it is the one line that proves which build is up.
 console.log(`Tematy: limit ${MAX_TOPICS} równoczesnych, eviction po ${IDLE_TTL / 1000}s ciszy (sweep ${SWEEP_MS / 1000}s)`)

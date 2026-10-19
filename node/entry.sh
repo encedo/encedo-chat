@@ -17,6 +17,9 @@ relay)
   if [ -n "${V6_HOST:-}" ]; then set -- "$@" --v6-port 9002 --v6-host "$V6_HOST"; fi
   if [ -n "${PEERS:-}" ]; then set -- "$@" --peers $PEERS; fi
   if [ -n "${SIBLINGS:-}" ]; then set -- "$@" --siblings "$SIBLINGS"; fi
+  # A network that admits devices by list (policy.access "allowlist"): the list
+  # the node follows (relay/allowlist.mjs). Unset: an open node, as always.
+  if [ -n "${ALLOW_PEERS:-}" ]; then set -- "$@" --allow-peers "$ALLOW_PEERS"; fi
   if [ -n "${REDIS_PORT:-}" ]; then
     set -- "$@" --stats-redis "redis://127.0.0.1:$REDIS_PORT" --stats-node "${NODE_HOST%%.*}" --stats-ttl-days 30
   fi
