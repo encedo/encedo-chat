@@ -13,6 +13,19 @@
 #          --no-cert            skip certbot + the nginx site (a test box without DNS)
 #          --skip-dns-check     do not require the A record to point at this machine
 #          --repo <dir>         clone location (default /opt/github/encedo-chat)
+#          --domain <d>         the network's domain (default onchato.com). Any other domain is
+#                               ANOTHER network: the node gets a random key of its own
+#                               (--key-file, not --pass), our node table is not used, the mesh is
+#                               --peers/--siblings below or none, and geoblock is off unless asked
+#          --home <url>         where a browser opening the node's name is sent
+#                               (default https://onchato.com, else https://<domain>)
+#          --peers "<ma> ..."   another network's other nodes (IPv6 9002 multiaddrs)
+#          --siblings <ids>     their PeerIds, comma-separated
+#          --geoblock           the sanctions geoblock and abuse list on another network's node
+#                               (always on for onchato.com - RKV policy)
+#
+# The Docker image (node/onchato-setup.sh) is the operators' way; this script is
+# the systemd one: our nodes, and an operator who wants no Docker.
 #
 # What it installs is what relay/DEPLOY.md describes step by step; the WHY of
 # every setting lives there, not here. The relay's flags come from ONE place,
@@ -39,6 +52,11 @@ MAXC=""
 PUSH_URL=""
 NO_CERT=0
 SKIP_DNS=0
+DOMAIN=onchato.com
+HOME_URL=""
+X_PEERS=""
+X_SIBLINGS=""
+GEOBLOCK=""
 REPO=/opt/github/encedo-chat
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SRC_REPO=$(cd "$SCRIPT_DIR/.." && pwd)     # the checkout this script was run from
@@ -54,13 +72,25 @@ while [ $# -gt 0 ]; do
     --no-cert) NO_CERT=1 ;;
     --skip-dns-check) SKIP_DNS=1 ;;
     --repo) REPO="$2"; shift ;;
-    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
+    --domain) DOMAIN="$2"; shift ;;
+    --home) HOME_URL="$2"; shift ;;
+    --peers) X_PEERS="$2"; shift ;;
+    --siblings) X_SIBLINGS="$2"; shift ;;
+    --geoblock) GEOBLOCK=1 ;;
+    -h|--help) sed -n '2,46p' "$0"; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
 done
 
 SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO=sudo
+# Our network or another one. Ours keeps everything as it was: --pass (the
+# PeerId is compiled into clients until 0.9), the node table, the geoblock.
+OURS=0; [ "$DOMAIN" = onchato.com ] && OURS=1
+[ -n "$HOME_URL" ] || { [ "$OURS" = 1 ] && HOME_URL=https://onchato.com || HOME_URL=https://$DOMAIN; }
+HOME_URL=${HOME_URL%/}
+[ -n "$GEOBLOCK" ] || GEOBLOCK=$OURS
+KEY_FILE=/var/lib/onchato/relay/node.key
 say()  { printf '%s\n' "$*"; }
 ok()   { printf '  [ok]   %s\n' "$*"; }
 warn() { printf '  [warn] %s\n' "$*"; WARNED=1; }
@@ -95,10 +125,10 @@ TEMPLATE=$TEMPLATE_REPO/relay/onchato-relay.service
 
 # Rows look like:  # bs1   12D3KooW...   2a03:ec41:0:9::cf   2 GB  2000
 # name, PeerId, mesh IPv6, --max-topics, --max-connections
-table() { { grep -E '^# bs[0-9]+ +12D3KooW' "$TEMPLATE" || true; } | awk '{print $2, $3, $4, $7, $8}'; }
+table() { [ "$OURS" = 1 ] || return 0; { grep -E '^# bs[0-9]+ +12D3KooW' "$TEMPLATE" || true; } | awk '{print $2, $3, $4, $7, $8}'; }
 # An old clone carries the 3-flag template with no node table: say so instead of
 # rendering nonsense (or, under `set -e`, dying without a word).
-[ -n "$(table)" ] || die "$TEMPLATE has no node table -- the clone predates it: git -C $TEMPLATE_REPO pull --ff-only"
+[ "$OURS" = 0 ] || [ -n "$(table)" ] || die "$TEMPLATE has no node table -- the clone predates it: git -C $TEMPLATE_REPO pull --ff-only"
 
 short=${HOST%%.*}
 if [ -z "$HOST" ]; then
@@ -106,11 +136,15 @@ if [ -z "$HOST" ]; then
     # On an existing node the answer is in systemd already.
     HOST=$(systemctl show -p ExecStart --value onchato-relay 2>/dev/null | grep -o -- '--host [^ ]*' | awk '{print $2}' || true)
   fi
-  if [ -z "$HOST" ] && [ -t 0 ]; then read -r -p "Node name (e.g. bs4.onchato.com): " HOST; fi
+  if [ -z "$HOST" ] && [ -t 0 ]; then read -r -p "Node name (e.g. bs4.$DOMAIN): " HOST; fi
   [ -n "$HOST" ] || die "--host is required"
   short=${HOST%%.*}
 fi
-[[ "$HOST" =~ ^bs[0-9]+\.onchato\.com$ ]] || warn "$HOST does not look like bsN.onchato.com -- the name is also the PeerId seed"
+if [ "$OURS" = 1 ]; then
+  [[ "$HOST" =~ ^bs[0-9]+\.onchato\.com$ ]] || warn "$HOST does not look like bsN.onchato.com -- the name is also the PeerId seed"
+else
+  case "$HOST" in *."$DOMAIN"|"$DOMAIN") ;; *) warn "$HOST is not under $DOMAIN" ;; esac
+fi
 
 V6=$(ip -6 addr show scope global 2>/dev/null | awk '/inet6/{print $2}' | cut -d/ -f1 | grep -v '^fd' | head -1 || true)
 RAM_MB=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
@@ -132,11 +166,20 @@ while read -r name pid v6 _; do
   SIBLINGS="$SIBLINGS,$pid"
 done < <(table)
 PEERS=${PEERS# }; SIBLINGS=${SIBLINGS#,}
+[ "$OURS" = 1 ] || { PEERS=$X_PEERS; SIBLINGS=$X_SIBLINGS; }
 
 # Only the two lines that carry fields are filled: the comments name the same
 # fields (<V6>, <PEERS>...) as documentation and must stay readable.
 render_unit() {
-  sed -E "/^(ExecStart|Description)=/{s|<NODE>|$short|g; s|<V6>|$V6|; s|<PEERS>|$PEERS|; s|<SIBLINGS>|$SIBLINGS|; s|<MAX_TOPICS>|$MAXT|; s|<MAX_CONNS>|$MAXC|}" "$TEMPLATE"
+  if [ "$OURS" = 1 ]; then
+    sed -E "/^(ExecStart|Description)=/{s|<NODE>|$short|g; s|<V6>|$V6|; s|<PEERS>|$PEERS|; s|<SIBLINGS>|$SIBLINGS|; s|<MAX_TOPICS>|$MAXT|; s|<MAX_CONNS>|$MAXC|}" "$TEMPLATE"
+    return
+  fi
+  # Another network: its own random key, its own name; the mesh flags only when
+  # there is a mesh (a single node has no peers, and needs no IPv6).
+  local mesh=""
+  [ -n "$PEERS" ] && mesh="--peers $PEERS --v6-port 9002 --v6-host $V6 --siblings $SIBLINGS"
+  sed -E "/^(ExecStart|Description)=/{s|--pass <NODE>\.onchato\.com|--key-file $KEY_FILE|; s|--host <NODE>\.onchato\.com|--host $HOST|; s|--peers <PEERS> --v6-port 9002 --v6-host <V6> --siblings <SIBLINGS>|$mesh|; s|<NODE>|$short|g; s|<MAX_TOPICS>|$MAXT|; s|<MAX_CONNS>|$MAXC|; s|  +| |g}" "$TEMPLATE"
 }
 # One flag (with its values) per line, sorted: comparable whatever the order.
 flags() {
@@ -150,7 +193,9 @@ flags() {
 if [ "$MODE" = check ]; then
   say "$HOST  (template: $TEMPLATE)"
   row=$(table | awk -v n="$short" '$1==n')
-  [ -n "$row" ] && ok "listed in the node table: $row" || warn "$short is not in the node table of the template"
+  if [ "$OURS" = 1 ]; then
+    [ -n "$row" ] && ok "listed in the node table: $row" || warn "$short is not in the node table of the template"
+  else ok "another network ($DOMAIN): its own key, $( [ -n "$PEERS" ] && echo "mesh: --peers" || echo "a single node")"; fi
 
   want=$(render_unit | grep '^ExecStart=/' | sed 's|^ExecStart=/usr/bin/node relay.mjs ||' | flags)
   live=$(systemctl show -p ExecStart --value onchato-relay 2>/dev/null \
@@ -174,9 +219,12 @@ if [ "$MODE" = check ]; then
 
   estab=$(ss -tn state established '( sport = :9002 or dport = :9002 )' | tail -n +2 | wc -l)
   expect=$(table | awk -v n="$short" '$1!=n' | wc -l)
+  [ "$OURS" = 1 ] || expect=$(printf '%s\n' $PEERS | grep -c . || true)
+  if [ "$expect" = 0 ]; then ok "mesh: a single node, nothing to link"; else
   [ "$estab" -ge "$expect" ] && ok "mesh: $estab link(s) on 9002, $expect other node(s)" || bad "mesh: $estab link(s) on 9002, expected $expect"
   L9002=$(ss -ltn '( sport = :9002 )' | tail -n +2)
   [ -n "$L9002" ] && ok "listening on 9002 (mesh)" || bad "not listening on 9002"
+  fi
   UFW=$($SUDO ufw status 2>/dev/null || true)
   while read -r name _ v6 _; do
     [ "$name" = "$short" ] && continue
@@ -201,6 +249,7 @@ if [ "$MODE" = check ]; then
     || bad "backup file in sites-enabled -- nginx LOADS it"
 
   # GeoIP (GEOBLOKADA.md): list present, fresh, wired into nginx and STUN.
+  if [ "$GEOBLOCK" != 1 ]; then ok "geoblock and abuse list: off (another network's choice; --geoblock to turn on)"; else
   GL=/var/lib/onchato/geoip/blocked-cidrs.txt
   if [ -f "$GL" ]; then
     n=$(grep -cvE '^(#|$)' "$GL" || true); age=$(( ( $(date +%s) - $(stat -c %Y "$GL") ) / 86400 ))
@@ -220,6 +269,7 @@ if [ "$MODE" = check ]; then
   sstart=$(systemctl show onchato-stun -p ActiveEnterTimestamp --value 2>/dev/null)
   { $SUDO journalctl -u onchato-stun --since "$sstart" --no-pager 2>/dev/null || true; } | grep -q 'GeoIP: [0-9]* ranges' \
     && ok "STUN loaded the geoip list" || warn "STUN has not reported loading the geoip list"
+  fi
 
   # The banner is printed once, at start: read from the start of THIS run.
   since=$(systemctl show onchato-relay -p ActiveEnterTimestamp --value 2>/dev/null)
@@ -241,7 +291,7 @@ say "mesh v6   ${V6:-<none found>}"
 say "machine   $CPUS vCPU, $RAM_MB MB -> --max-connections $MAXC, --max-topics $MAXT"
 say "peers     ${PEERS:-<none: this is the first node>}"
 echo
-if [ -z "$V6" ]; then
+if [ -z "$V6" ] && { [ "$OURS" = 1 ] || [ -n "$PEERS" ]; }; then
   [ "$MODE" = dry ] || die "no global IPv6 on this machine: the mesh runs over IPv6 port 9002 (relay/DEPLOY.md step 1)"
   V6="THIS-MACHINE-IPV6"; warn "no global IPv6 here -- shown as $V6 (a real install refuses)"
 fi
@@ -256,7 +306,7 @@ else
   mine=$(hostname -I 2>/dev/null || true)
   if [ -n "$a" ] && printf '%s\n' $mine | grep -qx "$a"; then ok "$HOST -> $a (this machine)"
   else
-    msg="$HOST resolves to '${a:-nothing}', not to this machine ($mine). Create the A record first -- the wildcard *.onchato.com points at bs1."
+    msg="$HOST resolves to '${a:-nothing}', not to this machine ($mine). Create the A record first$( [ "$OURS" = 1 ] && echo ' -- the wildcard *.onchato.com points at bs1')."
     [ "$MODE" = dry ] && warn "$msg" || die "$msg"
   fi
 fi
@@ -285,6 +335,9 @@ while read -r name _ v6 _; do
   [ "$name" = "$short" ] && continue
   run "$SUDO ufw allow from $v6 to any port 9002 proto tcp comment '$name relay mesh over IPv6'"
 done < <(table)
+if [ "$OURS" = 0 ]; then
+  for ma in $PEERS; do v6=$(printf '%s' "$ma" | cut -d/ -f3); run "$SUDO ufw allow from $v6 to any port 9002 proto tcp comment 'relay mesh over IPv6'"; done
+fi
 run "$SUDO ufw --force enable"
 
 # -- 3. the code -----------------------------------------------------------------
@@ -298,7 +351,8 @@ run "(cd $REPO/relay && $SUDO npm ci --silent)"
 
 # The PeerId this name seeds -- what every client will carry. Printed now so
 # the operator can compare it with the log at step 5.
-if [ -d "$REPO/relay/node_modules/@libp2p/crypto" ] || [ -d "$SRC_REPO/relay/node_modules/@libp2p/crypto" ]; then
+if [ "$OURS" = 0 ]; then PID="<made at first start - read it from the journal>"; say "  PeerId: from its own key ($KEY_FILE), made when the relay first starts"
+elif [ -d "$REPO/relay/node_modules/@libp2p/crypto" ] || [ -d "$SRC_REPO/relay/node_modules/@libp2p/crypto" ]; then
   d=$REPO/relay; [ -d "$d/node_modules/@libp2p/crypto" ] || d=$SRC_REPO/relay
   PID=$(cd "$d" && node -e '
     import("@libp2p/crypto/keys").then(async ({generateKeyPairFromSeed}) => {
@@ -317,6 +371,8 @@ run "$SUDO systemctl enable -q --now redis-server && $SUDO systemctl restart red
 
 # -- 5. the relay: the template, filled ------------------------------------------
 say "== 5. relay"
+# The relay runs as www-data and makes its key on first start: a directory it owns.
+[ "$OURS" = 1 ] || run "$SUDO install -d -m 700 -o www-data -g www-data $(dirname "$KEY_FILE")"
 unit=$(render_unit)
 printf '%s\n' "$unit" | grep -qE '^(ExecStart|Description)=.*<' && die "template left unfilled fields -- check the node table"
 printf '%s\n' "$unit" | put /etc/systemd/system/onchato-relay.service
@@ -342,6 +398,11 @@ fi
 # -- 7b. GeoIP: the sanctions block list (GEOBLOKADA.md, infra/geoip/) -------------------
 # Before step 8: the node's nginx site includes snippets/onchato-geoblock.conf,
 # and the geo block includes the list file, so both must exist before nginx -t.
+if [ "$GEOBLOCK" != 1 ]; then
+  say "== 7b. geoip: off (another network; --geoblock to turn it on)"
+  # The site includes the snippet; without the geoblock it is empty.
+  [ "$NO_CERT" = 1 ] || printf '# geoblock off on this node (bs-setup.sh --geoblock turns it on)\n' | put /etc/nginx/snippets/onchato-geoblock.conf
+else
 say "== 7b. geoip"
 run "$SUDO install -d -m 755 /var/lib/onchato/geoip /var/www/onchato-geo"
 run "$SUDO install -m 644 $REPO/infra/geoip/unavailable.html /var/www/onchato-geo/__onchato_unavailable.html"
@@ -363,6 +424,7 @@ if [ "$MODE" = dry ]; then printf '  $ %s
 elif $SUDO node "$REPO/infra/geoip/geoip-update.mjs"; then ok "block list built"
 else warn "geoip-update FAILED -- nginx blocks nothing and STUN filters nothing until it succeeds (journalctl -u onchato-geoip)"; fi
 run "$SUDO systemctl restart onchato-stun"   # reads the list at start (and on change after)
+fi
 
 # -- 8. certificate + this node's own nginx site ------------------------------------
 if [ "$NO_CERT" = 1 ]; then
@@ -374,13 +436,21 @@ else
   # Two nginx connections per client: the stock 768 is a ~380-client ceiling.
   run "$SUDO sed -i -E 's/worker_connections [0-9]+;/worker_connections 4096;/' /etc/nginx/nginx.conf"
   run "grep -q worker_rlimit_nofile /etc/nginx/nginx.conf || $SUDO sed -i -E 's/^(worker_processes [^;]+;)/\\1\\nworker_rlimit_nofile 8192;/' /etc/nginx/nginx.conf"
-  sed "s/__HOST__/$HOST/g; s#__HOME__#https://onchato.com#g" "$TEMPLATE_REPO/infra/nginx/relay-node.conf" | put "/etc/nginx/sites-available/$HOST"
+  sed "s/__HOST__/$HOST/g; s#__HOME__#$HOME_URL#g" "$TEMPLATE_REPO/infra/nginx/relay-node.conf" | put "/etc/nginx/sites-available/$HOST"
   run "$SUDO ln -sf /etc/nginx/sites-available/$HOST /etc/nginx/sites-enabled/$HOST"
   run "$SUDO nginx -t && $SUDO systemctl reload nginx"
 fi
 
 # -- 9. what the operator does next, elsewhere ---------------------------------------
 echo
+if [ "$OURS" = 0 ]; then
+  say "== done on this machine. Next:"
+  say "1. Its PeerId: journalctl -u onchato-relay -n 25 --no-pager | grep PeerId"
+  say "   Its address for your network profile: /dns4/$HOST/tcp/443/wss/http-path/%2Frelay/p2p/<PeerId>"
+  say "2. Sign the profile with it (scripts/onchato-ops.mjs network sign, docs/OPERATOR.md)."
+  say "3. bs-setup.sh --check --host $HOST --domain $DOMAIN here."
+  exit 0
+fi
 say "== done on this machine. Next, NOT done by this script:"
 say "1. Check the relay log: the PeerId must be $PID"
 say "     journalctl -u onchato-relay -n 25 --no-pager"

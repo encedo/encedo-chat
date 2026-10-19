@@ -2,8 +2,8 @@
 
 Status (2026-10-19): **built, tested locally and on a real server (blbx.pl)** - the relay's `--key-file`,
 the image + compose (`node/`), the setup script (`node/onchato-setup.sh`,
-`--local-test` passes end to end), the passphrase key. Not yet: `bs-setup.sh
---domain`, the script as a release asset. The file store (Kubo offline + the
+`--local-test` passes end to end), the passphrase key. `bs-setup.sh --domain` (the systemd way, dry-run tested; not yet installed on a
+machine) and the script as a release asset (from 0.7.59). The file store (Kubo offline + the
 prefixer + the sweeper, profile `store`, tested locally) and the network page on
 the home domain (live on blbx.pl) are in. Phase C of operator networks
 (`docs/ARCHITECTURE.md`, "Another operator's network"). The guide an operator
