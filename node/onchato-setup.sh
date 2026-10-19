@@ -45,6 +45,7 @@ preflight() {
   if [ "$LOCAL_TEST" = 1 ]; then
     command -v docker >/dev/null || die "docker is not installed"
     docker compose version >/dev/null 2>&1 || die "docker compose is not available"
+    docker buildx version >/dev/null 2>&1 || die "docker buildx is not available"
     return
   fi
   [ "$(id -u)" = 0 ] || die "run it as root: sudo bash $0"
@@ -60,11 +61,14 @@ preflight() {
   if ss -lun "sport = :3478" | grep -q 3478 && ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^onchato-stun'; then
     die "port 3478/udp is already in use (STUN needs it)"
   fi
-  if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
+  # buildx too: without it Docker falls back to the legacy builder, which ignores
+  # the per-image node/**/Dockerfile.dockerignore and takes the CLI image's root
+  # .dockerignore instead (found on bs4: the ops image missed its files).
+  if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1 || ! docker buildx version >/dev/null 2>&1; then
     case "$ID" in
       ubuntu)
         say "Installing Docker from Ubuntu's own packages..."
-        apt-get update -qq && apt-get install -y -qq docker.io docker-compose-v2 git curl >/dev/null
+        apt-get update -qq && apt-get install -y -qq docker.io docker-compose-v2 docker-buildx git curl >/dev/null
         systemctl enable --now docker >/dev/null ;;
       *)
         die "Docker with the compose plugin is needed and this script installs it only on Ubuntu.
