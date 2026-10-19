@@ -168,3 +168,9 @@ test('pointer: plain http (except loopback), a CIDv0 or junk is not a pointer', 
   assert.equal(parseNetworkPointer('https://a.example/n.json#onchato-net=QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG'), null)
   assert.equal(parseNetworkPointer('https://a.example/n.json'), null)
 })
+
+test('policy.access: "allowlist" is read; anything else is refused, absent means open', () => {
+  assert.equal(parseOperatorProfile(profile({ policy: { access: 'allowlist' } })).policy.access, 'allowlist')
+  assert.equal(parseOperatorProfile(profile({ policy: {} })).policy.access, undefined)
+  assert.throws(() => parseOperatorProfile(profile({ policy: { access: 'token' } })), /policy.access/)
+})

@@ -35,6 +35,13 @@ export interface NetworkPolicy {
   softwareProfiles?: boolean
   /** false: a managed device (MDM) shows no public network beside this one. */
   allowPublic?: boolean
+  /**
+   * `allowlist`: the nodes let in only devices on their list (access tier B,
+   * OPERATOR-NODE-PLAN.md). Each identity then keeps a stable libp2p key - a
+   * stable PeerId the node recognises, a pseudonym unrelated to the identity
+   * key. Absent: an open network, a fresh PeerId every session.
+   */
+  access?: 'allowlist'
 }
 
 /** What an operator signs. */
@@ -115,6 +122,7 @@ export function parseOperatorProfile(raw: unknown): OperatorProfile {
   if (p.transport !== undefined) { if (p.transport !== 'node-only') throw new Error('policy.transport may only be "node-only"'); policy.transport = 'node-only' }
   if (p.softwareProfiles !== undefined) { if (typeof p.softwareProfiles !== 'boolean') throw new Error('policy.softwareProfiles must be true or false'); policy.softwareProfiles = p.softwareProfiles }
   if (p.allowPublic !== undefined) { if (typeof p.allowPublic !== 'boolean') throw new Error('policy.allowPublic must be true or false'); policy.allowPublic = p.allowPublic }
+  if (p.access !== undefined) { if (p.access !== 'allowlist') throw new Error('policy.access may only be "allowlist"'); policy.access = 'allowlist' }
   return {
     v: 1,
     networkId: o.networkId,
