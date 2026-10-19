@@ -270,6 +270,7 @@ ACME_EMAIL=$ACME_EMAIL
 HOME_URL=$HOME_URL
 MAX_CONNS=${MAX_CONNS:-400}
 $( [ "${STATS:-yes}" = yes ] && echo "REDIS_PORT=${REDIS_PORT:-6379}" )
+DASH_PORT=${DASH_PORT:-8088}
 $( [ "$LOCAL_TEST" = 1 ] && echo CERT_MODE=self )
 $( [ "$LOCAL_TEST" = 0 ] && [ -n "${CERT_MODE:-}" ] && echo "CERT_MODE=$CERT_MODE" )
 $( [ -n "${HOME_SITE:-}" ] && echo "HOME_SITE=$HOME_SITE" )
@@ -385,6 +386,8 @@ checks() {
     '') ;;
     *)    check "files: the store at $FILES still works" "store_probe $FILES" ;;
   esac
+  local d; for d in $(seq 1 15); do curl -fs --max-time 3 "http://127.0.0.1:${DASH_PORT:-8088}/data" >/dev/null 2>&1 && break; sleep 2; done
+  check "the dashboard answers on 127.0.0.1:${DASH_PORT:-8088} (SSH tunnel)" "curl -fs --max-time 5 http://127.0.0.1:${DASH_PORT:-8088}/data | grep -q onNode"
   if [ -n "${HOME_SITE:-}" ]; then
     local i; for i in $(seq 1 30); do curl -fs $k --max-time 5 "https://$HOME_SITE/join.png" >/dev/null 2>&1 && break; sleep 4; done
     check "the network page https://$HOME_SITE/ is served" "curl -fs $k --max-time 5 https://$HOME_SITE/ | grep -q onchato-net="
@@ -400,6 +403,8 @@ join_code() {
   say "     Operator key fingerprint: $fp  (people compare it when they join)"
   say "     QR code as a file: $DATA/profile/join.svg"
   [ -n "${HOME_SITE:-}" ] && say "     The network page, with the code: https://$HOME_SITE/"
+  say "     The operator's dashboard (this server only, through SSH):"
+  say "       ssh -L ${DASH_PORT:-8088}:127.0.0.1:${DASH_PORT:-8088} root@$NODE_HOST    then open http://localhost:${DASH_PORT:-8088}"
   say "     People join in the onchato app: sign-in screen, \"another network\", scan or paste the link above."
 }
 

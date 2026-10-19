@@ -54,7 +54,22 @@ services:
     <<: *node
     profiles: [ stats ]
     image: redis:7.4-alpine
-    command: [ "sh", "-c", "exec redis-server --bind 127.0.0.1 --port $${REDIS_PORT:-6379} --protected-mode yes --save '' --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru" ]
+    # A snapshot every 15 minutes (the statistics' own window) into a volume:
+    # without it every update or reboot started the 30 days from zero.
+    command: [ "sh", "-c", "exec redis-server --bind 127.0.0.1 --port $${REDIS_PORT:-6379} --protected-mode yes --dir /data --save '900 1' --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru" ]
+    volumes: [ "redis-data:/data" ]
+
+  # The operator's dashboard (node/dash): 127.0.0.1 only, reached through an SSH
+  # tunnel (ssh -L 8088:127.0.0.1:8088 root@<node>). Reads loopback; no Docker
+  # socket on purpose. Read only, and it never holds the network key.
+  dash:
+    <<: *node
+    build: { context: .., dockerfile: node/ops/Dockerfile }
+    image: onchato-ops
+    entrypoint: [ "sh", "-c", "exec node /app/node/dash/dash.mjs --on-node --port $${DASH_PORT:-8088}" ]
+    # The profile only: root.kdf (the key's private salt) stays out of this container.
+    volumes: [ "${ONCHATO_PROFILE_DIR:-/var/lib/onchato/profile}:/data/profile:ro" ]
+    depends_on: [ relay ]
 
   # --- the file store, only with STORE=here (COMPOSE_PROFILES=store in node.env) ---
   kubo:
@@ -84,6 +99,7 @@ services:
 
 volumes:
   kubo-data:
+  redis-data:
   node-data:
   letsencrypt:
   acme-webroot:

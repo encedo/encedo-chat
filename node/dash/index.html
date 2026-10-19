@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel operatora onchato</title>
+<style>
+  /* The app's own tokens (impl/web/index.html), so the operator's page looks like
+     the product it runs. Read-only page: no forms, no scripts from elsewhere. */
+  :root{
+    --bg:#edf0ef;--card:#f6f8f7;--border:#d3dad7;--text:#0c1512;--body:#24322d;--muted:#5c6e68;
+    --accent:#0f6b57;--accent-ink:#f6f8f7;--accent-soft:#e0eae6;
+    --good:#1a8a6b;--good-soft:#dcefe7;--warn:#b4761f;--warn-soft:#f5ebdc;--err:#b23c26;--err-soft:#f6e3df;--off:#b6c1bc;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --shadow:0 1px 2px rgba(12,21,18,.05);--radius:6px;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --bg:#0a100e;--card:#101815;--border:#1e2a26;--text:#e4ebe7;--body:#c3d0cb;--muted:#8ba099;
+    --accent:#35c99e;--accent-ink:#06120e;--accent-soft:#14332a;
+    --good:#35c99e;--good-soft:#12332a;--warn:#d99a4e;--warn-soft:#33291a;--err:#e0603f;--err-soft:#3a1d16;--off:#3a4a44;
+    --shadow:0 10px 20px rgba(0,0,0,.25);
+  }}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;background:var(--bg);color:var(--body);font-size:14px;line-height:1.5}
+  header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:14px max(16px,env(safe-area-inset-right,0px)) 14px max(16px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--border);background:var(--card)}
+  .brand{display:flex;align-items:baseline;gap:10px;min-width:0}
+  .brand b{font-size:16px;color:var(--text);letter-spacing:-.01em}
+  .brand span{color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+  .label{font-family:var(--mono);font-size:10.5px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .badge{font-family:var(--mono);font-size:11px;font-weight:500;padding:3px 9px;border-radius:4px;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);color:var(--text);white-space:nowrap}
+  .badge::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--off)}
+  .badge.good{background:var(--good-soft);border-color:transparent;color:var(--good)} .badge.good::before{background:var(--good)}
+  .badge.warn{background:var(--warn-soft);border-color:transparent;color:var(--warn)} .badge.warn::before{background:var(--warn)}
+  .badge.err{background:var(--err-soft);border-color:transparent;color:var(--err)} .badge.err::before{background:var(--err)}
+  main{max-width:1180px;margin:0 auto;padding:18px max(16px,env(safe-area-inset-right,0px)) 40px max(16px,env(safe-area-inset-left,0px));display:grid;gap:16px}
+  .strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+  .stat{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;display:grid;gap:2px;min-width:0}
+  .stat .v{font-size:22px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
+  .stat .s{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 16px;display:grid;gap:12px;min-width:0}
+  .card h2{margin:0;font-size:14px;color:var(--text);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+  .tbl{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap}
+  td{padding:8px;border-bottom:1px solid var(--border);white-space:nowrap;vertical-align:middle}
+  tr:last-child td{border-bottom:0}
+  .mono{font-family:var(--mono);font-size:12px}
+  .bar{display:inline-block;width:80px;height:6px;border-radius:3px;background:var(--border);overflow:hidden;vertical-align:middle;margin-right:6px}
+  .bar i{display:block;height:100%;background:var(--accent)}
+  .bar i.warn{background:var(--warn)} .bar i.err{background:var(--err)}
+  dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 14px;margin:0}
+  dt{color:var(--muted)} dd{margin:0;min-width:0;overflow-wrap:anywhere}
+  .fp{font-family:var(--mono);font-size:12.5px;letter-spacing:.03em}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  svg.chart{width:100%;height:150px;display:block}
+  svg.chart .grid{stroke:var(--border);stroke-width:1}
+  svg.chart text{fill:var(--muted);font:10px var(--mono)}
+  .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--muted)}
+  .legend i{display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+  .blind{border:1px dashed var(--border);border-radius:var(--radius);padding:12px 16px;color:var(--muted);font-size:13px}
+  .blind b{color:var(--text)}
+  .err-line{color:var(--err);font-size:13px}
+  .muted{color:var(--muted)}
+  @media (max-width:900px){.grid2{grid-template-columns:minmax(0,1fr)}.strip{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media (max-width:420px){.strip{grid-template-columns:minmax(0,1fr)}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><b>onchato</b><span id="net">panel operatora</span></div>
+  <span id="live" class="badge">łączę…</span>
+</header>
+<main>
+  <div class="strip">
+    <div class="stat"><span class="label">Węzły</span><span class="v" id="s-nodes">–</span><span class="s" id="s-nodes-s"></span></div>
+    <div class="stat"><span class="label">Połączenia</span><span class="v" id="s-conns">–</span><span class="s" id="s-conns-s"></span></div>
+    <div class="stat"><span class="label">Profil sieci</span><span class="v" id="s-prof">–</span><span class="s" id="s-prof-s"></span></div>
+    <div class="stat"><span class="label">Pliki</span><span class="v" id="s-files">–</span><span class="s" id="s-files-s"></span></div>
+  </div>
+
+  <section class="card">
+    <h2>Węzły</h2>
+    <div class="tbl"><table>
+      <thead><tr><th class="label">Węzeł</th><th class="label">Stan</th><th class="label">Połączenia</th><th class="label">Tematy</th><th class="label">CPU</th><th class="label">Wiad./s</th><th class="label">Odmowy/s</th><th class="label">Certyfikat</th><th class="label">Wersja</th></tr></thead>
+      <tbody id="nodes"></tbody>
+    </table></div>
+    <div id="containers" class="chips"></div>
+  </section>
+
+  <section class="card">
+    <h2>Połączenia, ostatnie 24 godziny</h2>
+    <svg class="chart" id="chart" viewBox="0 0 800 150" preserveAspectRatio="none" role="img" aria-label="Połączenia w ciągu doby"></svg>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card">
+      <h2>Profil sieci <span id="prof-badge" class="badge">–</span></h2>
+      <dl id="prof"></dl>
+      <div class="tbl"><table><thead><tr><th class="label">Adres profilu</th><th class="label">HTTP</th><th class="label">CORS</th><th class="label">Wersja</th></tr></thead><tbody id="urls"></tbody></table></div>
+    </section>
+    <section class="card">
+      <h2>Pliki i maszyna</h2>
+      <dl id="machine"></dl>
+    </section>
+  </div>
+
+  <div class="blind"><b>Czego ten panel nie widzi, z założenia:</b> treści wiadomości, plików i głosówek (szyfrowanie end-to-end), kto z kim rozmawia (tematy pochodzą z sekretów par), list kontaktów ani składu grup. Nie trzyma też klucza sieci: profil podpisuje się poza nim (<span class="mono">onchato-ops network sign</span>).</div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id)
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e }
+const badge = (kind, text) => el('span', 'badge ' + kind, text)
+const n0 = (v) => (v == null || Number.isNaN(v) ? '–' : Math.round(v).toLocaleString('pl-PL'))
+const n1 = (v) => (v == null || Number.isNaN(v) ? '–' : v.toLocaleString('pl-PL', { maximumFractionDigits: 1 }))
+const bytes = (b) => (b == null || Number.isNaN(b) ? '–' : b > 1e9 ? n1(b / 1e9) + ' GB' : b > 1e6 ? n1(b / 1e6) + ' MB' : n0(b / 1e3) + ' kB')
+const ago = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + ' s temu' : Math.round(s / 60) + ' min temu' }
+const level = (p) => (p >= 90 ? 'err' : p >= 75 ? 'warn' : '')
+const COLORS = ['var(--accent)', 'var(--warn)', 'var(--err)', 'var(--muted)']
+function bar(v, max) {
+  const p = max ? Math.min(100, (v / max) * 100) : 0
+  const b = el('span', 'bar'); const i = el('i', level(p)); i.style.width = p + '%'; b.append(i)
+  const td = el('td'); td.append(b, document.createTextNode(`${n0(v)} / ${n0(max)}`)); return td
+}
+
+function render(d) {
+  const p = d.net.profile
+  $('net').textContent = p ? `${p.operator} · ${p.networkId}` : 'panel operatora'
+  document.title = p ? `Panel ${p.operator}` : 'Panel operatora onchato'
+
+  // nodes
+  const tb = $('nodes'); tb.replaceChildren()
+  let healthy = 0, conns = 0, maxConns = 0
+  const chips = $('containers'); chips.replaceChildren()
+  for (const n of d.nodes) {
+    const st = d.state[n.name] ?? {}, last = st.last, m = last?.m
+    const fresh = last && !st.error && d.now - last.t < d.every * 3000
+    if (fresh && m) { healthy++; conns += m.conns; maxConns += m.max_conns }
+    const tr = el('tr')
+    tr.append(el('td', 'mono', n.host))
+    const s = el('td'); s.append(st.error ? badge('err', 'brak odpowiedzi') : fresh && m ? badge('good', 'działa') : badge('warn', 'bez metryk')); tr.append(s)
+    tr.append(m ? bar(m.conns, m.max_conns) : el('td', 'muted', '–'))
+    tr.append(m ? bar(m.topics, m.max_topics) : el('td', 'muted', '–'))
+    tr.append(el('td', '', m ? n1(m.cpu_pct) + ' %' : '–'))
+    tr.append(el('td', '', n1(last?.msgsPerS)))
+    tr.append(el('td', '', n1(last?.refusedPerS)))
+    const c = el('td'); const cd = st.cert
+    c.append(cd?.error ? badge('err', cd.error) : cd ? badge(cd.days < 14 ? 'err' : cd.days < 30 ? 'warn' : 'good', `${cd.days} dni`) : document.createTextNode('–')); tr.append(c)
+    tr.append(el('td', 'mono', m?.commit ?? '–'))
+    tb.append(tr)
+    if (st.error) { const e = el('tr'); const td = el('td', 'err-line', `${n.host}: ${st.error.msg} (${ago(d.now - st.error.at)})`); td.colSpan = 9; e.append(td); tb.append(e) }
+    for (const k of last?.containers ?? []) chips.append(badge(k.state === 'running' ? 'good' : 'err', k.name))
+  }
+  $('s-nodes').textContent = `${healthy} / ${d.nodes.length}`
+  $('s-nodes-s').textContent = healthy === d.nodes.length ? 'wszystkie odpowiadają' : 'nie wszystkie odpowiadają'
+  $('s-conns').textContent = n0(conns)
+  $('s-conns-s').textContent = `z ${n0(maxConns)} możliwych`
+
+  // chart: one line per node, 24 h of 15-minute windows
+  const svg = $('chart'); svg.replaceChildren(); const lg = $('legend'); lg.replaceChildren()
+  const NS = 'http://www.w3.org/2000/svg'
+  const series = d.nodes.map((n) => (d.state[n.name]?.history ?? []).filter((h) => h.conns != null))
+  const top = Math.max(10, ...series.flat().map((h) => h.conns))
+  const t1 = d.now, t0 = t1 - 24 * 3600_000
+  for (const y of [10, 75, 140]) { const l = document.createElementNS(NS, 'line'); l.setAttribute('class', 'grid'); l.setAttribute('x1', 0); l.setAttribute('x2', 800); l.setAttribute('y1', y); l.setAttribute('y2', y); svg.append(l) }
+  const lab = (x, y, t) => { const e = document.createElementNS(NS, 'text'); e.setAttribute('x', x); e.setAttribute('y', y); e.textContent = t; svg.append(e) }
+  lab(4, 20, n0(top)); lab(4, 137, '0')
+  series.forEach((h, i) => {
+    if (!h.length) return
+    const pts = h.map((p) => `${((p.t - t0) / (t1 - t0)) * 800},${140 - (p.conns / top) * 130}`).join(' ')
+    const pl = document.createElementNS(NS, 'polyline'); pl.setAttribute('points', pts); pl.setAttribute('fill', 'none'); pl.setAttribute('stroke', COLORS[i % 4]); pl.setAttribute('stroke-width', '1.8'); pl.setAttribute('vector-effect', 'non-scaling-stroke'); svg.append(pl)
+    const it = el('span'); const sw = el('i'); sw.style.background = COLORS[i % 4]; it.append(sw, document.createTextNode(d.nodes[i].host)); lg.append(it)
+  })
+  if (!series.some((h) => h.length)) lg.append(el('span', '', 'Brak statystyk: węzły bez Redisa albo jeszcze nic nie zapisały (okno 15 minut).'))
+
+  // profile
+  const pr = $('prof'); pr.replaceChildren()
+  const row = (k, v, cls) => { pr.append(el('dt', '', k)); const dd = el('dd', cls); if (v instanceof Node) dd.append(v); else dd.textContent = v; pr.append(dd) }
+  if (d.net.error && !p) row('Błąd', d.net.error, 'err-line')
+  if (p) {
+    const days = Math.floor((p.expires - d.now) / 86_400_000)
+    $('prof-badge').replaceWith(Object.assign(badge(days < 0 ? 'err' : days < 30 ? 'warn' : 'good', days < 0 ? 'wygasł' : `ważny ${days} dni`), { id: 'prof-badge' }))
+    row('Operator', p.operator); row('Identyfikator', p.networkId, 'mono')
+    const fp = el('span', 'fp'); const g = (d.net.fingerprint ?? '').split(' '); fp.append(document.createTextNode(g.slice(0, 4).join(' ')), el('br'), document.createTextNode(g.slice(4).join(' '))); row('Odcisk klucza', fp)
+    row('Wersja', String(p.seq)); row('Ważny do', new Date(p.expires).toLocaleDateString('pl-PL'))
+    row('Aplikacja', p.app.origin + p.app.path, 'mono'); row('Składy plików', p.stores.join(', '), 'mono')
+    const rules = [p.policy.transport === 'node-only' ? 'treść tylko przez węzły' : '', p.policy.softwareProfiles === false ? 'tylko tożsamości HEM' : ''].filter(Boolean)
+    row('Zasady', rules.join(', ') || 'brak')
+    $('s-prof').textContent = `wersja ${p.seq}`
+    $('s-prof-s').textContent = days < 0 ? 'WYGASŁ - podpisz ponownie (--renew)' : `ważny jeszcze ${days} dni`
+    if (d.net.error) row('Ostatni odczyt', d.net.error, 'err-line')
+  }
+  const ub = $('urls'); ub.replaceChildren()
+  for (const u of d.net.urls ?? []) {
+    const tr = el('tr'); tr.append(el('td', 'mono', u.url))
+    const h = el('td'); h.append(u.error ? badge('err', u.error) : badge(u.status === 200 ? 'good' : 'err', String(u.status))); tr.append(h)
+    const c = el('td'); c.append(u.cors === '*' || u.cors === p?.app.origin ? badge('good', u.cors) : badge('err', u.cors ?? 'brak')); tr.append(c)
+    const s = el('td'); s.append(u.seq == null ? badge('err', '–') : badge(u.sameKey && u.seq === p?.seq ? 'good' : 'warn', String(u.seq))); tr.append(s)
+    ub.append(tr)
+  }
+
+  // files and machine (the first node that runs the store / the machine of each node)
+  const mc = $('machine'); mc.replaceChildren()
+  const mrow = (k, v) => { mc.append(el('dt', '', k), el('dd', '', v)) }
+  let store = null
+  for (const n of d.nodes) {
+    const last = d.state[n.name]?.last; if (!last) continue
+    if (last.store && !store) store = { host: n.host, ...last.store }
+    if (last.disk) mrow(`Dysk ${n.host}`, `${bytes(last.disk.used)} z ${bytes(last.disk.size)} (${last.disk.pct} %)`)
+    if (last.mem) mrow(`Pamięć ${n.host}`, `${n0(last.mem.used)} MB z ${n0(last.mem.total)} MB`)
+    mrow(`Statystyki ${n.host}`, last.stats ? 'Redis, 30 dni' : 'wyłączone')
+    if (last.homeSite) { const hc = d.state[n.name].homeCert; mrow('Strona sieci', `https://${last.homeSite}/` + (hc?.days != null ? ` (certyfikat ${hc.days} dni)` : '')) }
+  }
+  if (store) {
+    mrow('Skład plików', `na ${store.host}: ${n0(store.ledger)} plików w księdze, magazyn ${bytes(store.repo)}`)
+    $('s-files').textContent = n0(store.ledger); $('s-files-s').textContent = `plików teraz w składzie (żyją 5 minut), ${bytes(store.repo)}`
+  } else if (p) {
+    mrow('Skład plików', p.stores.join(', ') + ' (poza tymi węzłami)')
+    $('s-files').textContent = 'zewnętrzny'; $('s-files-s').textContent = p.stores.join(', ')
+  }
+
+  const lv = $('live'); lv.className = 'badge ' + (healthy === d.nodes.length && d.nodes.length ? 'good' : healthy ? 'warn' : 'err')
+  lv.textContent = `odczyt ${new Date(d.now).toLocaleTimeString('pl-PL')}`
+}
+
+async function poll() {
+  try { render(await (await fetch('/data', { cache: 'no-store' })).json()) }
+  catch { const lv = $('live'); lv.className = 'badge err'; lv.textContent = 'panel nie odpowiada' }
+}
+poll(); setInterval(poll, 5000)
+</script>
+</body>
+</html>

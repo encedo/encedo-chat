@@ -10,3 +10,5 @@
 !impl/lib/passmeter.ts
 !impl/cli/termqr.ts
 !impl/net/stun-probe.ts
+!node/dash/dash.mjs
+!node/dash/index.html

@@ -1,5 +1,5 @@
 # onchato-ops on the server: sign, check and print the join code of the
-# network profile (scripts/onchato-ops.mjs), and probe STUN, without Node or the
+# network profile (scripts/onchato-ops.mjs), probe STUN, and the dashboard, without Node or the
 # repo's dependencies on the host. onchato-setup.sh runs it; context: repo root.
 FROM node:24-bookworm-slim
 WORKDIR /app
@@ -12,5 +12,7 @@ COPY scripts/lib/signer.mjs scripts/lib/
 COPY impl/lib/netprofile.ts impl/lib/nodelist.ts impl/lib/cid.ts impl/lib/wc.ts impl/lib/qr.ts impl/lib/passmeter.ts impl/lib/
 COPY impl/cli/termqr.ts impl/cli/
 COPY impl/net/stun-probe.ts impl/net/
+# The operator's dashboard (node/dash), run by the `dash` service on loopback.
+COPY node/dash/dash.mjs node/dash/index.html node/dash/
 WORKDIR /work
 ENTRYPOINT ["node", "/app/scripts/onchato-ops.mjs"]
