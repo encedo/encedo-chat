@@ -171,8 +171,11 @@ The decided shape:
 - Join: scan the QR, the app asks for the admin's code, `POST /enroll {code}`
   to a node returns a random device ticket; the node stores its hash.
 - **The code (the user's decisions, 2026-10-19): TOTP, 8 digits**, from the
-  administrator's authenticator (Microsoft Authenticator; Google Authenticator
-  shows 6 digits only). The admin adds the network's seed once (an
+  administrator's authenticator. Tested on the admin's phone with an
+  `otpauth://...&digits=8` QR: **Google Authenticator shows the correct 8 digits;
+  Microsoft Authenticator ignores `digits` and shows 6** (the correct 6-digit code
+  of the same seed). So: Google Authenticator (or Aegis, 2FAS, FreeOTP), not
+  Microsoft's. The admin adds the network's seed once (an
   `otpauth://...&digits=8` QR the setup prints) and reads codes out to the people
   joining. Checked **when a device registers**, never on the network page: the
   page and its join code can stay public and long-lived, TOTP does not protect
@@ -211,9 +214,9 @@ secret on the wire, in a URL or in a log.
   unexpected end of input), indistinguishable from a network fault. The app
   needs another way to learn "not on the list" (e.g. a signed status check at
   the enrol endpoint) so it says so and stops retrying.
-- TOTP: the implementation matches RFC 6238's 8-digit SHA-1 vectors; whether
-  Microsoft Authenticator shows 8 digits from `digits=8` is checked on the
-  administrator's phone.
+- TOTP: the implementation matches RFC 6238's 8-digit SHA-1 vectors, and the
+  codes on the admin's phone matched it: Google Authenticator 8 digits
+  (94577281), Microsoft Authenticator 6 (383121, `digits` ignored).
 
 The estimate and order (two releases: the gate, the profile field and the
 stable key first, inert; then enrolment, screens, setup and dashboard) are in
