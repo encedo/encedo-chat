@@ -40,6 +40,12 @@ test('verified vectors still encode bit for bit', () => {
     ['A'.repeat(200), 0, 53, '14a820128e098547'],                           // version 9, two blocks
     ['zażółć gęślą jaźń 🌳', 0, 25, '342d4b18251f6698'],                    // UTF-8, multi-byte and astral
     ['3A:7F:1C:02:9D:BB:41:07', undefined, 25, 'e388db657d26b093'],         // a fingerprint, mask chosen by penalty
+    // Versions 11-20 (2026-10-19): decoded by jsQR under all eight masks and equal
+    // module for module to qrcode-generator, for the first and last length of every
+    // version 9-20, before these hashes were taken.
+    ['B'.repeat(300), 0, 61, '2b27b06e208f8527'],                           // version 11, four blocks
+    ['C'.repeat(450), 0, 73, '09f13b47615e1ea6'],                           // version 14, two groups, four alignment centres, 3 remainder bits
+    ['D'.repeat(858), 0, 97, 'faf7e53f607f2083'],                           // version 20, the largest this encoder holds
   ]
   for (const [text, mask, size, want] of vectors) {
     const m = qrMatrix(text, mask)
@@ -67,10 +73,12 @@ test('the symbol carries the patterns a scanner looks for', () => {
 test('the version grows with the payload, and stops', () => {
   assert.equal(qrMatrix('x').length, 21)               // 1
   assert.equal(qrMatrix('x'.repeat(30)).length, 25)    // 2
-  assert.equal(qrMatrix('x'.repeat(271)).length, 57)   // 10 — the last one this encoder holds
+  assert.equal(qrMatrix('x'.repeat(271)).length, 57)   // 10
+  assert.equal(qrMatrix('x'.repeat(272)).length, 61)   // 11 - a public invite in another network needs it
+  assert.equal(qrMatrix('x'.repeat(858)).length, 97)   // 20 - the last one this encoder holds
   // Refused, not truncated: a QR that silently drops the end of an invite link
   // is a QR that pairs somebody with a broken key.
-  assert.throws(() => qrMatrix('x'.repeat(272)), /more than this encoder holds/)
+  assert.throws(() => qrMatrix('x'.repeat(859)), /more than this encoder holds/)
 })
 
 test('the SVG has the quiet zone, without which a scanner has nothing to lock onto', () => {
@@ -81,4 +89,16 @@ test('the SVG has the quiet zone, without which a scanner has nothing to lock on
   assert.match(svg, /<rect[^>]*fill="#fff"/)      // opaque ground: a translucent QR scans in one theme only
   assert.match(svg, /shape-rendering="crispEdges"/)
   assert.ok(svg.includes('<path d="M'))
+})
+
+test('a public invite with another network and the longest name still makes a code', async () => {
+  // The case that failed on blbx.pl: inbox + invite key + "t" + a 64-character name.
+  const { inviteLink, setInviteNetwork, MAX_NAME } = await import('../lib/invite.ts')
+  const k = Buffer.from(new Uint8Array(32).fill(7)).toString('base64')
+  setInviteNetwork('a-network-id-of-reasonable-length.example')
+  try {
+    const url = inviteLink('https://chat.example.com', '/', { pub: k, name: 'Ż'.repeat(MAX_NAME), inbox: k, key: k } as any)
+    assert.ok(url.length > 271, `the case must be past the old limit to prove anything (${url.length})`)
+    assert.doesNotThrow(() => qrMatrix(url))
+  } finally { setInviteNetwork('main') }
 })

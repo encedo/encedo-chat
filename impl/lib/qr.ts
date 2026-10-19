@@ -17,11 +17,13 @@
  *
  * ## Scope, deliberately small
  *
- * Byte mode, error-correction level L, versions 1–10 (up to 271 bytes) — an
- * invite link is ~130–160 characters and a fingerprint far less. Level L
+ * Byte mode, error-correction level L, versions 1–20 (up to 858 bytes). A
+ * personal invite link is ~120–160 characters; a public one, with its inbox and
+ * invite keys, ~250-290 - and another network's id pushed a long name past
+ * version 10's 271 (found 2026-10-19 on blbx.pl), hence 20. Level L
  * because the payload is short, the code is drawn on a screen rather than
  * printed on a box, and a lower level means a smaller, denser-scanning code.
- * Anything longer than version 10 is refused rather than silently truncated.
+ * Anything longer than version 20 is refused rather than silently truncated.
  */
 
 /** Total codewords, data codewords, EC codewords per block, and the block split (level L). */
@@ -38,7 +40,7 @@ interface VersionSpec {
   remainder: number
 }
 
-/** Level L, versions 1–10. Verified against an independent encoder — see the test. */
+/** Level L, versions 1–20 (ISO 18004 tables 1, 9 and annex E). Verified against an independent encoder and decoder — see the test. */
 const VERSIONS: VersionSpec[] = [
   { data: 19, ec: 7, groups: [[1, 19]], align: [], remainder: 0 },                      // 1
   { data: 34, ec: 10, groups: [[1, 34]], align: [6, 18], remainder: 7 },                // 2
@@ -50,6 +52,16 @@ const VERSIONS: VersionSpec[] = [
   { data: 194, ec: 24, groups: [[2, 97]], align: [6, 24, 42], remainder: 0 },           // 8
   { data: 232, ec: 30, groups: [[2, 116]], align: [6, 26, 46], remainder: 0 },          // 9
   { data: 274, ec: 18, groups: [[2, 68], [2, 69]], align: [6, 28, 50], remainder: 0 },  // 10
+  { data: 324, ec: 20, groups: [[4, 81]], align: [6, 30, 54], remainder: 0 },           // 11
+  { data: 370, ec: 24, groups: [[2, 92], [2, 93]], align: [6, 32, 58], remainder: 0 },  // 12
+  { data: 428, ec: 26, groups: [[4, 107]], align: [6, 34, 62], remainder: 0 },          // 13
+  { data: 461, ec: 30, groups: [[3, 115], [1, 116]], align: [6, 26, 46, 66], remainder: 3 },   // 14
+  { data: 523, ec: 22, groups: [[5, 87], [1, 88]], align: [6, 26, 48, 70], remainder: 3 },     // 15
+  { data: 589, ec: 24, groups: [[5, 98], [1, 99]], align: [6, 26, 50, 74], remainder: 3 },     // 16
+  { data: 647, ec: 28, groups: [[1, 107], [5, 108]], align: [6, 30, 54, 78], remainder: 3 },   // 17
+  { data: 721, ec: 30, groups: [[5, 120], [1, 121]], align: [6, 30, 56, 82], remainder: 3 },   // 18
+  { data: 795, ec: 28, groups: [[3, 113], [4, 114]], align: [6, 30, 58, 86], remainder: 3 },   // 19
+  { data: 861, ec: 28, groups: [[3, 107], [5, 108]], align: [6, 34, 62, 90], remainder: 3 },   // 20
 ]
 
 // ---- GF(256) ---------------------------------------------------------------
@@ -271,12 +283,12 @@ function versionBits(version: number): number {
 
 /**
  * Encode `text` as a QR matrix: `out[row][col]`, 1 = dark.
- * Throws when the text does not fit version 10 at level L (271 bytes).
+ * Throws when the text does not fit version 20 at level L (858 bytes).
  */
 export function qrMatrix(text: string, forceMask?: number): number[][] {
   const data = new TextEncoder().encode(text)
   const version = pickVersion(data.length)
-  if (!version) throw new Error(`QR: ${data.length} bytes is more than this encoder holds (max 271)`)
+  if (!version) throw new Error(`QR: ${data.length} bytes is more than this encoder holds (max 858)`)
   const spec = VERSIONS[version - 1]
 
   // 1. bit stream: mode, length, payload, terminator, padding
