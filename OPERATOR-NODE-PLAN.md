@@ -222,6 +222,24 @@ The estimate and order (two releases: the gate, the profile field and the
 stable key first, inert; then enrolment, screens, setup and dashboard) are in
 the session notes of 2026-10-19; about 25-35 hours.
 
+**Release 1, built 2026-10-19 (inert until a network sets the policy):**
+`relay --allow-peers` (relay/allowlist.mjs), `policy.access: "allowlist"`
+(lib/netprofile.ts), the stable key per identity (lib/netkey.ts, sealed record
+`netkey`, SPEC 10, not exported), passed by the app and the CLI only under that
+policy; the node image passes `ALLOW_PEERS`. Proven by net/allowlist-test.ts.
+
+**Release 2, next:** the enrolment service (`/onchato/enroll`: challenge,
+signature by the device key, TOTP 8 digits, limits, a pause after repeated
+failures), the app's "code from the administrator" step and the consent text
+about the stable device number, a clear "not on the list" instead of retrying
+(the refused client sees only a generic error - a signed status check at the
+enrol endpoint), onchato-setup.sh (open / admin code; the TOTP seed and its
+`otpauth://...&digits=8` QR), `onchato-ops access list/revoke/label`, and the
+dashboard: devices with last seen, and **a button that shows the authenticator
+QR for 15 seconds, then hides it** (the user's idea, 2026-10-19; the dash
+container then reads the seed - acceptable, it is behind the SSH tunnel; every
+showing logged).
+
 ### C (to refine)
 
 Desktop signs in through OIDC (PKCE in the browser; the system browser + deep

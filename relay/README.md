@@ -22,6 +22,7 @@ npm run relay -- --port 9001 --pass bs1.onchato.com --host bs1.onchato.com
 
 Flags:
 - `--pass` — Ed25519 seed → the relay's **PeerId** (printed on startup). **Keep stable.**
+- `--allow-peers <file>` — a node of a network that admits devices by list (`policy.access: "allowlist"`, `allowlist.mjs`): only the PeerIds on the list (one per line, optional label, `#` comments) and the siblings get past the Noise handshake; the file is followed, a removed device is dropped at once. Never on our nodes.
 - `--key-file <path>` — instead of `--pass`: a random key of the node's own, made at first start (mode 600, never overwritten; `nodekey.mjs`). For every node that is not bs1-bs3 (the Docker image, another operator's network). The startup line reads `Key file: <path> -> PeerId: ...`.
 - `--port` — WS listen port (nginx proxies WSS → this).
 - `--host` — prints the production WSS multiaddr for clients.

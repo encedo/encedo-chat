@@ -230,6 +230,11 @@ the key, a refresh never lowers `seq`, the id `main` is reserved.
   old profile's list (all on, same addresses) - an edited list is the
   person's. Live: node list + stores; app address/policy/feedback wait for the
   next load. The CLI does not refresh (yet).
+- **Devices admitted by list** (`policy.access: "allowlist"`, access tier B): only
+  then does an identity dial with a stable libp2p key (`lib/netkey.ts`, sealed
+  record `netkey`, one per identity, not exported - it is the device's), and the
+  network's relays run `--allow-peers` (`relay/allowlist.mjs`). Everywhere else a
+  fresh key, a new PeerId every session - the 'no tracking' default.
 - **`ACTIVE` must stay declared at the top of app.ts** (babel turns `const`
   into `var`; a read above it is `undefined`, not an error).
 
@@ -581,6 +586,7 @@ covered by an automated test**; two-identity walkthroughs are by hand.
 | `npm run relay-load` / `-saturate` / `-flood` / `-hsrate` / `-chatload` | load/DoS toolkit |
 | `net/cli-*-test.ts` | CLI ↔ CLI scenarios |
 | `RELAY_DIR=<relay/> node net/relay-compat-test.ts` | this client (light + GossipSub) against another build's relay; CI runs it against the previous release tag's (`relay-compat`, the N-1 promise to operators) |
+| `node net/allowlist-test.ts` | a relay with `--allow-peers` against sessions with stable keys: listed devices meet and talk, an unlisted one is not let in, a removed one is dropped |
 | `node net/stun-probe.ts <host> [--bad]` | our STUN, and that it ignores everything else |
 
 `browser-test` switches: `GROUP_ONLY=1`, `FAILOVER=1`, `RELAY_NODE=<full
