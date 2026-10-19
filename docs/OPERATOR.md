@@ -48,6 +48,7 @@ Then it asks:
 | your organisation's name | `Acme` | what people see when they join |
 | an e-mail for the certificate | `it@example.com` | Let's Encrypt writes there before a certificate lapses |
 | files and voice notes? | `1` | 1: a store on this server; 2: an existing store; 3: text only. See "Files" |
+| keep statistics? | `y` | connections and traffic per 15 minutes, kept 30 days, for a dashboard (Redis, a few MB of RAM); without them only a line in the relay's log |
 | where the signing key is kept | `1` | 1: derived from a passphrase on this server; 2: on your own computer or a YubiKey. See "The key" |
 
 With the key on the server it then asks for the passphrase, twice.
@@ -179,7 +180,7 @@ identity for your network; their existing one is untouched.
 | network profile | `https://<server>/onchato/network.json`, with CORS | 443 |
 | network page | `https://<home domain>/`, when that domain points here | 443 |
 | file store (choice 1) | Kubo (offline) + the upload service + the sweeper | 443 at `/f` only |
-| statistics | Redis, 30 days, loopback | no |
+| statistics (optional) | Redis, 30 days, loopback | no |
 
 On the test VPS, checked from outside: 5001, 4001, 8089, 9202, 6379, 9001 and
 9003 are closed. Everything lives in `/opt/onchato` (code, built on the server

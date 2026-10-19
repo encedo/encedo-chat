@@ -139,6 +139,11 @@ questions() {
       ok "the store at $FILES takes a file and gives it back the way the apps expect" ;;
     *) die "a store address must start with https:// (got: $FILES)" ;;
   esac
+  if [ -z "${STATS:-}" ]; then
+    say ""
+    ask STATS_ANSWER "Keep statistics (connections and traffic per 15 minutes, 30 days, for a dashboard; Redis, a few MB)? y/n" "y"
+    case "$STATS_ANSWER" in n|N|no|No) STATS=no ;; *) STATS=yes ;; esac
+  fi
   if [ -z "${KEY_MODE:-}" ]; then
     say ""
     say "Where is the network's signing key kept? This cannot be changed later without a new network."
@@ -159,6 +164,7 @@ OPERATOR='${OPERATOR//\'/}'
 ACME_EMAIL='$ACME_EMAIL'
 KEY_MODE='$KEY_MODE'
 FILES='$FILES'
+STATS='$STATS'
 DOMAIN='$DOMAIN'
 NETWORK_ID='$NETWORK_ID'
 HOME_URL='$HOME_URL'
@@ -263,11 +269,12 @@ NODE_HOST=$NODE_HOST
 ACME_EMAIL=$ACME_EMAIL
 HOME_URL=$HOME_URL
 MAX_CONNS=${MAX_CONNS:-400}
-REDIS_PORT=${REDIS_PORT:-6379}
+$( [ "${STATS:-yes}" = yes ] && echo "REDIS_PORT=${REDIS_PORT:-6379}" )
 $( [ "$LOCAL_TEST" = 1 ] && echo CERT_MODE=self )
 $( [ "$LOCAL_TEST" = 0 ] && [ -n "${CERT_MODE:-}" ] && echo "CERT_MODE=$CERT_MODE" )
 $( [ -n "${HOME_SITE:-}" ] && echo "HOME_SITE=$HOME_SITE" )
-$( [ "${FILES:-}" = here ] && printf 'STORE=here\nCOMPOSE_PROFILES=store' )
+$( [ "${FILES:-}" = here ] && echo STORE=here )
+COMPOSE_PROFILES=$( p=; [ "${FILES:-}" = here ] && p=store; [ "${STATS:-yes}" = yes ] && p=${p:+$p,}stats; echo "$p" )
 $( [ -n "${PEERS:-}" ] && echo "PEERS=$PEERS" )
 $( [ -n "${SIBLINGS:-}" ] && echo "SIBLINGS=$SIBLINGS" )
 $( [ -n "${V6_HOST:-}" ] && echo "V6_HOST=$V6_HOST" )
@@ -368,6 +375,9 @@ checks() {
     check "the network profile is served, signed, with CORS" "ops --network host -- network check network.json --online"
     ops -- network check network.json 2>/dev/null | grep -E 'valid|WARNING' || true
   else printf '[fail] no network profile yet\n'; bad=1; fi
+  if [ "${STATS:-yes}" = yes ]; then
+    check "statistics: Redis answers on loopback" "docker exec onchato-redis-1 redis-cli -p ${REDIS_PORT:-6379} ping | grep -q PONG"
+  fi
   case "${FILES:-}" in
     here) local j; for j in $(seq 1 20); do store_probe "https://$NODE_HOST" >/dev/null && break; sleep 3; done
           check "files: the store on this node takes a file and gives it back prefixed" "store_probe https://$NODE_HOST" ;;
@@ -404,7 +414,9 @@ case "$MODE" in
     dns_check >/dev/null; checks ;;
   update)
     [ -n "${NODE_HOST:-}" ] || die "not set up yet"
-    preflight; REF=${ONCHATO_REF:-__RELEASE_TAG__}; fetch_code; start_node; checks ;;
+    # dns_check: the home domain's network page, as at install - without it an
+    # update dropped HOME_SITE and the page (found on blbx.pl, 0.7.59).
+    preflight; dns_check; REF=${ONCHATO_REF:-__RELEASE_TAG__}; fetch_code; start_node; checks ;;
   renew)
     [ -n "${NODE_HOST:-}" ] || die "not set up yet"
     [ -n "${ONCHATO_SRC:-}" ] && DIR=$ONCHATO_SRC

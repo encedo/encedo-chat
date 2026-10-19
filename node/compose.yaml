@@ -20,7 +20,10 @@ services:
     image: onchato-node
     command: relay
     volumes: [ "node-data:/data" ]
-    depends_on: [ redis ]
+    # Optional: the relay writes statistics lazily and reconnects, and without
+    # STATS (profile 'stats') there is no Redis at all.
+    depends_on:
+      redis: { condition: service_started, required: false }
 
   stun:
     <<: *node
@@ -49,6 +52,7 @@ services:
 
   redis:
     <<: *node
+    profiles: [ stats ]
     image: redis:7.4-alpine
     command: [ "sh", "-c", "exec redis-server --bind 127.0.0.1 --port $${REDIS_PORT:-6379} --protected-mode yes --save '' --appendonly no --maxmemory 128mb --maxmemory-policy allkeys-lru" ]
 
