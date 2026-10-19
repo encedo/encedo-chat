@@ -64,6 +64,7 @@ import {
 } from '../../lib/activenet.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { loadOrCreateNetKey, netPeerId } from '../../lib/netkey.ts'
+import { enrollDevice, deviceStatus, enrollUrl } from '../../lib/enroll.ts'
 import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
 import { newDiag } from '../../lib/diag.ts'
@@ -1638,6 +1639,13 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   if (ACTIVE.policy.access === 'allowlist' && storeNames) {
     peerKey = (await loadOrCreateNetKey(localKV(), await ensureCacheBase(), storeNames, (m) => ecLog(m, 'debug'))) ?? undefined
     ecLog(peerKey ? `network admits by list: this device is ${netPeerId(peerKey)}` : 'network admits by list, but no stable key could be kept - the node will not know this device')
+    netPeerKey = peerKey ?? null
+    // Not on the list yet: the administrator's code first, or the node only
+    // refuses - and a refused connection looks like a network fault.
+    if (peerKey) {
+      const st = await checkEnrolled(peerKey)
+      if (st && !st.listed) await enrollFlow(peerKey, st.locked)
+    }
   }
   clientReady = startSession(id, {
     peerKey,
@@ -1659,6 +1667,7 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
     onLog: ecLog,
     onLink: (state) => {
       if (state !== 'online') scheduleRegionCheck()
+      if (state !== 'online') void maybeRevoked()
       if (state !== linkState) {
         const what = state === 'online' ? tr('Połączenie z węzłem wróciło')
           : state === 'reconnecting' ? tr('Wznawiam połączenie z węzłem') : tr('Twoje połączenie z węzłem przerwane')
@@ -5269,6 +5278,65 @@ function ensureNetworkShell() {
  * version and date, and a way to fetch a newer one. Painted when the pane is
  * built; the profile changes only by that button or a reload.
  */
+// ---- devices admitted by list (lib/enroll.ts) --------------------------------------
+/** This identity's stable key in a network that admits devices by list; null elsewhere. */
+let netPeerKey: Uint8Array | null = null
+async function checkEnrolled(key: Uint8Array) {
+  const url = enrollUrl(ACTIVE)
+  return url ? deviceStatus(url, ACTIVE.id, key) : null
+}
+let enrollDone: ((ok: boolean) => void) | null = null
+MODAL_EXIT['enroll-modal'] = () => { const d = enrollDone; enrollDone = null; d?.(false) }
+/** The administrator's code, until it works or the person says "not now". */
+function enrollFlow(key: Uint8Array, locked: boolean): Promise<boolean> {
+  if (enrollDone) return Promise.resolve(false)
+  return new Promise((resolve) => {
+    enrollDone = resolve
+    ;($('enroll-code') as HTMLInputElement).value = ''
+    $('enroll-device').textContent = tr('To urządzenie: …{id}', { id: netPeerId(key).slice(-12) })
+    clr('enroll-msg')
+    if (locked) setMsg('enroll-msg', tr('Dodawanie urządzeń jest zablokowane po zbyt wielu błędnych kodach. Administrator musi je odblokować.'), 'err')
+    pushModal('enroll-modal')
+    $('enroll-code').focus()
+  })
+}
+$('enroll-cancel')?.addEventListener('click', () => {
+  dropModal('enroll-modal')
+  toast(tr('To urządzenie nie jest jeszcze wpuszczone do sieci. Kod wpiszesz w Ustawieniach → Sieć.'))
+})
+$('enroll-go')?.addEventListener('click', async () => {
+  const code = ($('enroll-code') as HTMLInputElement).value.replace(/\s/g, '')
+  if (!/^\d{8}$/.test(code)) { setMsg('enroll-msg', tr('Kod ma 8 cyfr.'), 'err'); return }
+  const url = enrollUrl(ACTIVE)
+  if (!url || !netPeerKey) { setMsg('enroll-msg', tr('Ta sieć nie podaje, gdzie dodawać urządzenia.'), 'err'); return }
+  const btn = $('enroll-go') as HTMLButtonElement
+  btn.disabled = true
+  try {
+    const r = await enrollDevice(url, ACTIVE.id, netPeerKey, code, ($('enroll-label') as HTMLInputElement).value.trim())
+    if (r.ok) {
+      const d = enrollDone; enrollDone = null
+      dropModal('enroll-modal'); toast(tr('Urządzenie wpuszczone do sieci.'))
+      d?.(true)
+      // Already running (Settings, or a revocation undone): dial again now.
+      client?.setRelays(chosenRelays())
+      return
+    }
+    setMsg('enroll-msg', r.error === 'code' ? tr('Zły albo nieaktualny kod. Poproś o bieżący.')
+      : r.error === 'locked' ? tr('Dodawanie urządzeń jest zablokowane po zbyt wielu błędnych kodach. Administrator musi je odblokować.')
+      : r.error === 'slow-down' ? tr('Za dużo błędnych kodów z tego adresu. Spróbuj za 10 minut.')
+      : r.error === 'network' ? tr('Węzeł sieci nie odpowiada. Sprawdź połączenie i spróbuj ponownie.')
+      : tr('Węzeł odmówił ({why}).', { why: r.error }), 'err')
+  } finally { btn.disabled = false }
+})
+/** A connection that drops in such a network: was this device taken off the list? */
+let revokedAskedAt = 0
+async function maybeRevoked() {
+  if (!netPeerKey || Date.now() - revokedAskedAt < 60_000) return
+  revokedAskedAt = Date.now()
+  const st = await checkEnrolled(netPeerKey)
+  if (st && !st.listed) { toast(tr('Ten węzeł nie wpuszcza już tego urządzenia.')); void enrollFlow(netPeerKey, st.locked) }
+}
+
 async function paintNetworkWhich() {
   const box = document.getElementById('net-which'); if (!box) return
   box.textContent = ''
@@ -5290,6 +5358,15 @@ async function paintNetworkWhich() {
   add(tr('Wersja profilu'), String(p.seq))
   const rules = [p.policy.softwareProfiles === false ? tr('tylko tożsamości HEM') : '', p.policy.transport === 'node-only' ? tr('treść tylko przez węzeł') : ''].filter(Boolean)
   if (rules.length) add(tr('Zasady'), rules.join(', '))
+  if (p.policy.access === 'allowlist') {
+    add(tr('Dostęp'), tr('urządzenia wpuszczone przez administratora'))
+    if (netPeerKey) {
+      add(tr('To urządzenie'), '…' + netPeerId(netPeerKey).slice(-12), 'mono')
+      const enrol = document.createElement('button'); enrol.type = 'button'; enrol.className = 'node-official'; enrol.textContent = tr('Wpisz kod od administratora')
+      enrol.addEventListener('click', () => { closeDrawer(); void enrollFlow(netPeerKey!, false) })
+      box.append(enrol)
+    }
+  }
   const note = document.createElement('div'); note.className = 'net-note'
   note.textContent = tr('Ta tożsamość należy do tej sieci na stałe. Inna sieć oznacza nową tożsamość — z ekranu logowania.')
   const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'node-official'; btn.textContent = tr('Odśwież profil sieci')
@@ -6645,6 +6722,8 @@ $('net-go')?.addEventListener('click', async () => {
     if (from) facts.push([tr('Pobrano z'), from])
     const rules = [p.policy.softwareProfiles === false ? tr('tylko tożsamości HEM') : '', p.policy.transport === 'node-only' ? tr('treść tylko przez węzeł') : ''].filter(Boolean)
     if (rules.length) facts.push([tr('Zasady'), rules.join(', ')])
+    // Said before joining, not discovered after: this network recognises the device.
+    if (p.policy.access === 'allowlist') facts.push([tr('Dostęp'), tr('tylko urządzenia wpuszczone przez administratora (8-cyfrowy kod od niego). Węzeł rozpozna to urządzenie po stałym numerze, nie wiedząc, kim jesteś.')])
     const dl = $('net-facts'); dl.textContent = ''
     for (const [k, v, cls] of facts) {
       const dt = document.createElement('dt'); dt.textContent = k
