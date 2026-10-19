@@ -46,6 +46,8 @@ export interface ClientOpts {
   contacts: ContactManager
   relays: string[]              // failover order; [0] is preferred
   transport?: 'light' | 'libp2p'
+  /** A stable libp2p key, only in a network that admits devices by list (lib/netkey.ts). */
+  peerKey?: Uint8Array
   /** The network id topics are derived for (`--network`; `main` by default). */
   networkId?: string
   /** Open this contact's window at start (onchato-cli chat <name>). */
@@ -121,7 +123,7 @@ export async function runClient(o: ClientOpts): Promise<{ session: ClientSession
     }, 8000).unref?.()
   }
   const session = await startSession(o.id, {
-    relay: o.relays[0], relays: o.relays, transport: o.transport ?? 'light', networkId: o.networkId,
+    relay: o.relays[0], relays: o.relays, transport: o.transport ?? 'light', networkId: o.networkId, peerKey: o.peerKey,
     onLog: (m) => { if (o.debug) status(`${SGR.grey}${m}${SGR.reset}`) },
     onLink: (state) => {
       link = state === 'online' ? true : state === 'offline' ? false : null

@@ -33,6 +33,7 @@ import { fileKV, type FileKV } from './store.ts'
 import { listProfiles, createProfile, openProfile, exportProfileFile, importProfileFile, identityKey } from './profiles.ts'
 import { hemSignIn, hemCreate, type HemChoice } from './identity.ts'
 import { runClient } from './client.ts'
+import { loadOrCreateNetKey, netPeerId } from '../lib/netkey.ts'
 import { Hub, type HubEvent, APP_ORIGIN, APP_PATH, setAppAddress } from './hub.ts'
 import { NET } from './network.ts'
 import { builtinNetwork, networkById, bindingOf, setBinding, nodesKey, softBindingKey, hemBindingKey } from '../lib/activenet.ts'
@@ -80,6 +81,17 @@ async function confirm(q: string): Promise<boolean> {
  * (`ec-nodes`, enabled ones, the app's own format), else the published list
  * compiled into the repo (infra/nodes.json, the same file the app ships).
  */
+/**
+ * The stable libp2p key of this identity, in a network that admits devices by
+ * list (lib/netkey.ts); undefined anywhere else (a fresh PeerId, as always).
+ */
+async function peerKeyOf(kv: FileKV, base: Uint8Array | null, names: Names): Promise<Uint8Array | undefined> {
+  if (ACTIVE.policy.access !== 'allowlist') return undefined
+  const k = await loadOrCreateNetKey(kv, base, names, (m) => console.error('onchato: ' + m))
+  if (k) console.error(`onchato: sieć wpuszcza urządzenia z listy - to urządzenie: ${netPeerId(k)}`)
+  return k ?? undefined
+}
+
 function relayList(kv: FileKV): string[] {
   try {
     const mine = JSON.parse(kv.get(nodesKey(ACTIVE)) ?? 'null')
@@ -379,7 +391,7 @@ try {
       }
       if (inv) {
         const name = opt('--name') ?? inv.name
-        const { id, contacts, store } = await signIn(kv)
+        const { id, contacts, store, names, base } = await signIn(kv)
         if (inv.pub === id.pub) die('to Twój własny klucz')
         const known = (await contacts.list()).find((c) => c.pub === inv.pub)
         if (known) { console.log(`ten klucz już masz: ${known.name} (${await fingerprint(inv.pub)})`); break }
@@ -393,7 +405,7 @@ try {
           // An invite that answers itself: knock on its inbox with our key. The
           // app's waiting record keeps the client knocking until they accept.
           const raw = inboxSecretBytes(inv)!
-          const session = await startSession(id, { relay: relayList(kv)[0], relays: relayList(kv), transport: 'light', networkId: NETWORK })
+          const session = await startSession(id, { relay: relayList(kv)[0], relays: relayList(kv), transport: 'light', networkId: NETWORK, peerKey: await peerKeyOf(kv, base, names) })
           let reach: number | null = null
           try { reach = await session.knock(raw, inv.key, { name: id.handle, note: opt('--note') }) } finally { await session.close().catch(() => {}) }
           const waiting = await store.waiting()
@@ -442,6 +454,7 @@ try {
       const stdin = process.stdin
       await runClient({
         id, kind, contacts, store, vault: { kv, base, names }, relays: relayList(kv), openFirst: args[0], debug: rest.includes('--debug'),
+        peerKey: await peerKeyOf(kv, base, names),
         transport: rest.includes('--libp2p') ? 'libp2p' : 'light', networkId: NETWORK,
         io: {
           out: process.stdout,
@@ -479,7 +492,7 @@ try {
         out({ ...r, via: 'daemon' })
       }
       const { id, contacts, names, base } = await signIn(kv)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names } })
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names }, peerKey: await peerKeyOf(kv, base, names) })
       await hub.start()
       try { out({ ...(await hub.send(to, text, waitMs)), via: 'direct' }) } finally { await hub.close() }
       break
@@ -499,7 +512,7 @@ try {
       const sock = await connectDaemon()
       if (sock) { const r = await ask(sock, { op: 'sendfile', to, path, wait: waitMs }); sock.end(); if (!r.ok) die(r.error); out({ ...r, via: 'daemon' }) }
       const { id, contacts, names, base } = await signIn(kv)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names } })
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names }, peerKey: await peerKeyOf(kv, base, names) })
       await hub.start()
       try { out({ ...(await hub.sendFile(to, path, waitMs)), via: 'direct' }) } finally { await hub.close() }
       break
@@ -543,7 +556,7 @@ try {
         await new Promise(() => {})
       }
       const { id, contacts, names, base } = await signIn(kv)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names } })
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names }, peerKey: await peerKeyOf(kv, base, names) })
       hub.on(show)
       if (saveDir) hub.on((e) => { if (e.t === 'file') hub.getFile(e.id, saveDir).then((p) => saved(e.name, p), (err) => failed(e.name, err?.message ?? String(err))) })
       await hub.start()
@@ -582,7 +595,7 @@ try {
     case 'daemon': {
       const { id, contacts, kind, names, base } = await signIn(kv)
       const say = (m: string) => console.log(`[onchato] ${m}`)
-      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names }, log: rest.includes('--debug') ? say : undefined, hem: kind === 'HEM', invites: true })
+      const hub = new Hub({ id, contacts, relays: relayList(kv), networkId: NETWORK, vault: { kv, base, names }, peerKey: await peerKeyOf(kv, base, names), log: rest.includes('--debug') ? say : undefined, hem: kind === 'HEM', invites: true })
       hub.on((e) => {
         if (e.t === 'link') say(`łącze: ${e.state}`)
         // Loud: somebody is at the door, and the name is only a claim.

@@ -11,14 +11,17 @@ import { webSockets } from '@libp2p/websockets'
 import { noise } from '@chainsafe/libp2p-noise'
 import { yamux } from '@chainsafe/libp2p-yamux'
 import { identify } from '@libp2p/identify'
+import { privateKeyFromProtobuf } from '@libp2p/crypto/keys'
 import { gossipsub } from '@chainsafe/libp2p-gossipsub'
 import { multiaddr } from '@multiformats/multiaddr'
 
 // v5 fix: keep any ws/wss multiaddr (incl. /http-path/...) instead of exactMatch.
 const wsFilter = (addrs) => addrs.filter((ma) => /\/(wss?)(\/|$)/.test(ma.toString()))
 
-export async function createPeer() {
+/** `peerKey`: a stable libp2p key (protobuf) for a network that admits devices by list (lib/netkey.ts); absent: a fresh one. */
+export async function createPeer(peerKey?: Uint8Array) {
   const node = await createLibp2p({
+    ...(peerKey ? { privateKey: privateKeyFromProtobuf(peerKey) } : {}),
     transports: [webSockets({ filter: wsFilter })],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],

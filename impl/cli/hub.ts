@@ -53,6 +53,7 @@ export class Hub {
   private relays: string[]
   private transport: 'light' | 'libp2p'
   private networkId?: string
+  private peerKey?: Uint8Array
   private log: (m: string) => void
   private vault?: { kv: KV; base: Uint8Array | null; names: Names }
   private hem: boolean
@@ -73,6 +74,8 @@ export class Hub {
 
   constructor(o: {
     id: Identity; contacts: ContactManager; relays: string[]; transport?: 'light' | 'libp2p'; networkId?: string; log?: (m: string) => void
+    /** A stable libp2p key, only in a network that admits devices by list (lib/netkey.ts). */
+    peerKey?: Uint8Array
     vault?: { kv: KV; base: Uint8Array | null; names: Names }
     /** New contacts go to the HEM (the identity is a HEM one). */
     hem?: boolean
@@ -81,6 +84,7 @@ export class Hub {
   }) {
     this.id = o.id; this.contacts = o.contacts; this.relays = o.relays; this.vault = o.vault; this.networkId = o.networkId
     this.transport = o.transport ?? 'light'; this.log = o.log ?? (() => {}); this.hem = !!o.hem; this.invites = !!o.invites
+    this.peerKey = o.peerKey
   }
 
   on(cb: (e: HubEvent) => void): () => void { this.listeners.add(cb); return () => this.listeners.delete(cb) }
@@ -88,7 +92,7 @@ export class Hub {
 
   async start(): Promise<void> {
     this.session = await startSession(this.id, {
-      relay: this.relays[0], relays: this.relays, transport: this.transport, networkId: this.networkId, onLog: this.log,
+      relay: this.relays[0], relays: this.relays, transport: this.transport, networkId: this.networkId, onLog: this.log, peerKey: this.peerKey,
       onLink: (state) => this.emit({ t: 'link', state }),
       onGroupSkd: (from, skd) => { void this.groups?.onInvite(from, skd) },
       onGroupSkdReq: (from, req) => { void this.groups?.onSkdReq(from, req) },

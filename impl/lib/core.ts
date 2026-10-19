@@ -712,6 +712,12 @@ export interface SessionOpts {
   /** libp2p relay multiaddr. */
   relay: string
   /**
+   * A stable libp2p key (protobuf bytes, lib/netkey.ts) - ONLY for a network
+   * whose profile admits devices by list. Absent: a fresh key, a new PeerId
+   * every session, as everywhere else.
+   */
+  peerKey?: Uint8Array
+  /**
    * Ordered relay candidates for failover (libp2p only). When set, every dial —
    * the first one and every re-dial — sweeps this list from the top and the
    * first node that connects wins, so an unreachable or hung node falls through
@@ -865,7 +871,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   // pubsub surface is pick/push instead of GossipSub (net/light.ts).
   const node: any = opts.transport === 'light'
       ? await createLightPeer({
-        onLog: opts.onLog, onRefused: (t: string) => refused(t),
+        onLog: opts.onLog, onRefused: (t: string) => refused(t), peerKey: opts.peerKey,
         // A stream that ended on a live connection: re-open it, a moment later
         // so an attach already under way can finish first.
         onPickClosed: () => {
@@ -877,7 +883,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
           ;(t as any).unref?.()
         },
       })
-      : await createPeer()
+      : await createPeer(opts.peerKey)
   opts.onTransport?.(node)
   /**
    * Dial, or re-dial: sweep the relay

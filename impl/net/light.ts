@@ -52,6 +52,7 @@ import { webSockets } from '@libp2p/websockets'
 import { noise } from '@chainsafe/libp2p-noise'
 import { yamux } from '@chainsafe/libp2p-yamux'
 import { identify } from '@libp2p/identify'
+import { privateKeyFromProtobuf } from '@libp2p/crypto/keys'
 import { multiaddr } from '@multiformats/multiaddr'
 import { pipe } from 'it-pipe'
 import * as lp from 'it-length-prefixed'
@@ -69,6 +70,8 @@ export interface PickStream {
 }
 export interface LightOpts {
   onLog?: (msg: string, level?: 'info' | 'debug') => void
+  /** A stable libp2p key (protobuf) for a network that admits devices by list (lib/netkey.ts); absent: a fresh one. */
+  peerKey?: Uint8Array
   /** The relay said no to a topic. The first non-silent refusal in the system: tell the user. */
   onRefused?: (topic: string) => void
   /** Injected in tests: opens a pick stream to `relayId` and feeds frames back through `onFrame`. */
@@ -192,6 +195,7 @@ export function pickAdapter(self: string, opts: LightOpts) {
 export async function createLightPeer(opts: LightOpts = {}) {
   const log = opts.onLog ?? (() => {})
   const node: any = await createLibp2p({
+    ...(opts.peerKey ? { privateKey: privateKeyFromProtobuf(opts.peerKey) } : {}),
     transports: [webSockets({ filter: wsFilter })],
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
