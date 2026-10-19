@@ -18,7 +18,9 @@ COPY relay/*.mjs relay/
 COPY infra/stun/stun.mjs infra/stun/
 COPY infra/geoip/geoip.mjs infra/geoip/
 COPY node/entry.sh /usr/local/bin/onchato-node
-RUN chmod 755 /usr/local/bin/onchato-node && mkdir -p /data && chown node:node /data
+# Readable by the `node` user whatever umask the server cloned the code with
+# (a hardened 077 left the relay unable to open relay.mjs: EACCES).
+RUN chmod -R a+rX /app && chmod 755 /usr/local/bin/onchato-node && mkdir -p /data && chown node:node /data
 USER node
 ENTRYPOINT ["onchato-node"]
 CMD ["relay"]

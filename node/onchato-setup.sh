@@ -12,6 +12,10 @@
 # repository. Answers are kept in /etc/onchato/setup.env; data in /var/lib/onchato;
 # code in /opt/onchato. Code is ASCII (repo rule).
 set -euo pipefail
+# Files this script writes or clones are read by containers running as another
+# user: a hardened umask (027, 077) made the relay unable to read its own code
+# (found on the blbx.pl install).
+umask 022
 
 MODE=install
 LOCAL_TEST=0
@@ -49,7 +53,12 @@ preflight() {
     return
   fi
   [ "$(id -u)" = 0 ] || die "run it as root: sudo bash $0"
-  . /etc/os-release 2>/dev/null || die "cannot tell which system this is (/etc/os-release)"
+  # Only these two fields: sourcing the whole file sets HOME_URL (and NAME,
+  # VERSION...) over this script's own variables - every network set up on
+  # Ubuntu got https://www.ubuntu.com/ as its home page (the blbx.pl install).
+  [ -r /etc/os-release ] || die "cannot tell which system this is (/etc/os-release)"
+  ID=$(. /etc/os-release && printf '%s' "${ID:-}")
+  PRETTY_NAME=$(. /etc/os-release && printf '%s' "${PRETTY_NAME:-}")
   case "$(uname -m)" in x86_64|aarch64) ;; *) die "$(uname -m) is not supported (x86_64 or arm64)";; esac
   local mem; mem=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
   [ "$mem" -ge 900 ] || warn "only ${mem} MB of RAM; 1 GB is the tested minimum"
