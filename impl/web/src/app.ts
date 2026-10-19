@@ -142,7 +142,7 @@ function inNetworkOrSwitch(net: string, then?: () => void): boolean {
   }
   setLastNet(localKV(), net, BUILTIN_NET)
   then?.()
-  location.reload()
+  reloadPage('network switch')
   return false
 }
 
@@ -1132,8 +1132,6 @@ function openSoftModal(name?: string, creating = false) {
   const start = creating ? '' : (name ?? localStorage.getItem(LAST_PROFILE) ?? '')
   ;($('soft-name') as HTMLInputElement).value = start; ($('soft-pass') as HTMLInputElement).value = ''
   softMode(creating)
-  const sn = document.getElementById('soft-net')
-  if (sn) { sn.hidden = !creating || knownNetworks().length < 2; $('soft-net-name').textContent = tr('Nowa tożsamość w sieci: {n}', { n: netLabel(ACTIVE) }) }
   // Focus lands where there is still something to type — on the password when
   // the name came back by itself, which is the common case after the first run.
   $(!creating && start ? 'soft-pass' : 'soft-name').focus()
@@ -1157,6 +1155,10 @@ function softMode(creating: boolean) {
     ? tr('Nowa tożsamość na tym urządzeniu. Hasła nie da się odzyskać ani zmienić bez niego — nie ma czego z nim porównać.')
     : tr('Tożsamość trzymana w tej przeglądarce i zaszyfrowana hasłem. Bez HEM — do wypróbowania komunikatora.')
   ;($('soft-go') as HTMLButtonElement).textContent = creating ? tr('Utwórz profil') : tr('Dalej')
+  // The network is chosen when an identity is MADE, however the window got
+  // into creating: "+ new profile", or a new name typed at sign-in and confirmed.
+  const sn = document.getElementById('soft-net')
+  if (sn) { sn.hidden = !creating || knownNetworks().length < 2; $('soft-net-name').textContent = tr('Nowa tożsamość w sieci: {n}', { n: netLabel(ACTIVE) }) }
 }
 
 // ---- password strength (a floor since 2026-09-03 — the user's decision) ---
@@ -3632,18 +3634,20 @@ $('scrim').addEventListener('click', () => {
   closeDrawer()
 })
 /**
- * Logging out is a reload. The Back stack must stand down FIRST: the header
- * button asks in a window, closing that window disarms the stack, and its
+ * Every reload that follows a window closing goes through here. The Back stack
+ * must stand down FIRST: closing the window disarms the stack, and its
  * history.back() - queued right after location.reload() - cancelled the reload
- * (0.7.40-0.7.46: "the window shows, nothing happens", any browser). If the page
- * is somehow still here a moment later, a plain navigation does it.
+ * (logging out in 0.7.40-0.7.46, changing the network in 0.7.62-0.7.63: "the
+ * window closes, nothing happens", any browser). If the page is somehow still
+ * here a moment later, a plain navigation does it.
  */
-function logOut() {
+function reloadPage(why: string) {
   leaving = true
-  diag.note('logout: reload')
+  diag.note(`${why}: reload`)
   location.reload()
-  setTimeout(() => { diag.note('logout: still here - navigating'); location.replace(location.pathname + location.search) }, 1500)
+  setTimeout(() => { diag.note(`${why}: still here - navigating`); location.replace(location.pathname + location.search) }, 1500)
 }
+function logOut() { reloadPage('logout') }
 $('btn-logout').addEventListener('click', logOut)
 // The same act, from the header rather than from inside Settings — but asked
 // first, because this one sits beside a button people press often. Logging out
@@ -6606,7 +6610,12 @@ function knownNetworks(): ActiveNetwork[] {
 function netLabel(n: ActiveNetwork): string {
   return n.builtin && n.id === 'main' ? tr('publiczna sieć onchato') : n.operator
 }
-/** The card's network line and what the network's policy allows; quiet on a device that knows one network. */
+/**
+ * The card's network line and what the network's policy allows; quiet on a
+ * device that knows one network. Only a statement: each profile already knows
+ * its network and switches on click, and a new identity's network is chosen
+ * in the window that makes it.
+ */
 function paintNetworkLine() {
   const many = knownNetworks().length > 1
   $('login-net').hidden = !many
@@ -6645,10 +6654,6 @@ $('soft-net-change')?.addEventListener('click', async () => {
   const id = await pickNetwork(tr('Sieć'), tr('Wybierz sieć dla nowej tożsamości. Strona przeładuje się w wybranej sieci i od razu otworzy to okno.'))
   if (!id || id === ACTIVE.id) return
   inNetworkOrSwitch(id, () => localStorage.setItem(OPEN_CREATE_KEY, '1'))
-})
-$('login-net-change')?.addEventListener('click', async () => {
-  const id = await pickNetwork(tr('Sieć'), tr('Wybierz sieć, w której chcesz się zalogować albo założyć tożsamość.'))
-  if (id) inNetworkOrSwitch(id)
 })
 
 let netPending: { profile: OperatorProfile; envelope: NetworkEnvelope } | null = null
@@ -6738,7 +6743,7 @@ $('net-go')?.addEventListener('click', async () => {
   // Into the network just joined, by reload, with its first identity to make.
   setLastNet(localKV(), r.profile.networkId, BUILTIN_NET)
   localStorage.setItem(OPEN_CREATE_KEY, '1')
-  location.reload()
+  reloadPage('network join')
 })
 $('btn-export')?.addEventListener('click', () => openMigrate('export'))
 

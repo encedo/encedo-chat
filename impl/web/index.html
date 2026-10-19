@@ -1092,7 +1092,6 @@
   .home-link{margin-top:14px;font-family:var(--mono);font-size:10.5px;color:var(--muted);opacity:.75;text-decoration:none}
   .home-link:hover{color:var(--accent);opacity:1;text-decoration:underline}
   .login-net{font-size:12px;color:var(--muted);margin:0 0 10px}
-  .login-net a{color:var(--accent);cursor:pointer}
   .soft-net{color:var(--accent)}
   .net-facts{display:grid;grid-template-columns:max-content 1fr;gap:6px 12px;margin:4px 0 12px;font-size:13px}
   .net-facts dt{color:var(--muted)}
@@ -1372,7 +1371,7 @@
       <!-- Which network this card is for. Shown only on a device that knows
            more than the built-in network (lib/activenet.ts): an identity lives
            in one network, and the profiles below are listed with theirs. -->
-      <div class="login-net" id="login-net" hidden><span id="login-net-name"></span> · <a id="login-net-change" data-i18n="zmień">zmień</a></div>
+      <div class="login-net" id="login-net" hidden><span id="login-net-name"></span></div>
       <div id="login-profiles-sec" hidden>
         <p class="sub" data-i18n="Wybierz profil.">Wybierz profil.</p>
         <div class="plist" id="login-profiles"></div>

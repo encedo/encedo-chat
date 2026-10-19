@@ -3844,18 +3844,26 @@ async function main() {
         if (given === pointer) {
           // The network can be changed from this window: a reload into the chosen
           // one, and the window opens again there by itself - there and back.
+          // Real mouse input, not element.click(): without user activation the
+          // Back stack's history.back() does not cancel the reload, and this
+          // passed while the switch did nothing for a person (0.7.62-0.7.63).
+          const tapAt = async (expr: string) => {
+            const r = JSON.parse(await b.eval<string>(`const e = ${expr}; e.scrollIntoView({ block: 'center' }); const r = e.getBoundingClientRect(); return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 })`))
+            await b.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 }, true)
+            await sleep(60)
+            await b.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 }, true)
+          }
+          await b.send('Page.bringToFront', {}, true)
           const flip = async (toMain: boolean) => {
-            await b.eval(`document.getElementById('soft-net-change').click(); return 1`)
+            await tapAt(`document.getElementById('soft-net-change')`)
             await b.waitFor('the network picker', `return document.getElementById('netpick-modal').classList.contains('open')`, 10_000)
-            await b.eval(`
-              const picks = [...document.querySelectorAll('#netpick-list .pick')];
-              const want = picks.find((p) => ${toMain} ? !p.textContent.includes('Harness Net') : p.textContent.includes('Harness Net'));
-              want.click(); return 1`)
+            await b.eval(`window.__notReloaded = 1; return 1`)
+            await tapAt(`[...document.querySelectorAll('#netpick-list .pick')].find((p) => ${toMain} ? !p.textContent.includes('Harness Net') : p.textContent.includes('Harness Net'))`)
             await sleep(500)
-            await b.waitFor(`the new identity window, reopened in ${toMain ? 'the main network' : 'the joined network'}`, `
+            await b.waitFor(`the new identity window, reopened in ${toMain ? 'the main network' : 'the joined network'} after a reload`, `
               const m = document.getElementById('soft-modal'), n = document.getElementById('soft-net-name');
               const t = n ? n.textContent : '';
-              return !!m && m.classList.contains('open') && (${toMain} ? !t.includes('Harness Net') && t.length > 0 : t.includes('Harness Net'))`, 20_000)
+              return !window.__notReloaded && !!m && m.classList.contains('open') && (${toMain} ? !t.includes('Harness Net') && t.length > 0 : t.includes('Harness Net'))`, 20_000)
           }
           await flip(true)
           if (await b.eval<string | null>(`return localStorage.getItem('ec-last-net')`) !== null) throw new Error(`${b.name}: "change" did not move the page to the main network`)
