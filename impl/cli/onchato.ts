@@ -302,8 +302,13 @@ try {
       break
     }
     case 'whoami': {
-      const { id, kind } = await signIn(kv)
+      const { id, kind, names, base } = await signIn(kv)
       console.log(`tożsamość: ${id.handle} (${kind})\nklucz:     ${id.pub}\nodcisk:    ${await fingerprint(id.pub)}\nsieć:      ${ACTIVE.builtin ? NETWORK : `${ACTIVE.operator} (${NETWORK})`}`)
+      // A network that admits devices by list knows this device by this number (lib/netkey.ts).
+      if (ACTIVE.policy.access === 'allowlist') {
+        const k = await loadOrCreateNetKey(kv, base, names)
+        console.log(`urządzenie: ${k ? netPeerId(k) : '(brak stałego klucza)'}  (ta sieć wpuszcza urządzenia z listy)`)
+      }
       break
     }
     case 'pubkey': console.log((await signIn(kv)).id.pub); break
