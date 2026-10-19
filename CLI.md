@@ -172,6 +172,13 @@ profile always runs in that network: its nodes, its file store, invite links to 
 `profile list` names each profile's network, `whoami` says which network this run is in. A HEM
 identity is put in a network with `--network <id>` on its first sign-in on this device.
 
+A network may admit only devices its administrator lets in. The first run of such a profile on
+this device asks for the administrator's current 8-digit code (or takes it from `--access-code`,
+or `ONCHATO_ACCESS_CODE` in a script; `--device-name` is the name the administrator sees). The
+node then recognises this device by a fixed number of its own - never your identity key - and
+`whoami` prints it. Without the code it says so and stops, rather than retrying a node that
+refuses it.
+
 ---
 
 ## 4. Contacts
@@ -610,6 +617,7 @@ Without the daemon there is no queue: `--key` and `--ttl` then change nothing.
 | `--debug` | in the client: engine log in the status window |
 | `--libp2p` | in the client: full GossipSub transport instead of the light one (diagnostics) |
 | `--network <id>` | the network this run works in: by default the chosen profile's (a profile cannot be moved to another network), else `main`. For a HEM identity it names the network on its first sign-in. An id this device does not know is, as before, the built-in nodes under another id - for development. Clients on different ids never meet, even on the same node |
+| `--access-code <8 digits>` | a network that admits devices by list: the administrator's code, the first time this device runs in it (`ONCHATO_ACCESS_CODE` in a script); `--device-name` names the device for the administrator |
 | `--network-profile <file\|link>` | `profile new`: make the profile in another operator's network, from its signed profile file or the short link with its CID |
 | `ONCHATO_NETWORK_PROFILE` | the built-in network profile to use instead of `infra/network.json` (a build for another network) |
 | `--core ts` | the EH‑2 handshake and the ratchet computed in the TypeScript engine instead of the `core-rs` module (Rust → WASM, `impl/core-wasm/core.wasm`), which is the default since 0.7.21. The same frames on the wire, so the other side sees no difference |

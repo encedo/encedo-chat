@@ -34,6 +34,7 @@ import { listProfiles, createProfile, openProfile, exportProfileFile, importProf
 import { hemSignIn, hemCreate, type HemChoice } from './identity.ts'
 import { runClient } from './client.ts'
 import { loadOrCreateNetKey, netPeerId } from '../lib/netkey.ts'
+import { enrollDevice, deviceStatus, enrollUrl } from '../lib/enroll.ts'
 import { Hub, type HubEvent, APP_ORIGIN, APP_PATH, setAppAddress } from './hub.ts'
 import { NET } from './network.ts'
 import { builtinNetwork, networkById, bindingOf, setBinding, nodesKey, softBindingKey, hemBindingKey } from '../lib/activenet.ts'
@@ -88,8 +89,23 @@ async function confirm(q: string): Promise<boolean> {
 async function peerKeyOf(kv: FileKV, base: Uint8Array | null, names: Names): Promise<Uint8Array | undefined> {
   if (ACTIVE.policy.access !== 'allowlist') return undefined
   const k = await loadOrCreateNetKey(kv, base, names, (m) => console.error('onchato: ' + m))
-  if (k) console.error(`onchato: sieć wpuszcza urządzenia z listy - to urządzenie: ${netPeerId(k)}`)
-  return k ?? undefined
+  if (!k) return undefined
+  console.error(`onchato: sieć wpuszcza urządzenia z listy - to urządzenie: ${netPeerId(k)}`)
+  // Not on the list yet: the administrator's code (relay/enroll.mjs), here or
+  // with --access-code; without it the node only refuses, and that looks like
+  // a network fault.
+  const url = enrollUrl(ACTIVE)
+  const st = url ? await deviceStatus(url, ACTIVE.id, k) : null
+  if (url && st && !st.listed) {
+    if (st.locked) die('dodawanie urządzeń w tej sieci jest zablokowane po zbyt wielu błędnych kodach - administrator musi je odblokować')
+    const code = opt('--access-code') ?? (process.stdin.isTTY ? (await secret('Kod od administratora (8 cyfr): ', 'ONCHATO_ACCESS_CODE')).trim() : undefined)
+    if (!code) die('to urządzenie nie jest wpuszczone do tej sieci - podaj kod administratora: --access-code <8 cyfr>')
+    const r = await enrollDevice(url, ACTIVE.id, k, code!, opt('--device-name') ?? 'onchato-cli')
+    if (!r.ok) die(r.error === 'code' ? 'zły albo nieaktualny kod' : `węzeł odmówił: ${r.error}${r.why ? ' - ' + r.why : ''}`)
+    console.error('onchato: urządzenie wpuszczone do sieci')
+    await new Promise((res) => setTimeout(res, 2500)) // the relay re-reads its list every 2 s
+  }
+  return k
 }
 
 function relayList(kv: FileKV): string[] {
