@@ -55,7 +55,9 @@ export async function openProfile(kv: KV, name: string, password: string): Promi
 export async function exportProfileFile(kv: KV, name: string, password: string, path: string): Promise<void> {
   const id = await openProfile(kv, name, password)
   const key = await identityKey(id.pub)
-  const file = await exportProfile(kv, name, key, password, Date.now(), (await namesFor(id, key)).prefix)
+  const names = await namesFor(id, key)
+  // The network key stays: it is this device's (lib/netkey.ts).
+  const file = await exportProfile(kv, name, key, password, Date.now(), names.prefix, [names.fixed.netkey])
   writeFileSync(path, JSON.stringify(file), { mode: 0o600 })
 }
 

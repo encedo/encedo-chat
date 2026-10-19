@@ -63,6 +63,7 @@ import {
   softBindingKey, hemBindingKey, OPEN_PROFILE_KEY, OPEN_CREATE_KEY, autoRefreshNetwork, NETWORK_REFRESH_MS, type ActiveNetwork,
 } from '../../lib/activenet.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
+import { loadOrCreateNetKey, netPeerId } from '../../lib/netkey.ts'
 import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
 import { newDiag } from '../../lib/diag.ts'
@@ -1630,7 +1631,16 @@ async function enterApp(id: Identity, book: ContactManager, sourceLabel: string,
   // Start the transport, but do NOT make the app shell wait for it: dialing a
   // relay is network work, and a login screen that hangs on it looks broken
   // (it also blocked the first automated run of this app outright).
+  // A network that admits devices by list (policy.access "allowlist") knows this
+  // device by a stable key of this identity's (lib/netkey.ts); anywhere else a
+  // fresh key, a new PeerId every session, as always.
+  let peerKey: Uint8Array | undefined
+  if (ACTIVE.policy.access === 'allowlist' && storeNames) {
+    peerKey = (await loadOrCreateNetKey(localKV(), await ensureCacheBase(), storeNames, (m) => ecLog(m, 'debug'))) ?? undefined
+    ecLog(peerKey ? `network admits by list: this device is ${netPeerId(peerKey)}` : 'network admits by list, but no stable key could be kept - the node will not know this device')
+  }
   clientReady = startSession(id, {
+    peerKey,
     relay: chosenRelay(),
     relays: chosenRelays(),   // 3b: fall through the enabled node list if one is down
     gkBackend,                // §8 bucket A: a HEM identity mints GK in the HSM
@@ -6654,7 +6664,8 @@ async function runExport(password: string): Promise<boolean> {
   const blob = raw ? JSON.parse(raw) : null
   if (!isSealedProfile(blob)) throw new Error(tr('To nie jest profil software — tożsamości z HEM nie da się przenieść plikiem'))
   await unseal(password, blob) // throws BadPassword
-  const file = await exportProfile(localKV(), name, session?.idKey ?? '', password, nowMs(), storeNames?.prefix ?? '')
+  // The network key stays: it is this device's (lib/netkey.ts).
+  const file = await exportProfile(localKV(), name, session?.idKey ?? '', password, nowMs(), storeNames?.prefix ?? '', storeNames ? [storeNames.fixed.netkey] : [])
   const sink = await beginSave(`onchato-${name}-${new Date(nowMs()).toISOString().slice(0, 10)}.${FILE_EXT}`, saveEnv)
   if (!sink) return false   // the dialog was closed: nothing written, and the modal stays for another try
   await sink.write(new Blob([JSON.stringify(file)], { type: 'application/json' }))

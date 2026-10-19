@@ -44,7 +44,7 @@ const NAMES_CTX = enc.encode('local storage names')
 const INDEX_SALT = 'encedo-chat-store-index-v1'
 
 /** The records every identity has one of. */
-export const FIXED = ['emp', 'book', 'book-signed', 'sealed', 'invites', 'waiting', 'ignored', 'outbox', 'prefs', 'seen', 'gleft', 'groups'] as const
+export const FIXED = ['emp', 'book', 'book-signed', 'sealed', 'invites', 'waiting', 'ignored', 'outbox', 'prefs', 'seen', 'gleft', 'groups', 'netkey'] as const
 export type Fixed = typeof FIXED[number]
 
 export interface Names {

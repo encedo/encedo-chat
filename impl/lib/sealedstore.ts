@@ -37,6 +37,7 @@ export const SALTS = {
   prefs: 'encedo-chat-prefs-v1',
   seen: 'encedo-chat-seen-v1',
   gleft: 'encedo-chat-group-left-v1',
+  netkey: 'encedo-chat-netkey-v1',
 } as const
 export type Store = keyof typeof SALTS
 export const STORES = Object.keys(SALTS) as Store[]

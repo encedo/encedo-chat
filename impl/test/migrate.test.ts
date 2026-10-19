@@ -220,3 +220,14 @@ test('network: an export refuses a binding with no network profile behind it', a
   s.set('ec-soft-net-Lab1', 'gone')
   await assert.rejects(exportProfile(s, 'Lab1', KID, PASS, NNOW), /not on this device/)
 })
+
+test('a record of this device (the network key, lib/netkey.ts) stays behind, though it sits under the identity prefix', () => {
+  const s = full()
+  const FULL_KID = 'a1b2c3d4'.repeat(4) // keysOfProfile wants a whole KID
+  const PREFIX = 'ec-0123456789abcdef-'
+  s.set(PREFIX + 'aa', 'sealed-book'); s.set(PREFIX + 'netkey-name', 'sealed-netkey')
+  const keys = collectProfile(s, 'Lab1', FULL_KID, PREFIX, [PREFIX + 'netkey-name'])
+  assert.ok(keys[PREFIX + 'aa'], 'the identity prefix stopped working')
+  assert.equal(keys[PREFIX + 'netkey-name'], undefined, 'the device key went into the export')
+  assert.ok(keysOfProfile(s, 'Lab1', FULL_KID, PREFIX).includes(PREFIX + 'netkey-name'), 'a deleted profile must take the device key with it')
+})

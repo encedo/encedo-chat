@@ -120,7 +120,7 @@ export const isMigrationFile = (v: any): v is MigrationFile =>
  * (lib/storenames.ts); the `kid` substring test stays for records an older
  * build wrote that sign-in has not moved yet.
  */
-export function collectProfile(store: KV, name: string, kid: string, prefix = ''): Record<string, string> {
+export function collectProfile(store: KV, name: string, kid: string, prefix = '', deviceOnly: string[] = []): Record<string, string> {
   const out: Record<string, string> = {}
   const identity = 'ec-soft-id-' + name
   // Its network, and that network's node list and transport setting, when it
@@ -131,6 +131,10 @@ export function collectProfile(store: KV, name: string, kid: string, prefix = ''
   for (const k of store.keys()) {
     if (!k.startsWith('ec-')) continue
     if (NOT_PORTABLE.includes(k)) continue
+    // Records that belong to this DEVICE, not the identity (lib/netkey.ts: the
+    // stable libp2p key a network's nodes list) - named by the caller, who has
+    // the storage names; a moved profile is admitted on the new device anew.
+    if (deviceOnly.includes(k)) continue
     const mine = k === identity || ownedBy(k, kid, prefix) || BROWSER_KEYS.includes(k) || netKeys.includes(k)
     if (!mine) continue
     const v = store.get(k)
@@ -167,9 +171,9 @@ function ownedBy(k: string, kid: string, prefix: string): boolean {
 /** Build the file. Throws if there is no identity to move — an export with no
  *  key in it is a file that looks like a rescue and is not one. */
 export async function exportProfile(
-  store: KV, name: string, kid: string, password: string, made: number, prefix = '',
+  store: KV, name: string, kid: string, password: string, made: number, prefix = '', deviceOnly: string[] = [],
 ): Promise<MigrationFile> {
-  const keys = collectProfile(store, name, kid, prefix)
+  const keys = collectProfile(store, name, kid, prefix, deviceOnly)
   if (!keys['ec-soft-id-' + name]) throw new Error('no sealed identity for ' + name)
   const bundle: Bundle = { v: 1, name, kid, made, keys, ...(prefix ? { prefix } : {}) }
   const net = store.get(softBindingKey(name))
