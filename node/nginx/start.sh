@@ -28,6 +28,14 @@ else
   rm -f /etc/nginx/snippets/onchato-extra-store.conf /etc/nginx/conf.d/store-limits.conf
 fi
 
+# Enrolment (ACCESS=allowlist): /onchato/enroll inside the node's site.
+if [ "${ACCESS:-}" = allowlist ]; then
+  cp /etc/onchato/onchato-extra-enroll.conf /etc/nginx/snippets/onchato-extra-enroll.conf
+  cp /etc/onchato/enroll-limits.conf /etc/nginx/conf.d/enroll-limits.conf
+else
+  rm -f /etc/nginx/snippets/onchato-extra-enroll.conf /etc/nginx/conf.d/enroll-limits.conf
+fi
+
 render() {
   if cert "$NODE_HOST"; then
     sed "s/__HOST__/$NODE_HOST/g; s#__HOME__#$HOME_URL#g" /etc/onchato/relay-node.conf > "$SITE"

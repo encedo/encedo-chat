@@ -6,3 +6,5 @@
 !node/nginx/home-site.conf
 !node/nginx/onchato-extra-store.conf
 !node/nginx/store-limits.conf
+!node/nginx/onchato-extra-enroll.conf
+!node/nginx/enroll-limits.conf

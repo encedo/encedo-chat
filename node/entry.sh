@@ -1,5 +1,5 @@
 #!/bin/sh
-# onchato-node entry: `relay`, `stun` or `fput`, flags rendered from the environment
+# onchato-node entry: `relay`, `stun`, `fput` or `enroll`, flags rendered from the environment
 # (node.env, read by compose). The relay flags are the ones our nodes run
 # (relay/onchato-relay.service); only what differs per node comes from env.
 set -eu
@@ -32,6 +32,14 @@ stun)
   export GEO_LIST="${GEO_LIST:-/data/geoip/blocked-cidrs.txt,/data/geoip/abuse-cidrs.txt}"
   cd /app/infra/stun
   exec node stun.mjs
+  ;;
+enroll)
+  # A device joins a network that admits devices by list (relay/enroll.mjs):
+  # the administrator's TOTP code, the device's signature, onto ALLOW_PEERS.
+  : "${ALLOW_PEERS:?ALLOW_PEERS is not set}" "${NETWORK_ID:?NETWORK_ID is not set}"
+  mkdir -p "$(dirname "$ALLOW_PEERS")"
+  cd /app/relay
+  exec node enroll.mjs
   ;;
 fput)
   # The upload prefixer in front of the local Kubo (STORE=here): eight bytes

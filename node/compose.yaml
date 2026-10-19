@@ -71,6 +71,16 @@ services:
     volumes: [ "${ONCHATO_PROFILE_DIR:-/var/lib/onchato/profile}:/data/profile:ro" ]
     depends_on: [ relay ]
 
+  # --- devices admitted by list, only with ACCESS=allowlist (profile 'allowlist') ---
+  # The relay follows ALLOW_PEERS; this service puts enrolled devices on it.
+  enroll:
+    <<: *node
+    profiles: [ allowlist ]
+    image: onchato-node
+    command: enroll
+    volumes: [ "node-data:/data" ]
+    depends_on: [ relay ]
+
   # --- the file store, only with STORE=here (COMPOSE_PROFILES=store in node.env) ---
   kubo:
     <<: *node

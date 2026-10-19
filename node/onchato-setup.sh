@@ -5,6 +5,7 @@
 #   sudo bash onchato-setup.sh --check    every test the setup did, again
 #   sudo bash onchato-setup.sh --update   the latest release, rebuilt and checked
 #   sudo bash onchato-setup.sh --renew    sign the network profile again (before it expires)
+#   sudo bash onchato-setup.sh --access-qr   the authenticator QR again (a network that admits devices by list)
 #        bash onchato-setup.sh --local-test   on a developer machine: no root, no DNS, no
 #                                             firewall, a self-signed certificate
 #
@@ -23,6 +24,7 @@ for a in "$@"; do
   case "$a" in
     --check) MODE=check ;; --update) MODE=update ;; --renew) MODE=renew ;;
     --local-test) LOCAL_TEST=1 ;;
+    --access-qr) MODE=access-qr ;;
     -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "unknown option $a (--help)"; exit 2 ;;
   esac
@@ -139,6 +141,15 @@ questions() {
       ok "the store at $FILES takes a file and gives it back the way the apps expect" ;;
     *) die "a store address must start with https:// (got: $FILES)" ;;
   esac
+  if [ -z "${ACCESS:-}" ]; then
+    say ""
+    say "Who can join?"
+    say "  1) anyone with the network's join code (an open network)"
+    say "  2) only devices you let in: the join code AND an 8-digit code from your authenticator app"
+    say "     (the node then recognises each device by a fixed number - it never learns who it is)"
+    ask ACCESS_CHOICE "1 or 2" "1"
+    case "$ACCESS_CHOICE" in 2) ACCESS=allowlist ;; *) ACCESS=open ;; esac
+  fi
   if [ -z "${STATS:-}" ]; then
     say ""
     ask STATS_ANSWER "Keep statistics (connections and traffic per 15 minutes, 30 days, for a dashboard; Redis, a few MB)? y/n" "y"
@@ -165,6 +176,7 @@ ACME_EMAIL='$ACME_EMAIL'
 KEY_MODE='$KEY_MODE'
 FILES='$FILES'
 STATS='$STATS'
+ACCESS='$ACCESS'
 DOMAIN='$DOMAIN'
 NETWORK_ID='$NETWORK_ID'
 HOME_URL='$HOME_URL'
@@ -275,7 +287,9 @@ $( [ "$LOCAL_TEST" = 1 ] && echo CERT_MODE=self )
 $( [ "$LOCAL_TEST" = 0 ] && [ -n "${CERT_MODE:-}" ] && echo "CERT_MODE=$CERT_MODE" )
 $( [ -n "${HOME_SITE:-}" ] && echo "HOME_SITE=$HOME_SITE" )
 $( [ "${FILES:-}" = here ] && echo STORE=here )
-COMPOSE_PROFILES=$( p=; [ "${FILES:-}" = here ] && p=store; [ "${STATS:-yes}" = yes ] && p=${p:+$p,}stats; echo "$p" )
+NETWORK_ID=$NETWORK_ID
+$( [ "${ACCESS:-}" = allowlist ] && printf 'ACCESS=allowlist\nALLOW_PEERS=/data/allow/peers.txt' )
+COMPOSE_PROFILES=$( p=; [ "${FILES:-}" = here ] && p=store; [ "${STATS:-yes}" = yes ] && p=${p:+$p,}stats; [ "${ACCESS:-}" = allowlist ] && p=${p:+$p,}allowlist; echo "$p" )
 $( [ -n "${PEERS:-}" ] && echo "PEERS=$PEERS" )
 $( [ -n "${SIBLINGS:-}" ] && echo "SIBLINGS=$SIBLINGS" )
 $( [ -n "${V6_HOST:-}" ] && echo "V6_HOST=$V6_HOST" )
@@ -290,6 +304,22 @@ ENV
   say "Waiting for the certificate..."
   for i in $(seq 1 90); do compose logs nginx 2>/dev/null | grep -q 'full site on\|^.*onchato-nginx: certificate found' && break
     curl -fsk --max-time 3 "https://$NODE_HOST/health" >/dev/null 2>&1 && break; sleep 4; done
+}
+
+# ---- 3b. devices admitted by list: the authenticator's seed -----------------------
+# In the node's volume, written as the node's user (the relay and the enrolment
+# service run as it). The QR is shown at install and on --access-qr only.
+access_ops() { docker run --rm --user 1000:1000 -v onchato_node-data:/data onchato-ops access "$@" --dir /data/allow; }
+access_setup() {
+  [ "${ACCESS:-}" = allowlist ] || return 0
+  access_ops seed >/dev/null || die "the enrolment seed was not written"
+  if [ "${1:-}" = show ] || [ ! -f "$ETC/access-qr-shown" ]; then
+    say ""
+    say "Add this network to the administrator's authenticator app (once):"
+    access_ops qr --label "$OPERATOR"
+    : > "$ETC/access-qr-shown"
+    say "People joining need a current code from it. Show this QR again: sudo bash $0 --access-qr"
+  fi
 }
 
 # ---- 4. the key and the profile ------------------------------------------------
@@ -310,14 +340,15 @@ write_profile() {
   # The store the apps upload to: this node (here; and with none, where /f
   # simply answers 404 - the profile needs one), or the one tested above.
   case "${FILES:-here}" in here|none) STORE_ORIGIN="https://$NODE_HOST" ;; *) STORE_ORIGIN=$FILES ;; esac
-  export NETWORK_ID OPERATOR NODE_HOST HOME_URL APP_ORIGIN PEER_ID STORE_ORIGIN
-  docker run --rm --user "$(id -u):$(id -g)" -v "$DATA:/data" -e NETWORK_ID -e OPERATOR -e NODE_HOST -e HOME_URL -e APP_ORIGIN -e PEER_ID -e STORE_ORIGIN \
+  ACCESS=${ACCESS:-open}
+  export NETWORK_ID OPERATOR NODE_HOST HOME_URL APP_ORIGIN PEER_ID STORE_ORIGIN ACCESS
+  docker run --rm --user "$(id -u):$(id -g)" -v "$DATA:/data" -e NETWORK_ID -e OPERATOR -e NODE_HOST -e HOME_URL -e APP_ORIGIN -e PEER_ID -e STORE_ORIGIN -e ACCESS \
     --entrypoint node onchato-ops -e '
     const fs = require("fs"), e = process.env
     const profile = { v: 1, networkId: e.NETWORK_ID, operator: e.OPERATOR,
       app: { origin: e.APP_ORIGIN, path: "/" }, stores: [e.STORE_ORIGIN],
       profileUrls: ["https://" + e.NODE_HOST + "/onchato/network.json"],
-      feedback: null, home: e.HOME_URL, policy: { transport: "node-only" } }
+      feedback: null, home: e.HOME_URL, policy: { transport: "node-only", ...(e.ACCESS === "allowlist" ? { access: "allowlist" } : {}) } }
     const nodes = { v: 1, nodes: [{ name: e.NODE_HOST, addr: "/dns4/" + e.NODE_HOST + "/tcp/443/wss/http-path/%2Frelay/p2p/" + e.PEER_ID }] }
     fs.writeFileSync("/data/profile/profile.json", JSON.stringify(profile, null, 2) + "\n")
     fs.writeFileSync("/data/profile/nodes.json", JSON.stringify(nodes, null, 2) + "\n")' || die "could not write the profile"
@@ -349,16 +380,18 @@ write_site() {
   mkdir -p "$DATA/profile/site"; chmod 755 "$DATA/profile/site"
   ops -- network link "https://$NODE_HOST/onchato/network.json" network.json --png site/join.png >/dev/null || die "the join code was not drawn"
   local fp; fp=$(ops -- network check network.json 2>/dev/null | awk '/root key/ {print $3,$4,$5,$6,$7,$8,$9,$10}')
-  export OPERATOR NETWORK_ID NODE_HOST APP_ORIGIN FP="$fp"
+  ACCESS=${ACCESS:-open}
+  export OPERATOR NETWORK_ID NODE_HOST APP_ORIGIN ACCESS FP="$fp"
   docker run --rm --user "$(id -u):$(id -g)" -v "$DATA:/data" -v "$DIR/node/site:/tpl:ro" \
-    -e OPERATOR -e NETWORK_ID -e NODE_HOST -e APP_ORIGIN -e FP --entrypoint node onchato-ops -e '
+    -e OPERATOR -e NETWORK_ID -e NODE_HOST -e APP_ORIGIN -e ACCESS -e FP --entrypoint node onchato-ops -e '
     const fs = require("fs"), e = process.env
     const esc = (t) => String(t).replace(/[&<>"\x27]/g, (c) => "&#" + c.charCodeAt(0) + ";")
     const link = process.argv[1]
     const fp = e.FP.split(" ")
     const v = { OPERATOR: esc(e.OPERATOR), NETWORK_ID: esc(e.NETWORK_ID), NODE_HOST: esc(e.NODE_HOST),
       APP: esc(e.APP_ORIGIN + "/"), APP_HOST: esc(new URL(e.APP_ORIGIN).host),
-      FP1: esc(fp.slice(0, 4).join(" ")), FP2: esc(fp.slice(4).join(" ")), LINK: esc(link) }
+      FP1: esc(fp.slice(0, 4).join(" ")), FP2: esc(fp.slice(4).join(" ")), LINK: esc(link),
+      ACCESS_NOTE: e.ACCESS === "allowlist" ? "\n    <p class=\"note\">Do dołączenia potrzebny jest też 8-cyfrowy kod od administratora sieci. Węzeł rozpozna potem to urządzenie po stałym numerze, nie wiedząc, kim jesteś.</p>" : "" }
     const out = fs.readFileSync("/tpl/index.html", "utf8").replace(/__([A-Z0-9_]+)__/g, (m, k) => (k in v ? v[k] : m))
     fs.writeFileSync("/data/profile/site/index.html", out)' \
     "$(ops -- network link "https://$NODE_HOST/onchato/network.json" network.json | head -1)" || die "the network page was not written"
@@ -376,6 +409,9 @@ checks() {
     check "the network profile is served, signed, with CORS" "ops --network host -- network check network.json --online"
     ops -- network check network.json 2>/dev/null | grep -E 'valid|WARNING' || true
   else printf '[fail] no network profile yet\n'; bad=1; fi
+  if [ "${ACCESS:-}" = allowlist ]; then
+    check "enrolment answers at https://$NODE_HOST/onchato/enroll (devices admitted by list)" "curl -fs $k --max-time 5 https://$NODE_HOST/onchato/enroll/challenge | grep -q nonce"
+  fi
   if [ "${STATS:-yes}" = yes ]; then
     check "statistics: Redis answers on loopback" "docker exec onchato-redis-1 redis-cli -p ${REDIS_PORT:-6379} ping | grep -q PONG"
   fi
@@ -412,7 +448,7 @@ join_code() {
 load_answers
 case "$MODE" in
   install)
-    preflight; questions; dns_check; firewall; fetch_code; start_node; make_key; sign_profile; write_site; checks; join_code ;;
+    preflight; questions; dns_check; firewall; fetch_code; start_node; access_setup; make_key; sign_profile; write_site; checks; join_code ;;
   check)
     [ -n "${NODE_HOST:-}" ] || die "not set up yet (no $ETC/setup.env)"
     [ -n "${ONCHATO_SRC:-}" ] && DIR=$ONCHATO_SRC
@@ -422,6 +458,9 @@ case "$MODE" in
     # dns_check: the home domain's network page, as at install - without it an
     # update dropped HOME_SITE and the page (found on blbx.pl, 0.7.59).
     preflight; dns_check; REF=${ONCHATO_REF:-__RELEASE_TAG__}; fetch_code; start_node; checks ;;
+  access-qr)
+    [ "${ACCESS:-}" = allowlist ] || die "this network is open (no authenticator code)"
+    access_setup show ;;
   renew)
     [ -n "${NODE_HOST:-}" ] || die "not set up yet"
     [ -n "${ONCHATO_SRC:-}" ] && DIR=$ONCHATO_SRC
