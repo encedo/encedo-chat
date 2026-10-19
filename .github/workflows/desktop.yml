@@ -797,11 +797,15 @@ jobs:
           [ -z "$OLD" ] || gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$OLD"
           curl -sf -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: text/x-shellscript" \
             --data-binary @"$NAME" "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RID/assets?name=$NAME" > /dev/null
+          # The note through `gh release edit`, never a bare PATCH of the body: on a
+          # DRAFT that PATCH drops the tag (it became untagged-..., and every job
+          # looking the release up by tag lost it - v0.7.59).
           BODY=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RID" --jq .body)
           case "$BODY" in *"onchato-setup.sh SHA-256"*) ;; *)
-            gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RID" -f body="$BODY
-
-          **Run your own network:** \`onchato-setup.sh\` SHA-256 \`$SUM\`" > /dev/null ;; esac
+            printf '%s\n\n**Run your own network:** `onchato-setup.sh` SHA-256 `%s`\n' "$BODY" "$SUM" > /tmp/notes.md
+            gh release edit "$TAG" --notes-file /tmp/notes.md > /dev/null ;; esac
+          T=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RID" --jq .tag_name)
+          [ "$T" = "$TAG" ] || { echo "::error::the release lost its tag ($T) - restore it: gh api -X PATCH .../releases/$RID -f tag_name=$TAG"; exit 1; }
           echo "attached $NAME ($SUM) to release $RID"
 
   android-asset:

@@ -166,7 +166,7 @@ The decided shape:
   that signs in (and the paired phone) is the network's identity of the person;
   it is not the onchato profile and never touches its keys.
 
-### B in more detail (to settle before code)
+### B in more detail (PARKED 2026-10-19: needs more analysis before code)
 
 - Join: scan the QR, the app asks for the admin's code, `POST /enroll {code}`
   to a node returns a random device ticket; the node stores its hash.
