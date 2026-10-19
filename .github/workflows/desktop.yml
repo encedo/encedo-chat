@@ -765,6 +765,45 @@ jobs:
   # artifact of the `android` job in this run; replaced if it is already there.
   # Android red means this job red and a release with no APK - visibly, not by
   # omission. Not for the manifest-only repair (`inputs.tag`).
+  # The operator's setup script (node/onchato-setup.sh, OPERATOR-GUIDE): on the
+  # release, so `releases/latest/download/onchato-setup.sh` is one fixed URL. Its
+  # install default is THIS tag (the first __RELEASE_TAG__ only; --update keeps
+  # looking for the newest), so the script, the node image and the apps stay one
+  # release apart at most. Its SHA-256 goes into the release notes.
+  setup-asset:
+    name: operator setup script on the release
+    needs: [draft]
+    if: startsWith(github.ref, 'refs/tags/') && (github.event_name != 'workflow_dispatch' || inputs.tag == '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Stamp the tag, attach it, note its hash
+        run: |
+          set -euo pipefail
+          NAME=onchato-setup.sh
+          sed '0,/__RELEASE_TAG__/s//'"$TAG"'/' node/onchato-setup.sh > "$NAME"
+          grep -q "ONCHATO_REF:-$TAG}" "$NAME" || { echo "::error::the tag was not stamped into the install default"; exit 1; }
+          bash -n "$NAME"
+          SUM=$(sha256sum "$NAME" | cut -d' ' -f1)
+          RID=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate \
+                | jq -r --arg t "$TAG" '[.[] | select(.tag_name == $t)] | sort_by(.created_at) | .[0].id // empty')
+          test -n "$RID" || { echo "::error::no release (draft or published) for $TAG"; exit 1; }
+          OLD=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RID/assets?per_page=100" | jq -r --arg n "$NAME" '.[] | select(.name == $n) | .id')
+          [ -z "$OLD" ] || gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$OLD"
+          curl -sf -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: text/x-shellscript" \
+            --data-binary @"$NAME" "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$RID/assets?name=$NAME" > /dev/null
+          BODY=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RID" --jq .body)
+          case "$BODY" in *"onchato-setup.sh SHA-256"*) ;; *)
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RID" -f body="$BODY
+
+          **Run your own network:** \`onchato-setup.sh\` SHA-256 \`$SUM\`" > /dev/null ;; esac
+          echo "attached $NAME ($SUM) to release $RID"
+
   android-asset:
     name: android APK on the release
     needs: [draft, android]
