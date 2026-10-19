@@ -134,6 +134,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     '(profil sieci wygasł)': '(network profile expired)',
     'Wybierz sieć, w której chcesz się zalogować albo założyć tożsamość.': 'Choose the network to sign in to or to create an identity in.',
     'Nowa tożsamość w sieci: {n}': 'A new identity in the network: {n}',
+    'Wybierz sieć dla nowej tożsamości. Strona przeładuje się w wybranej sieci i od razu otworzy to okno.': 'Choose the network for the new identity. The page reloads in that network and opens this window again.',
     'Ta sieć wymaga tożsamości w HEM.': 'This network requires an identity in a HEM.',
     'W której sieci jest ta tożsamość?': 'Which network is this identity in?',
     'To urządzenie zna więcej niż jedną sieć. Tożsamość HEM „{h}" zostanie na tym urządzeniu przypisana do wybranej sieci na stałe.': 'This device knows more than one network. The HEM identity “{h}” will be tied to the chosen network on this device for good.',

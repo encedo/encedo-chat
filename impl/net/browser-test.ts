@@ -3841,6 +3841,27 @@ async function main() {
         await b.waitFor('the new identity window, in the joined network', `
           const m = document.getElementById('soft-modal'), n = document.getElementById('soft-net');
           return !!m && m.classList.contains('open') && !!n && !n.hidden && n.textContent.includes('Harness Net')`, 20_000)
+        if (given === pointer) {
+          // The network can be changed from this window: a reload into the chosen
+          // one, and the window opens again there by itself - there and back.
+          const flip = async (toMain: boolean) => {
+            await b.eval(`document.getElementById('soft-net-change').click(); return 1`)
+            await b.waitFor('the network picker', `return document.getElementById('netpick-modal').classList.contains('open')`, 10_000)
+            await b.eval(`
+              const picks = [...document.querySelectorAll('#netpick-list .pick')];
+              const want = picks.find((p) => ${toMain} ? !p.textContent.includes('Harness Net') : p.textContent.includes('Harness Net'));
+              want.click(); return 1`)
+            await sleep(500)
+            await b.waitFor(`the new identity window, reopened in ${toMain ? 'the main network' : 'the joined network'}`, `
+              const m = document.getElementById('soft-modal'), n = document.getElementById('soft-net-name');
+              const t = n ? n.textContent : '';
+              return !!m && m.classList.contains('open') && (${toMain} ? !t.includes('Harness Net') && t.length > 0 : t.includes('Harness Net'))`, 20_000)
+          }
+          await flip(true)
+          if (await b.eval<string | null>(`return localStorage.getItem('ec-last-net')`) !== null) throw new Error(`${b.name}: "change" did not move the page to the main network`)
+          await flip(false)
+          if (await b.eval<string>(`return localStorage.getItem('ec-last-net')`) !== netId) throw new Error(`${b.name}: "change" did not move the page back`)
+        }
         await b.eval(`
           document.getElementById('soft-name').value = ${JSON.stringify(handle)};
           document.getElementById('soft-pass').value = ${JSON.stringify(SOFT_PASS)};
@@ -3864,7 +3885,7 @@ async function main() {
         await b.waitFor('the first-run card', `return document.getElementById('welcome-modal').classList.contains('open')`, 20_000)
         await b.eval(`document.getElementById('welcome-close').click(); return 1`)
       }
-      step(`both joined "${netId}" - A from the whole signed profile, B from the short link with its CID (a swapped file behind it refused) - and made new identities bound to it; B's sign-in took the operator's newer profile by itself`)
+      step(`both joined "${netId}" - A from the whole signed profile, B from the short link with its CID (a swapped file behind it refused), B changed the network from the new-identity window there and back - and made new identities bound to it; B's sign-in took the operator's newer profile by itself`)
       // Each one's invite link, and each imports the other's: the link must name
       // the network's own app, and the import goes through the usual window.
       const linkOf = (b: Page) => b.eval<string>(`

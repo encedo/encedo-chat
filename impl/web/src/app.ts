@@ -1132,7 +1132,7 @@ function openSoftModal(name?: string, creating = false) {
   ;($('soft-name') as HTMLInputElement).value = start; ($('soft-pass') as HTMLInputElement).value = ''
   softMode(creating)
   const sn = document.getElementById('soft-net')
-  if (sn) { sn.hidden = !creating || knownNetworks().length < 2; sn.textContent = tr('Nowa tożsamość w sieci: {n}', { n: netLabel(ACTIVE) }) }
+  if (sn) { sn.hidden = !creating || knownNetworks().length < 2; $('soft-net-name').textContent = tr('Nowa tożsamość w sieci: {n}', { n: netLabel(ACTIVE) }) }
   // Focus lands where there is still something to type — on the password when
   // the name came back by itself, which is the common case after the first run.
   $(!creating && start ? 'soft-pass' : 'soft-name').focus()
@@ -6561,6 +6561,14 @@ function pickNetwork(title: string, note: string): Promise<string | null> {
   })
 }
 $('netpick-cancel')?.addEventListener('click', () => dropModal('netpick-modal'))
+// The same choice from the new-profile window: another network is a reload
+// into it (nothing of this one stays connected), and that window opens again
+// there by itself - the way it does after joining a network (OPEN_CREATE_KEY).
+$('soft-net-change')?.addEventListener('click', async () => {
+  const id = await pickNetwork(tr('Sieć'), tr('Wybierz sieć dla nowej tożsamości. Strona przeładuje się w wybranej sieci i od razu otworzy to okno.'))
+  if (!id || id === ACTIVE.id) return
+  inNetworkOrSwitch(id, () => localStorage.setItem(OPEN_CREATE_KEY, '1'))
+})
 $('login-net-change')?.addEventListener('click', async () => {
   const id = await pickNetwork(tr('Sieć'), tr('Wybierz sieć, w której chcesz się zalogować albo założyć tożsamość.'))
   if (id) inNetworkOrSwitch(id)
