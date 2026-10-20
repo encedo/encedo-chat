@@ -143,7 +143,7 @@ async function describe(profile) {
   console.log(`  stores    ${profile.stores.join(', ')}`)
   console.log(`  refresh   ${profile.profileUrls.join(', ')}`)
   console.log(`  feedback  ${profile.feedback ?? '(none - the app shows no form)'}`)
-  const pol = Object.entries(profile.policy).map(([k, v]) => `${k}=${v}`).join(' ')
+  const pol = Object.entries(profile.policy).map(([k, v]) => `${k}=${v && typeof v === 'object' ? Object.values(v).join(',') : v}`).join(' ')
   console.log(`  policy    ${pol || '(none)'}`)
   if (days >= 0 && days < 30) console.log(`WARNING: expires in ${days} days - re-sign with a higher seq and upload before then`)
 }
