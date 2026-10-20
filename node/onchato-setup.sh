@@ -6,6 +6,7 @@
 #   sudo bash onchato-setup.sh --update   the latest release, rebuilt and checked
 #   sudo bash onchato-setup.sh --renew    sign the network profile again (before it expires)
 #   sudo bash onchato-setup.sh --access-qr   the authenticator QR again (a network that admits devices by list)
+#   sudo bash onchato-setup.sh --access   ask "who can join?" again (open / authenticator code / company accounts)
 #        bash onchato-setup.sh --local-test   on a developer machine: no root, no DNS, no
 #                                             firewall, a self-signed certificate
 #
@@ -25,7 +26,8 @@ for a in "$@"; do
     --check) MODE=check ;; --update) MODE=update ;; --renew) MODE=renew ;;
     --local-test) LOCAL_TEST=1 ;;
     --access-qr) MODE=access-qr ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    --access) MODE=access ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
     *) echo "unknown option $a (--help)"; exit 2 ;;
   esac
 done
@@ -111,6 +113,70 @@ ask() { # ask VAR "question" default
   if [ -t 0 ]; then read -r -p "$q [${cur}]: " ans || true; printf -v "$var" '%s' "${ans:-$cur}"
   else printf -v "$var" '%s' "$cur"; fi
 }
+# ---- the company sign-in (OIDC, relay/oidc.mjs) -------------------------------------
+# The provider is checked before anything is written: its discovery document,
+# that it does the authorization code flow with PKCE, and - with a code that
+# cannot work - whether it refuses this client id and secret ("invalid_client").
+# An "invalid_grant" does NOT prove them right: some providers check the code
+# before the client (Encedo OIDC does), so the first sign-in is the proof.
+json_field() { python3 -c 'import json,sys; v=json.load(sys.stdin).get(sys.argv[1]); print(" ".join(v) if isinstance(v,list) else (v or ""))' "$1" 2>/dev/null; }
+oidc_discover() { # sets OIDC_ISSUER to the provider's own spelling, or dies
+  local base=${1%/} doc iss
+  doc=$(curl -fsS -m 15 "$base/.well-known/openid-configuration") || die "no OpenID Connect discovery at $base/.well-known/openid-configuration"
+  iss=$(printf '%s' "$doc" | json_field issuer)
+  [ "${iss%/}" = "$base" ] || die "the provider calls itself \"$iss\", not \"$1\""
+  OIDC_ISSUER=$iss
+  printf '%s' "$doc" | json_field response_types_supported | grep -qw code || die "the provider does not offer the authorization code flow"
+  local pkce; pkce=$(printf '%s' "$doc" | json_field code_challenge_methods_supported)
+  [ -z "$pkce" ] || printf '%s' "$pkce" | grep -qw S256 || die "the provider does not offer PKCE with S256"
+  OIDC_TOKEN_URL=$(printf '%s' "$doc" | json_field token_endpoint)
+  [ -n "$OIDC_TOKEN_URL" ] || die "the provider names no token endpoint"
+  ok "the provider: $OIDC_ISSUER (code flow, PKCE)"
+}
+oidc_client_check() {
+  local body err
+  body=$(curl -sS -m 15 -u "$OIDC_CLIENT_ID:$(cat "$ETC/oidc.secret")" \
+    -d grant_type=authorization_code -d code=onchato-setup-probe -d "redirect_uri=${APP_ORIGIN%/}/oidc.html" \
+    -d code_verifier=onchato-setup-probe-0000000000000000000000000000 "$OIDC_TOKEN_URL") || die "the provider's token endpoint did not answer"
+  err=$(printf '%s' "$body" | json_field error)
+  case "$err" in
+    invalid_client|unauthorized_client) die "the provider refused this client id and secret ($err) - check both, and that the client is confidential" ;;
+    invalid_grant|invalid_request) ok "the provider's token endpoint answers and did not refuse this client (the first sign-in confirms the secret)" ;;
+    *) warn "the provider answered a test sign-in with \"${err:-no error}\" - could not confirm the client id and secret" ;;
+  esac
+}
+oidc_questions() {
+  command -v python3 >/dev/null || die "python3 is needed to read the provider's answers"
+  mkdir -p "$ETC"
+  say ""
+  say "Register onchato at your identity provider first (an admin task there):"
+  say "  - a confidential web client, authorization code flow with PKCE (S256)"
+  say "  - redirect URI:  ${APP_ORIGIN%/}/oidc.html"
+  say "  - scopes: openid, plus email to limit by domain or to keep e-mails"
+  ask OIDC_ISSUER "The provider's address (its issuer, https://...)" "${OIDC_ISSUER:-}"
+  case "$OIDC_ISSUER" in https://*) ;; *) die "the provider's address must start with https://" ;; esac
+  oidc_discover "$OIDC_ISSUER"
+  ask OIDC_CLIENT_ID "The client id it gave you" "${OIDC_CLIENT_ID:-}"
+  [ -n "$OIDC_CLIENT_ID" ] || die "the client id is needed"
+  if [ -t 0 ]; then
+    local sec=''
+    read -r -s -p "The client secret (not shown; Enter keeps the stored one): " sec || true; say ""
+    if [ -n "$sec" ]; then (umask 077; printf '%s\n' "$sec" > "$ETC/oidc.secret"); fi
+  fi
+  [ -s "$ETC/oidc.secret" ] || die "the client secret is needed (or put it alone in $ETC/oidc.secret)"
+  oidc_client_check
+  ask OIDC_ALLOW_DOMAIN "Only accounts with a verified e-mail in this domain (empty: any account it signs in)" "${OIDC_ALLOW_DOMAIN:-}"
+  ask OIDC_ALLOW_GROUP "Only accounts in this group (the provider's 'groups' claim; empty: no group check)" "${OIDC_ALLOW_GROUP:-}"
+  say "What should the node write down beside each device it lets in?"
+  say "  1) nothing about the person (the default: the node knows a device, not whose)"
+  say "  2) the provider's account id (a pseudonym)"
+  say "  3) the e-mail (you see whose device it is; revoke by person)"
+  local cur=1; case "${OIDC_RECORD:-none}" in sub) cur=2 ;; email) cur=3 ;; esac
+  ask OIDC_RECORD_CHOICE "1, 2 or 3" "$cur"
+  case "$OIDC_RECORD_CHOICE" in 2) OIDC_RECORD=sub ;; 3) OIDC_RECORD=email ;; *) OIDC_RECORD=none ;; esac
+  say "People see this on the screen where they join."
+}
+
 questions() {
   say ""
   say "A few questions (Enter keeps the value in brackets)."
@@ -146,9 +212,11 @@ questions() {
     say "Who can join?"
     say "  1) anyone with the network's join code (an open network)"
     say "  2) only devices you let in: the join code AND an 8-digit code from your authenticator app"
-    say "     (the node then recognises each device by a fixed number - it never learns who it is)"
-    ask ACCESS_CHOICE "1 or 2" "1"
-    case "$ACCESS_CHOICE" in 2) ACCESS=allowlist ;; *) ACCESS=open ;; esac
+    say "  3) only people with an account at your company's identity provider (OpenID Connect:"
+    say "     Entra ID, Google Workspace, Keycloak, Encedo OIDC...): they sign in once per device"
+    say "     (2 and 3: the node then recognises each device by a fixed number)"
+    ask ACCESS_CHOICE "1, 2 or 3" "1"
+    case "$ACCESS_CHOICE" in 2) ACCESS=allowlist; OIDC_ISSUER= ;; 3) ACCESS=allowlist; oidc_questions ;; *) ACCESS=open; OIDC_ISSUER= ;; esac
   fi
   if [ -z "${STATS:-}" ]; then
     say ""
@@ -318,10 +386,8 @@ access_ops() { docker run --rm --user 1000:1000 -v onchato_node-data:/data oncha
 access_setup() {
   [ "${ACCESS:-}" = allowlist ] || return 0
   # The company variant (relay/oidc.mjs): devices enrol by their owner's sign-in.
-  # Set by hand for now in $ETC/setup.env (OIDC_ISSUER, OIDC_CLIENT_ID, optional
-  # OIDC_ALLOW_DOMAIN / OIDC_ALLOW_GROUP / OIDC_RECORD=none|sub|email) with the
-  # client secret in $ETC/oidc.secret; register ${APP_ORIGIN%/}/oidc.html as the
-  # redirect URI at the provider.
+  # Asked in "who can join?" (oidc_questions): OIDC_* in $ETC/setup.env, the
+  # client secret alone in $ETC/oidc.secret, copied into the node's volume here.
   if [ -n "${OIDC_ISSUER:-}" ]; then
     [ -s "$ETC/oidc.secret" ] || die "OIDC_ISSUER is set but $ETC/oidc.secret (the client secret) is missing"
     docker run --rm -i --user 1000:1000 -v onchato_node-data:/data --entrypoint sh onchato-ops -c 'umask 077; mkdir -p /data/allow; cat > /data/allow/oidc.secret' < "$ETC/oidc.secret" || die "the client secret was not stored"
@@ -467,6 +533,12 @@ load_answers
 case "$MODE" in
   install)
     preflight; questions; dns_check; firewall; fetch_code; start_node; access_setup; make_key; sign_profile; write_site; checks; join_code ;;
+  access)
+    # "Who can join?" again: the profile is signed anew (a new hash - the old
+    # QR stops working) and devices learn the new rule at their next sign-in.
+    [ -n "${NODE_HOST:-}" ] || die "not set up yet"
+    [ -t 0 ] || die "--access asks questions: run it in a terminal"
+    ACCESS=; questions; dns_check; fetch_code; start_node; access_setup; make_key; sign_profile; write_site; checks; join_code ;;
   check)
     [ -n "${NODE_HOST:-}" ] || die "not set up yet (no $ETC/setup.env)"
     [ -n "${ONCHATO_SRC:-}" ] && DIR=$ONCHATO_SRC
