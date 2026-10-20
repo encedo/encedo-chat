@@ -60,8 +60,7 @@ import { refreshNetwork, loadRegistry, openEnvelope, registerNetwork, rootFinger
 import type { PublishedNode } from '../../lib/nodelist.ts'
 import {
   builtinNetwork, resolveActive, networkById, bindingOf, setBinding, setLastNet, nodesKey, transportKey,
-  softBindingKey, hemBindingKey, OPEN_PROFILE_KEY, OPEN_CREATE_KEY, LOGIN_NOTICE_KEY, autoRefreshNetwork, NETWORK_REFRESH_MS, type ActiveNetwork,
-} from '../../lib/activenet.ts'
+  softBindingKey, hemBindingKey, OPEN_PROFILE_KEY, OPEN_CREATE_KEY, LOGIN_NOTICE_KEY, autoRefreshNetwork, NETWORK_REFRESH_MS, type ActiveNetwork, LAST_NET_KEY } from '../../lib/activenet.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { loadOrCreateNetKey, netPeerId } from '../../lib/netkey.ts'
 import { enrollDevice, deviceStatus, enrollUrl, oidcBegin, enrollDeviceOidc, type EnrollResult } from '../../lib/enroll.ts'
@@ -118,6 +117,23 @@ declare const __EC_NETWORK__: string
 const NET = parseNetworkProfile(JSON.parse(__EC_NETWORK_PROFILE__))
 /** The built-in network: this build's profile and its compiled-in node list. */
 const BUILTIN_NET = builtinNetwork(NET, published.nodes as PublishedNode[], __EC_NETWORK__)
+declare const __EC_OPERATOR__: boolean
+/**
+ * An operator's own copy of the app (EC_OPERATOR_BUILD, served by the node:
+ * node/onchato-setup.sh). Its network comes from `network.js` beside the page -
+ * the operator's signed profile, the same file as /onchato/network.json - and is
+ * registered as an imported one (the pin, the seq, the rules, every path that
+ * imported networks already take) and made the network a fresh device works
+ * in. A missing or refused file leaves the page in the built-in network and
+ * says why in the console; it never half-joins.
+ */
+if (__EC_OPERATOR__) {
+  const env = (window as any).__EC_OPERATOR_NETWORK__
+  const r = env ? registerNetwork(localKV(), env, Date.now()) : null
+  if (!r) console.error('onchato: this copy has no network.js beside it - the operator\'s network is missing')
+  else if (!r.ok) console.error(`onchato: the operator's network profile was refused (${r.why})`)
+  else if (!localStorage.getItem(LAST_NET_KEY)) setLastNet(localKV(), r.profile.networkId, BUILTIN_NET)
+}
 /**
  * The network THIS PAGE works in, from load to reload (lib/activenet.ts): the
  * one the last identity signed in to, else the built-in one. Its node list,

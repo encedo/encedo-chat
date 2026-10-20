@@ -41,6 +41,11 @@ module.exports = (_env, argv) => {
   const profileText = require('fs').readFileSync(profilePath, 'utf8')
   const profile = JSON.parse(profileText)
   if (process.env.EC_NETWORK_PROFILE) console.log(`[build] network profile ${profilePath} (network ${profile.networkId})`)
+  // EC_OPERATOR_BUILD=1: the copy an operator's node serves (release asset
+  // onchato-web-operator-<tag>.tar.gz). Same code; the page also loads
+  // network.js, the node's signed network profile, which app.ts adopts.
+  const operatorBuild = process.env.EC_OPERATOR_BUILD === '1'
+  if (operatorBuild) console.log('[build] operator copy: reads network.js beside the page')
   return {
     context: path.resolve(__dirname),
     entry: { app: './src/app.ts' },
@@ -109,6 +114,7 @@ module.exports = (_env, argv) => {
       },
       new webpack.DefinePlugin({
         __EC_ALLOW_KEYS__: JSON.stringify(allowKeys),
+        __EC_OPERATOR__: JSON.stringify(operatorBuild),
         // The network this build derives its topics for (SPEC.md 5.1): the
         // profile's, unless EC_NETWORK overrides it for development. The
         // installed app has no flag for it, by design.
@@ -143,7 +149,7 @@ module.exports = (_env, argv) => {
       // the markup carries so that it survives a dead bundle (app.ts sets the
       // same one at start).
       new HtmlWebpackPlugin({ template: './index.html', filename: 'index.html', chunks: ['app'],
-        templateParameters: { netHome: profile.home, netHomeHost: new URL(profile.home).host } }),
+        templateParameters: { netHome: profile.home, netHomeHost: new URL(profile.home).host, operatorBuild } }),
       // The CSP in index.html names the inline script by HASH, and the hash has
       // to be of what is EMITTED: html-webpack-plugin minifies the page, so a
       // hash taken from the source file is wrong by a few characters and the
