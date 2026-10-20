@@ -28,6 +28,9 @@ tauri = { version = "2", features = ["tray-icon", "test"] }
 # native process, not the webview (the real boundary the WASM-in-page engine
 # cannot give). Selected from the web side by setCoreBackend('native').
 encedo-core = { path = "../../core-rs" }
+# `onchato://`: a company sign-in (OIDC) finished in the system browser comes
+# back to the app through it (relay/oidc.mjs, web/oidc.html) - desktop and phone.
+tauri-plugin-deep-link = "2"
 # `tray-icon` is what makes the shell useful at all: onchato has no
 # store-and-forward, so a closed window is a person nobody can reach. The tray
 # is how the app stays reachable without a window on screen.
@@ -53,6 +56,9 @@ tauri-plugin-notification = "2"
 # zoom suggestions are Encedo's, and the same copy is what encedo-authenticator
 # ships. Two copies now; if either ever changes, both must.
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+# The system browser on a phone (a company sign-in opens there; lib.rs mobile
+# `desk_open_url`). The desktop launches xdg-open / open / rundll32 itself.
+tauri-plugin-opener = "2"
 tauri-plugin-barcode-scanner = { path = "plugins/barcode-scanner" }
 # "Save" on a phone. Android's WebView ignores `<a download>` on a blob URL,
 # so the button did nothing there (reported 2026-09-25). The host asks the
@@ -90,9 +96,6 @@ base64 = "0.22"
 # this app is a second window of the SAME IDENTITY, and the protocol's answer to
 # that is to close both sessions.
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
-# `onchato://`: a company sign-in (OIDC) finished in the system browser comes
-# back to the app through it (relay/oidc.mjs, web/oidc.html).
-tauri-plugin-deep-link = "2"
 
 # Reaching the WebKitGTK settings behind the webview, to turn WebRTC ON. The
 # version is pinned to the one `wry` already links: two versions of this crate

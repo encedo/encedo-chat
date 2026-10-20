@@ -65,7 +65,8 @@
     "deep-link": {
       "desktop": {
         "schemes": ["onchato"]
-      }
+      },
+      "mobile": [{ "scheme": ["onchato"], "appLink": false }]
     }
   }
 }

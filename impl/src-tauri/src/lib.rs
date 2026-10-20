@@ -34,6 +34,54 @@ mod rtc;
 // drives it over IPC (core_native.rs). Desktop and mobile both.
 mod core_native;
 
+/// A company sign-in (OIDC, relay/oidc.mjs) coming back from the system
+/// browser as `onchato://oidc?code=..&state=..` - oidc.html sends it there, the
+/// system hands it to us (deep-link plugin; on the desktop a second launch is
+/// forwarded by single-instance, on a phone the one activity gets it). Only that
+/// shape is kept, and only the last one, until the webview's short poll takes
+/// it: the code in it is worthless without the PKCE verifier the webview holds
+/// and the client secret the network's node holds, so a stray link costs nothing.
+mod oidc_link {
+    use std::sync::Mutex;
+    use tauri::{AppHandle, Manager, Runtime};
+    use tauri_plugin_deep_link::DeepLinkExt;
+
+    #[derive(Default)]
+    pub struct Inbox(Mutex<Option<String>>);
+
+    fn keep<R: Runtime>(app: &AppHandle<R>, urls: impl IntoIterator<Item = String>) -> bool {
+        let mut got = false;
+        for u in urls {
+            if u.starts_with("onchato://oidc?") && u.len() < 4096 {
+                *app.state::<Inbox>().0.lock().unwrap() = Some(u);
+                got = true;
+            }
+        }
+        got
+    }
+
+    /// The link the app was started with, and every one after; `then` runs
+    /// when one was kept (the desktop brings its window forward).
+    pub fn listen<R: Runtime>(app: &tauri::App<R>, then: impl Fn(&AppHandle<R>) + Send + Sync + 'static) {
+        if let Ok(Some(urls)) = app.deep_link().get_current() {
+            if keep(app.handle(), urls.iter().map(|u| u.to_string())) {
+                then(app.handle());
+            }
+        }
+        let h = app.handle().clone();
+        app.deep_link().on_open_url(move |e| {
+            if keep(&h, e.urls().iter().map(|u| u.to_string())) {
+                then(&h);
+            }
+        });
+    }
+
+    #[tauri::command]
+    pub fn desk_take_oidc(inbox: tauri::State<'_, Inbox>) -> Option<String> {
+        inbox.0.lock().unwrap().take()
+    }
+}
+
 #[cfg(desktop)]
 mod desk {
     use std::sync::Mutex;
@@ -106,10 +154,6 @@ mod desk {
         /// screen corner, in the live report) unless it asks for its old spot
         /// back — so the spot is saved at hide and spent at reveal.
         hidden_at: Mutex<Option<tauri::PhysicalPosition<i32>>>,
-        /// The last `onchato://oidc?...` the system handed us: a company
-        /// sign-in finished in the browser (oidc.html sends it here). Taken,
-        /// once, by the webview's short poll while it waits.
-        oidc: Mutex<Option<String>>,
         /// The session bus, held open for the life of the process. See
         /// `deliver` — this field IS the fix for the vanishing banners.
         #[cfg(target_os = "linux")]
@@ -139,7 +183,6 @@ mod desk {
                 save_title: Mutex::new("Save file".into()),
                 booted: std::sync::atomic::AtomicBool::new(false),
                 hidden_at: Mutex::new(None),
-                oidc: Mutex::new(None),
                 #[cfg(target_os = "linux")]
                 bus: Mutex::new(None),
                 // Assumed absent until proven present: the failure of hiding a
@@ -772,29 +815,6 @@ mod desk {
     /// Open a URL in the system browser — the only kind of "new window" this
     /// app has.
     ///
-    /// A company sign-in comes back as `onchato://oidc?code=..&state=..`
-    /// (the system opens us with it; a running copy gets it from the second
-    /// launch). Only that shape is kept, and only the last one: the code in it
-    /// is worthless without the PKCE verifier the webview holds and the client
-    /// secret the network's node holds, so a stray link costs nothing.
-    pub fn keep_oidc<R: Runtime>(app: &AppHandle<R>, urls: impl IntoIterator<Item = String>) {
-        let mut got = false;
-        for u in urls {
-            if u.starts_with("onchato://oidc?") && u.len() < 4096 {
-                *app.state::<Shell>().oidc.lock().unwrap() = Some(u);
-                got = true;
-            }
-        }
-        if got {
-            reveal(app);
-        }
-    }
-
-    #[tauri::command]
-    fn desk_take_oidc(shell: tauri::State<'_, Shell>) -> Option<String> {
-        shell.oidc.lock().unwrap().take()
-    }
-
     /// The webview forwards every `window.open` / `target="_blank"` to the
     /// host as a new-window request, and the shell installs no handler for
     /// those (a messenger opens no second webviews) — so without this command
@@ -1298,6 +1318,7 @@ mod desk {
             ))
             .plugin(tauri_plugin_updater::Builder::new().build())
             .manage(Shell::default())
+            .manage(crate::oidc_link::Inbox::default())
             .manage(crate::rtc::Rtc::new())
             .invoke_handler(tauri::generate_handler![
                 crate::rtc::rtc_available,
@@ -1334,7 +1355,7 @@ mod desk {
                 desk_diag_wipe,
                 desk_show,
                 desk_open_url,
-                desk_take_oidc,
+                crate::oidc_link::desk_take_oidc,
                 desk_update_kind,
                 desk_appimage_status,
                 desk_appimage_install,
@@ -1449,21 +1470,15 @@ mod desk {
                 }
                 watch_main_thread(app.handle().clone());
 
+                // Linux has no installer step that tells the desktop who opens
+                // onchato:// for an AppImage; the .deb's entry says it too, and
+                // saying it again is harmless.
+                #[cfg(target_os = "linux")]
                 {
                     use tauri_plugin_deep_link::DeepLinkExt;
-                    // Linux has no installer step that tells the desktop who
-                    // opens onchato:// for an AppImage; the .deb's entry says
-                    // it too, and saying it again is harmless.
-                    #[cfg(target_os = "linux")]
                     let _ = app.deep_link().register_all();
-                    if let Ok(Some(urls)) = app.deep_link().get_current() {
-                        keep_oidc(app.handle(), urls.iter().map(|u| u.to_string()));
-                    }
-                    let h = app.handle().clone();
-                    app.deep_link().on_open_url(move |e| {
-                        keep_oidc(&h, e.urls().iter().map(|u| u.to_string()));
-                    });
                 }
+                crate::oidc_link::listen(app, |h| reveal(h));
 
                 Ok(())
             })
@@ -1639,6 +1654,18 @@ mod mobile {
         file.sync_all().map_err(|e| e.to_string())
     }
 
+    /// The system browser, for a company sign-in (and any outward link): the
+    /// webview of a packaged app opens no second window. http/https only, as
+    /// on the desktop - this is reachable from webview content.
+    #[tauri::command]
+    fn desk_open_url(app: AppHandle, url: String) -> Result<(), String> {
+        use tauri_plugin_opener::OpenerExt;
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err("not a web url".into());
+        }
+        app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+    }
+
     pub fn wire(b: Builder<Wry>) -> Builder<Wry> {
         // The native QR scanner (CameraX + ML Kit). The webview's own scanner
         // stays for browsers; on a phone it cannot touch the lens, so a code at
@@ -1650,7 +1677,16 @@ mod mobile {
             .plugin(tauri_plugin_notification::init())
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_fs::init())
+            // onchato:// back from the system browser (oidc_link) - and the
+            // browser itself, opened with the sign-in.
+            .plugin(tauri_plugin_deep_link::init())
+            .plugin(tauri_plugin_opener::init())
             .manage(Saves::default())
+            .manage(crate::oidc_link::Inbox::default())
+            .setup(|app| {
+                crate::oidc_link::listen(app, |_| {});
+                Ok(())
+            })
             .invoke_handler(tauri::generate_handler![
                 desk_save_begin,
                 desk_save_write,
@@ -1676,6 +1712,8 @@ mod mobile {
                 desk_strings,
                 desk_show,
                 desk_update_kind,
+                desk_open_url,
+                crate::oidc_link::desk_take_oidc,
             ])
     }
 }
