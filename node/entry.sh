@@ -38,7 +38,8 @@ stun)
   ;;
 enroll)
   # A device joins a network that admits devices by list (relay/enroll.mjs):
-  # the administrator's TOTP code, the device's signature, onto ALLOW_PEERS.
+  # the administrator's TOTP code or a sign-in at the network's provider
+  # (OIDC_*; relay/oidc.mjs), the device's signature, onto ALLOW_PEERS.
   : "${ALLOW_PEERS:?ALLOW_PEERS is not set}" "${NETWORK_ID:?NETWORK_ID is not set}"
   mkdir -p "$(dirname "$ALLOW_PEERS")"
   cd /app/relay

@@ -181,6 +181,10 @@ DOMAIN='$DOMAIN'
 NETWORK_ID='$NETWORK_ID'
 HOME_URL='$HOME_URL'
 ENV
+  # Set by hand (the company sign-in, access_setup): kept across a re-run.
+  local v; for v in OIDC_ISSUER OIDC_CLIENT_ID OIDC_ALLOW_DOMAIN OIDC_ALLOW_GROUP OIDC_RECORD; do
+    [ -n "${!v:-}" ] && printf "%s='%s'\n" "$v" "${!v//\'/}" >> "$ETC/setup.env"
+  done
   chmod 600 "$ETC/setup.env"
 }
 
@@ -289,6 +293,7 @@ $( [ -n "${HOME_SITE:-}" ] && echo "HOME_SITE=$HOME_SITE" )
 $( [ "${FILES:-}" = here ] && echo STORE=here )
 NETWORK_ID=$NETWORK_ID
 $( [ "${ACCESS:-}" = allowlist ] && printf 'ACCESS=allowlist\nALLOW_PEERS=/data/allow/peers.txt' )
+$( [ "${ACCESS:-}" = allowlist ] && [ -n "${OIDC_ISSUER:-}" ] && printf 'OIDC_ISSUER=%s\nOIDC_CLIENT_ID=%s\nOIDC_CLIENT_SECRET_FILE=/data/allow/oidc.secret\nOIDC_REDIRECT_URI=%s/oidc.html\nOIDC_ALLOW_DOMAIN=%s\nOIDC_ALLOW_GROUP=%s\nOIDC_RECORD=%s' "$OIDC_ISSUER" "$OIDC_CLIENT_ID" "${APP_ORIGIN%/}" "${OIDC_ALLOW_DOMAIN:-}" "${OIDC_ALLOW_GROUP:-}" "${OIDC_RECORD:-none}" )
 COMPOSE_PROFILES=$( p=; [ "${FILES:-}" = here ] && p=store; [ "${STATS:-yes}" = yes ] && p=${p:+$p,}stats; [ "${ACCESS:-}" = allowlist ] && p=${p:+$p,}allowlist; echo "$p" )
 $( [ -n "${PEERS:-}" ] && echo "PEERS=$PEERS" )
 $( [ -n "${SIBLINGS:-}" ] && echo "SIBLINGS=$SIBLINGS" )
@@ -312,6 +317,17 @@ ENV
 access_ops() { docker run --rm --user 1000:1000 -v onchato_node-data:/data onchato-ops access "$@" --dir /data/allow; }
 access_setup() {
   [ "${ACCESS:-}" = allowlist ] || return 0
+  # The company variant (relay/oidc.mjs): devices enrol by their owner's sign-in.
+  # Set by hand for now in $ETC/setup.env (OIDC_ISSUER, OIDC_CLIENT_ID, optional
+  # OIDC_ALLOW_DOMAIN / OIDC_ALLOW_GROUP / OIDC_RECORD=none|sub|email) with the
+  # client secret in $ETC/oidc.secret; register ${APP_ORIGIN%/}/oidc.html as the
+  # redirect URI at the provider.
+  if [ -n "${OIDC_ISSUER:-}" ]; then
+    [ -s "$ETC/oidc.secret" ] || die "OIDC_ISSUER is set but $ETC/oidc.secret (the client secret) is missing"
+    docker run --rm -i --user 1000:1000 -v onchato_node-data:/data --entrypoint sh onchato-ops -c 'umask 077; mkdir -p /data/allow; cat > /data/allow/oidc.secret' < "$ETC/oidc.secret" || die "the client secret was not stored"
+    ok "devices enrol by a sign-in at $OIDC_ISSUER (client $OIDC_CLIENT_ID; the node records: ${OIDC_RECORD:-none}); redirect URI: ${APP_ORIGIN%/}/oidc.html"
+    return 0
+  fi
   access_ops seed >/dev/null || die "the enrolment seed was not written"
   if [ "${1:-}" = show ] || [ ! -f "$ETC/access-qr-shown" ]; then
     say ""
@@ -342,13 +358,15 @@ write_profile() {
   case "${FILES:-here}" in here|none) STORE_ORIGIN="https://$NODE_HOST" ;; *) STORE_ORIGIN=$FILES ;; esac
   ACCESS=${ACCESS:-open}
   export NETWORK_ID OPERATOR NODE_HOST HOME_URL APP_ORIGIN PEER_ID STORE_ORIGIN ACCESS
-  docker run --rm --user "$(id -u):$(id -g)" -v "$DATA:/data" -e NETWORK_ID -e OPERATOR -e NODE_HOST -e HOME_URL -e APP_ORIGIN -e PEER_ID -e STORE_ORIGIN -e ACCESS \
+  export OIDC_ISSUER="${OIDC_ISSUER:-}" OIDC_RECORD="${OIDC_RECORD:-none}"
+  docker run --rm --user "$(id -u):$(id -g)" -v "$DATA:/data" -e NETWORK_ID -e OPERATOR -e NODE_HOST -e HOME_URL -e APP_ORIGIN -e PEER_ID -e STORE_ORIGIN -e ACCESS -e OIDC_ISSUER -e OIDC_RECORD \
     --entrypoint node onchato-ops -e '
     const fs = require("fs"), e = process.env
     const profile = { v: 1, networkId: e.NETWORK_ID, operator: e.OPERATOR,
       app: { origin: e.APP_ORIGIN, path: "/" }, stores: [e.STORE_ORIGIN],
       profileUrls: ["https://" + e.NODE_HOST + "/onchato/network.json"],
-      feedback: null, home: e.HOME_URL, policy: { transport: "node-only", ...(e.ACCESS === "allowlist" ? { access: "allowlist" } : {}) } }
+      feedback: null, home: e.HOME_URL, policy: { transport: "node-only", ...(e.ACCESS === "allowlist" ? { access: "allowlist" } : {}),
+        ...(e.ACCESS === "allowlist" && e.OIDC_ISSUER ? { enroll: { method: "oidc", issuer: e.OIDC_ISSUER, record: e.OIDC_RECORD || "none" } } : {}) } }
     const nodes = { v: 1, nodes: [{ name: e.NODE_HOST, addr: "/dns4/" + e.NODE_HOST + "/tcp/443/wss/http-path/%2Frelay/p2p/" + e.PEER_ID }] }
     fs.writeFileSync("/data/profile/profile.json", JSON.stringify(profile, null, 2) + "\n")
     fs.writeFileSync("/data/profile/nodes.json", JSON.stringify(nodes, null, 2) + "\n")' || die "could not write the profile"

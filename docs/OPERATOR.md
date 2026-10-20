@@ -174,8 +174,38 @@ $A unlock --dir /data/allow                   # after too many wrong codes, see 
   The dashboard and `access list` show the lock. Someone with the join code can
   then annoy you (nobody new gets in), but cannot get in.
 
-Sign-in through your company directory (OIDC) is planned for larger
-organisations (`OPERATOR-NODE-PLAN.md`, section 4).
+**Sign-in with company accounts (OIDC), instead of the code.** For a company
+with an identity provider (Entra ID, Google Workspace, Keycloak, Encedo OIDC):
+a device gets in when its owner signs in there; nobody reads out codes. Your
+node is the OIDC client and keeps the client secret; the app only opens the
+sign-in and brings the result back. For now it is set by hand:
+
+1. At the provider, register a confidential web client with the authorization
+   code flow and PKCE, redirect URI `https://app.onchato.com/oidc.html` (or
+   your own app address + `/oidc.html`), scope `openid` (plus `email` when you
+   limit by domain or record e-mails).
+2. On the server, add to `/etc/onchato/setup.env`:
+
+   ```bash
+   OIDC_ISSUER='https://login.example.com'   # exactly the provider's "issuer"
+   OIDC_CLIENT_ID='onchato'
+   OIDC_ALLOW_DOMAIN='example.com'           # optional: only accounts with a verified e-mail there
+   OIDC_ALLOW_GROUP=''                       # optional: only accounts in this group (the `groups` claim)
+   OIDC_RECORD='none'                        # what the node writes beside a device: none | sub | email
+   ```
+
+   and the client secret alone in `/etc/onchato/oidc.secret` (`chmod 600`).
+3. Re-run `sudo bash onchato-setup.sh` (choice 2 under "who can join"). The
+   network profile then says that devices join by a sign-in at that provider,
+   and what the node records; the app shows both before anyone joins.
+
+`OIDC_RECORD` is your policy. `none` (the default): the list holds the device's
+number and the name it gave, as with codes. `sub`: also the provider's account
+id, a pseudonym. `email`: the e-mail, so `access list` shows whose device it is.
+A failed sign-in counts against the address (5 per 10 minutes) but never locks
+enrolment for everyone. The packaged apps (desktop, Android, iOS) open the
+sign-in in a window of their own; where that does not work yet, keep a code
+way in (planned: the system browser).
 
 ## The dashboard
 
