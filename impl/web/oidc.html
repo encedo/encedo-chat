@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src __CSP_SCRIPT_HASHES__; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
+<title>onchato - logowanie</title>
+<style>
+  :root { --bg: #f7f8f7; --ink: #16211e; --muted: #5d6b66; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0f1513; --ink: #e6ece9; --muted: #96a5a0; } }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; padding: 24px; box-sizing: border-box; text-align: center; }
+  p { margin: 0; max-width: 32ch; } .m { color: var(--muted); font-size: 14px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div><p id="t">Wracam do onchato…</p><p class="m" id="m"></p></div>
+<!-- The provider's sign-in comes back here (the network's OIDC redirect URI).
+     The code goes to the app's window over a same-origin BroadcastChannel - the
+     app runs under COOP same-origin, so this window has no opener to post to -
+     and leaves this page's address at once. Nothing here talks to the network. -->
+<script>
+(function () {
+  var q = new URLSearchParams(location.search)
+  var msg = { oidc: true, code: q.get('code') || '', state: q.get('state') || '', error: q.get('error') || '', why: q.get('error_description') || '' }
+  try { history.replaceState(null, '', location.pathname) } catch (e) {}
+  var ok = false
+  try { var ch = new BroadcastChannel('onchato-oidc'); ch.postMessage(msg); ch.close(); ok = true } catch (e) {}
+  document.getElementById('t').textContent = msg.error ? 'Logowanie nie powiodło się.' : ok ? 'Zalogowano. Możesz zamknąć to okno.' : 'Ta przeglądarka nie przekazała logowania do onchato.'
+  document.getElementById('m').textContent = msg.error ? (msg.why || msg.error) : ''
+  if (ok && !msg.error) setTimeout(function () { window.close() }, 600)
+})()
+</script>
+</body>
+</html>

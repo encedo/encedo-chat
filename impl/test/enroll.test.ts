@@ -43,3 +43,35 @@ test('a round trip through the node\'s own logic: not listed, a wrong code refus
     assert.ok(!wrongNet.ok && wrongNet.error === 'signature', 'a device signed for another network was accepted')
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
+
+test('a sign-in round trip: the device starts it, the node redeems the code and lists the device', async () => {
+  // @ts-ignore - plain .mjs
+  const oidc = await import('../../relay/oidc.mjs')
+  const { oidcBegin, enrollDeviceOidc, oidcNonce } = await import('../lib/enroll.ts')
+  const { netPeerId } = await import('../lib/netkey.ts')
+  const dir = mkdtempSync(join(tmpdir(), 'enroll-o-'))
+  try {
+    const key = privateKeyToProtobuf(await generateKeyPair('Ed25519'))
+    // The device's nonce is the node's.
+    assert.equal(await oidcNonce('acme', 'c1', netPeerId(key)), oidc.oidcNonce('acme', 'c1', netPeerId(key)))
+    let askedNonce = ''
+    const provider = { authorizeEndpoint: async () => 'https://idp.example/authorize', redeem: async ({ nonce }: any) => { if (nonce !== askedNonce) throw new Error('nonce'); return { sub: 'u1' } } }
+    const e = node.makeEnroll({ networkId: 'acme', listFile: join(dir, 'peers.txt'), log: () => {}, oidc: { provider, clientId: 'c', redirectUri: 'https://app.example/oidc.html', scope: 'openid', allowDomain: '', allowGroup: '', record: 'none' } })
+    const url = 'https://n1.example/onchato/enroll'
+    const fake = (async (u: string, init?: any) => {
+      const path = u.slice(url.length)
+      const r = path.startsWith('/challenge') ? { status: 200, body: await e.challenge(path.includes('for=oidc') ? 'oidc' : '') }
+        : path === '/status' ? await e.status(JSON.parse(init.body))
+        : await e.enrollOidc(JSON.parse(init.body), '1.2.3.4')
+      return new Response(JSON.stringify(r.body), { status: r.status })
+    }) as any as typeof fetch
+    await assert.rejects(oidcBegin(url, 'acme', key, 'https://other-idp.example', fake), /not the network's provider/)
+    const go = await oidcBegin(url, 'acme', key, 'https://idp.example', fake)
+    const q = new URL(go.authorizeUrl).searchParams
+    assert.equal(q.get('code_challenge_method'), 'S256'); assert.equal(q.get('redirect_uri'), 'https://app.example/oidc.html')
+    askedNonce = q.get('nonce')!
+    assert.equal(askedNonce, oidc.oidcNonce('acme', go.challenge, netPeerId(key)))
+    assert.deepEqual(await enrollDeviceOidc(url, 'acme', key, go.challenge, 'the-code', go.verifier, 'laptop', fake), { ok: true })
+    assert.deepEqual(await deviceStatus(url, 'acme', key, fake), { listed: true, locked: false })
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})

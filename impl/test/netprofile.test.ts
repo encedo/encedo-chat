@@ -174,3 +174,13 @@ test('policy.access: "allowlist" is read; anything else is refused, absent means
   assert.equal(parseOperatorProfile(profile({ policy: {} })).policy.access, undefined)
   assert.throws(() => parseOperatorProfile(profile({ policy: { access: 'token' } })), /policy.access/)
 })
+
+test('policy.enroll: a sign-in at an https provider, only with the list; record defaults to nothing', () => {
+  const p = parseOperatorProfile(profile({ policy: { access: 'allowlist', enroll: { method: 'oidc', issuer: 'https://oidc.example' } } })).policy
+  assert.deepEqual(p.enroll, { method: 'oidc', issuer: 'https://oidc.example', record: 'none' })
+  assert.equal(parseOperatorProfile(profile({ policy: { access: 'allowlist', enroll: { method: 'oidc', issuer: 'https://oidc.example', record: 'email' } } })).policy.enroll?.record, 'email')
+  assert.throws(() => parseOperatorProfile(profile({ policy: { enroll: { method: 'oidc', issuer: 'https://oidc.example' } } })), /needs policy.access/)
+  assert.throws(() => parseOperatorProfile(profile({ policy: { access: 'allowlist', enroll: { method: 'oidc', issuer: 'http://oidc.example' } } })), /https/)
+  assert.throws(() => parseOperatorProfile(profile({ policy: { access: 'allowlist', enroll: { method: 'saml', issuer: 'https://oidc.example' } } })), /method/)
+  assert.throws(() => parseOperatorProfile(profile({ policy: { access: 'allowlist', enroll: { method: 'oidc', issuer: 'https://oidc.example', record: 'name' } } })), /record/)
+})

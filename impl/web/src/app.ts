@@ -64,7 +64,7 @@ import {
 } from '../../lib/activenet.ts'
 import { clampToStep, zoomPlan, PREFERRED_START } from '../../lib/qrzoom.ts'
 import { loadOrCreateNetKey, netPeerId } from '../../lib/netkey.ts'
-import { enrollDevice, deviceStatus, enrollUrl } from '../../lib/enroll.ts'
+import { enrollDevice, deviceStatus, enrollUrl, oidcBegin, enrollDeviceOidc, type EnrollResult } from '../../lib/enroll.ts'
 import { boxHeight } from '../../lib/composer.ts'
 import { setRadioProfile, profileFor } from '../../lib/radiophase.ts'
 import { newDiag } from '../../lib/diag.ts'
@@ -5350,21 +5350,60 @@ function enrollFlow(key: Uint8Array, locked: boolean): Promise<boolean> {
     ;($('enroll-code') as HTMLInputElement).value = ''
     $('enroll-device').textContent = tr('To urządzenie: …{id}', { id: netPeerId(key).slice(-12) })
     clr('enroll-msg')
-    if (locked) setMsg('enroll-msg', tr('Dodawanie urządzeń jest zablokowane po zbyt wielu błędnych kodach. Administrator musi je odblokować.'), 'err')
+    // The company variant: the owner's sign-in at the network's provider
+    // instead of the administrator's code.
+    const oidc = ACTIVE.policy.enroll?.method === 'oidc' ? ACTIVE.policy.enroll : null
+    $('enroll-code-wrap').hidden = !!oidc
+    $('enroll-title').textContent = oidc ? tr('Logowanie kontem firmy') : tr('Kod od administratora')
+    $('enroll-sub').textContent = oidc
+      ? tr('Ta sieć wpuszcza tylko urządzenia osób z kontem u {host}. Zaloguj się nim w oknie, które się otworzy. Węzeł rozpozna potem to urządzenie po stałym numerze.', { host: new URL(oidc.issuer).host })
+        + ' ' + (oidc.record === 'email' ? tr('Węzeł zapisze przy nim Twój adres e-mail.') : oidc.record === 'sub' ? tr('Węzeł zapisze przy nim identyfikator Twojego konta (bez imienia i adresu).') : tr('Węzeł nie zapisze, kim jesteś.'))
+      : tr('Ta sieć wpuszcza tylko urządzenia dodane przez administratora. Poproś go o bieżący 8-cyfrowy kod z jego aplikacji uwierzytelniającej i wpisz go poniżej. Węzeł rozpozna potem to urządzenie po stałym numerze, nie wiedząc, kim jesteś.')
+    ;($('enroll-go') as HTMLButtonElement).textContent = oidc ? tr('Zaloguj się kontem firmy') : tr('Wpuść to urządzenie')
+    if (locked && !oidc) setMsg('enroll-msg', tr('Dodawanie urządzeń jest zablokowane po zbyt wielu błędnych kodach. Administrator musi je odblokować.'), 'err')
     pushModal('enroll-modal')
-    $('enroll-code').focus()
+    if (!oidc) $('enroll-code').focus()
   })
 }
 $('enroll-cancel')?.addEventListener('click', () => dropModal('enroll-modal'))
+/**
+ * The provider's sign-in, in its own window. The window is opened before
+ * anything is awaited (a popup opened later is blocked), the address set once
+ * the node has given its challenge; the code comes back from oidc.html over a
+ * same-origin BroadcastChannel - under COOP the sign-in window has no opener.
+ */
+async function enrollByOidc(url: string, issuer: string): Promise<EnrollResult> {
+  const w = window.open('about:blank', 'onchato-oidc', 'popup,width=520,height=720')
+  if (!w) return { ok: false, error: 'popup' }
+  let go: Awaited<ReturnType<typeof oidcBegin>>
+  try { go = await oidcBegin(url, ACTIVE.id, netPeerKey!, issuer) } catch (e: any) { try { w.close() } catch {} ; return { ok: false, error: 'provider', why: String(e?.message ?? e) } }
+  const back = new Promise<{ code: string; error: string; why: string } | null>((resolve) => {
+    const ch = new BroadcastChannel('onchato-oidc')
+    const t = setTimeout(() => { ch.close(); resolve(null) }, 10 * 60_000)
+    ch.onmessage = (ev) => {
+      const m = ev.data
+      if (!m?.oidc || m.state !== go.state) return
+      clearTimeout(t); ch.close(); resolve(m)
+    }
+  })
+  w.location.href = go.authorizeUrl
+  setMsg('enroll-msg', tr('Dokończ logowanie w otwartym oknie…'), '')
+  const m = await back
+  if (!m) return { ok: false, error: 'timeout' }
+  if (m.error) return { ok: false, error: 'sign-in', why: m.why || m.error }
+  return enrollDeviceOidc(url, ACTIVE.id, netPeerKey!, go.challenge, m.code, go.verifier, ($('enroll-label') as HTMLInputElement).value.trim())
+}
+
 $('enroll-go')?.addEventListener('click', async () => {
+  const oidc = ACTIVE.policy.enroll?.method === 'oidc' ? ACTIVE.policy.enroll : null
   const code = ($('enroll-code') as HTMLInputElement).value.replace(/\s/g, '')
-  if (!/^\d{8}$/.test(code)) { setMsg('enroll-msg', tr('Kod ma 8 cyfr.'), 'err'); return }
+  if (!oidc && !/^\d{8}$/.test(code)) { setMsg('enroll-msg', tr('Kod ma 8 cyfr.'), 'err'); return }
   const url = enrollUrl(ACTIVE)
   if (!url || !netPeerKey) { setMsg('enroll-msg', tr('Ta sieć nie podaje, gdzie dodawać urządzenia.'), 'err'); return }
   const btn = $('enroll-go') as HTMLButtonElement
   btn.disabled = true
   try {
-    const r = await enrollDevice(url, ACTIVE.id, netPeerKey, code, ($('enroll-label') as HTMLInputElement).value.trim())
+    const r = oidc ? await enrollByOidc(url, oidc.issuer) : await enrollDevice(url, ACTIVE.id, netPeerKey, code, ($('enroll-label') as HTMLInputElement).value.trim())
     if (r.ok) {
       const d = enrollDone; enrollDone = null
       dropModal('enroll-modal'); toast(tr('Urządzenie wpuszczone do sieci.'))
@@ -5377,6 +5416,11 @@ $('enroll-go')?.addEventListener('click', async () => {
       : r.error === 'locked' ? tr('Dodawanie urządzeń jest zablokowane po zbyt wielu błędnych kodach. Administrator musi je odblokować.')
       : r.error === 'slow-down' ? tr('Za dużo błędnych kodów z tego adresu. Spróbuj za 10 minut.')
       : r.error === 'network' ? tr('Węzeł sieci nie odpowiada. Sprawdź połączenie i spróbuj ponownie.')
+      : r.error === 'popup' ? tr('Przeglądarka zablokowała okno logowania. Zezwól na wyskakujące okna dla tej strony i spróbuj ponownie.')
+      : r.error === 'timeout' ? tr('Logowanie nie wróciło w ciągu 10 minut. Spróbuj ponownie.')
+      : r.error === 'domain' ? tr('To konto nie należy do firmy, która prowadzi tę sieć.')
+      : r.error === 'group' ? tr('To konto nie ma dostępu do tej sieci (brak wymaganej grupy).')
+      : r.error === 'sign-in' || r.error === 'provider' ? tr('Logowanie nie powiodło się ({why}).', { why: r.why ?? '' })
       : tr('Węzeł odmówił ({why}).', { why: r.error }), 'err')
   } finally { btn.disabled = false }
 })
@@ -6786,7 +6830,10 @@ $('net-go')?.addEventListener('click', async () => {
     const rules = [p.policy.softwareProfiles === false ? tr('tylko tożsamości HEM') : '', p.policy.transport === 'node-only' ? tr('treść tylko przez węzeł') : ''].filter(Boolean)
     if (rules.length) facts.push([tr('Zasady'), rules.join(', ')])
     // Said before joining, not discovered after: this network recognises the device.
-    if (p.policy.access === 'allowlist') facts.push([tr('Dostęp'), tr('tylko urządzenia wpuszczone przez administratora (8-cyfrowy kod od niego). Węzeł rozpozna to urządzenie po stałym numerze, nie wiedząc, kim jesteś.')])
+    const en = p.policy.enroll
+    if (p.policy.access === 'allowlist' && en) facts.push([tr('Dostęp'), tr('tylko urządzenia osób z kontem u {host} (logowanie przy pierwszym wejściu). Węzeł rozpozna to urządzenie po stałym numerze', { host: new URL(en.issuer).host })
+      + (en.record === 'email' ? tr(' i zapisze przy nim Twój adres e-mail.') : en.record === 'sub' ? tr(' i zapisze przy nim identyfikator Twojego konta.') : tr(', nie zapisując, kim jesteś.'))])
+    else if (p.policy.access === 'allowlist') facts.push([tr('Dostęp'), tr('tylko urządzenia wpuszczone przez administratora (8-cyfrowy kod od niego). Węzeł rozpozna to urządzenie po stałym numerze, nie wiedząc, kim jesteś.')])
     const dl = $('net-facts'); dl.textContent = ''
     for (const [k, v, cls] of facts) {
       const dt = document.createElement('dt'); dt.textContent = k

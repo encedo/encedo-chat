@@ -216,6 +216,9 @@ module.exports = (_env, argv) => {
       new HtmlWebpackPlugin({ template: './how.html', filename: 'how.html', chunks: [], inject: false, minify: false }),
       new HtmlWebpackPlugin({ template: './privacy.html', filename: 'privacy.html', chunks: [], inject: false, minify: false }),
       new HtmlWebpackPlugin({ template: './terms.html', filename: 'terms.html', chunks: [], inject: false, minify: false }),
+      // Where a company network's sign-in comes back (relay/oidc.mjs): hands the
+      // code to the app's window and closes. Its own inline script, hashed into its CSP.
+      new HtmlWebpackPlugin({ template: './oidc.html', filename: 'oidc.html', chunks: [], inject: false, minify: false }),
       // The public landing page, carried through verbatim: no chunks, no
       // injection, no minifier. It has no bundle — the whole point is that a
       // first-time visitor downloads a few KB of HTML rather than 1.2 MiB of

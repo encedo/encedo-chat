@@ -1788,10 +1788,12 @@
   <!-- A network that admits devices by list: this device enrols with the
        administrator's code (lib/enroll.ts). -->
   <div class="modal" id="enroll-modal">
-    <h2 data-i18n="Kod od administratora">Kod od administratora</h2>
-    <div class="msub" data-i18n="Ta sieć wpuszcza tylko urządzenia dodane przez administratora. Poproś go o bieżący 8-cyfrowy kod z jego aplikacji uwierzytelniającej i wpisz go poniżej. Węzeł rozpozna potem to urządzenie po stałym numerze, nie wiedząc, kim jesteś.">Ta sieć wpuszcza tylko urządzenia dodane przez administratora. Poproś go o bieżący 8-cyfrowy kod z jego aplikacji uwierzytelniającej i wpisz go poniżej. Węzeł rozpozna potem to urządzenie po stałym numerze, nie wiedząc, kim jesteś.</div>
+    <h2 id="enroll-title" data-i18n="Kod od administratora">Kod od administratora</h2>
+    <div class="msub" id="enroll-sub" data-i18n="Ta sieć wpuszcza tylko urządzenia dodane przez administratora. Poproś go o bieżący 8-cyfrowy kod z jego aplikacji uwierzytelniającej i wpisz go poniżej. Węzeł rozpozna potem to urządzenie po stałym numerze, nie wiedząc, kim jesteś.">Ta sieć wpuszcza tylko urządzenia dodane przez administratora. Poproś go o bieżący 8-cyfrowy kod z jego aplikacji uwierzytelniającej i wpisz go poniżej. Węzeł rozpozna potem to urządzenie po stałym numerze, nie wiedząc, kim jesteś.</div>
+    <div id="enroll-code-wrap">
     <label for="enroll-code" data-i18n="Kod (8 cyfr)">Kod (8 cyfr)</label>
     <input id="enroll-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="12345678">
+    </div>
     <label for="enroll-label" data-i18n="Nazwa urządzenia dla administratora (opcjonalnie)">Nazwa urządzenia dla administratora (opcjonalnie)</label>
     <input id="enroll-label" maxlength="60">
     <div class="msub" id="enroll-device" style="margin-top:10px;font-family:var(--mono)"></div>

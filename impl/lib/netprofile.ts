@@ -42,6 +42,14 @@ export interface NetworkPolicy {
    * key. Absent: an open network, a fresh PeerId every session.
    */
   access?: 'allowlist'
+  /**
+   * How a device gets onto that list. Absent: the administrator's 8-digit TOTP
+   * code. `oidc`: its owner signs in at the company's identity provider
+   * (`issuer`, https), and the node checks the sign-in (relay/oidc.mjs);
+   * `record` says what the node keeps beside the device: nothing, the
+   * provider's account id, or the e-mail - shown where people join.
+   */
+  enroll?: { method: 'oidc'; issuer: string; record: 'none' | 'sub' | 'email' }
 }
 
 /** What an operator signs. */
@@ -123,6 +131,17 @@ export function parseOperatorProfile(raw: unknown): OperatorProfile {
   if (p.softwareProfiles !== undefined) { if (typeof p.softwareProfiles !== 'boolean') throw new Error('policy.softwareProfiles must be true or false'); policy.softwareProfiles = p.softwareProfiles }
   if (p.allowPublic !== undefined) { if (typeof p.allowPublic !== 'boolean') throw new Error('policy.allowPublic must be true or false'); policy.allowPublic = p.allowPublic }
   if (p.access !== undefined) { if (p.access !== 'allowlist') throw new Error('policy.access may only be "allowlist"'); policy.access = 'allowlist' }
+  if (p.enroll !== undefined) {
+    const e = p.enroll
+    if (!e || e.method !== 'oidc') throw new Error('policy.enroll.method may only be "oidc"')
+    if (policy.access !== 'allowlist') throw new Error('policy.enroll needs policy.access "allowlist"')
+    let iss: URL | null = null
+    try { iss = new URL(e.issuer) } catch {}
+    if (!iss || iss.protocol !== 'https:') throw new Error('policy.enroll.issuer must be an https address')
+    const record = e.record ?? 'none'
+    if (!['none', 'sub', 'email'].includes(record)) throw new Error('policy.enroll.record may be "none", "sub" or "email"')
+    policy.enroll = { method: 'oidc', issuer: String(e.issuer), record }
+  }
   return {
     v: 1,
     networkId: o.networkId,

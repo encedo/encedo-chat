@@ -57,3 +57,48 @@ export async function deviceStatus(url: string, networkId: string, peerKey: Uint
     return { listed: !!b.listed, locked: !!b.locked }
   } catch { return null }
 }
+
+// ---- the company variant: a sign-in at the network's identity provider ---------
+// (relay/oidc.mjs is the node side.) The node is the OIDC client and holds the
+// secret; the device only starts the sign-in, carries the authorization code
+// back and signs it with its key. The nonce in the request binds the sign-in to
+// the node's challenge and this device's PeerId - recomputed by the node.
+
+const b64url = (u: Uint8Array) => btoa(String.fromCharCode(...u)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+const sha256 = async (s: string) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))
+
+/** The nonce the sign-in request carries; relay/oidc.mjs computes the same. */
+export const oidcNonce = async (networkId: string, challengeNonce: string, peerId: string) =>
+  b64url(await sha256(`onchato-oidc-v1\n${networkId}\n${challengeNonce}\n${peerId}`))
+
+export interface OidcStart { nonce: string; authorize: string; clientId: string; redirectUri: string; scope: string }
+
+/**
+ * Everything to open the provider's sign-in with: the node's challenge (good for
+ * 10 minutes) and its client details, plus this device's PKCE pair and state.
+ * `issuer` comes from the SIGNED profile: the node's sign-in address must be on
+ * the provider's host, or a node could send people to sign in anywhere.
+ */
+export async function oidcBegin(url: string, networkId: string, peerKey: Uint8Array, issuer: string, fetchImpl: typeof fetch = fetch) {
+  const r = await fetchImpl(`${url}/challenge?for=oidc`, { cache: 'no-store' })
+  const ch: OidcStart = await r.json()
+  if (!r.ok || typeof ch?.nonce !== 'string' || typeof ch.authorize !== 'string') throw new Error((ch as any)?.why ?? 'the node did not start a sign-in')
+  if (new URL(ch.authorize).host !== new URL(issuer).host) throw new Error(`the node's sign-in address (${new URL(ch.authorize).host}) is not the network's provider (${new URL(issuer).host})`)
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)))
+  const state = b64url(crypto.getRandomValues(new Uint8Array(16)))
+  const q = new URLSearchParams({
+    response_type: 'code', client_id: ch.clientId, redirect_uri: ch.redirectUri, scope: ch.scope || 'openid', state,
+    nonce: await oidcNonce(networkId, ch.nonce, netPeerId(peerKey)), code_challenge: b64url(await sha256(verifier)), code_challenge_method: 'S256',
+  })
+  return { challenge: ch.nonce, verifier, state, authorizeUrl: `${ch.authorize}${ch.authorize.includes('?') ? '&' : '?'}${q}` }
+}
+
+/** Put this device on the list with the code its owner's sign-in returned. */
+export async function enrollDeviceOidc(url: string, networkId: string, peerKey: Uint8Array, challenge: string, code: string, verifier: string, label = '', fetchImpl: typeof fetch = fetch): Promise<EnrollResult> {
+  try {
+    const sig = b64(await privateKeyFromProtobuf(peerKey).sign(enrollMessage(networkId, challenge, 'oidc:' + code)))
+    const res = await fetchImpl(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ method: 'oidc', peerId: netPeerId(peerKey), nonce: challenge, code, verifier, sig, label }) })
+    const body: any = await res.json().catch(() => ({}))
+    return res.ok && body?.ok ? { ok: true } : { ok: false, error: body?.error ?? `http-${res.status}`, why: body?.why }
+  } catch (e: any) { return { ok: false, error: 'network', why: String(e?.message ?? e) } }
+}
