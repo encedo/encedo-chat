@@ -40,6 +40,7 @@ services:
       - "letsencrypt:/etc/letsencrypt:ro"
       - "acme-webroot:/var/www/html"
       - "${ONCHATO_PROFILE_DIR:-/var/lib/onchato/profile}:/srv/onchato:ro"
+      - "${ONCHATO_APP_DIR:-/var/lib/onchato/app}:/srv/app:ro"
 
   certbot:
     <<: *node

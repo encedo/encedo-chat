@@ -40,6 +40,12 @@ DIR=${ONCHATO_DIR:-/opt/onchato}
 DATA=${ONCHATO_DATA:-/var/lib/onchato}
 ETC=${ONCHATO_ETC:-/etc/onchato}
 APP_ORIGIN=${ONCHATO_APP:-https://app.onchato.com}
+# The operator's copy of the app (SERVE_APP=yes) comes from the release this
+# script belongs to, and must hash to what the release stamped in here.
+WEB_SHA256=__WEB_SHA256__
+RELEASES=https://github.com/encedo/encedo-chat/releases/download
+# Where people open the app: this node when it serves its own copy.
+app_origin() { if [ "${SERVE_APP:-}" = yes ] && [ -z "${ONCHATO_APP:-}" ]; then APP_ORIGIN=https://$NODE_HOST; fi; }
 
 say()  { printf '%s\n' "$*"; }
 ok()   { printf '[ok] %s\n' "$*"; }
@@ -180,7 +186,7 @@ oidc_questions() {
 questions() {
   say ""
   say "A few questions (Enter keeps the value in brackets)."
-  ask NODE_HOST    "The server's name (a DNS record pointing at this machine)" "${NODE_HOST:-}"
+  ask NODE_HOST    "The server's name - a DNS record pointing at this machine, e.g. chat.example.com" "${NODE_HOST:-}"
   [ -n "$NODE_HOST" ] || die "the server's name is needed"
   ask OPERATOR     "Your organisation's name, as people will see it" "${OPERATOR:-}"
   [ -n "$OPERATOR" ] || die "the organisation's name is needed"
@@ -207,6 +213,15 @@ questions() {
       ok "the store at $FILES takes a file and gives it back the way the apps expect" ;;
     *) die "a store address must start with https:// (got: $FILES)" ;;
   esac
+  if [ -z "${SERVE_APP:-}" ]; then
+    say ""
+    say "Serve the onchato app from this server too, at https://$NODE_HOST/ ?"
+    say "  y) people open your network there and are in it at once (the app comes from the release, checked)"
+    say "  n) people use https://app.onchato.com and join with your network's link"
+    ask SERVE_ANSWER "y/n" "y"
+    case "$SERVE_ANSWER" in n|N|no|No) SERVE_APP=no ;; *) SERVE_APP=yes ;; esac
+  fi
+  app_origin
   if [ -z "${ACCESS:-}" ]; then
     say ""
     say "Who can join?"
@@ -245,6 +260,7 @@ KEY_MODE='$KEY_MODE'
 FILES='$FILES'
 STATS='$STATS'
 ACCESS='$ACCESS'
+SERVE_APP='$SERVE_APP'
 DOMAIN='$DOMAIN'
 NETWORK_ID='$NETWORK_ID'
 HOME_URL='$HOME_URL'
@@ -333,7 +349,35 @@ fetch_code() {
   ok "code: $REF ($(git -C "$DIR" rev-parse --short HEAD)) in $DIR"
 }
 
-compose() { ONCHATO_PROFILE_DIR="$DATA/profile" GIT_COMMIT="$(git -C "$DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)" docker compose -f "$DIR/node/compose.yaml" --env-file "$DIR/node/node.env" "$@"; }
+# ---- the app this node serves (SERVE_APP=yes) ----------------------------------------
+# The release's operator build (onchato-web-operator.tar.gz), refused unless it
+# hashes to WEB_SHA256 - stamped into this script by the same release. A script
+# that did not come from a release (no stamp) says so loudly and takes the file
+# as it is; ONCHATO_WEB_DIR serves a local build instead (a test).
+fetch_web() {
+  [ "${SERVE_APP:-}" = yes ] || return 0
+  local tmp; tmp=$(mktemp -d)
+  if [ -n "${ONCHATO_WEB_DIR:-}" ]; then
+    cp -a "$ONCHATO_WEB_DIR/." "$tmp/" || die "cannot copy $ONCHATO_WEB_DIR"
+    warn "the app: a local build from $ONCHATO_WEB_DIR (not the release's)"
+  else
+    curl -fsSL -m 120 -o "$tmp/web.tgz" "$RELEASES/$REF/onchato-web-operator.tar.gz" || die "cannot download the app for $REF"
+    local sum; sum=$(sha256sum "$tmp/web.tgz" | cut -d' ' -f1)
+    case "$WEB_SHA256" in
+      __WEB*) warn "this script is not from a release: the app ($sum) is NOT checked against one" ;;
+      "$sum") ok "the app: $REF, SHA-256 matches the release" ;;
+      *) die "the app for $REF does not hash to what this script expects ($sum, not $WEB_SHA256)" ;;
+    esac
+    tar -xzf "$tmp/web.tgz" -C "$tmp" && rm -f "$tmp/web.tgz" || die "the app's archive is damaged"
+  fi
+  [ -f "$tmp/index.html" ] && grep -q 'src="network.js"' "$tmp/index.html" || die "that is not the operator's copy of the app (no network.js in it)"
+  chmod -R a+rX "$tmp"
+  rm -rf "$DATA/app.old"; [ -d "$DATA/app" ] && mv "$DATA/app" "$DATA/app.old"
+  mv "$tmp" "$DATA/app"; rm -rf "$DATA/app.old"
+  ok "the app is in $DATA/app (served at https://$NODE_HOST/)"
+}
+
+compose() { ONCHATO_PROFILE_DIR="$DATA/profile" ONCHATO_APP_DIR="$DATA/app" GIT_COMMIT="$(git -C "$DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)" docker compose -f "$DIR/node/compose.yaml" --env-file "$DIR/node/node.env" "$@"; }
 ops() { # ops <docker run options...> -- <onchato-ops args...>
   local opts=() tls=()
   while [ "$1" != -- ]; do opts+=("$1"); shift; done; shift
@@ -361,6 +405,7 @@ $( [ -n "${HOME_SITE:-}" ] && echo "HOME_SITE=$HOME_SITE" )
 $( [ "${FILES:-}" = here ] && echo STORE=here )
 NETWORK_ID=$NETWORK_ID
 $( [ "${ACCESS:-}" = allowlist ] && printf 'ACCESS=allowlist\nALLOW_PEERS=/data/allow/peers.txt' )
+$( [ "${SERVE_APP:-}" = yes ] && echo SERVE_APP=yes )
 $( [ "${ACCESS:-}" = allowlist ] && [ -n "${OIDC_ISSUER:-}" ] && printf 'OIDC_ISSUER=%s\nOIDC_CLIENT_ID=%s\nOIDC_CLIENT_SECRET_FILE=/data/allow/oidc.secret\nOIDC_REDIRECT_URI=%s/oidc.html\nOIDC_ALLOW_DOMAIN=%s\nOIDC_ALLOW_GROUP=%s\nOIDC_RECORD=%s' "$OIDC_ISSUER" "$OIDC_CLIENT_ID" "${APP_ORIGIN%/}" "${OIDC_ALLOW_DOMAIN:-}" "${OIDC_ALLOW_GROUP:-}" "${OIDC_RECORD:-none}" )
 COMPOSE_PROFILES=$( p=; [ "${FILES:-}" = here ] && p=store; [ "${STATS:-yes}" = yes ] && p=${p:+$p,}stats; [ "${ACCESS:-}" = allowlist ] && p=${p:+$p,}allowlist; echo "$p" )
 $( [ -n "${PEERS:-}" ] && echo "PEERS=$PEERS" )
@@ -455,6 +500,9 @@ sign_profile() {
     [ -f "$DATA/profile/network.json" ] || die "no $DATA/profile/network.json yet - run this again when it is there"
   fi
   chmod 644 "$DATA/profile/network.json"
+  # The same profile as the app page loads it (onchato-app.conf: /network.js).
+  { printf 'window.__EC_OPERATOR_NETWORK__ = '; cat "$DATA/profile/network.json"; printf ';\n'; } > "$DATA/profile/network.js"
+  chmod 644 "$DATA/profile/network.js"
 }
 
 # The network page: the join code as a PNG and a page around it, from the
@@ -488,6 +536,9 @@ checks() {
   say ""
   check "https://$NODE_HOST/health answers (DNS, TLS, nginx)" "curl -fs $k --max-time 5 https://$NODE_HOST/health"
   check "the relay takes a WebSocket (101)" "{ curl -s $k -i -N --max-time 3 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: $(head -c16 /dev/urandom | base64)' https://$NODE_HOST/relay || true; } | head -1 | grep -q ' 101'"
+  if [ "${SERVE_APP:-}" = yes ]; then
+    check "the app is served at https://$NODE_HOST/ (with its network.js)" "curl -fs $k --max-time 5 https://$NODE_HOST/ | grep -q 'src=\"network.js\"' && curl -fs $k --max-time 5 https://$NODE_HOST/network.js | grep -q __EC_OPERATOR_NETWORK__"
+  fi
   check "STUN answers on 3478/udp" "docker run --rm --network host --entrypoint node onchato-ops /app/impl/net/stun-probe.ts ${STUN_HOST:-$NODE_HOST}"
   if [ -f "$DATA/profile/network.json" ]; then
     check "the network profile is served, signed, with CORS" "ops --network host -- network check network.json --online"
@@ -530,15 +581,16 @@ join_code() {
 
 # ---- main ------------------------------------------------------------------------
 load_answers
+app_origin
 case "$MODE" in
   install)
-    preflight; questions; dns_check; firewall; fetch_code; start_node; access_setup; make_key; sign_profile; write_site; checks; join_code ;;
+    preflight; questions; dns_check; firewall; fetch_code; fetch_web; start_node; access_setup; make_key; sign_profile; write_site; checks; join_code ;;
   access)
     # "Who can join?" again: the profile is signed anew (a new hash - the old
     # QR stops working) and devices learn the new rule at their next sign-in.
     [ -n "${NODE_HOST:-}" ] || die "not set up yet"
     [ -t 0 ] || die "--access asks questions: run it in a terminal"
-    ACCESS=; questions; dns_check; fetch_code; start_node; access_setup; make_key; sign_profile; write_site; checks; join_code ;;
+    ACCESS=; questions; dns_check; fetch_code; fetch_web; start_node; access_setup; make_key; sign_profile; write_site; checks; join_code ;;
   check)
     [ -n "${NODE_HOST:-}" ] || die "not set up yet (no $ETC/setup.env)"
     [ -n "${ONCHATO_SRC:-}" ] && DIR=$ONCHATO_SRC
@@ -547,7 +599,7 @@ case "$MODE" in
     [ -n "${NODE_HOST:-}" ] || die "not set up yet"
     # dns_check: the home domain's network page, as at install - without it an
     # update dropped HOME_SITE and the page (found on blbx.pl, 0.7.59).
-    preflight; dns_check; REF=${ONCHATO_REF:-__RELEASE_TAG__}; fetch_code; start_node; checks ;;
+    preflight; dns_check; REF=${ONCHATO_REF:-__RELEASE_TAG__}; fetch_code; fetch_web; start_node; checks ;;
   access-qr)
     [ "${ACCESS:-}" = allowlist ] || die "this network is open (no authenticator code)"
     access_setup show ;;

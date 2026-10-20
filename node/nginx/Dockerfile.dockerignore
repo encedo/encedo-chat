@@ -8,3 +8,4 @@
 !node/nginx/store-limits.conf
 !node/nginx/onchato-extra-enroll.conf
 !node/nginx/enroll-limits.conf
+!node/nginx/onchato-app.conf

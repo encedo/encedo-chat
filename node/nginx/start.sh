@@ -39,6 +39,12 @@ fi
 render() {
   if cert "$NODE_HOST"; then
     sed "s/__HOST__/$NODE_HOST/g; s#__HOME__#$HOME_URL#g" /etc/onchato/relay-node.conf > "$SITE"
+    # The app at the node's address (SERVE_APP=yes): in place of the redirect home.
+    if [ "${SERVE_APP:-}" = yes ]; then
+      # Only the redirect HOME - not the HTTP block's redirect to HTTPS ($host).
+      sed -i '/\$host/!s#^    location / { return 301 .*#    include /etc/onchato/onchato-app.conf;#' "$SITE"
+      grep -q 'onchato-app.conf' "$SITE" || echo "onchato-nginx: WARNING - the template's 'location /' was not found, the app is not served"
+    fi
   else
     cat > "$SITE" <<CONF
 server {
