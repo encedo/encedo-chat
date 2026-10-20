@@ -190,6 +190,9 @@ export function openExternal(url: string) {
   else window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+/** A company sign-in that came back as onchato://oidc?... (lib.rs `keep_oidc`), once; null while none has. */
+export const takeOidc = () => invoke<string | null>('desk_take_oidc').catch(() => null)
+
 /**
  * Hand the shell every string it shows, in the app's language, and tell it the
  * close-to-tray setting the webview is holding.

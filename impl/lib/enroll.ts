@@ -79,13 +79,15 @@ export interface OidcStart { nonce: string; authorize: string; clientId: string;
  * `issuer` comes from the SIGNED profile: the node's sign-in address must be on
  * the provider's host, or a node could send people to sign in anywhere.
  */
-export async function oidcBegin(url: string, networkId: string, peerKey: Uint8Array, issuer: string, fetchImpl: typeof fetch = fetch) {
+export async function oidcBegin(url: string, networkId: string, peerKey: Uint8Array, issuer: string, fetchImpl: typeof fetch = fetch, statePrefix = '') {
   const r = await fetchImpl(`${url}/challenge?for=oidc`, { cache: 'no-store' })
   const ch: OidcStart = await r.json()
   if (!r.ok || typeof ch?.nonce !== 'string' || typeof ch.authorize !== 'string') throw new Error((ch as any)?.why ?? 'the node did not start a sign-in')
   if (new URL(ch.authorize).host !== new URL(issuer).host) throw new Error(`the node's sign-in address (${new URL(ch.authorize).host}) is not the network's provider (${new URL(issuer).host})`)
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)))
-  const state = b64url(crypto.getRandomValues(new Uint8Array(16)))
+  // `d.` marks a sign-in started by the packaged desktop app: oidc.html sends
+  // it on to onchato:// instead of to a browser window of the app.
+  const state = statePrefix + b64url(crypto.getRandomValues(new Uint8Array(16)))
   const q = new URLSearchParams({
     response_type: 'code', client_id: ch.clientId, redirect_uri: ch.redirectUri, scope: ch.scope || 'openid', state,
     nonce: await oidcNonce(networkId, ch.nonce, netPeerId(peerKey)), code_challenge: b64url(await sha256(verifier)), code_challenge_method: 'S256',

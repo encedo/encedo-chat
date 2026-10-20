@@ -42,7 +42,7 @@ import {
   isDesktopShell, notifySupported, notifyPermission, notifyRequest, notifyShow, type Banner,
   updateKind, updateCheck, updateDownload, updateProgress, updateApply,
   closeToTray, setCloseToTray, autostartEnabled, setAutostart, initDesktop, trayAvailable, isMobileShell,
-  appimageStatus, appimageInstall, showWindow, openExternal,
+  appimageStatus, appimageInstall, showWindow, openExternal, takeOidc,
   nativeScanAvailable, nativeScan, nativeScanCancel, nativeScanZoom, nativeScanSetZoom,
   diagFileAvailable, diagPath, diagAppend, diagWipe, hostSaveRoute, type ManifestBlob,
 } from './desktop.ts'
@@ -5343,7 +5343,7 @@ async function checkEnrolled(key: Uint8Array) {
   return url ? deviceStatus(url, ACTIVE.id, key) : null
 }
 let enrollDone: ((ok: boolean) => void) | null = null
-MODAL_EXIT['enroll-modal'] = () => { oidcCancel?.(); const d = enrollDone; enrollDone = null; d?.(false) }
+MODAL_EXIT['enroll-modal'] = () => { oidcCancel?.(); $('enroll-paste-wrap').hidden = true; const d = enrollDone; enrollDone = null; d?.(false) }
 /** The administrator's code, until it works or the person says "not now". */
 function enrollFlow(key: Uint8Array, locked: boolean): Promise<boolean> {
   if (enrollDone) return Promise.resolve(false)
@@ -5378,33 +5378,64 @@ $('enroll-cancel')?.addEventListener('click', () => dropModal('enroll-modal'))
 // loses its handle the moment the window goes to the provider), so the button
 // stays live: pressing it again drops the attempt still waiting and starts anew.
 let oidcCancel: (() => void) | null = null
+// How the sign-in comes back: in a browser, from oidc.html over a same-origin
+// BroadcastChannel; in the packaged desktop app, the provider opens in the
+// SYSTEM browser and oidc.html sends the result to onchato:// (the host keeps
+// it, `takeOidc`), or the person pastes the code it shows when that does not
+// open the app. All three land in `oidcDeliver`.
+let oidcDeliver: ((m: { code: string; state?: string; error?: string; why?: string }) => void) | null = null
 async function enrollByOidc(url: string, issuer: string): Promise<EnrollResult> {
   oidcCancel?.()
-  const w = window.open('about:blank', 'onchato-oidc', 'popup,width=520,height=720')
-  if (!w) return { ok: false, error: 'popup' }
+  const packaged = isDesktopShell() && !isMobileShell()
+  const w = packaged ? null : window.open('about:blank', 'onchato-oidc', 'popup,width=520,height=720')
+  if (!packaged && !w) return { ok: false, error: 'popup' }
   let go: Awaited<ReturnType<typeof oidcBegin>>
-  try { go = await oidcBegin(url, ACTIVE.id, netPeerKey!, issuer) } catch (e: any) { try { w.close() } catch {} ; return { ok: false, error: 'provider', why: String(e?.message ?? e) } }
-  const back = new Promise<{ code: string; error: string; why: string } | 'cancelled' | null>((resolve) => {
+  try { go = await oidcBegin(url, ACTIVE.id, netPeerKey!, issuer, fetch, packaged ? 'd.' : '') } catch (e: any) { try { w?.close() } catch {} ; return { ok: false, error: 'provider', why: String(e?.message ?? e) } }
+  const back = new Promise<{ code: string; error?: string; why?: string } | 'cancelled' | null>((resolve) => {
     const ch = new BroadcastChannel('onchato-oidc')
-    const done = (v: any) => { clearTimeout(t); ch.close(); if (oidcCancel === cancel) oidcCancel = null; resolve(v) }
+    let poll: ReturnType<typeof setInterval> | null = null
+    const done = (v: any) => {
+      clearTimeout(t); ch.close(); if (poll) clearInterval(poll)
+      if (oidcCancel === cancel) { oidcCancel = null; oidcDeliver = null; $('enroll-paste-wrap').hidden = true }
+      resolve(v)
+    }
     const t = setTimeout(() => done(null), 10 * 60_000)
     const cancel = () => done('cancelled')
     oidcCancel = cancel
-    ch.onmessage = (ev) => {
-      const m = ev.data
-      if (!m?.oidc || m.state !== go.state) return
-      done(m)
-    }
+    // A pasted code carries no state: it is taken for the one sign-in waiting.
+    oidcDeliver = (m) => { if (m.state === undefined || m.state === go.state) done(m) }
+    ch.onmessage = (ev) => { if (ev.data?.oidc) oidcDeliver?.(ev.data) }
+    if (packaged) poll = setInterval(() => {
+      void takeOidc().then((u) => {
+        if (!u) return
+        const q = new URLSearchParams(u.slice(u.indexOf('?') + 1))
+        oidcDeliver?.({ code: q.get('code') ?? '', state: q.get('state') ?? '', error: q.get('error') ?? '', why: q.get('error_description') ?? '' })
+      })
+    }, 1000)
   })
-  w.location.href = go.authorizeUrl
+  if (packaged) {
+    openExternal(go.authorizeUrl)
+    ;($('enroll-paste') as HTMLInputElement).value = ''
+    $('enroll-paste-wrap').hidden = false
+  } else w!.location.href = go.authorizeUrl
   ;($('enroll-go') as HTMLButtonElement).disabled = false
-  setMsg('enroll-msg', tr('Dokończ logowanie w otwartym oknie. Zamknięte albo nie działa? Naciśnij przycisk jeszcze raz.'), '')
+  setMsg('enroll-msg', packaged
+    ? tr('Dokończ logowanie w przeglądarce. Wróci samo do aplikacji; jeśli nie, wklej poniżej kod, który pokaże przeglądarka.')
+    : tr('Dokończ logowanie w otwartym oknie. Zamknięte albo nie działa? Naciśnij przycisk jeszcze raz.'), '')
   const m = await back
   if (m === 'cancelled') return { ok: false, error: 'cancelled' }
   if (!m) return { ok: false, error: 'timeout' }
   if (m.error) return { ok: false, error: 'sign-in', why: m.why || m.error }
+  if (!m.code) return { ok: false, error: 'sign-in', why: tr('brak kodu') }
   return enrollDeviceOidc(url, ACTIVE.id, netPeerKey!, go.challenge, m.code, go.verifier, ($('enroll-label') as HTMLInputElement).value.trim())
 }
+/** The code shown by oidc.html when onchato:// did not open the app: the bare code, or the whole link. */
+$('enroll-paste-go')?.addEventListener('click', () => {
+  const raw = ($('enroll-paste') as HTMLInputElement).value.trim()
+  if (!raw) return
+  const q = raw.includes('code=') ? new URLSearchParams(raw.slice(raw.indexOf('?') + 1)) : null
+  oidcDeliver?.(q ? { code: q.get('code') ?? '', state: q.get('state') ?? undefined } : { code: raw })
+})
 
 $('enroll-go')?.addEventListener('click', async () => {
   const oidc = ACTIVE.policy.enroll?.method === 'oidc' ? ACTIVE.policy.enroll : null

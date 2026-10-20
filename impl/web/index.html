@@ -1794,6 +1794,10 @@
     <label for="enroll-code" data-i18n="Kod (8 cyfr)">Kod (8 cyfr)</label>
     <input id="enroll-code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="12345678">
     </div>
+    <div id="enroll-paste-wrap" hidden>
+    <label for="enroll-paste" data-i18n="Kod z przeglądarki">Kod z przeglądarki</label>
+    <div style="display:flex;gap:8px"><input id="enroll-paste" autocomplete="off" spellcheck="false" style="flex:1;min-width:0"><button class="btn-ghost" id="enroll-paste-go" data-i18n="Użyj kodu">Użyj kodu</button></div>
+    </div>
     <label for="enroll-label" data-i18n="Nazwa urządzenia dla administratora (opcjonalnie)">Nazwa urządzenia dla administratora (opcjonalnie)</label>
     <input id="enroll-label" maxlength="60">
     <div class="msub" id="enroll-device" style="margin-top:10px;font-family:var(--mono)"></div>
