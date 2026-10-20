@@ -108,6 +108,22 @@ link carries the file's hash). Devices that already joined pick up the new
 version by themselves, at sign-in and once a day. Only the printed code
 changes, and the network page always shows the current one.
 
+## The app on your own address
+
+The script asks whether this server should also serve the onchato app, at
+`https://<your server>/` (the default: yes). Then people open your address and
+are in your network at once: no link to import, no choice of network. The app
+is the release's own build for operators (`onchato-web-operator.tar.gz`),
+downloaded with the script's release and refused unless it hashes to what the
+release stamped into the script; `--update` brings the next one. Beside it the
+node serves `network.js`, your signed network profile, which the page adopts.
+
+What changes with it: the profile, the invite links and the company sign-in's
+redirect URI name your address instead of `app.onchato.com`. Browsers keep data
+per address, so identities made in the browser at `app.onchato.com` do not
+appear at yours by themselves - move them with the profile export, or make new
+ones. The desktop and phone apps are not affected.
+
 ## Files and voice notes
 
 Files and voice notes are encrypted on the phone and parked in a store for five
@@ -185,7 +201,8 @@ sign-in and brings the result back.
 1. At the provider, register a confidential web client with the authorization
    code flow and PKCE, redirect URI `https://app.onchato.com/oidc.html` (or
    your own app address + `/oidc.html`), scope `openid` (plus `email` when you
-   limit by domain or record e-mails). The script prints the redirect URI too.
+   limit by domain or record e-mails). The script prints the redirect URI too:
+   with the app on your own address it is `https://<your server>/oidc.html`.
 2. Choose 3 under "who can join?" - at the first setup, or later with
    `sudo bash onchato-setup.sh --access`. The script asks for the provider's
    address and checks it (discovery, the code flow, PKCE), then the client id
