@@ -17,8 +17,20 @@
  * administrator unlocks it (onchato-ops access unlock). Locked, the network can
  * be annoyed (no one enrols) but not entered.
  *
+ * The company variant (oidc.mjs): instead of the code, the device sends the
+ * authorization code of its owner's sign-in at the company's identity provider;
+ * the node redeems it (it holds the client secret) and checks the id_token,
+ * whose nonce binds it to this challenge and this PeerId. What goes on the list
+ * beside the PeerId is the operator's policy (OIDC_RECORD): nothing about the
+ * person (none, the default), the provider's account id (sub), or the e-mail.
+ * A failed sign-in counts against the address, never toward the network-wide
+ * lock: a token cannot be guessed, and a lock anyone can trip would be a switch
+ * for shutting the door on everyone.
+ *
  * Env: ENROLL_PORT (9204), NETWORK_ID, ALLOW_PEERS (the list), ACCESS_DIR (seed,
- * lock, failure count; default the list's directory). Code is ASCII (repo rule).
+ * lock, failure count; default the list's directory); for OIDC: OIDC_ISSUER,
+ * OIDC_CLIENT_ID, OIDC_CLIENT_SECRET_FILE, OIDC_REDIRECT_URI, OIDC_ALLOW_DOMAIN,
+ * OIDC_ALLOW_GROUP, OIDC_RECORD (none|sub|email). Code is ASCII (repo rule).
  */
 import { createServer } from 'node:http'
 import { createHmac, randomBytes } from 'node:crypto'
@@ -26,10 +38,13 @@ import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from '
 import { dirname, join } from 'node:path'
 import { createPublicKey, verify as edVerify } from 'node:crypto'
 import { parseAllowlist } from './allowlist.mjs'
+import { makeProvider, oidcNonce } from './oidc.mjs'
 
 export const DIGITS = 8
 export const STEP_S = 30
 export const NONCE_TTL_MS = 120_000
+/** A sign-in at the provider (a password, a second factor) takes longer than typing a code. */
+export const OIDC_NONCE_TTL_MS = 10 * 60_000
 export const PER_IP_FAILURES = 5
 export const PER_IP_WINDOW_MS = 10 * 60_000
 export const LOCK_AFTER = 20
@@ -103,7 +118,7 @@ async function signedBy(peerId, msg, sigB64) {
  * The service's logic, without HTTP - what the tests drive. `now` and `rand`
  * are injectable; the files are real (a temp dir in tests).
  */
-export function makeEnroll({ networkId, listFile, accessDir = dirname(listFile), now = () => Date.now(), rand = () => randomBytes(32).toString('base64url'), log = console.log }) {
+export function makeEnroll({ networkId, listFile, accessDir = dirname(listFile), now = () => Date.now(), rand = () => randomBytes(32).toString('base64url'), log = console.log, oidc = null }) {
   const seedFile = join(accessDir, 'totp.seed'), lockFile = join(accessDir, 'enroll.locked'), failFile = join(accessDir, 'enroll.failures')
   const nonces = new Map()   // nonce -> expiry
   const used = new Map()     // `${counter}:${code}` -> expiry
@@ -127,9 +142,53 @@ export function makeEnroll({ networkId, listFile, accessDir = dirname(listFile),
     if (n >= LOCK_AFTER && !existsSync(lockFile)) { writeFileSync(lockFile, new Date(t).toISOString() + '\n'); log(`[enroll] LOCKED after ${n} wrong codes - onchato-ops access unlock`) }
   }
   const ipBlocked = (ip) => (perIp.get(ip) ?? []).filter((x) => now() - x < PER_IP_WINDOW_MS).length >= PER_IP_FAILURES
+  const failIp = (ip, why) => {
+    const t = now()
+    const list = (perIp.get(ip) ?? []).filter((x) => t - x < PER_IP_WINDOW_MS); list.push(t); perIp.set(ip, list)
+    log(`[enroll] sign-in refused from ${ip} (${why})`)
+  }
+  function addToList(peerId, label) {
+    if (listed().has(peerId)) return
+    let text = ''; try { text = readFileSync(listFile, 'utf8') } catch {}
+    const clean = String(label ?? '').replace(/[^\p{L}\p{N} ._,()@+:-]/gu, '').slice(0, 100)
+    const line = `${peerId} ${clean ? clean + ' ' : ''}# enrolled ${new Date(now()).toISOString()}\n`
+    mkdirSync(dirname(listFile), { recursive: true })
+    const tmp = listFile + '.tmp'
+    writeFileSync(tmp, (text && !text.endsWith('\n') ? text + '\n' : text) + line); renameSync(tmp, listFile)
+    log(`[enroll] ok ${peerId.slice(-8)}${clean ? ` (${clean})` : ''}`)
+  }
 
   return {
-    challenge() { sweep(); const n = rand(); nonces.set(n, now() + NONCE_TTL_MS); return { nonce: n, networkId } },
+    /** A challenge; for a sign-in (`oidc`) a promise, with what the device needs to start it. */
+    challenge(kind = '') {
+      sweep(); const n = rand()
+      if (kind === 'oidc' && oidc) {
+        nonces.set(n, now() + OIDC_NONCE_TTL_MS)
+        return oidc.provider.authorizeEndpoint().then((authorize) => ({ nonce: n, networkId, authorize, clientId: oidc.clientId, redirectUri: oidc.redirectUri, scope: oidc.scope }))
+      }
+      nonces.set(n, now() + NONCE_TTL_MS); return { nonce: n, networkId }
+    },
+
+    /** The company variant: a sign-in at the provider instead of the code. */
+    async enrollOidc({ peerId, nonce, code, verifier, sig, label }, ip = '?') {
+      if (!oidc) return { status: 404, body: { error: 'not-set-up', why: 'this node admits devices by code, not by sign-in' } }
+      if (ipBlocked(ip)) return { status: 429, body: { error: 'slow-down', why: 'too many refused sign-ins from this address; try again in 10 minutes' } }
+      if ([peerId, nonce, code, verifier, sig].some((x) => typeof x !== 'string') || code.length > 2048 || verifier.length > 128) return { status: 400, body: { error: 'shape' } }
+      if (!takeNonce(nonce)) return { status: 400, body: { error: 'challenge', why: 'the challenge is unknown or expired; start again' } }
+      if (!await signedBy(peerId, enrollMessage(networkId, nonce, 'oidc:' + code), sig)) return { status: 400, body: { error: 'signature', why: 'not signed by the key of this PeerId' } }
+      let who
+      try {
+        who = await oidc.provider.redeem({ code, codeVerifier: verifier, redirectUri: oidc.redirectUri, nonce: oidcNonce(networkId, nonce, peerId), allowDomain: oidc.allowDomain, allowGroup: oidc.allowGroup })
+      } catch (e) {
+        const why = String(e?.message ?? e)
+        failIp(ip, why)
+        const error = why === 'domain' || why === 'group' ? why : 'sign-in'
+        return { status: 403, body: { error, why } }
+      }
+      const tag = oidc.record === 'email' ? (who.email ?? who.sub) : oidc.record === 'sub' ? `sub:${who.sub}` : ''
+      addToList(peerId, [tag, String(label ?? '')].filter(Boolean).join(' '))
+      return { status: 200, body: { ok: true, listed: true } }
+    },
 
     /** { status, body } - status is the HTTP code. */
     async enroll({ peerId, nonce, code, sig, label }, ip = '?') {
@@ -144,15 +203,7 @@ export function makeEnroll({ networkId, listFile, accessDir = dirname(listFile),
       if (counter === null) { fail(ip, 'no match'); return { status: 403, body: { error: 'code', why: 'wrong or expired code' } } }
       if (used.has(`${counter}:${code}`)) { fail(ip, 'used again'); return { status: 403, body: { error: 'code', why: 'this code was already used; wait for the next one' } } }
       used.set(`${counter}:${code}`, now() + 3 * STEP_S * 1000)
-      if (!listed().has(peerId)) {
-        let text = ''; try { text = readFileSync(listFile, 'utf8') } catch {}
-        const clean = String(label ?? '').replace(/[^\p{L}\p{N} ._,()-]/gu, '').slice(0, 60)
-        const line = `${peerId} ${clean ? clean + ' ' : ''}# enrolled ${new Date(now()).toISOString()}\n`
-        mkdirSync(dirname(listFile), { recursive: true })
-        const tmp = listFile + '.tmp'
-        writeFileSync(tmp, (text && !text.endsWith('\n') ? text + '\n' : text) + line); renameSync(tmp, listFile)
-        log(`[enroll] ok ${peerId.slice(-8)}${clean ? ` (${clean})` : ''}`)
-      }
+      addToList(peerId, String(label ?? '').slice(0, 60))
       return { status: 200, body: { ok: true, listed: true } }
     },
 
@@ -170,7 +221,20 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const listFile = process.env.ALLOW_PEERS
   const networkId = process.env.NETWORK_ID
   if (!listFile || !networkId) { console.error('enroll: ALLOW_PEERS and NETWORK_ID are needed'); process.exit(2) }
-  const e = makeEnroll({ networkId, listFile, accessDir: process.env.ACCESS_DIR || dirname(listFile) })
+  const env = process.env
+  let oidc = null
+  if (env.OIDC_ISSUER) {
+    const clientSecret = readFileSync(env.OIDC_CLIENT_SECRET_FILE ?? '', 'utf8').trim()
+    if (!env.OIDC_CLIENT_ID || !clientSecret || !env.OIDC_REDIRECT_URI) { console.error('enroll: OIDC_ISSUER needs OIDC_CLIENT_ID, OIDC_CLIENT_SECRET_FILE and OIDC_REDIRECT_URI'); process.exit(2) }
+    const record = ['sub', 'email'].includes(env.OIDC_RECORD) ? env.OIDC_RECORD : 'none'
+    oidc = {
+      provider: makeProvider({ issuer: env.OIDC_ISSUER, clientId: env.OIDC_CLIENT_ID, clientSecret }),
+      clientId: env.OIDC_CLIENT_ID, redirectUri: env.OIDC_REDIRECT_URI, scope: record === 'email' || env.OIDC_ALLOW_DOMAIN ? 'openid email' : 'openid',
+      allowDomain: env.OIDC_ALLOW_DOMAIN ?? '', allowGroup: env.OIDC_ALLOW_GROUP ?? '', record,
+    }
+    console.log(`[ok] enroll by sign-in at ${env.OIDC_ISSUER} (client ${env.OIDC_CLIENT_ID}; records ${record}${oidc.allowDomain ? `; domain ${oidc.allowDomain}` : ''}${oidc.allowGroup ? `; group ${oidc.allowGroup}` : ''})`)
+  }
+  const e = makeEnroll({ networkId, listFile, accessDir: process.env.ACCESS_DIR || dirname(listFile), oidc })
   const PORT = Number(process.env.ENROLL_PORT ?? 9204)
   const send = (res, status, body) => {
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store', 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type' })
@@ -181,12 +245,17 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
     const path = (req.url ?? '').split('?')[0].replace(/^\/onchato\/enroll/, '')
     // nginx passes the real address; without it every caller would share one budget.
     const ip = String(req.headers['x-real-ip'] ?? req.socket.remoteAddress ?? '?')
-    if (req.method === 'GET' && (path === '/challenge' || path === '')) return send(res, 200, e.challenge())
+    if (req.method === 'GET' && (path === '/challenge' || path === '')) {
+      try { return send(res, 200, await e.challenge(new URLSearchParams((req.url ?? '').split('?')[1] ?? '').get('for') ?? '')) }
+      catch (err) { return send(res, 502, { error: 'provider', why: String(err?.message ?? err) }) }
+    }
     if (req.method !== 'POST') return send(res, 405, { error: 'method' })
     let raw = ''
     for await (const chunk of req) { raw += chunk; if (raw.length > 4096) return send(res, 413, { error: 'too-big' }) }
     let body; try { body = JSON.parse(raw) } catch { return send(res, 400, { error: 'json' }) }
-    const r = path === '/status' ? await e.status(body) : path === '' || path === '/' ? await e.enroll(body, ip) : { status: 404, body: { error: 'path' } }
+    const r = path === '/status' ? await e.status(body)
+      : path === '' || path === '/' ? await (body?.method === 'oidc' ? e.enrollOidc(body, ip) : e.enroll(body, ip))
+      : { status: 404, body: { error: 'path' } }
     send(res, r.status, r.body)
   }).listen(PORT, '127.0.0.1', () => console.log(`[ok] enroll on 127.0.0.1:${PORT} for ${networkId}, list ${listFile}`))
 }
