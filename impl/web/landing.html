@@ -222,6 +222,9 @@
     font-family: var(--mono); font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums;
   }
   .host-foot b { color: var(--ink); font-weight: 600; }
+  /* The setup commands wrap inside the frame (a long download URL ran off its
+     edge on a phone); copying still gives one line - the wrap is only visual. */
+  #run pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   .join-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--hair); }
   .join-mode { padding: 22px 28px; min-width: 0; }
   .join-mode + .join-mode { border-left: 1px solid var(--hair); }
