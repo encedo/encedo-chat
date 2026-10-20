@@ -89,7 +89,10 @@ base64 = "0.22"
 # One running copy per machine. Not a nicety — see `wire()`: a second copy of
 # this app is a second window of the SAME IDENTITY, and the protocol's answer to
 # that is to close both sessions.
-tauri-plugin-single-instance = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+# `onchato://`: a company sign-in (OIDC) finished in the system browser comes
+# back to the app through it (relay/oidc.mjs, web/oidc.html).
+tauri-plugin-deep-link = "2"
 
 # Reaching the WebKitGTK settings behind the webview, to turn WebRTC ON. The
 # version is pinned to the one `wry` already links: two versions of this crate

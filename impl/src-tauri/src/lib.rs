@@ -106,6 +106,10 @@ mod desk {
         /// screen corner, in the live report) unless it asks for its old spot
         /// back — so the spot is saved at hide and spent at reveal.
         hidden_at: Mutex<Option<tauri::PhysicalPosition<i32>>>,
+        /// The last `onchato://oidc?...` the system handed us: a company
+        /// sign-in finished in the browser (oidc.html sends it here). Taken,
+        /// once, by the webview's short poll while it waits.
+        oidc: Mutex<Option<String>>,
         /// The session bus, held open for the life of the process. See
         /// `deliver` — this field IS the fix for the vanishing banners.
         #[cfg(target_os = "linux")]
@@ -135,6 +139,7 @@ mod desk {
                 save_title: Mutex::new("Save file".into()),
                 booted: std::sync::atomic::AtomicBool::new(false),
                 hidden_at: Mutex::new(None),
+                oidc: Mutex::new(None),
                 #[cfg(target_os = "linux")]
                 bus: Mutex::new(None),
                 // Assumed absent until proven present: the failure of hiding a
@@ -767,6 +772,29 @@ mod desk {
     /// Open a URL in the system browser — the only kind of "new window" this
     /// app has.
     ///
+    /// A company sign-in comes back as `onchato://oidc?code=..&state=..`
+    /// (the system opens us with it; a running copy gets it from the second
+    /// launch). Only that shape is kept, and only the last one: the code in it
+    /// is worthless without the PKCE verifier the webview holds and the client
+    /// secret the network's node holds, so a stray link costs nothing.
+    pub fn keep_oidc<R: Runtime>(app: &AppHandle<R>, urls: impl IntoIterator<Item = String>) {
+        let mut got = false;
+        for u in urls {
+            if u.starts_with("onchato://oidc?") && u.len() < 4096 {
+                *app.state::<Shell>().oidc.lock().unwrap() = Some(u);
+                got = true;
+            }
+        }
+        if got {
+            reveal(app);
+        }
+    }
+
+    #[tauri::command]
+    fn desk_take_oidc(shell: tauri::State<'_, Shell>) -> Option<String> {
+        shell.oidc.lock().unwrap().take()
+    }
+
     /// The webview forwards every `window.open` / `target="_blank"` to the
     /// host as a new-window request, and the shell installs no handler for
     /// those (a messenger opens no second webviews) — so without this command
@@ -1259,6 +1287,10 @@ mod desk {
         b.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             reveal(app);
         }))
+        // `onchato://` (a company sign-in coming back from the browser). With
+        // single-instance's `deep-link` feature, a second launch carrying the
+        // link hands it to this running copy (`on_open_url` below).
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_notification::init())
             .plugin(tauri_plugin_autostart::init(
                 tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -1302,6 +1334,7 @@ mod desk {
                 desk_diag_wipe,
                 desk_show,
                 desk_open_url,
+                desk_take_oidc,
                 desk_update_kind,
                 desk_appimage_status,
                 desk_appimage_install,
@@ -1415,6 +1448,22 @@ mod desk {
                     tauri::async_runtime::spawn(watch_tray_host(handle));
                 }
                 watch_main_thread(app.handle().clone());
+
+                {
+                    use tauri_plugin_deep_link::DeepLinkExt;
+                    // Linux has no installer step that tells the desktop who
+                    // opens onchato:// for an AppImage; the .deb's entry says
+                    // it too, and saying it again is harmless.
+                    #[cfg(target_os = "linux")]
+                    let _ = app.deep_link().register_all();
+                    if let Ok(Some(urls)) = app.deep_link().get_current() {
+                        keep_oidc(app.handle(), urls.iter().map(|u| u.to_string()));
+                    }
+                    let h = app.handle().clone();
+                    app.deep_link().on_open_url(move |e| {
+                        keep_oidc(&h, e.urls().iter().map(|u| u.to_string()));
+                    });
+                }
 
                 Ok(())
             })
