@@ -1632,17 +1632,19 @@ if (sweptPreKid) ecLog(`cleared ${sweptPreKid} local entries written before iden
 let netRefreshTimer: ReturnType<typeof setInterval> | null = null
 /**
  * True when the page is leaving: a new access rule changes how this device
- * dials (a stable key, the administrator's code), and a session that started
- * under the old one cannot be patched - the page reloads into the new rule and
- * reopens the same profile.
+ * dials and gets in (a stable key; the administrator's code or a company
+ * sign-in), and a session that started under the old one cannot be patched -
+ * the page reloads into the new rule and reopens the same profile.
  */
 async function refreshNetworkQuietly(): Promise<boolean> {
   const kept = localStorage.getItem(nodesKey(ACTIVE))
   const r = await autoRefreshNetwork(localKV(), ACTIVE, nowMs())
   if (!r.changed) { if (r.why) ecLog(`network profile: not refreshed (${r.why})`); return false }
   ecLog(`network profile: now version ${r.profile.seq}${r.nodesFollowed ? ', node list follows it' : kept ? ', your own node list kept' : ''}`)
-  if ((r.profile.policy?.access ?? 'open') !== (ACTIVE.policy.access ?? 'open')) {
-    ecLog(`network profile: access is now ${r.profile.policy?.access ?? 'open'} - reloading into it`)
+  // Who may come in (access) and how a device gets in (enroll) are both read at load.
+  const rule = (p: { access?: string; enroll?: unknown }) => JSON.stringify([p.access ?? 'open', p.enroll ?? null])
+  if (rule(r.profile.policy ?? {}) !== rule(ACTIVE.policy)) {
+    ecLog(`network profile: the access rule is now ${rule(r.profile.policy ?? {})} - reloading into it`)
     if (activeSoftProfile) localStorage.setItem(OPEN_PROFILE_KEY, activeSoftProfile)
     reloadPage('network access changed')
     return true
