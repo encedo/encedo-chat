@@ -85,7 +85,7 @@ export async function oidcBegin(url: string, networkId: string, peerKey: Uint8Ar
   if (!r.ok || typeof ch?.nonce !== 'string' || typeof ch.authorize !== 'string') throw new Error((ch as any)?.why ?? 'the node did not start a sign-in')
   if (new URL(ch.authorize).host !== new URL(issuer).host) throw new Error(`the node's sign-in address (${new URL(ch.authorize).host}) is not the network's provider (${new URL(issuer).host})`)
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)))
-  // `d.` marks a sign-in started by the packaged desktop app: oidc.html sends
+  // `d.` marks a sign-in started by a packaged app (desktop or phone): oidc.html sends
   // it on to onchato:// instead of to a browser window of the app.
   const state = statePrefix + b64url(crypto.getRandomValues(new Uint8Array(16)))
   const q = new URLSearchParams({

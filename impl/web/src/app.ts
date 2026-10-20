@@ -5379,14 +5379,16 @@ $('enroll-cancel')?.addEventListener('click', () => dropModal('enroll-modal'))
 // stays live: pressing it again drops the attempt still waiting and starts anew.
 let oidcCancel: (() => void) | null = null
 // How the sign-in comes back: in a browser, from oidc.html over a same-origin
-// BroadcastChannel; in the packaged desktop app, the provider opens in the
+// BroadcastChannel; in a packaged app (desktop or phone), the provider opens in the
 // SYSTEM browser and oidc.html sends the result to onchato:// (the host keeps
 // it, `takeOidc`), or the person pastes the code it shows when that does not
 // open the app. All three land in `oidcDeliver`.
 let oidcDeliver: ((m: { code: string; state?: string; error?: string; why?: string }) => void) | null = null
 async function enrollByOidc(url: string, issuer: string): Promise<EnrollResult> {
   oidcCancel?.()
-  const packaged = isDesktopShell() && !isMobileShell()
+  // Every packaged shell, desktop and phone: the sign-in opens in the system
+  // browser and comes back through onchato://.
+  const packaged = isDesktopShell()
   const w = packaged ? null : window.open('about:blank', 'onchato-oidc', 'popup,width=520,height=720')
   if (!packaged && !w) return { ok: false, error: 'popup' }
   let go: Awaited<ReturnType<typeof oidcBegin>>

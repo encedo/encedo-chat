@@ -31,9 +31,10 @@
 <!-- The provider's sign-in comes back here (the network's OIDC redirect URI).
      A sign-in started in a browser: the code goes to the app's window over a
      same-origin BroadcastChannel (the app runs under COOP, this window has no
-     opener). Started by the packaged desktop app (state "d."): the code goes on
-     to onchato://, which the system hands to the app - and is shown for pasting
-     when that does not happen. The code alone is useless: redeeming it needs the
+     opener). Started by a packaged app (state "d."): the code goes on to
+     onchato://, which the system hands to the app - and the page offers a
+     button for it (Chrome on Android follows an app link only from a tap) and
+     the code for pasting when neither works. The code alone is useless: redeeming it needs the
      verifier the app holds and the secret the network's node holds. Nothing
      here talks to the network. -->
 <script>

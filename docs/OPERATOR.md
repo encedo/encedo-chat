@@ -198,10 +198,10 @@ sign-in and brings the result back.
 number and the name it gave, as with codes. `sub`: also the provider's account
 id, a pseudonym. `email`: the e-mail, so `access list` shows whose device it is.
 A failed sign-in counts against the address (5 per 10 minutes) but never locks
-enrolment for everyone. The desktop app opens the sign-in in the system
-browser, which hands the result back through `onchato://` (the browser asks
-once whether to open onchato); when it does not, the page shows a code to
-paste into the app. The phone apps cannot sign in this way yet.
+enrolment for everyone. The desktop and phone apps open the sign-in in the
+system browser, which hands the result back through `onchato://` (the browser
+asks once whether to open onchato; on Android, tap "Open onchato" on the
+page); when it does not, the page shows a code to paste into the app.
 
 ## The dashboard
 
