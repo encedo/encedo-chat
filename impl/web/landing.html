@@ -222,6 +222,16 @@
     font-family: var(--mono); font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums;
   }
   .host-foot b { color: var(--ink); font-weight: 600; }
+  .join-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--hair); }
+  .join-mode { padding: 22px 28px; min-width: 0; }
+  .join-mode + .join-mode { border-left: 1px solid var(--hair); }
+  .join-mode h3 { font-family: var(--mono); font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--ink); }
+  .join-mode h3 span { color: var(--ember); margin-right: 6px; }
+  .join-mode p { margin: 0; font-size: 14px; color: var(--muted); }
+  @media (max-width: 760px) {
+    .join-modes { grid-template-columns: minmax(0, 1fr); }
+    .join-mode + .join-mode { border-left: 0; border-top: 1px solid var(--hair); }
+  }
 
   /* ---- honesty note: this project documents its limits, so the page does ---- */
   #security .host-foot { border-top: 0; }
@@ -458,25 +468,42 @@
         <p class="sec-label">Your own infrastructure</p>
         <div class="host">
           <div class="host-top">
-            <h2>Three commands to try it. One <span class="accent">$5 VPS</span> to run it.</h2>
+            <h2>One command for a network of your own. One <span class="accent">$5 VPS</span> to run it.</h2>
             <p>
-              Do not take our word for any of the above — run the network yourself. A node is a
-              single Node.js process with no database, no queue and nothing to administer.
-              The three lines below give a node on plain WebSocket, enough to try it; the apps
-              connect over TLS, so a node for real use gets nginx and a certificate in front —
-              <a href="https://github.com/encedo/encedo-chat/blob/main/relay/DEPLOY.md">relay/DEPLOY.md</a>
-              walks through it, firewall included.
+              Do not take our word for any of the above — run the network yourself. On a small
+              Ubuntu or Debian server with a DNS name, the setup script asks a few questions and
+              brings up the whole node in Docker: the relay, STUN, a Let's Encrypt certificate,
+              a file store if you want one, and a dashboard reachable only over SSH. It signs your
+              network's profile with a key that stays yours, and prints a join link and a QR code
+              for the same apps. Identities made there live in your network, not in ours.
+              <a href="https://github.com/encedo/encedo-chat/blob/main/docs/OPERATOR.md">The operator's guide</a>.
             </p>
           </div>
-<pre><span class="c"># any small Linux box, Node 22+</span>
-<span class="p">$</span> git clone https://github.com/encedo/encedo-chat
-<span class="p">$</span> cd encedo-chat/relay &amp;&amp; npm ci
-<span class="p">$</span> node relay.mjs --pass "my-node" --port 9001 --bind 0.0.0.0</pre>
+<pre><span class="c"># Ubuntu or Debian, with a DNS name pointing at the server</span>
+<span class="p">$</span> curl -fsSLO https://github.com/encedo/encedo-chat/releases/latest/download/onchato-setup.sh
+<span class="p">$</span> sudo bash onchato-setup.sh</pre>
+          <div class="join-modes">
+            <div class="join-mode">
+              <h3><span>1</span>Anyone with the link</h3>
+              <p>An open network: the join link or QR code is all it takes.</p>
+            </div>
+            <div class="join-mode">
+              <h3><span>2</span>Devices you let in</h3>
+              <p>Each new device also needs an 8-digit code from your authenticator app.
+                Taking a device off the list drops it within seconds.</p>
+            </div>
+            <div class="join-mode">
+              <h3><span>3</span>Company accounts</h3>
+              <p>One sign-in per device at your identity provider — Entra ID, Google Workspace,
+                Keycloak or any OpenID Connect one — in the browser or the desktop app.</p>
+            </div>
+          </div>
           <div class="host-foot">
-            <span><b>63 MB</b> idle</span>
+            <span><b>63 MB</b> idle relay</span>
             <span><b>192 MB</b> at 520 live sessions</span>
             <span><b>~4000</b> sessions per GB</span>
             <span><b>1 vCPU</b> measured</span>
+            <span>2 and 3: a node knows a device by a fixed number; what it records about the person is your stated policy, shown before anyone joins</span>
           </div>
         </div>
       </section>
