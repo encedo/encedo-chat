@@ -42,6 +42,11 @@ enroll)
   # (OIDC_*; relay/oidc.mjs), the device's signature, onto ALLOW_PEERS.
   : "${ALLOW_PEERS:?ALLOW_PEERS is not set}" "${NETWORK_ID:?NETWORK_ID is not set}"
   mkdir -p "$(dirname "$ALLOW_PEERS")"
+  # The setup script stores the client secret after the containers are up (it
+  # needs the ops image they build): wait for it rather than fail the first start.
+  if [ -n "${OIDC_ISSUER:-}" ] && [ -n "${OIDC_CLIENT_SECRET_FILE:-}" ]; then
+    i=0; while [ ! -s "$OIDC_CLIENT_SECRET_FILE" ] && [ $i -lt 120 ]; do sleep 1; i=$((i + 1)); done
+  fi
   cd /app/relay
   exec node enroll.mjs
   ;;
