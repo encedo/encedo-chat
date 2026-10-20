@@ -227,7 +227,8 @@
   .join-mode + .join-mode { border-left: 1px solid var(--hair); }
   .join-mode h3 { font-family: var(--mono); font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--ink); }
   .join-mode h3 span { color: var(--ember); margin-right: 6px; }
-  .join-mode p { margin: 0; font-size: 14px; color: var(--muted); }
+  .join-mode p { margin: 0; font-size: 14px; color: var(--muted); text-wrap: pretty; }
+  .join-note { margin: 0; padding: 16px 28px; border-top: 1px solid var(--hair); font-size: 13.5px; color: var(--muted); text-wrap: pretty; }
   @media (max-width: 760px) {
     .join-modes { grid-template-columns: minmax(0, 1fr); }
     .join-mode + .join-mode { border-left: 0; border-top: 1px solid var(--hair); }
@@ -489,7 +490,7 @@
             </div>
             <div class="join-mode">
               <h3><span>2</span>Devices you let in</h3>
-              <p>Each new device also needs an 8-digit code from your authenticator app.
+              <p>Each new device also needs an 8&#8209;digit code from your authenticator app.
                 Taking a device off the list drops it within seconds.</p>
             </div>
             <div class="join-mode">
@@ -498,12 +499,13 @@
                 Keycloak or any OpenID Connect one — in the browser or the desktop app.</p>
             </div>
           </div>
+          <p class="join-note">With 2 and 3 a node knows each device by a fixed number. What it records
+            about the person is your stated policy, shown to them before they join.</p>
           <div class="host-foot">
             <span><b>63 MB</b> idle relay</span>
             <span><b>192 MB</b> at 520 live sessions</span>
             <span><b>~4000</b> sessions per GB</span>
             <span><b>1 vCPU</b> measured</span>
-            <span>2 and 3: a node knows a device by a fixed number; what it records about the person is your stated policy, shown before anyone joins</span>
           </div>
         </div>
       </section>
