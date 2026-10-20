@@ -537,7 +537,9 @@ checks() {
   check "https://$NODE_HOST/health answers (DNS, TLS, nginx)" "curl -fs $k --max-time 5 https://$NODE_HOST/health"
   check "the relay takes a WebSocket (101)" "{ curl -s $k -i -N --max-time 3 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: $(head -c16 /dev/urandom | base64)' https://$NODE_HOST/relay || true; } | head -1 | grep -q ' 101'"
   if [ "${SERVE_APP:-}" = yes ]; then
-    check "the app is served at https://$NODE_HOST/ (with its network.js)" "curl -fs $k --max-time 5 https://$NODE_HOST/ | grep -q 'src=\"network.js\"' && curl -fs $k --max-time 5 https://$NODE_HOST/network.js | grep -q __EC_OPERATOR_NETWORK__"
+    # Not `grep -q`: it stops reading at the first match, curl then dies on a
+    # closed pipe, and under pipefail a page that is right reads as a failure.
+    check "the app is served at https://$NODE_HOST/ (with its network.js)" "curl -fs $k --max-time 5 https://$NODE_HOST/ | grep -F 'src=\"network.js\"' && curl -fs $k --max-time 5 https://$NODE_HOST/network.js | grep -F __EC_OPERATOR_NETWORK__"
   fi
   check "STUN answers on 3478/udp" "docker run --rm --network host --entrypoint node onchato-ops /app/impl/net/stun-probe.ts ${STUN_HOST:-$NODE_HOST}"
   if [ -f "$DATA/profile/network.json" ]; then
