@@ -142,7 +142,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Węzeł zapisze przy nim identyfikator Twojego konta (bez imienia i adresu).': 'The node will record your account id with it (no name, no address).',
     'Węzeł nie zapisze, kim jesteś.': 'The node will not record who you are.',
     'Zaloguj się kontem firmy': 'Sign in with the company account',
-    'Dokończ logowanie w otwartym oknie…': 'Finish signing in in the window that opened…',
+    'Dokończ logowanie w otwartym oknie. Zamknięte albo nie działa? Naciśnij przycisk jeszcze raz.': 'Finish signing in in the window that opened. Closed, or not working? Press the button again.',
     'Przeglądarka zablokowała okno logowania. Zezwól na wyskakujące okna dla tej strony i spróbuj ponownie.': 'The browser blocked the sign-in window. Allow pop-ups for this page and try again.',
     'Logowanie nie wróciło w ciągu 10 minut. Spróbuj ponownie.': 'The sign-in did not come back within 10 minutes. Try again.',
     'To konto nie należy do firmy, która prowadzi tę sieć.': 'This account does not belong to the company that runs this network.',

@@ -5341,7 +5341,7 @@ async function checkEnrolled(key: Uint8Array) {
   return url ? deviceStatus(url, ACTIVE.id, key) : null
 }
 let enrollDone: ((ok: boolean) => void) | null = null
-MODAL_EXIT['enroll-modal'] = () => { const d = enrollDone; enrollDone = null; d?.(false) }
+MODAL_EXIT['enroll-modal'] = () => { oidcCancel?.(); const d = enrollDone; enrollDone = null; d?.(false) }
 /** The administrator's code, until it works or the person says "not now". */
 function enrollFlow(key: Uint8Array, locked: boolean): Promise<boolean> {
   if (enrollDone) return Promise.resolve(false)
@@ -5372,23 +5372,33 @@ $('enroll-cancel')?.addEventListener('click', () => dropModal('enroll-modal'))
  * the node has given its challenge; the code comes back from oidc.html over a
  * same-origin BroadcastChannel - under COOP the sign-in window has no opener.
  */
+// Whether the sign-in window was closed cannot be seen (under COOP the page
+// loses its handle the moment the window goes to the provider), so the button
+// stays live: pressing it again drops the attempt still waiting and starts anew.
+let oidcCancel: (() => void) | null = null
 async function enrollByOidc(url: string, issuer: string): Promise<EnrollResult> {
+  oidcCancel?.()
   const w = window.open('about:blank', 'onchato-oidc', 'popup,width=520,height=720')
   if (!w) return { ok: false, error: 'popup' }
   let go: Awaited<ReturnType<typeof oidcBegin>>
   try { go = await oidcBegin(url, ACTIVE.id, netPeerKey!, issuer) } catch (e: any) { try { w.close() } catch {} ; return { ok: false, error: 'provider', why: String(e?.message ?? e) } }
-  const back = new Promise<{ code: string; error: string; why: string } | null>((resolve) => {
+  const back = new Promise<{ code: string; error: string; why: string } | 'cancelled' | null>((resolve) => {
     const ch = new BroadcastChannel('onchato-oidc')
-    const t = setTimeout(() => { ch.close(); resolve(null) }, 10 * 60_000)
+    const done = (v: any) => { clearTimeout(t); ch.close(); if (oidcCancel === cancel) oidcCancel = null; resolve(v) }
+    const t = setTimeout(() => done(null), 10 * 60_000)
+    const cancel = () => done('cancelled')
+    oidcCancel = cancel
     ch.onmessage = (ev) => {
       const m = ev.data
       if (!m?.oidc || m.state !== go.state) return
-      clearTimeout(t); ch.close(); resolve(m)
+      done(m)
     }
   })
   w.location.href = go.authorizeUrl
-  setMsg('enroll-msg', tr('Dokończ logowanie w otwartym oknie…'), '')
+  ;($('enroll-go') as HTMLButtonElement).disabled = false
+  setMsg('enroll-msg', tr('Dokończ logowanie w otwartym oknie. Zamknięte albo nie działa? Naciśnij przycisk jeszcze raz.'), '')
   const m = await back
+  if (m === 'cancelled') return { ok: false, error: 'cancelled' }
   if (!m) return { ok: false, error: 'timeout' }
   if (m.error) return { ok: false, error: 'sign-in', why: m.why || m.error }
   return enrollDeviceOidc(url, ACTIVE.id, netPeerKey!, go.challenge, m.code, go.verifier, ($('enroll-label') as HTMLInputElement).value.trim())
@@ -5404,6 +5414,7 @@ $('enroll-go')?.addEventListener('click', async () => {
   btn.disabled = true
   try {
     const r = oidc ? await enrollByOidc(url, oidc.issuer) : await enrollDevice(url, ACTIVE.id, netPeerKey, code, ($('enroll-label') as HTMLInputElement).value.trim())
+    if (!r.ok && r.error === 'cancelled') return // a newer press took over
     if (r.ok) {
       const d = enrollDone; enrollDone = null
       dropModal('enroll-modal'); toast(tr('Urządzenie wpuszczone do sieci.'))
