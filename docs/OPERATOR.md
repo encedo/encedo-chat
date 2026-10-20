@@ -128,12 +128,14 @@ minutes, until the other side downloads them. The script offers three choices:
 
 ## Who can join
 
-The script asks once:
+The script asks at setup (and again with `--access`):
 
 1. **Anyone with the join code** (an open network). The network page shows the
    code publicly, so treat it like an open door.
 2. **Only devices you let in.** Joining then takes the join code **and** a
    current 8-digit code from your authenticator app.
+3. **Only people with a company account.** Joining takes the join code and a
+   sign-in at your identity provider (below: "Sign-in with company accounts").
 
 **Setting up choice 2.** At the end of the setup the script shows a QR code.
 Add it **once** to an authenticator that shows 8 digits: Google Authenticator,
