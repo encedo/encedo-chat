@@ -8,7 +8,8 @@
 import { HEM } from '../../hem-sdk-js/hem-sdk.js'
 import { diffieHellman } from 'node:crypto'
 import { Keystore, rawToPriv, rawToPub } from './keystore.ts'
-import { hemIdentityFrom, type Identity } from '../lib/core.ts'
+import { hemIdentityFrom, hemWarmTokens, collect, type Identity } from '../lib/core.ts'
+import { b64 } from '../lib/wc.ts'
 import { deriveOverEcdh } from '../lib/derive.ts'
 import { SELF_PREFIX, buildSelfDescr, parseSelfDescr, selfLabel } from '../lib/descr.ts'
 
@@ -44,16 +45,17 @@ export async function hemSignIn(
   const hem = new HEM(url)
   await hem.hemCheckin()
   const listTok = await hem.authorizePassword(password, 'keymgmt:list')
-  const keys: any[] = await hem.searchKeys(listTok, SELF_PREFIX)
+  const keys: any[] = await collect(hem.searchKeysAll(listTok, SELF_PREFIX)) // every page, not the first 15
   const ids: HemChoice[] = keys.map((k) => ({ kid: String(k.kid), handle: parseSelfDescr(k.description)?.handle || '(?)' }))
   const chosen = await selectIdentity(ids, handleHint, choose)
   // Signing in never creates: a typo in a command must not mint an identity in
   // somebody's hardware. That is `onchato-cli hem new <name>` (hemCreate), on purpose.
   if (!chosen) throw new Error('this HEM holds no onchato identity - create one with: onchato-cli hem new <name> --hem <url>')
   const { kid, handle } = chosen
+  await hemWarmTokens(hem, kid) // one authorisation for the first three scopes
   const useTok = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
-  const { pubkey } = await hem.getPubKey(useTok, kid)
-  return { id: hemIdentityFrom(hem, kid, handle, pubkey), hem, kid }
+  const { pubkey } = await hem.getKeyPublicInfo(useTok, kid)
+  return { id: hemIdentityFrom(hem, kid, handle, b64(pubkey)), hem, kid }
 }
 
 /**
@@ -85,11 +87,9 @@ export async function hemCreate(url: string, password: string, handle: string): 
   const hem = new HEM(url)
   await hem.hemCheckin()
   const gen = await hem.authorizePassword(password, 'keymgmt:gen')
-  const descrB64 = Buffer.from(buildSelfDescr(handle), 'utf8').toString('base64')
-  const kid = (await hem.createKeyPair(gen, selfLabel(handle), 'CURVE25519', descrB64)).kid
-  const useTok = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
-  const { pubkey } = await hem.getPubKey(useTok, kid)
-  return { id: hemIdentityFrom(hem, kid, handle, pubkey), hem, kid }
+  const k = await hem.createKeyPair(gen, selfLabel(handle), 'CURVE25519', { descr: buildSelfDescr(handle), returnPubkey: true })
+  const pubkey: Uint8Array = k.pubkey ?? (await hem.getKeyPublicInfo(await hem.authorizePassword(null, `keymgmt:use:${k.kid}`), k.kid)).pubkey
+  return { id: hemIdentityFrom(hem, k.kid, handle, b64(pubkey)), hem, kid: k.kid }
 }
 
 /** Software identity (dev/test). Creates the keystore if missing. */

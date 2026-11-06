@@ -25,29 +25,21 @@
  * The password comes from the environment, never an argument — arguments are
  * visible to every process on the box via /proc.
  *
- * -- TODO, firmware >= 2026-08-10: cover `ecdhDerive` (HKDF in the device) --
- *
- * The new firmware adds
- *   `ecdhDerive(token, kid, peerPub, salt, info, len)
- *      = HKDF-SHA256(ikm = X25519(priv[kid], peerPub), salt, info, len)`
- * under the SAME `keymgmt:use:<kid>` scope (salt <=64 B, info <=128 B, len <=64 B).
- * It is what closes the gap this whole spike works around: today the pair secret
- * `ss` transits client RAM because the HKDF happens here, not in the device.
- *
- * The check that matters is one equality — in-device against client-side over
- * the raw ECDH, same salt and info, byte for byte. If those differ, every
- * rendezvous topic derived either way lands in a different room, and the failure
- * presents as "the other person never shows up".
- *
- * Then the `wm` scheme (see the window-key note): the device derives
- * `wm = HKDF(ss, "encedo-chat-window-v1", paramsInfo(date, offset), 32)` and the
- * host derives topic and MAC key from `wm` — so a host compromise yields one
- * window, not every window this pair will ever use.
+ *   5. Firmware 1.3: does HKDF in the device (`ecdhHkdf`) give exactly what the
+ *      client computes over the raw ECDH, same salt and info, byte for byte?
+ *      If not, every rendezvous topic derived either way lands in a different
+ *      room, and the failure presents as "the other person never shows up".
+ *      Covered: several outputs from one ECDH, an empty context (no salt), a
+ *      16-byte output whose first 4 bytes are the 4-byte one (the rotation
+ *      offset asks the device for 16), a peer stored in the HEM (`extKid`), and
+ *      DH with the key's own public key (the self-topic). The raw comparison
+ *      needs the `raw_ecdh_enabled` policy; without it the equality is skipped
+ *      and said so.
  */
 
 import { HEM } from '../../hem-sdk-js/hem-sdk.js'
 import { generateX25519 } from '../lib/x25519.ts'
-import { b64, unb64, sha256 } from '../lib/wc.ts'
+import { b64, unb64, sha256, kdf } from '../lib/wc.ts'
 import { buildMarker, parseMarker, MARKER_PREFIX, MARKER_SEARCH, DESCR_MAX, byteLen } from '../lib/gmarker.ts'
 import { groupIdFromGK } from '../lib/group.ts'
 
@@ -84,34 +76,82 @@ try {
     name: 'gk-selftest',
   })
   const gen = await hem.authorizePassword(pass, 'keymgmt:gen')
-  const asB64 = (s: string) => b64(new TextEncoder().encode(s))
-  const created = await hem.createKeyPair(gen, 'chat-gk-selftest', 'CURVE25519', asB64(marker0.descr))
+  const created = await hem.createKeyPair(gen, 'chat-gk-selftest', 'CURVE25519', { descr: marker0.descr, returnPubkey: true })
   gkKid = created.kid
   ok(!!gkKid, 'createKeyPair CURVE25519 returned a kid', gkKid)
   ok(/^[0-9a-f]+$/i.test(gkKid), 'KID is hex (hint packing depends on this)', `${gkKid.length} chars`)
 
   const use = await hem.authorizePassword(pass, `keymgmt:use:${gkKid}`)
-  const { pubkey, type } = await hem.getPubKey(use, gkKid)
-  const gkPub = unb64(pubkey)
+  const { pubkey: gkPub, type } = await hem.getKeyPublicInfo(use, gkKid)
   ok(gkPub.length === 32, 'GK_pub is 32 raw bytes', `type=${type}`)
-  console.log(`    GK_pub (base64) ${pubkey}`)
+  ok(!!created.pubkey && hex(created.pubkey) === hex(gkPub), 'createKeyPair returnPubkey hands back the same key (no second read)')
+  console.log(`    GK_pub (base64) ${b64(gkPub)}`)
   console.log(`    GK_pub (hex)    ${hex(gkPub)}`)
   const gid = await groupIdFromGK(gkPub)
   ok(gid.length === 16, 'gid = SHA-256(GK_pub)[0:16]', hex(gid))
 
   // ---- 2. THE property the roster MAC rests on ----------------------------
   step('ECDH commutativity: in-device GK vs client-side member')
-  const ssAdmin = new Uint8Array(await hem.ecdh(use, gkKid, b64(member.pub)))
+  // The member side is software X25519, so this is the reference for every
+  // derivation below whether or not the device may hand out the raw secret.
   const ssMember = await member.dh(gkPub)
-  ok(ssAdmin.length === 32, 'the device returned a 32-byte raw secret')
-  ok(hex(ssAdmin) === hex(ssMember),
-    'ECDH(GK_priv, IK_member) in-device == ECDH(IK_member, GK_pub) client-side',
-    'this is what makes an admin roster MAC verifiable by a member')
+  let raw: Uint8Array | null = null
+  try {
+    raw = await hem.ecdh(use, gkKid, { pubkey: member.pub })
+  } catch (e: any) {
+    if (e?.code !== 'http_403') throw e
+    console.log('    (no raw_ecdh_enabled policy: raw ECDH refused, as firmware 1.3 does by default)')
+  }
+  if (raw) {
+    ok(raw.length === 32, 'the device returned a 32-byte raw secret')
+    ok(hex(raw) === hex(ssMember),
+      'ECDH(GK_priv, IK_member) in-device == ECDH(IK_member, GK_pub) client-side',
+      'this is what makes an admin roster MAC verifiable by a member')
+    const again = await hem.ecdh(use, gkKid, { pubkey: member.pub })
+    ok(hex(again) === hex(raw), 'ecdh is deterministic across calls')
+  }
 
-  // A second call must be identical — the memo caches this value for the life
-  // of the group, so a device that varied here would break every later epoch.
-  const again = new Uint8Array(await hem.ecdh(use, gkKid, b64(member.pub)))
-  ok(hex(again) === hex(ssAdmin), 'ecdh is deterministic across calls (the memo relies on it)')
+  // ---- 2b. firmware 1.3: HKDF in the device == HKDF here ------------------
+  step('HKDF in the device (ecdhHkdf) == HKDF over the same ECDH in the client')
+  const label = 'onchato-selftest-v1'                    // 'encedo-...' is reserved by the device
+  const ctx = new TextEncoder().encode('main\x002026-11-07') // the shape of a rendezvous context
+  const [okmA, okmB, okm16] = await hem.ecdhHkdf(use, gkKid, {
+    pubkey: member.pub,
+    items: [
+      { hkdfSalt: ctx, hkdfCtx: label, hkdfLen: 32 },
+      { hkdfCtx: label + '-nosalt', hkdfLen: 32 },      // empty context: no salt at all
+      { hkdfSalt: ctx, hkdfCtx: label, hkdfLen: 16 },
+    ],
+  })
+  ok(hex(okmA) === hex(await kdf(label, ssMember, ctx, 32)), 'one item: device == client HKDF(ss, salt=ctx, info=label, 32)')
+  ok(hex(okmB) === hex(await kdf(label + '-nosalt', ssMember, new Uint8Array(0), 32)), 'no salt: device == client HKDF with an empty salt')
+  ok(hex(okm16) === hex(okmA.subarray(0, 16)), 'a shorter output is the prefix of a longer one (so 4 bytes = first 4 of 16)')
+  ok(hex(okm16.subarray(0, 4)) === hex(await kdf(label, ssMember, ctx, 4)), 'the first 4 of 16 == a client 4-byte HKDF (rotation offset)')
+  const single = await hem.ecdh(use, gkKid, { pubkey: member.pub, alg: 'HKDF-SHA2-256', hkdfSalt: ctx, hkdfCtx: label, hkdfLen: 32 })
+  ok(hex(single) === hex(okmA), 'ecdh with alg HKDF == the same item of ecdhHkdf')
+
+  // A peer stored in the HEM: the two-KID form of a contact.
+  let impKid = ''
+  try {
+    const imp = await hem.authorizePassword(pass, 'keymgmt:imp')
+    impKid = (await hem.importPublicKey(imp, 'chat-gk-selftest-peer', 'CURVE25519', member.pub, { descr: 'onchato-selftest' })).kid
+    const [viaKid] = await hem.ecdhHkdf(use, gkKid, { extKid: impKid, items: [{ hkdfSalt: ctx, hkdfCtx: label, hkdfLen: 32 }] })
+    ok(hex(viaKid) === hex(okmA), 'a stored peer (extKid) derives the same as its raw public key')
+  } finally {
+    if (impKid) await hem.deleteKey(await hem.authorizePassword(pass, 'keymgmt:del'), impKid).catch(() => {})
+  }
+
+  // DH with the key's own public key: the self-topic (§9.1) and the decoy seed.
+  const [self] = await hem.ecdhHkdf(use, gkKid, { pubkey: gkPub, items: [{ hkdfCtx: label, hkdfLen: 32 }] })
+  ok(self.length === 32, 'DH with its own public key is allowed (self-topic)')
+
+  // The reserved prefix: what made every 'encedo-chat-...' label unusable.
+  let reserved = ''
+  try {
+    await hem.ecdhHkdf(use, gkKid, { pubkey: member.pub, items: [{ hkdfCtx: 'encedo-chat-rendezvous-v1' }] })
+    reserved = 'accepted'
+  } catch (e: any) { reserved = e?.code ?? 'error' }
+  ok(reserved !== 'accepted', "an info starting with 'encedo-' is refused (by the SDK, which mirrors the device's rule)", reserved)
 
   // ---- 3. the marker: rewrite (membership change) and find it -------------
   step('marker: updateKey (bucket D write path)')
@@ -120,13 +160,14 @@ try {
   let updOk = true
   try {
     const upd = await hem.authorizePassword(pass, 'keymgmt:upd')
-    await hem.updateKey(upd, gkKid, 'chat-gk-selftest', asB64(real.descr))
+    await hem.updateKey(upd, gkKid, 'chat-gk-selftest', real.descr)
   } catch (e: any) { updOk = false; ok(false, 'updateKey with scope keymgmt:upd', e?.message ?? String(e)) }
   if (updOk) ok(true, 'updateKey with scope keymgmt:upd')
 
   step('marker: key_search by prefix, and the DESCR round trip')
   const listTok = await hem.authorizePassword(pass, 'keymgmt:list')
-  const found: any[] = await hem.searchKeys(listTok, MARKER_SEARCH)
+  const found: any[] = []
+  for await (const k of hem.searchKeysAll(listTok, MARKER_SEARCH)) found.push(k)
   const mine = found.find((k) => k.kid === gkKid)
   ok(!!mine, `searchKeys("${MARKER_SEARCH}") returns the group`, `${found.length} marker key(s) on this HEM`)
   if (mine) {

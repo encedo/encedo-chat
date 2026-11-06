@@ -19,10 +19,10 @@
  * Remember a public key under its KID for the lifetime of this wrapper.
  *
  * `KID = SHA-1(pub)[0:16]` is a hash of the key's own content, so the answer
- * cannot change while the entry exists — and the current firmware does not
- * return public keys from `key_search`, so the contact book pays one `getPubKey`
- * per contact on every load. A trace of one sign-in fetched the same key three
- * times, at about a second each.
+ * cannot change while the entry exists. A device without the
+ * `pubkey_in_search` policy does not return public keys from `key_search`, so
+ * the contact book pays one `getKeyPublicInfo` per contact on every load. A
+ * trace of one sign-in fetched the same key three times, at about a second each.
  *
  * The PROMISE is cached, so callers that want the same key while the device is
  * working share the call. A failure is not remembered.
@@ -33,7 +33,7 @@ export function cachePubKeys(hem: any): any {
     get(target, prop, recv) {
       const v = Reflect.get(target, prop, recv)
       if (typeof v !== 'function') return v
-      if (prop !== 'getPubKey') return v.bind(target)
+      if (prop !== 'getKeyPublicInfo') return v.bind(target)
       return (token: string, kid: string, ...rest: any[]) => {
         const k = String(kid).toLowerCase()
         let p = byKid.get(k)
@@ -69,17 +69,19 @@ const CALLS: Record<string, (a: any[]) => string> = {
   getVersion: () => 'device version',
   getStatus: () => 'device status',
   getAttestation: () => 'device attestation',
-  authorizePassword: (a) => `access token for scope ${a[1]}`,
-  authorizeRemote: (a) => `remote access token for scope ${a[0]}`,
-  listKeys: () => 'key list',
-  searchKeys: (a) => `key search "${a[1]}"`,
-  getPubKey: (a) => `public key of KID=${kidish(a[1])}`,
+  authorizePassword: (a) => `access token for scope ${[a[1]].flat().join(' + ')}`,
+  authorizeRemote: (a) => `remote access token for scope ${[a[0]].flat().join(' + ')}`,
+  listKeys: (a) => `key list from ${a[1]?.offset ?? 0}`,
+  searchKeys: (a) => `key search "${a[1]}" from ${a[2]?.offset ?? 0}`,
+  getKeyPublicInfo: (a) => `public key of KID=${kidish(a[1])}`,
   createKeyPair: (a) => `new ${a[2]} key pair, label "${a[1]}"`,
   importPublicKey: (a) => `import of ${a[2]} public key, label "${a[1]}"`,
   updateKey: (a) => `update of KID=${kidish(a[1])} -> label "${a[2]}"`,
   deleteKey: (a) => `delete of KID=${kidish(a[1])}`,
-  ecdh: (a) => `ECDH: KID=${kidish(a[1])} x a peer public key`,
-  ecdhKid: (a) => `ECDH: KID=${kidish(a[1])} x KID=${kidish(a[2])}`,
+  // Which operand is the peer, and whether the secret leaves the device (no
+  // alg) or only HKDF output does. Never the salt, context or the key bytes.
+  ecdh: (a) => `ECDH: KID=${kidish(a[1])} x ${a[2]?.extKid ? `KID=${kidish(a[2].extKid)}` : 'a peer public key'}${a[2]?.alg ? ` -> ${a[2].alg}` : ' (raw)'}`,
+  ecdhHkdf: (a) => `ECDH+HKDF: KID=${kidish(a[1])} x ${a[2]?.extKid ? `KID=${kidish(a[2].extKid)}` : 'a peer public key'}, ${a[2]?.items?.length ?? '?'} output(s)`,
   deriveKey: (a) => `derived key, label "${a[1]}"`,
 }
 

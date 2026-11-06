@@ -26,6 +26,9 @@ import { parseMarker, hemKid } from '../lib/gmarker.ts'
 
 const P = { networkId: 'gkhem', dateUTC: '2026-08-04' }
 const dec = (b64s: string) => new TextDecoder().decode(unb64(b64s))
+// The SDK takes a DESCR as text (sent as its UTF-8 bytes); the fake keeps it
+// base64 as the device answers it, so `dec` reads it back.
+const enc = (text: string | Uint8Array) => b64(typeof text === 'string' ? new TextEncoder().encode(text) : text)
 
 async function softId(): Promise<GroupId> {
   const k = await generateX25519()
@@ -40,25 +43,25 @@ async function softId(): Promise<GroupId> {
  */
 function fakeHem() {
   const keys = new Map<string, { priv: Uint8Array; pub: Uint8Array; label: string; descr: string }>()
-  const calls = { ecdh: 0, createKeyPair: 0, getPubKey: 0, authorize: 0, updateKey: 0, deleteKey: 0, importPublicKey: 0, searchKeys: 0 }
+  const calls = { ecdh: 0, createKeyPair: 0, getKeyPublicInfo: 0, authorize: 0, updateKey: 0, deleteKey: 0, importPublicKey: 0, searchKeys: 0 }
   let n = 0
   return {
     calls,
     keys,
-    async authorizePassword(_pw: string | null, scope: string) { calls.authorize++; return `tok:${scope}` },
-    async createKeyPair(_t: string, label: string, type: string, descr: string) {
+    async authorizePassword(_pw: string | null, scope: string | string[]) { calls.authorize++; return `tok:${scope}` },
+    async createKeyPair(_t: string, label: string, type: string, opts: { descr?: string; returnPubkey?: boolean } = {}) {
       calls.createKeyPair++
       assert.equal(type, 'CURVE25519', 'GK must be an X25519 key')
       const priv = randomBytes(32)
       const pub = (await x25519FromPriv(priv)).pub
       const kid = `kid-${++n}`
-      keys.set(kid, { priv, pub, label, descr })
-      return { kid }
+      keys.set(kid, { priv, pub, label, descr: enc(opts.descr ?? '') })
+      return { kid, pubkey: opts.returnPubkey ? pub : null }
     },
     async updateKey(_t: string, kid: string, label: string, descr: string) {
       calls.updateKey++
       const k = keys.get(kid); if (!k) throw new Error('no such kid')
-      keys.set(kid, { ...k, label, descr })
+      keys.set(kid, { ...k, label, descr: enc(descr) })
       return {}
     },
     async deleteKey(_t: string, kid: string) {
@@ -66,34 +69,37 @@ function fakeHem() {
       if (!keys.delete(kid)) throw new Error('no such kid')
       return {}
     },
-    async getPubKey(_t: string, kid: string) {
-      calls.getPubKey++
+    async getKeyPublicInfo(_t: string, kid: string) {
+      calls.getKeyPublicInfo++
       const k = keys.get(kid); if (!k) throw new Error('no such kid')
-      return { pubkey: b64(k.pub), type: 'CURVE25519', updated: 0 }
+      return { kid, pubkey: k.pub, type: 'CURVE25519', updated: 0 }
     },
-    async ecdh(_t: string, kid: string, peerPubB64: string) {
+    async ecdh(_t: string, kid: string, peer: { pubkey?: Uint8Array; extKid?: string }) {
       calls.ecdh++
       const k = keys.get(kid); if (!k) throw new Error('no such kid')
-      return (await x25519FromPriv(k.priv)).dh(unb64(peerPubB64))
+      const peerPub = peer.pubkey ?? keys.get(peer.extKid ?? '')?.pub
+      if (!peerPub) throw new Error('no peer')
+      return (await x25519FromPriv(k.priv)).dh(peerPub)
     },
     // Anchored PREFIX matching, as the device does it — the owner filter is the
     // whole scoping mechanism, so a stub that ignored the prefix would let a
-    // broken one pass.
-    async searchKeys(_t: string, pat: string) {
+    // broken one pass. Public keys come back as on a device with the
+    // `pubkey_in_search` policy.
+    async *searchKeysAll(_t: string, pat: string, opts: { returnPubkey?: boolean } = {}) {
       calls.searchKeys++
-      return [...keys.entries()]
-        .filter(([, k]) => dec(k.descr).startsWith(pat))
-        .map(([kid, k]) => ({ kid, label: k.label, type: 'CURVE25519', description: unb64(k.descr) }))
+      for (const [kid, k] of [...keys.entries()].filter(([, k]) => dec(k.descr).startsWith(pat))) {
+        yield { kid, label: k.label, type: 'CURVE25519', description: unb64(k.descr), pubkey: opts.returnPubkey ? k.pub : null }
+      }
     },
     // A device holds one public key ONCE, whatever DESCR it sits under: the KID
     // indexes the key's content. Modelled here, because it is the rule the
     // member-marker path has to survive rather than assume away.
-    async importPublicKey(_t: string, label: string, type: string, pub: Uint8Array, descr: string) {
+    async importPublicKey(_t: string, label: string, type: string, pub: Uint8Array, opts: { descr?: string } = {}) {
       calls.importPublicKey++
       assert.equal(type, 'CURVE25519')
       const kid = await hemKid(pub)
       if (keys.has(kid)) throw new Error('key already present')
-      keys.set(kid, { priv: new Uint8Array(0), pub, label, descr })
+      keys.set(kid, { priv: new Uint8Array(0), pub, label, descr: enc(opts.descr ?? '') })
       return { kid }
     },
   }
@@ -121,7 +127,7 @@ test('a HEM-backed GK is indistinguishable from a software one to a member', asy
   const gkPub = unb64(skdB.gkPub)
   assert.equal(A.mgr.gidHexOf(await groupIdFromGK(gkPub)), gid)
   assert.equal(hem.calls.createKeyPair, 1, 'one keypair per group')
-  assert.equal(hem.calls.getPubKey, 1, 'createKeyPair returns only a kid, so exactly one getPubKey')
+  assert.equal(hem.calls.getKeyPublicInfo, 0, 'createKeyPair hands back the public key: no second read')
 })
 
 test('GK_priv never leaves the HSM: nothing persisted is key material', async () => {

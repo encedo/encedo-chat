@@ -141,39 +141,52 @@ a local X25519, capped at 60/min before opening; our own decoys are never
 opened. `test/inbox.test.ts` "a flood of frames costs the identity backend
 nothing" pins it. Never put a device call on a path a stranger can trigger.
 
-**Newer FW — `api/search` returns public keys.** Today `searchKeys` returns only
-`{kid,label,type,description}`, so `hemContactBook.list` does one `getPubKey`
-per contact. When that FW ships, drop the per-kid loop.
+**`api/search` returns public keys (FW 1.3, `pubkey_in_search` policy).** The
+contact book, the group markers and the sign-in ask for them
+(`returnPubkey: true`) and read a key one by one (`pubKeyReader`) only when the
+answer came without it - a device personalised without the policy.
 
 ## SDK facts (from `hem-sdk-js`)
 
-`new HEM(url)` points at a real device or a local software stub. Auth = **scoped
-JWT**: `authorizePassword(password, scope)` (PBKDF2-600k + X25519 client-side)
-or `authorizeRemote` (mobile push); crypto ops need `keymgmt:use:<kid>`.
+`new HEM(url)` points at a real device or a local software stub. Firmware 1.3
+or later: the SDK follows the 1.3 API and nothing older. Auth = **scoped
+JWT**: `authorizePassword(password, scope, { expSeconds })` (PBKDF2-600k +
+X25519 client-side) or `authorizeRemote` (mobile push); a scope may be an
+array of up to 8, and the SDK caches the token under each (`hemWarmTokens`
+takes list + get + use:<kid> in one authorisation at sign-in); crypto ops
+need `keymgmt:use:<kid>` (of `kid` alone - a stored peer needs no scope).
+Optional values always go in the options object: an old positional call
+throws `invalid_arg` (the SDK's `MIGRATION.md`).
 
 | SDK method | Use |
 |---|---|
 | `authorizePassword` / `authorizeRemote` | scoped JWT |
-| `createKeyPair(token, label, 'CURVE25519', descrB64)` | IK at onboarding → `{kid}` |
-| `importPublicKey(token, label, 'CURVE25519', pubBytes, descrB64)` | a contact's IK_pub, a group's `GK_pub` |
-| `ecdh(token, kid, peerPubB64)` | **raw 32-byte shared secret** |
-| `searchKeys(token, descr)` / `listKeys` / `getPubKey` | resolve contacts, identities, group markers |
+| `createKeyPair(token, label, 'CURVE25519', { descr, returnPubkey: true })` | IK at onboarding, a GK -> `{ kid, pubkey }` (one call) |
+| `importPublicKey(token, label, 'CURVE25519', pubBytes, { descr })` | a contact's IK_pub, a group's `GK_pub` |
+| `ecdh(token, kid, { pubkey } \| { extKid }, { alg?, hkdf* })` | without `alg` the **raw** secret - only with the device's `raw_ecdh_enabled` policy (403 otherwise) |
+| `ecdhHkdf(token, kid, { pubkey \| extKid, items })` | one ECDH, 1..8 HKDF outputs, the secret stays in the device |
+| `searchKeysAll(token, prefix, { returnPubkey })` / `getKeyPublicInfo` | resolve contacts, identities, group markers - every page; public keys in the answer with the `pubkey_in_search` policy |
+| `updateKey(token, kid, label, descr)` | rename, marker rewrite |
 | `deleteKey(token, kid)` | contact removal, IK rotation |
 | `deriveKey(...)` | deterministic provisioning on two HEMs — provisioning/HA, not the message path |
 
-In the HSM, unused today: `hmacHash`/`hmacVerify`, `cipher*`,
-`mlkemEncaps`/`Decaps`, `mldsaSign`/`Verify` (de-risks the PQ identity phase).
+A DESCR is passed as text (the SDK sends its UTF-8 bytes) and comes back as
+`description: Uint8Array`. In the HSM, unused today: `hmacHash`/`hmacVerify`,
+`cipher*`, `mlkemEncaps`/`Decaps`, `mldsaSign`/`Verify`, `kdf`.
 
-Gotchas: the device API needs a `mode` on `create`/`derive` (CURVE25519→`ECDH`,
-ED25519→`ExDSA`) — the SDK fills it from the type, so a raw REST call must; `searchKeys` pattern is base64 with a leading `^` — an
-anchored prefix, which is the entire scoping mechanism for identities, contacts
+Gotchas: `searchKeys` alone is ONE page of at most 15 - use `searchKeysAll`
+(before FW 1.3 the chat read the first page only, so a 16th contact, identity
+or group marker silently did not exist); the pattern is an anchored prefix, which is the entire scoping mechanism for identities, contacts
 (`ETSEIC:peer1,<ownerKID>,<name>`, name = the whole tail) and group markers;
 `allow_keysearch` matches the **first six bytes** (hence `ETSEIC:`); `label` is
 capped at 32 characters and DESCR at 128 bytes — truncate with `lib/descr.ts`'s
 byte-safe helpers (`sliceBytes`, `byteLen`; `descr.ts` also builds the
 identity and contact records), never `String.slice`; the device refuses to hold the same
-public key twice under any DESCR (`KID = SHA-1(pub)[0:16]`). The endpoint spec
-of record is the sibling PHP repo `hem-api-tester`.
+public key twice under any DESCR (`KID = SHA-1(pub)[0:16]`); an HKDF info
+(`hkdfCtx`) starting with `encedo-` is reserved by the firmware (400), and
+`hkdfLen` is 16..128. The endpoint reference of record is
+`encedo_firmware/docs/HEM_API_reference_1.3.x.md` (sibling repo), then the PHP
+`hem-api-tester`.
 
 ## Engine map (impl/)
 

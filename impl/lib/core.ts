@@ -54,11 +54,11 @@ export interface Peer { pub: string; kid?: string }
 
 /** Build an Identity from an already-authenticated HEM session (browser-safe — no fs). */
 export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: string): Identity {
-  const ecdh = async (peerPubB64: string, peerKid?: string) => {
+  const ecdh = async (peerPubB64: string, peerKid?: string): Promise<Uint8Array> => {
     const t = await hem.authorizePassword(null, `keymgmt:use:${kid}`) // cached derived key -> no re-prompt
     // HEM contact (imported -> has a kid): two-KID ECDH, both operands in-device.
     // Local / one-off contact (no kid): raw peer pubkey.
-    return peerKid ? hem.ecdhKid(t, kid, peerKid) : hem.ecdh(t, kid, peerPubB64)
+    return hem.ecdh(t, kid, peerKid ? { extKid: peerKid } : { pubkey: unb64(peerPubB64) })
   }
   return {
     handle,
@@ -94,7 +94,7 @@ export function hemRenameIdentity(hem: any, kid: string) {
   return async (handle: string) => {
     const descr = buildSelfDescr(handle) // byte-safe: the handle is sliced to SELF_NAME_MAX
     const tok = await hem.authorizePassword(null, 'keymgmt:upd')
-    await hem.updateKey(tok, kid, selfLabel(handle), b64(new TextEncoder().encode(descr)))
+    await hem.updateKey(tok, kid, selfLabel(handle), descr) // a string is sent as its UTF-8 bytes
   }
 }
 
@@ -107,8 +107,8 @@ export function hemRenameIdentity(hem: any, kid: string) {
  * that is useless without the HEM, where before it yielded the key itself.
  *
  * HSM traffic is deliberately small and bounded:
- *   - group creation: `createKeyPair` + one `getPubKey` (createKeyPair returns
- *     only a kid). Twice per group, ever.
+ *   - group creation: one `createKeyPair`, which returns the public key with
+ *     the KID. Once per group, ever.
  *   - roster MAC: one `ecdh` per member, memoised by the group engine and
  *     epoch-independent, so a membership change costs one call per NEW member
  *     and nothing at all for everyone already there.
@@ -118,9 +118,8 @@ export function hemRenameIdentity(hem: any, kid: string) {
 export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
   const use = (kid: string) => hem.authorizePassword(null, `keymgmt:use:${kid}`)
   const readPub = pubKeyReader(hem)
-  const asB64 = (s: string) => b64(new TextEncoder().encode(s)) // DESCRs go to the HEM base64'd
   const fromKid = (kid: string): AdminGk => {
-    const dh = async (peerPub: Uint8Array) => new Uint8Array(await hem.ecdh(await use(kid), kid, b64(peerPub)))
+    const dh = async (peerPub: Uint8Array): Promise<Uint8Array> => hem.ecdh(await use(kid), kid, { pubkey: peerPub })
     // FIRMWARE SEAM: the roster-MAC key rk_i = HKDF(ECDH(GK, IK_i), gid||epoch,
     // label) derives here today; with ecdh+HKDF in firmware it is one device
     // call and ECDH(GK, IK_i) never leaves the HSM (same note as hemIdentityFrom).
@@ -132,15 +131,17 @@ export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
     fromKid,
     async create(label: string, descr: string) {
       const gen = await hem.authorizePassword(null, 'keymgmt:gen')
-      const { kid } = await hem.createKeyPair(gen, label, 'CURVE25519', asB64(descr))
-      const { pubkey } = await hem.getPubKey(await use(kid), kid)
-      return { gk: fromKid(kid), pub: unb64(pubkey) }
+      // The device hands the new public key back with the KID, so creating a
+      // group is one call; a reply without it falls back to reading the key.
+      const k = await hem.createKeyPair(gen, label, 'CURVE25519', { descr, returnPubkey: true })
+      const pub: Uint8Array = k.pubkey ?? unb64(await readPub(k.kid))
+      return { gk: fromKid(k.kid), pub }
     },
     // The roster blob is stale the moment the roster moves, and a stale blob
     // reconstructs the OLD member set on a recovering device. One call per
     // membership change — not per member.
     async setMarker(kid: string, label: string, descr: string) {
-      await hem.updateKey(await hem.authorizePassword(null, 'keymgmt:upd'), kid, label, asB64(descr))
+      await hem.updateKey(await hem.authorizePassword(null, 'keymgmt:upd'), kid, label, descr)
     },
     // Dissolving a group takes its marker with it: the portable group list is
     // exactly the set of GK entries, so leaving one behind would keep listing a
@@ -155,7 +156,7 @@ export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
     // anyone said in it.
     async importPub(pub: Uint8Array, label: string, descr: string) {
       const imp = await hem.authorizePassword(null, 'keymgmt:imp')
-      const r = await hem.importPublicKey(imp, label, 'CURVE25519', pub, asB64(descr))
+      const r = await hem.importPublicKey(imp, label, 'CURVE25519', pub, { descr })
       // Older firmware answers an import with nothing useful; the KID is derived
       // from the key's content, so it is the same value either way.
       return String(r?.kid ?? await hemKid(pub))
@@ -163,17 +164,17 @@ export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
     // The portable group list. `MARKER_SEARCH` matches every generation, so a
     // marker written by an older build still turns up here — it simply fails to
     // parse and is skipped, which is what a generation digit is for.
-    // One getPubKey per group, as the contact book pays for a contact: GK_pub is
-    // what yields the group id, and search does not return public keys yet.
+    // GK_pub is what yields the group id. The search hands it back on a device
+    // with the `pubkey_in_search` policy; without it, one read per group.
+    // Every page: a device holding more than 15 markers used to lose the rest.
     async listMarkers() {
       const listTok = await hem.authorizePassword(null, 'keymgmt:list')
-      const keys: any[] = await hem.searchKeys(listTok, MARKER_SEARCH)
       const out: Array<{ kid: string; pub: Uint8Array; descr: string }> = []
-      for (const k of keys) {
+      for await (const k of hem.searchKeysAll(listTok, MARKER_SEARCH, { returnPubkey: true })) {
         const text = descrText(k.description)
         if (!text) continue
         try {
-          out.push({ kid: String(k.kid), pub: unb64(await readPub(k.kid)), descr: text })
+          out.push({ kid: String(k.kid), pub: k.pubkey ?? unb64(await readPub(k.kid)), descr: text })
         } catch { /* a key we cannot read is not a group we can rejoin */ }
       }
       return out
@@ -229,7 +230,7 @@ export interface ContactBook {
 /**
  * A token that can read ANY public key, instead of one per key.
  *
- * `getPubKey` is documented as needing `keymgmt:use:<KID>`, and that scope is
+ * Reading a key (`getKeyPublicInfo`) accepts `keymgmt:use:<KID>`, and that scope is
  * per-key: loading ten contacts meant ten authorisations, each of them two round
  * trips (a challenge, then the signed assertion) at about 2.5 s. In a measured
  * sign-in the token requests were 43% of all device time, and two of the four
@@ -251,18 +252,39 @@ export function pubKeyReader(hem: any): (kid: string) => Promise<string> {
     if (broad !== false) {
       try {
         const tok = await hem.authorizePassword(null, 'keymgmt:get')
-        const { pubkey } = await hem.getPubKey(tok, kid)
+        const { pubkey } = await hem.getKeyPublicInfo(tok, kid)
         broad = true
-        return pubkey
+        return b64(pubkey)
       } catch (e: any) {
         if (broad === true) throw e // it worked before; this is a real failure
         broad = false               // the device wants the per-key scope
       }
     }
     const tok = await hem.authorizePassword(null, `keymgmt:use:${kid}`)
-    const { pubkey } = await hem.getPubKey(tok, kid)
-    return pubkey
+    const { pubkey } = await hem.getKeyPublicInfo(tok, kid)
+    return b64(pubkey)
   }
+}
+
+/**
+ * Take, in one authorisation, the tokens a signed-in HEM session asks for
+ * first: the contact search, the public-key read and the identity's own ECDH.
+ * Each separate scope is a challenge and a signed assertion against the device
+ * (a sign-in trace measured ~2.5 s apiece); the SDK caches a token under every
+ * scope it holds, so the later `authorizePassword(null, <one of these>)` calls
+ * are answered locally. A device that refuses the combination costs nothing:
+ * the calls ask one scope at a time, as before.
+ */
+/** Every item of an async iterator, in order - `Array.fromAsync` without
+ *  needing a webview new enough to have it (Chrome 121, Safari 16.4). */
+export async function collect<T>(it: AsyncIterable<T>): Promise<T[]> {
+  const out: T[] = []
+  for await (const x of it) out.push(x)
+  return out
+}
+
+export async function hemWarmTokens(hem: any, kid: string): Promise<void> {
+  try { await hem.authorizePassword(null, ['keymgmt:list', 'keymgmt:get', `keymgmt:use:${kid}`]) } catch { /* per-scope then */ }
 }
 
 /**
@@ -289,8 +311,6 @@ export class ContactHeldByOtherIdentity extends Error {
   }
 }
 
-const asB64 = (s: string) => b64(new TextEncoder().encode(s)) // DESCRs go to the HEM base64'd
-
 /**
  * HEM-backed contact book for ONE identity: peers live in the HSM as CURVE25519
  * public keys under `ETSEIC:peer1,<ownerKid>,<name>` — HSM-anchored + portable
@@ -301,38 +321,40 @@ const asB64 = (s: string) => b64(new TextEncoder().encode(s)) // DESCRs go to th
  * exists, is derived from the key's content, and therefore needs neither storage
  * nor a migration to be portable.
  *
- * The pubkey isn't returned by search, so it's fetched per kid.
+ * The search returns the public keys on a device with the `pubkey_in_search`
+ * policy; without it, one read per contact (`pubKeyReader`). Every page is read -
+ * the first page alone stopped at 15 contacts.
  */
 export function hemContactBook(hem: any, ownerKid: string): ContactBook {
   const readPub = pubKeyReader(hem)
   /** Who owns the key with this KID, if anyone — one broad search, add path only. */
   const findOwner = async (contactKid: string): Promise<{ ownerKid: string } | null> => {
     const listTok = await hem.authorizePassword(null, 'keymgmt:list')
-    const all: any[] = await hem.searchKeys(listTok, peerSearchPrefix())
-    const hit = all.find((k) => String(k.kid).toLowerCase() === contactKid)
-    const owner = hit && parsePeerDescr(hit.description)?.ownerKid
-    return owner ? { ownerKid: owner } : null
+    for await (const k of hem.searchKeysAll(listTok, peerSearchPrefix())) {
+      if (String(k.kid).toLowerCase() !== contactKid) continue
+      const owner = parsePeerDescr(k.description)?.ownerKid
+      return owner ? { ownerKid: owner } : null
+    }
+    return null
   }
   /** The handle of an identity on this device, for the message. Null if it has none. */
   const handleOf = async (kid: string): Promise<string | null> => {
     try {
       const listTok = await hem.authorizePassword(null, 'keymgmt:list')
-      const selves: any[] = await hem.searchKeys(listTok, SELF_PREFIX)
-      const me = selves.find((k) => String(k.kid).toLowerCase() === kid)
-      return me ? parseSelfDescr(me.description)?.handle ?? null : null
+      for await (const k of hem.searchKeysAll(listTok, SELF_PREFIX)) {
+        if (String(k.kid).toLowerCase() === kid) return parseSelfDescr(k.description)?.handle ?? null
+      }
+      return null
     } catch { return null }
   }
 
   return {
     async list() {
       const listTok = await hem.authorizePassword(null, 'keymgmt:list')
-      const keys: any[] = await hem.searchKeys(listTok, peerSearchPrefix(ownerKid))
       const out: Contact[] = []
-      // one getPubKey per contact — current FW's api/search doesn't return pubkeys.
-      // TODO(newer FW): api/search returns the public keys directly -> drop this loop
-      // and read `pub` straight off the search entry (one call for the whole list).
-      for (const k of keys) {
-        out.push({ name: parsePeerDescr(k.description)?.name || '(?)', pub: await readPub(k.kid), kid: k.kid, source: 'hem' })
+      for await (const k of hem.searchKeysAll(listTok, peerSearchPrefix(ownerKid), { returnPubkey: true })) {
+        const pub = k.pubkey ? b64(k.pubkey) : await readPub(k.kid)
+        out.push({ name: parsePeerDescr(k.description)?.name || '(?)', pub, kid: k.kid, source: 'hem' })
       }
       return out
     },
@@ -348,7 +370,7 @@ export function hemContactBook(hem: any, ownerKid: string): ContactBook {
         throw new ContactHeldByOtherIdentity(held.ownerKid, await handleOf(held.ownerKid), contactKid)
       }
       const impTok = await hem.authorizePassword(null, 'keymgmt:imp')
-      await hem.importPublicKey(impTok, peerLabel(name), 'CURVE25519', unb64(pubB64), asB64(descr))
+      await hem.importPublicKey(impTok, peerLabel(name), 'CURVE25519', unb64(pubB64), { descr })
     },
     async remove(c: Contact) {
       if (!c.kid) return
@@ -363,7 +385,7 @@ export function hemContactBook(hem: any, ownerKid: string): ContactBook {
       // Both fields, always: the label is a caption the device shows and the
       // DESCR is what the client reads, and a rename that moved only one of them
       // would leave the two disagreeing about the same contact.
-      await hem.updateKey(updTok, c.kid, peerLabel(name), asB64(descr))
+      await hem.updateKey(updTok, c.kid, peerLabel(name), descr)
     },
   }
 }

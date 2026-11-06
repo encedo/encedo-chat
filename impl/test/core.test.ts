@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { deriveRoom, hemIdentityFrom, hemContactBook, localContactBook, mergedContactBook, pubKeyReader, sessionParams, type Identity } from '../lib/core.ts'
 import { topicFromSecret, announceMacKey } from '../lib/rendezvous.ts'
 import { buildPeerDescr, buildSelfDescr, peerSearchPrefix, hemKid } from '../lib/descr.ts'
-import { unb64 } from '../lib/wc.ts'
+import { b64, unb64 } from '../lib/wc.ts'
 
 const P = { networkId: 'main', dateUTC: '2026-07-27' }
 // A fresh buffer per call, as a real backend returns: the seam wipes the secret after deriving.
@@ -29,19 +29,19 @@ test('deriveRoom keys: macKey verifies, and EH-2 keys are wired (no interim path
   assert.deepEqual(keys.eh2.peerIkPub, new Uint8Array(32).fill(7))
 })
 
-test('hemIdentityFrom: ecdh uses base64 pubkey, or ecdhKid when a peer kid is given', async () => {
-  let base: any = null, ext: any = null
+test('hemIdentityFrom: ecdh names the peer as raw key bytes, or as a stored KID when it has one', async () => {
+  const seen: any[] = []
   const hem = {
     authorizePassword: async () => 'tok',
-    ecdh: async (t: string, kid: string, pub: string) => { base = { t, kid, pub }; return new Uint8Array(32).fill(1) },
-    ecdhKid: async (t: string, kid: string, extKid: string) => { ext = { t, kid, extKid }; return new Uint8Array(32).fill(2) },
+    ecdh: async (t: string, kid: string, peer: any) => { seen.push({ t, kid, peer }); return new Uint8Array(32).fill(1) },
   }
   const id = hemIdentityFrom(hem, 'kid7', 'alice', 'PUBB64')
   assert.equal(id.handle, 'alice'); assert.equal(id.pub, 'PUBB64')
-  await id.ecdh('peerpub')                      // no kid -> base64 ecdh
-  assert.deepEqual(base, { t: 'tok', kid: 'kid7', pub: 'peerpub' }); assert.equal(ext, null)
-  await id.ecdh('peerpub', 'peerKid9')          // kid present -> two-KID ecdhKid
-  assert.deepEqual(ext, { t: 'tok', kid: 'kid7', extKid: 'peerKid9' })
+  const peerPub = new Uint8Array(32).fill(9)
+  await id.ecdh(b64(peerPub))                   // no kid -> the raw public key, as bytes
+  assert.deepEqual(seen[0], { t: 'tok', kid: 'kid7', peer: { pubkey: peerPub } })
+  await id.ecdh(b64(peerPub), 'peerKid9')       // kid present -> both operands in the device
+  assert.deepEqual(seen[1], { t: 'tok', kid: 'kid7', peer: { extKid: 'peerKid9' } })
 })
 
 test('hemContactBook: writes the scoped record, reads only ours, and sees a collision coming', async () => {
@@ -55,20 +55,22 @@ test('hemContactBook: writes the scoped record, reads only ours, and sees a coll
     const calls: any = { searches: [] }
     const hem = {
       authorizePassword: async (_pw: any, scope: string) => 'tok:' + scope,
-      importPublicKey: async (_t: string, label: string, type: string, bytes: Uint8Array, descrB64: string) => {
-        calls.import = { label, type, len: bytes.length, descr: new TextDecoder().decode(Uint8Array.from(atob(descrB64), (c) => c.charCodeAt(0))) }
+      // The SDK takes a DESCR as text and sends its UTF-8 bytes.
+      importPublicKey: async (_t: string, label: string, type: string, bytes: Uint8Array, opts: { descr: string }) => {
+        calls.import = { label, type, len: bytes.length, descr: opts.descr }
         return { kid: 'K1' }
       },
-      updateKey: async (_t: string, kid: string, label: string, descrB64: string) => {
-        calls.update = { kid, label, descr: new TextDecoder().decode(Uint8Array.from(atob(descrB64), (c) => c.charCodeAt(0))) }
+      updateKey: async (_t: string, kid: string, label: string, descr: string) => {
+        calls.update = { kid, label, descr }
       },
       // The device matches an anchored PREFIX — the stub must too, or the test
-      // would pass with scoping that does not work.
-      searchKeys: async (_t: string, pat: string) => {
+      // would pass with scoping that does not work. No public keys in the
+      // answer: a device without the pubkey_in_search policy.
+      searchKeysAll: async function* (_t: string, pat: string) {
         calls.searches.push(pat)
-        return entries.filter((e) => new TextDecoder().decode(e.description).startsWith(pat))
+        yield* entries.filter((e) => new TextDecoder().decode(e.description).startsWith(pat))
       },
-      getPubKey: async (_t: string, _kid: string) => ({ pubkey: PUB }),
+      getKeyPublicInfo: async (_t: string, _kid: string) => ({ pubkey: unb64(PUB) }),
       deleteKey: async (_t: string, kid: string) => { calls.del = kid },
     }
     return { hem, calls }
@@ -103,6 +105,28 @@ test('hemContactBook: writes the scoped record, reads only ours, and sees a coll
   assert.equal(calls.del, 'K1')
 })
 
+test('a contact book on a device that returns public keys from the search reads no key one by one, past 15', async () => {
+  const MINE = '0123456789abcdef0123456789abcdef'
+  const enc = (s: string) => new TextEncoder().encode(s)
+  const entries = Array.from({ length: 20 }, (_, i) => ({
+    kid: `K${i}`, description: enc(buildPeerDescr(MINE, `p${i}`)!), pubkey: new Uint8Array(32).fill(i + 1),
+  }))
+  let reads = 0, askedPub = false
+  const hem = {
+    authorizePassword: async () => 'tok',
+    searchKeysAll: async function* (_t: string, pat: string, opts: any = {}) {
+      askedPub = !!opts.returnPubkey
+      yield* entries.filter((e) => new TextDecoder().decode(e.description).startsWith(pat))
+    },
+    getKeyPublicInfo: async () => { reads++; return { pubkey: new Uint8Array(32) } },
+  }
+  const list = await hemContactBook(hem, MINE).list()
+  assert.ok(askedPub, 'the search asks for the public keys')
+  assert.equal(list.length, 20, 'all of them - the first page alone stopped at 15')
+  assert.equal(reads, 0, 'no per-contact read when the search carried the keys')
+  assert.equal(list[19].pub, b64(new Uint8Array(32).fill(20)))
+})
+
 test('adding a key another identity already holds is refused BEFORE the device is touched', async () => {
   // The device would refuse it anyway — KID indexes the key's content — but as a
   // firmware error naming nothing. The client can predict it, because the KID is
@@ -117,10 +141,12 @@ test('adding a key another identity already holds is refused BEFORE the device i
   const hem = {
     authorizePassword: async () => 'tok',
     importPublicKey: async () => { imported = true; return { kid: 'X' } },
-    searchKeys: async (_t: string, pat: string) => [
-      { kid: otherKid, description: enc(buildPeerDescr(THEIRS, 'carol')!) },
-      { kid: THEIRS, description: enc(buildSelfDescr('Work')) },
-    ].filter((e) => new TextDecoder().decode(e.description).startsWith(pat)),
+    searchKeysAll: async function* (_t: string, pat: string) {
+      yield* [
+        { kid: otherKid, description: enc(buildPeerDescr(THEIRS, 'carol')!) },
+        { kid: THEIRS, description: enc(buildSelfDescr('Work')) },
+      ].filter((e) => new TextDecoder().decode(e.description).startsWith(pat))
+    },
   }
 
   await assert.rejects(
@@ -196,14 +222,15 @@ test('deriveRoom accepts the day\'s keys already derived, and builds the same ro
 })
 
 test('one broad token reads every public key, and a device that refuses it still works', async () => {
-  // getPubKey is documented as needing keymgmt:use:<KID>, which is per-key: ten
+  // A key read accepts keymgmt:use:<KID>, which is per-key: ten
   // contacts meant ten authorisations, each two round trips. `keymgmt:get` is
   // KID-independent. Firmware that does not know it refuses, so the first
   // attempt decides and the answer is remembered.
-  const modern = { scopes: [] as string[], async authorizePassword(_p: any, s: string) { this.scopes.push(s); return 't' }, async getPubKey(_t: string, kid: string) { return { pubkey: 'P:' + kid } } }
+  const pk = (kid: string) => new TextEncoder().encode('P:' + kid)
+  const modern = { scopes: [] as string[], async authorizePassword(_p: any, s: string) { this.scopes.push(s); return 't' }, async getKeyPublicInfo(_t: string, kid: string) { return { pubkey: pk(kid) } } }
   const readModern = pubKeyReader(modern)
-  assert.equal(await readModern('K1'), 'P:K1')
-  assert.equal(await readModern('K2'), 'P:K2')
+  assert.equal(await readModern('K1'), b64(pk('K1')), 'the key comes back as bytes and leaves as base64')
+  assert.equal(await readModern('K2'), b64(pk('K2')))
   assert.deepEqual(modern.scopes, ['keymgmt:get', 'keymgmt:get'], 'never a per-key scope')
 
   const legacy = {
@@ -213,11 +240,11 @@ test('one broad token reads every public key, and a device that refuses it still
       if (s === 'keymgmt:get') throw Object.assign(new Error('unknown scope'), { code: 'http_403' })
       return 't'
     },
-    async getPubKey(_t: string, kid: string) { return { pubkey: 'P:' + kid } },
+    async getKeyPublicInfo(_t: string, kid: string) { return { pubkey: pk(kid) } },
   }
   const readLegacy = pubKeyReader(legacy)
-  assert.equal(await readLegacy('K1'), 'P:K1')
-  assert.equal(await readLegacy('K2'), 'P:K2')
+  assert.equal(await readLegacy('K1'), b64(pk('K1')))
+  assert.equal(await readLegacy('K2'), b64(pk('K2')))
   assert.deepEqual(legacy.scopes, ['keymgmt:get', 'keymgmt:use:K1', 'keymgmt:use:K2'],
     'the broad scope is tried ONCE, then never again on this device')
 })
@@ -228,10 +255,10 @@ test('a failure after the broad scope has worked is reported, not retried narrow
   let n = 0
   const hem = {
     async authorizePassword() { return 't' },
-    async getPubKey(_t: string, kid: string) { if (++n > 1) throw new Error('device asleep'); return { pubkey: 'P:' + kid } },
+    async getKeyPublicInfo(_t: string, kid: string) { if (++n > 1) throw new Error('device asleep'); return { pubkey: new TextEncoder().encode('P:' + kid) } },
   }
   const read = pubKeyReader(hem)
-  assert.equal(await read('K1'), 'P:K1')
+  assert.equal(await read('K1'), b64(new TextEncoder().encode('P:K1')))
   await assert.rejects(() => read('K2'), /device asleep/)
 })
 

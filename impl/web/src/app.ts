@@ -16,7 +16,7 @@
 
 import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
 import { setCoreBackend, coreStatus, onCoreFallback, type CoreBackend } from '../../eh2/establish.ts'
-import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
+import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, hemWarmTokens, collect, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import { exportProfile, openBundle, applyBundle, conflictsWith, identityHere, keysOfProfile, localKV, FILE_EXT, type KV } from '../../lib/migrate.ts'
 import { decodeInvite, inviteLink, inviteFromPaste, setInviteNetwork, inviteNetwork, type Invite } from '../../lib/invite.ts'
@@ -826,6 +826,7 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
     localStorage.setItem(hemBindingKey(id.kid), pick)
   }
   if (!inNetworkOrSwitch(bindingOf(localKV(), hemBindingKey(id.kid), BUILTIN_NET))) return
+  await hemWarmTokens(hem, id.kid) // one authorisation for the first three scopes
   const pubkey = await pubKeyReader(hem)(id.kid)
   rememberMethod('hem')
   setLastNet(localKV(), ACTIVE.id, BUILTIN_NET)
@@ -946,13 +947,14 @@ $('go').addEventListener('click', async () => {
     if (mode === 'register') {
       const handle = val('handle'); if (!handle) { setMsg('msg', tr('Podaj handle.'), 'err'); return }
       const gen = await hem.authorizePassword(pass, 'keymgmt:gen')
-      // b64 of the UTF-8 bytes, not btoa: btoa throws on any character above
-      // U+00FF, so registering as "Zażółć" used to fail with a DOM exception.
-      const { kid } = await hem.createKeyPair(gen, selfLabel(handle), 'CURVE25519', b64(new TextEncoder().encode(buildSelfDescr(handle))))
+      // The DESCR goes as text: the SDK sends a string as its UTF-8 bytes, so
+      // registering as "Zażółć" works (btoa, once, threw above U+00FF).
+      const { kid } = await hem.createKeyPair(gen, selfLabel(handle), 'CURVE25519', { descr: buildSelfDescr(handle) })
       await signInAs(hem, { kid, handle })
     } else {
       const listTok = await hem.authorizePassword(pass, 'keymgmt:list')
-      const keys: any[] = await hem.searchKeys(listTok, SELF_PREFIX)
+      // Every page: the first one alone ends at 15 entries.
+      const keys: any[] = await collect(hem.searchKeysAll(listTok, SELF_PREFIX))
       if (!keys.length) { setMsg('msg', tr('Brak tożsamości czatu na tym HEM — zarejestruj.'), 'err'); return }
       // Alphabetical, so the list does not reorder itself as identities are
       // added — the device returns them in whatever order it stores them.
