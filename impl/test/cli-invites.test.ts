@@ -29,10 +29,10 @@ test('an invite the app sealed is read by the CLI, and one the CLI made is read 
   assert.equal(await store.revoke('nope'), false)
 })
 
-test('a store from before sealing (plain JSON) is still read; another identity\'s key cannot open it', async () => {
+test('a plain store (the format before 0.7.34) is not read; another identity\'s key cannot open a sealed one', async () => {
   const kv = memKV()
   kv.set(N.fixed.invites, JSON.stringify([{ id: 'old', label: 'stare', secret: 'x', created: 1 }]))
-  assert.equal((await new InviteStore(kv, base, N).invites())[0].label, 'stare')
+  assert.deepEqual(await new InviteStore(kv, base, N).invites(), [], 'a withdrawn invite cannot be brought back by writing it plain')
   const kv2 = memKV()
   await writeSealedKV(kv2, base, N, 'invites', [{ id: 'z', label: 'tajne', secret: 's', created: 1 }])
   const other = crypto.getRandomValues(new Uint8Array(32))

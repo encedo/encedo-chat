@@ -750,11 +750,12 @@ async function softProfile(b: Page, handle: string) {
 }
 
 /** Log in with the software identity already in this profile's localStorage. */
-async function login(b: Page, handle: string) {
+async function login(b: Page, handle: string, hasContacts = true) {
   await b.waitFor('login form', `return !!document.getElementById('go-soft')`)
   await hemFormGoesBack(b)
   await softProfile(b, handle)
-  await b.waitFor('contact list', `return !!document.querySelector('#pane-contacts .contact')`, 30_000)
+  if (hasContacts) await b.waitFor('contact list', `return !!document.querySelector('#pane-contacts .contact')`, 30_000)
+  else await b.waitFor('app shell', `return !!document.getElementById('app') && !document.getElementById('app').hidden`, 30_000)
 }
 
 /**
@@ -866,8 +867,6 @@ async function main() {
     // A also gets a second, unreachable contact — the "switch away and back" test
     // needs somewhere to switch TO.
     const ghostPub = Buffer.from(Array.from({ length: 32 }, (_, i) => (i * 7 + 13) & 0xff)).toString('base64')
-    await A.eval(`localStorage.setItem('ec-local-contacts-${idA}', ${JSON.stringify(JSON.stringify([{ name: 'sim-b', pub: pubB }, { name: 'ghost', pub: ghostPub }]))}); return 1`)
-    await B.eval(`localStorage.setItem('ec-local-contacts-${idB}', ${JSON.stringify(JSON.stringify([{ name: 'sim-a', pub: pubA }]))}); return 1`)
     // WARNING: The shipped default is relay-only since 0.5.48 (app.ts TRANSPORT_KEY),
     // and this harness is the ONLY thing that covers the direct plane at all —
     // Node has no RTCPeerConnection. So both browsers opt into `auto` here, the
@@ -876,29 +875,37 @@ async function main() {
     // and `FAILOVER=1` / `?webrtc=0` still exercise it deliberately.
     for (const b of [A, B]) await b.eval(`localStorage.setItem('ec-transport', 'auto'); return 1`)
     await Promise.all([A.reload(A_URL), B.reload(B_URL)])
-    await Promise.all([login(A, 'sim-a'), login(B, 'sim-b')])
+    await Promise.all([login(A, 'sim-a', false), login(B, 'sim-b', false)])
+    // Contacts go in the way a person adds them - the add window, a key typed
+    // in - since 0.8.2 nothing reads a book planted in an older format.
+    const addByKey = async (b: Page, name: string, pub: string) => {
+      await b.eval(`document.getElementById('btn-add-peer').click();
+        document.getElementById('add-name').value = ${JSON.stringify(name)};
+        document.getElementById('add-pub').value = ${JSON.stringify(pub)};
+        document.getElementById('add-save').click(); return 1`)
+      await b.waitFor(`added ${name}: the "send your code back?" question`, `return document.getElementById('ask-modal').classList.contains('open')`, 15_000)
+      await b.eval(`document.getElementById('ask-no').click(); return 1`)
+      await b.waitFor(`${name} on the list`, `return [...document.querySelectorAll('#pane-contacts .contact')].some((e) => e.textContent.includes(${JSON.stringify(name)}))`, 15_000)
+    }
+    await addByKey(A, 'sim-b', pubB); await addByKey(A, 'ghost', ghostPub); await addByKey(B, 'sim-a', pubA)
 
     await Promise.all([openContact(A, 'sim-b'), openContact(B, 'sim-a')])
 
-    // The book was seeded as a bare array, the oldest format there is. Signing
-    // in must have sealed it on the spot (lib/localbook.ts): nobody reading
-    // this browser's storage learns whom sim-a knows.
+    // The book is sealed at rest (lib/localbook.ts): nobody reading this
+    // browser's storage learns whom sim-a knows.
     const atRest = await A.eval<any>(`
       const n = window.__storeNames;
       const raw = localStorage.getItem(n.fixed.book) || '';
       let json = true; try { JSON.parse(raw) } catch { json = false }
       return { json, len: raw.length, names: /sim-b|ghost/.test(raw), key: raw.includes(${JSON.stringify(pubB)}) || raw.includes(${JSON.stringify(ghostPub)}),
-               marker: localStorage.getItem(n.fixed['book-signed']),
-               sealedOnly: localStorage.getItem(n.fixed.sealed),
-               legacy: localStorage.getItem('ec-local-contacts-${idA}') }`)
-    // ...and sign-in closed the plain-JSON door of every other sealed store (lib/sealedstore.ts).
-    if (atRest.json || atRest.names || atRest.key || atRest.marker !== '1' || atRest.sealedOnly !== '1' || atRest.legacy !== null) {
-      throw new Error(`the contact book is not sealed at rest after sign-in: ${JSON.stringify(atRest)}`)
+               empty: !raw }`)
+    if (atRest.empty || atRest.json || atRest.names || atRest.key) {
+      throw new Error(`the contact book is not sealed at rest: ${JSON.stringify(atRest)}`)
     }
-    step('the contact book seeded in the clear was sealed at sign-in, and the sealed stores take no plain JSON from now on')
+    step('contacts added in the window land sealed: no name or key of theirs in storage')
     await noIdentityInNames(A, [idA, idB, pubA, pubB, ghostPub])
     await noIdentityInNames(B, [idA, idB, pubA, pubB])
-    step('no storage name carries a KID or a contact key: the seeded book moved off its KID-named key')
+    step('no storage name carries a KID or a contact key')
 
     // The FIRST room after sign-in, and only the first: `#chat-view` starts
     // hidden, and `focus()` on an element inside a `display:none` ancestor does
@@ -3663,11 +3670,11 @@ async function main() {
       throw new Error('precondition: the renamed profile has no state under its storage names')
     }
     // Stand-ins for what a lived-in profile holds: two more records under its
-    // names, and one an older build left under its KID that was never moved.
+    // names. (A KID-named record of a build before 0.7.34 is nobody's since
+    // 0.8.2 - not read, not exported, not deleted with a profile.)
     await B.eval(`
       localStorage.setItem(${JSON.stringify(victim.prefix + 'a'.repeat(32))}, 'x');
       localStorage.setItem(${JSON.stringify(victim.prefix + 'b'.repeat(32))}, 'x');
-      localStorage.setItem('ec-pins-${victimKid}-somebody', 'x');
       return 1;`)
     await B.eval(`location.reload(); return 1`).catch(() => {})
     await B.waitFor('B back at the login form', `return !!document.getElementById('go-soft') && document.getElementById('app').hidden`, 15_000)

@@ -822,6 +822,7 @@ feature is missing.
   Docker image, the Tauri desktop (Linux, Windows signed, macOS) + Android + iOS
   shells with updater — shipped.
 - Known follow-ups: skipped-key persistence across restarts; the light client's
-  stage 3 after battery measurements; storage migrations from 0.7.34 come out in
-  0.8.0 (moved from 0.7.40, the user's call 2026-10-16).
+  stage 3 after battery measurements. The storage migrations of 0.7.34 came out
+  in 0.8.2: only sealed records under the storage names are read; the one
+  migration left is `migrateNamesKey` (the 0.8.0 name key).
 - The tree is normally clean at a tag; the release ritual is in Deploy above.

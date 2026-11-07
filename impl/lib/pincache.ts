@@ -31,7 +31,7 @@
  * 1:1 room id is the contact's public key: the key name alone said "this
  * identity talks to that key". It now sits under `names.scoped('pin', roomId)`
  * (lib/storenames.ts), which only the identity can compute; the blob and its
- * key schedule are unchanged, and `migrateToNames` moves the old names.
+ * key schedule are unchanged.
  *
  * ## What it refuses
  *

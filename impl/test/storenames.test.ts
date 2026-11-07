@@ -3,14 +3,13 @@
  *
  * What must hold: no name carries the KID, a group id or a room id; only the
  * identity can compute its names, and computes the same ones every time and
- * in every client; and the move off the old names loses nothing and leaves
- * nothing behind that still names the identity.
+ * in every client; and the 0.8.0 move to the current name key loses nothing.
  */
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes } from '../lib/wc.ts'
-import { namesFor, namesFromKey, migrateToNames, migrateNamesKey, pinName, FIXED, NAMES_LABEL_PRE_080 } from '../lib/storenames.ts'
+import { namesFor, namesFromKey, migrateNamesKey, pinName, FIXED, NAMES_LABEL_PRE_080 } from '../lib/storenames.ts'
 import { deriveOverEcdh } from '../lib/derive.ts'
 import { browserSoftwareIdentity } from '../lib/core.ts'
 
@@ -49,36 +48,16 @@ test('only the identity computes its names: the same every time, different for a
   assert.notEqual(fake.prefix, na1.prefix)
 })
 
-test('every record moves off its KID-carrying name with its value intact, and the old names are gone', async () => {
-  const legacy = {
-    [`ec-gcache-emp-${KID}`]: 'EMP', [`ec-local-contacts-${KID}`]: 'BOOK', [`ec-local-contacts-${KID}-signed`]: '1',
-    [`ec-sealed-${KID}`]: '1', [`ec-invites-${KID}`]: 'INV', [`ec-waiting-${KID}`]: 'WAIT', [`ec-ignored-${KID}`]: 'IGN',
-    [`ec-outbox-${KID}`]: 'OUT', [`ec-prefs-${KID}`]: 'PREFS', [`ec-seen-${KID}`]: 'SEEN', [`ec-gleft-${KID}`]: 'LEFT',
-    [`ec-gcache-${KID}-${GID}`]: 'GROUP', [`ec-pins-${KID}-${PEER}`]: 'PINS1', [`ec-pins-${KID}-${GID}`]: 'PINS2',
-  }
-  const kv = mem({ ...legacy, [`ec-local-contacts-${OTHER}`]: 'CUDZA', 'ec-soft-id-ala': 'ID', 'ec-lang': 'pl' })
-  const n = await namesFromKey(randomBytes(32), KID)
-  assert.equal(await migrateToNames(kv, n), Object.keys(legacy).length)
-  const want: Record<string, string> = {
-    [n.fixed.emp]: 'EMP', [n.fixed.book]: 'BOOK', [n.fixed['book-signed']]: '1', [n.fixed.sealed]: '1',
-    [n.fixed.invites]: 'INV', [n.fixed.waiting]: 'WAIT', [n.fixed.ignored]: 'IGN', [n.fixed.outbox]: 'OUT',
-    [n.fixed.prefs]: 'PREFS', [n.fixed.seen]: 'SEEN', [n.fixed.gleft]: 'LEFT',
-    [await n.scoped('group', GID)]: 'GROUP', [await n.scoped('pin', PEER)]: 'PINS1', [await n.scoped('pin', GID)]: 'PINS2',
-  }
-  for (const [k, v] of Object.entries(want)) assert.equal(kv.get(k), v, k)
-  assert.deepEqual(kv.keys().filter((k) => k.includes(KID)), [], 'nothing names the identity any more')
-  assert.equal(kv.get(`ec-local-contacts-${OTHER}`), 'CUDZA', 'another identity is not touched')
-  assert.equal(kv.get('ec-soft-id-ala'), 'ID')
-  assert.deepEqual(await n.groups(kv), [GID], 'the group is listed in the index')
-  assert.equal(await migrateToNames(kv, n), 0, 'a second sign-in has nothing to move')
-})
-
-test('a name already written by this build keeps its value; the old copy is dropped', async () => {
-  const n = await namesFromKey(randomBytes(32), KID)
-  const kv = mem({ [n.fixed.book]: 'NEW', [`ec-local-contacts-${KID}`]: 'OLD' })
-  assert.equal(await migrateToNames(kv, n), 0)
-  assert.equal(kv.get(n.fixed.book), 'NEW')
-  assert.equal(kv.get(`ec-local-contacts-${KID}`), null)
+test('0.8.2: the markers of the removed migrations are deleted at sign-in, and a KID-carrying name is nobody\'s any more', async () => {
+  let saved: string | null = null
+  const id = await browserSoftwareIdentity('o', () => saved, (v) => { saved = v })
+  const n = await namesFor(id, KID)
+  assert.equal(n.obsolete.length, 2, "'book-signed' and 'sealed'")
+  for (const o of n.obsolete) assert.ok(o.startsWith(n.prefix) && !Object.values(n.fixed).includes(o))
+  const kv = mem({ [n.obsolete[0]]: '1', [n.obsolete[1]]: '1', [n.fixed.moved]: '1', [`ec-local-contacts-${KID}`]: 'OLD' })
+  await migrateNamesKey(kv, id, n)
+  for (const o of n.obsolete) assert.equal(kv.get(o), null, 'the marker is gone')
+  assert.equal(kv.get(`ec-local-contacts-${KID}`), 'OLD', 'a pre-0.7.34 name is not read, moved or touched (0.8.2)')
 })
 
 test('the group index is sealed, keeps one entry per group, and goes when it is empty', async () => {

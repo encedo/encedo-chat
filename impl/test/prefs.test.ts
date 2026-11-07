@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { loadPrefs, savePrefs, LEGACY } from '../lib/prefs.ts'
+import { loadPrefs, savePrefs } from '../lib/prefs.ts'
 import { namesFromKey } from '../lib/storenames.ts'
 import { openLocal } from '../lib/localstore.ts'
 import type { KV } from '../lib/migrate.ts'
@@ -21,22 +21,11 @@ test('preferences round-trip sealed, and open for nobody else', async () => {
   assert.deepEqual(await loadPrefs(kv, base, NB), {}, 'and sees nothing')
 })
 
-test('the plain keys of an older build are read once, sealed, and removed', async () => {
+test('only the sealed blob counts: the plain keys of a build before 0.7.34 are not read; no base is all defaults', async () => {
   const kv = memKV()
-  kv.set(LEGACY.notify + KID, 'quiet'); kv.set(LEGACY.mediaAuto + KID, '1')
-  assert.deepEqual(await loadPrefs(kv, base, N), { notify: 'quiet', mediaAuto: true })
-  assert.equal(kv.get(LEGACY.notify + KID), null); assert.equal(kv.get(LEGACY.mediaAuto + KID), null)
-  assert.ok(kv.get(N.fixed.prefs), 'sealed in their place')
-  assert.deepEqual(await loadPrefs(kv, base, N), { notify: 'quiet', mediaAuto: true }, 'the second read comes from the seal')
-})
-
-test('a sealed value wins over a stale plain key; without a base nothing is sealed or removed', async () => {
-  const kv = memKV()
+  kv.set('ec-notify-' + KID, 'quiet'); kv.set('ec-autoimg-' + KID, '1')
+  assert.deepEqual(await loadPrefs(kv, base, N), {}, 'somebody switching auto-fetch on through the store is not obeyed')
   await savePrefs(kv, base, N, { notify: 'off' })
-  kv.set(LEGACY.notify + KID, 'name')
-  assert.equal((await loadPrefs(kv, base, N)).notify, 'off')
-  assert.equal(kv.get(LEGACY.notify + KID), null, 'the stale key is still cleaned up')
-  const kv2 = memKV(); kv2.set(LEGACY.mediaAuto + KID, '1')
-  assert.deepEqual(await loadPrefs(kv2, null, N), { mediaAuto: true }, 'honoured for the session')
-  assert.equal(kv2.get(LEGACY.mediaAuto + KID), '1', 'but not removed: there is nowhere sealed to put it')
+  assert.deepEqual(await loadPrefs(kv, base, N), { notify: 'off' })
+  assert.deepEqual(await loadPrefs(kv, null, N), {}, 'no base: nothing can be opened, the defaults hold')
 })

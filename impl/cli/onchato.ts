@@ -47,8 +47,7 @@ import { join, resolve } from 'node:path'
 import { humanSize } from './files.ts'
 import { readFileSync } from 'node:fs'
 import { openLocalBook, cacheBaseOf } from '../lib/localbook.ts'
-import { sealPlainStores } from '../lib/sealedstore.ts'
-import { namesFor, migrateToNames, migrateNamesKey, type Names } from '../lib/storenames.ts'
+import { namesFor, migrateNamesKey, type Names } from '../lib/storenames.ts'
 import { hemContactBook, mergedContactBook, localOnlyManager, type ContactManager, type Identity } from '../lib/core.ts'
 import { setCoreBackend } from '../eh2/establish.ts'
 import { BadPassword } from '../lib/profile.ts'
@@ -189,12 +188,10 @@ async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactMana
     // Two derivations for the whole sign-in (on a HEM each is a device call):
     // the storage names, then the §10 base under the name they give emp_pub.
     const names = await namesFor(id, key)
-    await migrateToNames(kv, names)
     await migrateNamesKey(kv, id, names) // the 0.8.0 names; the terminal keeps no pins
     const base = await cacheBaseOf(id, names, kv)
     const local = await openLocalBook(names, kv, base)
     if (local.verdict === 'tampered') console.error('onchato: UWAGA - lokalna książka kontaktów nie przeszła weryfikacji (pokazuję tylko kontakty z HEM)')
-    await sealPlainStores(kv, base, names)
     return { id, kind: 'HEM', key, names, base, store: new InviteStore(kv, base, names), contacts: mergedContactBook(hemContactBook(hem, kid), local.verdict === 'tampered' ? emptyBook() : local.book) }
   }
   const profiles = listProfiles(kv)
@@ -205,12 +202,10 @@ async function signIn(kv: FileKV): Promise<{ id: Identity; contacts: ContactMana
   catch (e) { die(e instanceof BadPassword ? 'złe hasło' : (e as Error).message) }
   const key = await identityKey(id!.pub)
   const names = await namesFor(id!, key)
-  await migrateToNames(kv, names)
   await migrateNamesKey(kv, id!, names)
   const base = await cacheBaseOf(id!, names, kv)
   const local = await openLocalBook(names, kv, base)
   if (local.verdict === 'tampered') die('książka kontaktów nie przeszła weryfikacji - ktoś zmienił ' + kv.path + ' (nic nie nadpisuję)')
-  await sealPlainStores(kv, base, names)
   return { id: id!, kind: 'software', key, names, base, store: new InviteStore(kv, base, names), contacts: localOnlyManager(local.book) }
 }
 const emptyBook = () => ({ list: async () => [], add: async () => { throw new Error('książka zablokowana') }, remove: async () => {}, rename: async () => {} })

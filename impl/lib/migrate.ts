@@ -116,9 +116,9 @@ export const isMigrationFile = (v: any): v is MigrationFile =>
 /**
  * Which keys belong to this profile.
  *
- * Since 2026-10-14 an identity's records sit under its storage-name prefix
- * (lib/storenames.ts); the `kid` substring test stays for records an older
- * build wrote that sign-in has not moved yet.
+ * An identity's records sit under its storage-name prefix (lib/storenames.ts).
+ * The KID no longer names anything: the records of the builds before 0.7.34
+ * that carried it were moved by 0.7.34..0.8.x, and their reader is gone.
  */
 export function collectProfile(store: KV, name: string, kid: string, prefix = '', deviceOnly: string[] = []): Record<string, string> {
   const out: Record<string, string> = {}
@@ -135,7 +135,7 @@ export function collectProfile(store: KV, name: string, kid: string, prefix = ''
     // stable libp2p key a network's nodes list) - named by the caller, who has
     // the storage names; a moved profile is admitted on the new device anew.
     if (deviceOnly.includes(k)) continue
-    const mine = k === identity || ownedBy(k, kid, prefix) || BROWSER_KEYS.includes(k) || netKeys.includes(k)
+    const mine = k === identity || ownedBy(k, prefix) || BROWSER_KEYS.includes(k) || netKeys.includes(k)
     if (!mine) continue
     const v = store.get(k)
     if (v !== null) out[k] = v
@@ -156,16 +156,13 @@ export function collectProfile(store: KV, name: string, kid: string, prefix = ''
 export function keysOfProfile(store: KV, name: string, kid: string, prefix = ''): string[] {
   if (!/^[0-9a-f]{32}$/.test(kid)) throw new Error('not a KID: ' + kid)
   const identity = 'ec-soft-id-' + name
-  return store.keys().filter((k) => k === identity || ownedBy(k, kid, prefix))
+  return store.keys().filter((k) => k === identity || ownedBy(k, prefix))
 }
 
-/**
- * A key of this identity: under its storage-name prefix (lib/storenames.ts),
- * or - written before the names, and not moved yet - carrying its KID.
- */
-function ownedBy(k: string, kid: string, prefix: string): boolean {
+/** A key of this identity: under its storage-name prefix (lib/storenames.ts). */
+function ownedBy(k: string, prefix: string): boolean {
   if (prefix && !/^ec-[0-9a-f]{16}-$/.test(prefix)) throw new Error('not a storage prefix: ' + prefix)
-  return k.startsWith('ec-') && ((!!kid && k.includes(kid)) || (!!prefix && k.startsWith(prefix)))
+  return !!prefix && k.startsWith(prefix)
 }
 
 /** Build the file. Throws if there is no identity to move — an export with no
@@ -195,6 +192,11 @@ export async function openBundle(file: unknown, password: string): Promise<Bundl
   if (!bundle || bundle.v !== 1 || typeof bundle.name !== 'string' || !bundle.keys) {
     throw new Error('the file opened but does not contain a profile')
   }
+  // A file from before 0.7.34 names its records by the KID, which nothing
+  // reads any more (0.8.2): refused, rather than imported as an empty profile.
+  if (typeof bundle.prefix !== 'string' || !/^ec-[0-9a-f]{16}-$/.test(bundle.prefix)) {
+    throw new Error('the file is from a version before 0.7.34 - export it again from a newer one')
+  }
   return bundle as Bundle
 }
 
@@ -220,7 +222,7 @@ export function conflictsWith(store: KV, bundle: Bundle): string | null {
  * deleting either takes the other's contacts. Refused like a name clash.
  */
 export function identityHere(store: KV, bundle: Bundle): boolean {
-  return store.keys().some((k) => ownedBy(k, bundle.kid, bundle.prefix ?? ''))
+  return store.keys().some((k) => ownedBy(k, bundle.prefix ?? ''))
 }
 
 /** Write the profile in. Refuses on a conflict rather than trusting the caller

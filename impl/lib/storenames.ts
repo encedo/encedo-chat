@@ -47,7 +47,9 @@ const NAMES_CTX = enc.encode('local storage names')
 const INDEX_SALT = 'encedo-chat-store-index-v1'
 
 /** The records every identity has one of. */
-export const FIXED = ['emp', 'book', 'book-signed', 'sealed', 'invites', 'waiting', 'ignored', 'outbox', 'prefs', 'seen', 'gleft', 'groups', 'netkey', 'moved'] as const
+export const FIXED = ['emp', 'book', 'invites', 'waiting', 'ignored', 'outbox', 'prefs', 'seen', 'gleft', 'groups', 'netkey', 'moved'] as const
+/** Markers of the storage migrations removed in 0.8.2 ('book-signed', 'sealed'): only ever deleted. */
+const OBSOLETE = ['book-signed', 'sealed'] as const
 export type Fixed = typeof FIXED[number]
 
 export interface Names {
@@ -56,6 +58,8 @@ export interface Names {
   /** `ec-<idTag>-`: every record of this identity starts with it. */
   prefix: string
   fixed: Record<Fixed, string>
+  /** Names of records no build reads any more, deleted at sign-in. */
+  obsolete: string[]
   /** One room's pins, one group's state. */
   scoped(kind: 'pin' | 'group', scope: string): Promise<string>
   /** The group ids this identity holds state for (lib/storenames.ts, group index). */
@@ -72,9 +76,10 @@ export async function namesFromKey(nk: Uint8Array, kid: string): Promise<Names> 
   const prefix = 'ec-' + hex((await mac('id')).slice(0, 8)) + '-'
   const name = async (label: string, scope = '') => prefix + hex((await mac(label + '\0' + scope)).slice(0, 16))
   const fixed = Object.fromEntries(await Promise.all(FIXED.map(async (f) => [f, await name(f)]))) as Record<Fixed, string>
+  const obsolete = await Promise.all(OBSOLETE.map((f) => name(f)))
   const indexKey = await hkdfBits(nk, enc.encode(INDEX_SALT), enc.encode(kid), 32)
   return {
-    kid, prefix, fixed,
+    kid, prefix, fixed, obsolete,
     scoped: (kind, scope) => name(kind, scope),
     async groups(kv) {
       const raw = kv.get(fixed.groups)
@@ -93,46 +98,6 @@ export async function namesFromKey(nk: Uint8Array, kid: string): Promise<Names> 
 export async function namesFor(id: Deriving & { pub: string }, kid: string): Promise<Names> {
   const nk = await deriveWith(id, NAMES_LABEL, id.pub, NAMES_CTX, 32)
   try { return await namesFromKey(nk, kid) } finally { nk.fill(0) }
-}
-
-/** Where each record used to be, keyed by the KID in the clear. */
-const LEGACY: Array<[string, Fixed]> = [
-  ['ec-gcache-emp-', 'emp'], ['ec-local-contacts-', 'book'], ['ec-sealed-', 'sealed'],
-  ['ec-invites-', 'invites'], ['ec-waiting-', 'waiting'], ['ec-ignored-', 'ignored'], ['ec-outbox-', 'outbox'],
-  ['ec-prefs-', 'prefs'], ['ec-seen-', 'seen'], ['ec-gleft-', 'gleft'],
-]
-
-/**
- * Move every record of this identity from its KID-carrying name to its own.
- * The values move unchanged: the seals are keyed by the KID as their scope,
- * and that did not change. A name already taken keeps what it holds (it was
- * written by this build) and the old copy is dropped. Returns how many moved.
- *
- * Left alone on purpose: the plain preference keys and the B1 group list of
- * older builds, which their own readers fold in and remove at this sign-in.
- */
-export async function migrateToNames(kv: KV, names: Names): Promise<number> {
-  const kid = names.kid
-  let moved = 0
-  const move = (from: string, to: string) => {
-    const v = kv.get(from)
-    if (v === null) return
-    if (kv.get(to) === null) { kv.set(to, v); moved++ }
-    kv.remove?.(from)
-  }
-  for (const [p, f] of LEGACY) move(p + kid, names.fixed[f])
-  move('ec-local-contacts-' + kid + '-signed', names.fixed['book-signed'])
-  const gids: string[] = []
-  for (const k of kv.keys()) {
-    if (k.startsWith('ec-gcache-' + kid + '-')) {
-      const gid = k.slice(('ec-gcache-' + kid + '-').length)
-      move(k, await names.scoped('group', gid)); gids.push(gid)
-    } else if (k.startsWith('ec-pins-' + kid + '-')) {
-      move(k, await names.scoped('pin', k.slice(('ec-pins-' + kid + '-').length)))
-    }
-  }
-  if (gids.length) await names.setGroups(kv, [...await names.groups(kv), ...gids])
-  return moved
 }
 
 /**
@@ -155,6 +120,7 @@ export async function migrateToNames(kv: KV, names: Names): Promise<number> {
  * Returns how many records moved and the old names when some are left.
  */
 export async function migrateNamesKey(kv: KV, id: Deriving & { pub: string }, names: Names): Promise<{ moved: number; legacy: Names | null }> {
+  for (const n of names.obsolete) kv.remove?.(n)
   if (kv.get(names.fixed.moved) !== null) return { moved: 0, legacy: null }
   let old: Names
   try {
@@ -176,6 +142,7 @@ export async function migrateNamesKey(kv: KV, id: Deriving & { pub: string }, na
   for (const gid of gids) move(await old.scoped('group', gid), await names.scoped('group', gid))
   if (gids.length) await names.setGroups(kv, [...await names.groups(kv), ...gids])
   kv.remove?.(old.fixed.groups)
+  for (const n of old.obsolete) kv.remove?.(n)
   const left = kv.keys().some((k) => k.startsWith(old.prefix))
   if (!left) kv.set(names.fixed.moved, '1')
   return { moved, legacy: left ? old : null }

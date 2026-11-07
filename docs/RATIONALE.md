@@ -296,7 +296,7 @@ impl/
 ├── core-wasm/  core.wasm, built from /core-rs (Rust: the same §6–§7, KATs in core-rs/tests)
 ├── lib/        wc.ts (WebCrypto, kdf, aeadNonce) · rendezvous · announce · origin (§13 envelope) · presence
 │               · room (delivery contract, EH-2 seam) · envelope · session (crypto seam) · core (facade) · x25519 (the Dh capability)
-│               · senderkey/group/grouproom/gmarker (§8) · gcache/pincache/bookmac/localbook/localstore/sealedstore/storenames/seen/gleft/prefs (§10)
+│               · senderkey/group/grouproom/gmarker (§8) · gcache/pincache/localbook/localstore/sealedstore/storenames/seen/gleft/prefs (§10)
 │               · inbox/knock/invite (§5.7–5.9) · decoy (§5.10) · safety (§4.4.1) · descr (§4.2) · clock (§5.4 anchor) · manifest (§5.6)
 │               · filecrypto/fileenvelope/cid (§7.5) · xfer/xfer-session (§13.1) · msgsize (§7.4) · migrate · profile/passmeter (§4.5)
 │               · selfsession (§9.1) · quote/edits/mentions/linkify (§7.4) · ice (§13 STUN) · nodelist/nodepick (§5.6) · radiophase (§5.5)

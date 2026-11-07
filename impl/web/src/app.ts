@@ -22,7 +22,7 @@ import { exportProfile, openBundle, applyBundle, conflictsWith, identityHere, ke
 import { decodeInvite, inviteLink, inviteFromPaste, setInviteNetwork, inviteNetwork, type Invite } from '../../lib/invite.ts'
 import { pickFirst, orderFrom, nodeKey } from '../../lib/nodepick.ts'
 import jsQR from './vendor/jsqr.cjs'
-import { type Verdict } from '../../lib/bookmac.ts'
+import { type Verdict } from '../../lib/localbook.ts'
 import { openLocalBook, cacheBaseOf } from '../../lib/localbook.ts'
 import type { GkBackend } from '../../lib/group.ts'
 // `t` is taken: this file uses it for text, topics, timers and DOM nodes, and a
@@ -93,8 +93,8 @@ import { enableProtoLog } from '../../lib/protolog.ts'
 import { cachePubKeys, traceHem } from '../../lib/hemwrap.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import { sealPins, openPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../../lib/pincache.ts'
-import { readSealedKV, writeSealedKV, sealPlainStores, type Store } from '../../lib/sealedstore.ts'
-import { namesFor, migrateToNames, migrateNamesKey, pinName, type Names } from '../../lib/storenames.ts'
+import { readSealedKV, writeSealedKV, type Store } from '../../lib/sealedstore.ts'
+import { namesFor, migrateNamesKey, pinName, type Names } from '../../lib/storenames.ts'
 import { markLeft, unmarkLeft, leftCovers, isLeftMap, type LeftMap } from '../../lib/gleft.ts'
 import { loadPrefs, savePrefs, type Prefs } from '../../lib/prefs.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
@@ -841,7 +841,6 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
   await loadSeen(names, base)
   await loadLeft(names, base)
   await loadPrefsFor(names, base)
-  await sealPlainStores(localKV(), base, names, (m) => ecLog(m, 'debug'))
   await enterApp(
     hemId,
     mergedContactBook(hemContactBook(hem, id.kid), local.verdict === 'tampered' ? taintedBook() : local.book),
@@ -1371,8 +1370,7 @@ async function softLogin() {
     await loadSeen(names, base)
     await loadLeft(names, base)
     await loadPrefsFor(names, base)
-    await sealPlainStores(localKV(), base, names, (m) => ecLog(m, 'debug'))
-    await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
+      await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
     else setMsg('soft-msg', tr('Błąd tożsamości software: ') + (e?.message ?? e), 'err')
@@ -2037,8 +2035,7 @@ let seenMap: Record<string, Seen> = {}
 let seenNames: Names | null = null
 let seenBase: Uint8Array | null = null
 
-/** Read the record for this identity; a pre-seal plain record is accepted
- *  once and sealed at sign-in (sealPlainStores), like every sealed store. */
+/** Read the record for this identity (sealed, like every per-identity store). */
 async function loadSeen(names: Names, base: Uint8Array | null) {
   seenNames = names; seenBase = base
   const v = await readSealedKV<Record<string, Seen>>(localKV(), base, names, 'seen',
@@ -9786,7 +9783,6 @@ const genc = new TextEncoder()
 // identities may share one (the KID tells them apart), and editing it would
 // orphan everything stored under the old spelling — which is what used to
 // happen to a renamed profile's contacts and group cache.
-const legacyGroupsKey = () => 'ec-groups-' + (session?.idKey ?? '') // B1 plaintext (migrated away)
 let cacheBase: Uint8Array | null = null
 /** Set at sign-in by openNames: where this identity's records are stored. */
 let storeNames: Names | null = null
@@ -9809,10 +9805,6 @@ async function ensureCacheBase(): Promise<Uint8Array | null> {
  */
 async function openNames(id: Identity, idKey: string): Promise<Names> {
   const names = await namesFor(id, idKey)
-  try {
-    const n = await migrateToNames(localKV(), names)
-    if (n) ecLog(`storage: moved ${n} record(s) off names that carried the KID`, 'debug')
-  } catch (e: any) { ecLog('storage: moving to the new names failed - ' + (e?.message ?? e)) }
   try {
     const r = await migrateNamesKey(localKV(), id, names)
     legacyNames = r.legacy
@@ -9988,7 +9980,6 @@ async function restoreGroups() {
   for (const gid of seen) for (const pub of owedInvites.owedFor(gid)) {
     const gu = groupsUI.get(gid); if (gu) void distributeGroup(gid, gu.name, pub)
   }
-  await migrateLegacyGroups(seen)
   renderGroups()
   if (seen.size) ecLog(`restored ${seen.size} group(s) from the encrypted cache`)
   // The cache is what this browser remembers; the device is what the HEM knows.
@@ -10002,23 +9993,6 @@ async function restoreGroups() {
   // missing needs a round of `group-skd-req` over a 1:1 anyway, so half a minute
   // later changes nothing about when it comes back.
   setTimeout(() => { void refreshContacts().then(() => recoverGroupsFromDevice()) }, RECOVERY_DELAY_MS)
-}
-
-/** One-time upgrade: a B1 plaintext blob (ec-groups-<handle>) -> encrypt each group
- *  into the §10 cache, then delete the plaintext. Prevents groups vanishing on the
- *  B1->B2 upgrade the same way the identity change once broke 1:1. */
-async function migrateLegacyGroups(seen: Set<string>) {
-  const raw = localStorage.getItem(legacyGroupsKey()); if (!raw || !client) return
-  try {
-    const blob = JSON.parse(raw); const names = new Map<string, string>(blob.names ?? [])
-    for (const snap of blob.groups ?? []) {
-      const gidHex = client.groups.gidHexOf(unb64(snap.gid))
-      if (!seen.has(gidHex)) { if (await addRestoredGroup(snap, names.get(gidHex) ?? '')) seen.add(gidHex) }
-    }
-    await persistGroups()                    // re-seal as encrypted blobs
-    localStorage.removeItem(legacyGroupsKey()) // drop the plaintext
-    ecLog('migrated the B1 plaintext group cache to the §10 encrypted cache')
-  } catch (e: any) { ecLog('legacy group migration failed: ' + (e?.message ?? e), 'debug') }
 }
 
 /** Show a group in the chat pane (reuses #messages; sender labels via `who`). */

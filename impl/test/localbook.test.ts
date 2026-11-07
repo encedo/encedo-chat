@@ -5,15 +5,15 @@
  * properties carry the weight: the names and keys of whoever this identity
  * knows never reach storage in the clear - not on write and not left behind by
  * an older format - and a book that does not verify is `tampered`, kept as
- * evidence, never read as empty and never written over. The 2026-10-12 rule
- * stays too: a book that has ever been protected is never again accepted as
- * a bare "pre-MAC" array.
+ * evidence, never read as empty and never written over. Since 0.8.2 only the
+ * sealed format is read: the plain and MAC'd formats of the builds before
+ * 0.7.34 are `tampered` - an untouched old profile and a substitute look the
+ * same.
  */
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { openLocalBook, cacheBaseOf } from '../lib/localbook.ts'
-import { signBook, pack } from '../lib/bookmac.ts'
 import { generateX25519 } from '../lib/x25519.ts'
 import type { KV } from '../lib/migrate.ts'
 import { namesFromKey, type Names } from '../lib/storenames.ts'
@@ -35,7 +35,6 @@ const OTHER_KID = '0123456789abcdef0123456789abcdef'
 const N: Names = await namesFromKey(randomBytes(32), KID)
 const N2: Names = await namesFromKey(randomBytes(32), OTHER_KID)
 const BOOK = N.fixed.book
-const MARK = N.fixed['book-signed']
 const REAL = 'iv3Q1qyn2LhfwPVy7UvnKi/f0yiqZLeY4GALWq5ilzA='
 const MINE = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
 const until = async (cond: () => boolean, ms = 2000) => { const t0 = Date.now(); while (!cond()) { if (Date.now() - t0 > ms) throw new Error('timed out: ' + cond.toString()); await new Promise((r) => setTimeout(r, 5)) } }
@@ -48,53 +47,31 @@ async function setup() {
   return { kv, id, base }
 }
 
-test('a pre-MAC bare array is accepted, sealed on open, and the plain list is gone', async () => {
+test('only a sealed book is read: a bare array or a v1 signed book is tampered, kept as evidence, never written over', async () => {
+  for (const plain of [
+    JSON.stringify([{ name: 'Ala Nowak', pub: MINE }]),                                  // the pre-MAC bare array
+    JSON.stringify({ v: 1, mac: 'AAAA', body: JSON.stringify([{ name: 'Ola', pub: MINE }]) }), // the v1 MAC'd packing
+  ]) {
+    const { kv, base } = await setup()
+    kv.set(BOOK, plain)
+    const { book, verdict } = await openLocalBook(N, kv, base)
+    assert.equal(verdict, 'tampered', plain.slice(0, 30))
+    assert.deepEqual(await book.list(), [], 'a tampered book shows nothing')
+    await assert.rejects(book.add('X', MINE), /refusing to write over it/)
+    assert.equal(kv.get(BOOK), plain, 'the evidence is left where it was')
+  }
+})
+
+test('no book yet is an empty book, ok, and the first write seals it', async () => {
   const { kv, base } = await setup()
-  kv.set(BOOK, JSON.stringify([{ name: 'Ala Nowak', pub: REAL }])); kv.writes.length = 0
   const { book, verdict } = await openLocalBook(N, kv, base)
-  assert.equal(verdict, 'unsigned')
-  assert.equal((await book.list())[0].pub, REAL)
-  assert.ok(sealed(kv.get(BOOK)), 'sealed before the caller saw it, not at the next write')
-  assert.equal(kv.get(MARK), '1')
+  assert.equal(verdict, 'ok')
+  await book.add('Ala Nowak', REAL)
+  await until(() => sealed(kv.get(BOOK)))
   assert.deepEqual(leaks(kv, 'Ala Nowak', REAL), [])
   const again = await openLocalBook(N, kv, base)
   assert.equal(again.verdict, 'ok')
   assert.deepEqual((await again.book.list()).map((c) => c.name), ['Ala Nowak'])
-})
-
-test('a v1 signed book that verifies is sealed on open; one that does not is evidence', async () => {
-  const { kv, base } = await setup()
-  const body = JSON.stringify([{ name: 'Ola Wit', pub: REAL }])
-  kv.set(BOOK, pack(body, await signBook(base, KID, body))); kv.set(MARK, '1'); kv.writes.length = 0
-  const { verdict, book } = await openLocalBook(N, kv, base)
-  assert.equal(verdict, 'ok')
-  assert.equal((await book.list())[0].name, 'Ola Wit')
-  assert.ok(sealed(kv.get(BOOK)))
-  assert.deepEqual(leaks(kv, 'Ola Wit', REAL), [])
-
-  const kv2 = memKV(); kv2.set(N.fixed.emp, kv.get(N.fixed.emp)!)
-  const swapped = JSON.stringify([{ name: 'Ola Wit', pub: MINE }])
-  const forged = pack(swapped, await signBook(base, KID, body)) // a MAC over the OTHER text
-  kv2.set(BOOK, forged); kv2.set(MARK, '1')
-  const bad = await openLocalBook(N, kv2, base)
-  assert.equal(bad.verdict, 'tampered')
-  assert.deepEqual(await bad.book.list(), [])
-  assert.equal(kv2.get(BOOK), forged, 'left exactly where it was')
-  await assert.rejects(bad.book.add('X', MINE), /refusing to write over it/)
-})
-
-test('once protected, a bare array put back in its place is tampering, not a pre-MAC book', async () => {
-  const { kv, base } = await setup()
-  const { book } = await openLocalBook(N, kv, base)
-  await book.add('Ala Nowak', REAL)
-  await until(() => sealed(kv.get(BOOK)))
-  // The attack: drop the seal, put a list with a swapped key in its place.
-  kv.set(BOOK, JSON.stringify([{ name: 'Ala Nowak', pub: MINE }]))
-  const { book: b2, verdict } = await openLocalBook(N, kv, base)
-  assert.equal(verdict, 'tampered')
-  assert.deepEqual(await b2.list(), [], 'a tampered book shows nothing')
-  await assert.rejects(b2.add('X', MINE), /refusing to write over it/)
-  assert.ok(kv.get(BOOK)!.includes(MINE), 'the evidence is left where it was')
 })
 
 test('a sealed book that does not open is tampered, never an empty book that the next write seals over', async () => {
@@ -134,7 +111,7 @@ test('the plain text never touches storage: what lands is sealed, or nothing', a
   assert.equal((await book.list()).length, 1, 'reads see the change at once')
   await until(() => sealed(kv.get(BOOK)))
   await book.rename((await book.list())[0], 'Alicja Lis')
-  await until(() => kv.writes.length >= 4)
+  await until(() => kv.writes.length >= 2) // one sealed write per change (no marker since 0.8.2)
   assert.deepEqual(leaks(kv, 'Ala Nowak', 'Alicja Lis', REAL), [])
 })
 
