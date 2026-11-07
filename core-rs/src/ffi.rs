@@ -92,7 +92,7 @@ pub extern "C" fn ec_hs_peer_ek(handle: i32, msg2: *const u8, msg2_len: usize) -
     give_back(handle, Obj::Init(init));
     match r { Ok(ek) => { set_out(ek.to_vec()); 0 } Err(e) => hs_err(e) }
 }
-/// I: dh2 = DH(EK_r, IK_i) from the host; out = msg3; the handle now holds the result.
+/// I: k2 = HKDF(DH(EK_r, IK_i), salt = h1, info = IK_I_INFO) from the host; out = msg3; the handle now holds the result.
 #[no_mangle]
 pub extern "C" fn ec_hs_initiator_complete(handle: i32, msg2: *const u8, msg2_len: usize, dh2: *const u8, now_ms: f64) -> i32 {
     let Some(Obj::Init(init)) = take(handle) else { return fail("not an initiator handle") };
@@ -114,7 +114,7 @@ pub extern "C" fn ec_hs_respond(ik_pub: *const u8, peer_ik_pub: *const u8, tag_k
         Err(e) => hs_err(e),
     }
 }
-/// R: dh1 = DH(IK_r, EK_i) from the host; out = msg2 (SK held, I unauthenticated).
+/// R: k1 = HKDF(DH(IK_r, EK_i), salt = h1, info = IK_R_INFO) from the host; out = msg2 (SK held, I unauthenticated).
 #[no_mangle]
 pub extern "C" fn ec_hs_responder_complete(handle: i32, dh1: *const u8) -> i32 {
     let Some(Obj::RespBegin(rb)) = take(handle) else { return fail("not a responder handle") };

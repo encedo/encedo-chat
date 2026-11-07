@@ -22,8 +22,9 @@
 
 import type { Eh2Handshake, StartOpts } from './establish.ts'
 import type { Session } from '../lib/session.ts'
-import { HandshakeError } from './handshake.ts'
-import { T_MSG1, T_MSG2, T_MSG3 } from './wire.ts'
+import { HandshakeError, IK_I_INFO, IK_R_INFO } from './handshake.ts'
+import { T_MSG1, T_MSG2, T_MSG3, h1 as hashMsg1 } from './wire.ts'
+import { dhKey } from '../lib/x25519.ts'
 import { nowMs } from '../lib/time.ts'
 
 interface Exports {
@@ -188,9 +189,10 @@ export async function startHandshakeWasm(opts: StartOpts): Promise<Eh2Handshake>
         try {
           const rc = core.with([frame], ([[p, n]]) => x.ec_hs_peer_ek(h, p, n))
           if (rc !== 0) fail(core, rc)
-          const dh2 = await opts.ik.dh(core.out())          // DH(EK_r, IK_i): the identity backend's call
-          const rc2 = core.with([frame, dh2], ([[p, n], [d]]) => x.ec_hs_initiator_complete(h, p, n, d, now()))
-          dh2.fill(0)
+          // k2 = HKDF(DH(EK_r, IK_i), h1): the identity backend's call - a HEM derives it in the device
+          const k2 = await dhKey(opts.ik, IK_I_INFO, core.out(), await hashMsg1(msg1))
+          const rc2 = core.with([frame, k2], ([[p, n], [d]]) => x.ec_hs_initiator_complete(h, p, n, d, now()))
+          k2.fill(0)
           if (rc2 !== 0) fail(core, rc2)
           const msg3 = core.out()
           live = false
@@ -215,9 +217,10 @@ export async function startHandshakeWasm(opts: StartOpts): Promise<Eh2Handshake>
           const rc = core.with([ikPub, opts.peerIkPub, opts.tagKey, frame], ([[a], [b], [c], [p, n]]) => x.ec_hs_respond(a, b, c, p, n, now(), 0))
           if (rc <= 0) fail(core, rc)
           h = rc
-          const dh1 = await opts.ik.dh(core.out())         // DH(IK_r, EK_i): the identity backend's call
-          const rc2 = core.with([dh1], ([[d]]) => x.ec_hs_responder_complete(h, d))
-          dh1.fill(0)
+          // k1 = HKDF(DH(IK_r, EK_i), h1): the identity backend's call - a HEM derives it in the device
+          const k1 = await dhKey(opts.ik, IK_R_INFO, core.out(), await hashMsg1(frame))
+          const rc2 = core.with([k1], ([[d]]) => x.ec_hs_responder_complete(h, d))
+          k1.fill(0)
           if (rc2 !== 0) fail(core, rc2)
           return core.out()                                 // msg2: SK exists, I is not yet authenticated
         }

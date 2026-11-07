@@ -1,7 +1,8 @@
 //! The known-answer vectors of docs/kat/ reproduced by the Rust port: the
 //! same fixed keys and seeds as scripts/export-kat.mjs, the same bytes out.
 
-use encedo_core::handshake::{Initiator, ResponderBegin, MAX_SKEW_MS};
+use encedo_core::handshake::{ik_key, Initiator, ResponderBegin, IK_I_INFO, IK_R_INFO, MAX_SKEW_MS};
+use encedo_core::wire;
 use encedo_core::kem::KemSecret;
 use encedo_core::ratchet::{Ratchet, RatchetOpts};
 use encedo_core::rng::Rng;
@@ -41,10 +42,11 @@ fn handshake(now: u64) -> (encedo_core::handshake::HandshakeResult, encedo_core:
     let init = Initiator::new(ik_i.public(), ik_r.public(), &tag, Priv::from_bytes(fill(0x33)), KemSecret::from_seed([0x55; 64]), now);
     let msg1 = init.msg1().to_vec();
     let rb = ResponderBegin::new(ik_r.public(), ik_i.public(), &tag, &msg1, now, MAX_SKEW_MS).unwrap();
-    let dh1 = ik_r.dh(&rb.peer_ek());                       // the HSM's DH on R
-    let (msg2, resp) = rb.complete(&dh1, Priv::from_bytes(fill(0x44)), fill(0x66)).unwrap();
-    let dh2 = ik_i.dh(&init.peer_ek_of(&msg2).unwrap());    // the HSM's DH on I
-    let (msg3, ri) = init.complete(&msg2, &dh2, now).unwrap();
+    let h1 = wire::h1(&msg1);
+    let k1 = ik_key(&ik_r.dh(&rb.peer_ek()), &h1, IK_R_INFO);                    // what the HSM derives on R
+    let (msg2, resp) = rb.complete(&k1, Priv::from_bytes(fill(0x44)), fill(0x66)).unwrap();
+    let k2 = ik_key(&ik_i.dh(&init.peer_ek_of(&msg2).unwrap()), &h1, IK_I_INFO); // what the HSM derives on I
+    let (msg3, ri) = init.complete(&msg2, &k2, now).unwrap();
     let rr = resp.finish(&msg3).unwrap();
     assert_eq!(&ri.sk[..], &rr.sk[..], "SK_i == SK_r");
     (ri, rr, msg1, msg2, msg3)
@@ -116,9 +118,16 @@ fn the_responder_refuses_a_wrong_tag_and_a_wrong_mac() {
     // an initiator that cannot do the IK DH (hands in garbage) fails mac_i on R
     let init = Initiator::new(ik_i.public(), ik_r.public(), &tag, Priv::from_bytes(fill(0x33)), KemSecret::from_seed([0x55; 64]), now);
     let rb = ResponderBegin::new(ik_r.public(), ik_i.public(), &tag, init.msg1(), now, MAX_SKEW_MS).unwrap();
-    let dh1 = ik_r.dh(&rb.peer_ek());
-    let (msg2, resp) = rb.complete(&dh1, Priv::from_bytes(fill(0x44)), fill(0x66)).unwrap();
-    assert_eq!(init.complete(&msg2, &fill(0x00), now).err(), Some(HandshakeError::MacR), "a wrong IK DH on I shows as mac_r failing");
+    let k1 = ik_key(&ik_r.dh(&rb.peer_ek()), &wire::h1(init.msg1()), IK_R_INFO);
+    let (msg2, resp) = rb.complete(&k1, Priv::from_bytes(fill(0x44)), fill(0x66)).unwrap();
+    assert_eq!(init.complete(&msg2, &fill(0x00), now).err(), Some(HandshakeError::MacR), "a wrong IK key on I shows as mac_r failing");
+    // The raw DH handed in where the derived key belongs - what a host that skipped the HKDF would do - fails too.
+    let init = Initiator::new(ik_i.public(), ik_r.public(), &tag, Priv::from_bytes(fill(0x33)), KemSecret::from_seed([0x55; 64]), now);
+    let rb = ResponderBegin::new(ik_r.public(), ik_i.public(), &tag, init.msg1(), now, MAX_SKEW_MS).unwrap();
+    let raw1 = ik_r.dh(&rb.peer_ek());
+    let (msg2, _) = rb.complete(&raw1, Priv::from_bytes(fill(0x44)), fill(0x66)).unwrap();
+    let k2 = ik_key(&ik_i.dh(&init.peer_ek_of(&msg2).unwrap()), &wire::h1(init.msg1()), IK_I_INFO);
+    assert_eq!(init.complete(&msg2, &k2, now).err(), Some(HandshakeError::MacR), "a raw IK DH on R does not pass for the derived key");
     assert_eq!(resp.finish(&[0x03, 3, 0, 0]).err().map(|e| matches!(e, HandshakeError::Wire(_))), Some(true));
 }
 

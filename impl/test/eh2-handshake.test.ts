@@ -46,7 +46,7 @@ test('SK_i == SK_r — both sides derive the same session key (§6.3 first test)
   assert.notDeepEqual(iResult.sk, new Uint8Array(32), 'SK is not all-zero')
 })
 
-test('the key schedule is exactly ikm = DH(IK_r,EK_i) || DH(EK_r,IK_i) || DH(EK_r,EK_i) || ss', async () => {
+test('the key schedule is exactly ikm = k1 || k2 || DH(EK_r,EK_i) || ss, k1/k2 the HKDFs of the IK DHs under h1', async () => {
   const [ikI, ikR] = [await generateX25519(), await generateX25519()]
   const kem = toyKem()
   const i1 = await initiate({ tagKey: TAG_KEY, ik: ikI, peerIkPub: ikR.pub, kem, now: NOW })
@@ -54,19 +54,26 @@ test('the key schedule is exactly ikm = DH(IK_r,EK_i) || DH(EK_r,IK_i) || DH(EK_
   const i2 = await initiatorComplete(i1.state, r1.msg2, { now: NOW })
 
   const msg2 = decodeMsg2(r1.msg2)
+  const salt = await hashMsg1(i1.msg1)
   const dh1 = await i1.state.ekI.dh(ikR.pub)     // DH(IK_r, EK_i)
   const dh2 = await ikI.dh(msg2.ekPub)           // DH(EK_r, IK_i)
+  const k1 = await hkdfBits(dh1, salt, enc.encode('onchato-eh2-ik-r-v1'), 32)
+  const k2 = await hkdfBits(dh2, salt, enc.encode('onchato-eh2-ik-i-v1'), 32)
   const dh3 = await i1.state.ekI.dh(msg2.ekPub)  // DH(EK_r, EK_i)
   const ss = await i1.state.pq.decapsulate(msg2.pqCt)
-  const salt = await hashMsg1(i1.msg1)
-  const info = enc.encode('onchato-handshake-v2')
+  const info = enc.encode('onchato-handshake-v3')
 
-  assert.deepEqual(i2.result.sk, await hkdfBits(concat(dh1, dh2, dh3, ss), salt, info, 32))
+  assert.deepEqual(i2.result.sk, await hkdfBits(concat(k1, k2, dh3, ss), salt, info, 32))
   // and the ordering is load-bearing: any other permutation is a different key
-  assert.notDeepEqual(i2.result.sk, await hkdfBits(concat(dh2, dh1, dh3, ss), salt, info, 32))
-  assert.notDeepEqual(i2.result.sk, await hkdfBits(concat(dh1, dh3, dh2, ss), salt, info, 32))
+  assert.notDeepEqual(i2.result.sk, await hkdfBits(concat(k2, k1, dh3, ss), salt, info, 32))
+  assert.notDeepEqual(i2.result.sk, await hkdfBits(concat(k1, dh3, k2, ss), salt, info, 32))
+  // the raw DHs in place of k1/k2 (the 3.0 schedule) are a different key
+  assert.notDeepEqual(i2.result.sk, await hkdfBits(concat(dh1, dh2, dh3, ss), salt, info, 32))
+  // the two roles' labels are not interchangeable
+  const k1asI = await hkdfBits(dh1, salt, enc.encode('onchato-eh2-ik-i-v1'), 32)
+  assert.notDeepEqual(i2.result.sk, await hkdfBits(concat(k1asI, k2, dh3, ss), salt, info, 32))
   // as is the salt (h1) — that is what makes every session's SK unique
-  assert.notDeepEqual(i2.result.sk, await hkdfBits(concat(dh1, dh2, dh3, ss), new Uint8Array(32), info, 32))
+  assert.notDeepEqual(i2.result.sk, await hkdfBits(concat(k1, k2, dh3, ss), new Uint8Array(32), info, 32))
 })
 
 test('dh3 is the first ratchet step input and both sides hold it', async () => {

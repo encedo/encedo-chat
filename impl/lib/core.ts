@@ -459,8 +459,10 @@ export async function deriveRoom(
   // rotation offset and the room share one set of device calls).
   const { topic, macKey } = eh2.rv ?? await derivePresence(id, peer, p)
   // The EH-2 DHs run against the peer's EPHEMERAL keys, so no contact `kid`
-  // here — just our IK against raw public keys (HEM raw ecdh, §4.3).
-  const ik = dhFromEcdh(id.pub, (peerPubB64) => id.ecdh(peerPubB64))
+  // here — just our IK against raw public keys, derived through the backend (§4.3, §6.2).
+  // The DH with our IK goes through the identity backend's derivation (a HEM
+  // runs the HKDF in the device; spec 4.0), so EH-2 never asks it for a raw DH.
+  const ik = dhFromEcdh(id.pub, (peerPubB64) => id.ecdh(peerPubB64), (label, peerPubB64, salt, len) => deriveWith(id, label, peerPubB64, salt, len))
   const { rv: _rv, ...rest } = eh2
   return { topic, keys: { macKey, eh2: { ik, peerIkPub: unb64(peer.pub), ...rest } } }
 }

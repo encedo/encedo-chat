@@ -12,6 +12,8 @@ import assert from 'node:assert/strict'
 import { loadCore, startHandshakeWasm } from '../eh2/wasm.ts'
 import { startHandshake, setCoreBackend, coreBackend, type Eh2Handshake, type StartOpts } from '../eh2/establish.ts'
 import { x25519FromPriv, type Dh } from '../lib/x25519.ts'
+import { kdf } from '../lib/wc.ts'
+import { IK_I_INFO, IK_R_INFO } from '../eh2/handshake.ts'
 import type { Session } from '../lib/session.ts'
 
 const te = new TextEncoder(), td = new TextDecoder()
@@ -121,4 +123,36 @@ test('the process-wide switch routes startHandshake to the module', async () => 
     assert.ok(typeof (I as any).stats === 'function' && typeof (R as any).stats === 'function', 'both sessions came from the module')
     await say(I, R, 'routed')
   } finally { setCoreBackend('ts') }
+})
+
+/**
+ * An IK that refuses a raw DH and only derives - a HEM on firmware 1.3
+ * without the raw_ecdh_enabled policy. EH-2 must complete with it in every
+ * engine pairing (spec 4.0, section 6.2): the one DH with our IK is asked as
+ * HKDF(DH, salt = h1, info = the role's label).
+ */
+async function deriveOnly(priv: Dh, asked: Array<{ label: string; salt: Uint8Array }>): Promise<Dh> {
+  return {
+    pub: priv.pub,
+    dh: async () => { throw Object.assign(new Error('raw ECDH refused (no raw_ecdh_enabled policy)'), { code: 'http_403' }) },
+    derive: async (label, peerPub, salt, len) => { asked.push({ label, salt }); return kdf(label, await priv.dh(peerPub), salt, len) },
+  }
+}
+
+test('an IK that only derives (a HEM without raw ECDH) completes EH-2 in every engine pairing', async () => {
+  for (const [eI, eR] of [['ts', 'ts'], ['wasm', 'wasm'], ['ts', 'wasm'], ['wasm', 'ts']] as Array<[Engine, Engine]>) {
+    const askedI: Array<{ label: string; salt: Uint8Array }> = [], askedR: typeof askedI = []
+    const { ikI, ikR } = await pair()
+    const hi = await start(eI, { role: 'initiator', ik: await deriveOnly(ikI, askedI), peerIkPub: ikR.pub, tagKey: TAG, ratchet: { pqEverySteps: 1 } })
+    const hr = await start(eR, { role: 'responder', ik: await deriveOnly(ikR, askedR), peerIkPub: ikI.pub, tagKey: TAG, ratchet: { pqEverySteps: 1 } })
+    const msg2 = (await hr.feed(hi.initial[0]))!
+    const msg3 = (await hi.feed(msg2))!
+    assert.equal(await hr.feed(msg3), null)
+    const I = await hi.session, R = await hr.session
+    await say(I, R, `${eI}->${eR}`); await say(R, I, `${eR}->${eI}`)
+    const h1 = new Uint8Array(await crypto.subtle.digest('SHA-256', hi.initial[0]))
+    assert.deepEqual(askedI.map((a) => a.label), [IK_I_INFO], `${eI} initiator: one derivation, its role's label`)
+    assert.deepEqual(askedR.map((a) => a.label), [IK_R_INFO], `${eR} responder: one derivation, its role's label`)
+    assert.deepEqual(askedI[0].salt, h1, 'salted with h1'); assert.deepEqual(askedR[0].salt, h1)
+  }
 })

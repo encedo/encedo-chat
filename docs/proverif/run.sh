@@ -32,8 +32,8 @@ SCENARIOS=(
 # SK without A's private key, so "R authenticates I" MUST fail - and does, in
 # seconds. It proves the model can see a real protocol bug.
 rm -rf mutant && mkdir mutant
-sed -e 's/let ikm = (exp(pkR, eki), exp(ekR, ik), exp(ekR, eki), ss) in/let ikm = (exp(pkR, eki), exp(ekR, eki), ss) in/' \
-    -e 's/let ikm = (exp(ekI, ik), exp(pkI, ekr), exp(ekI, ekr), ss) in/let ikm = (exp(ekI, ik), exp(ekI, ekr), ss) in/' eh2.pvl > mutant/eh2.pvl
+sed -e 's/let ikm = (hkdf(h1, g2b(exp(pkR, eki)), L_IKR), hkdf(h1, g2b(exp(ekR, ik)), L_IKI), exp(ekR, eki), ss) in/let ikm = (hkdf(h1, g2b(exp(pkR, eki)), L_IKR), exp(ekR, eki), ss) in/' \
+    -e 's/let ikm = (hkdf(h1, g2b(exp(ekI, ik)), L_IKR), hkdf(h1, g2b(exp(pkI, ekr)), L_IKI), exp(ekI, ekr), ss) in/let ikm = (hkdf(h1, g2b(exp(ekI, ik)), L_IKR), exp(ekI, ekr), ss) in/' eh2.pvl > mutant/eh2.pvl
 if [ "$(grep -c 'exp(ekR, ik)\|exp(pkI, ekr)' mutant/eh2.pvl)" != 0 ]; then echo "[fail] the mutant was not built (eh2.pvl changed shape)"; exit 1; fi
 cp eh2-auth.pv mutant/
 SCENARIOS+=("mutant/eh2-auth|kem-public|false false false true|mutant/eh2")

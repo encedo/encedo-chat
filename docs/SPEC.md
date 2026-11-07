@@ -127,8 +127,8 @@ GROUP  label  Onchato-Group-<name>                     (truncated to fit)
 
 | Operation | Use | Frequency |
 |---|---|---|
-| `ecdh(kid, peer_pub)` → raw 32 B | the one DH with `IK` in EH-2 (§6.2); the cache base (§10); once, the storage names of a pre-4.0 client (§10) | one per handshake; one per session |
-| `derive(kid, peer, [(ctx, label, L)…])` → `HKDF(ECDH(IK, peer), salt = ctx, info = label, L)` for each item | pair and self topic (§5.1–5.2), Announce MAC keys (§5.5), rotation offset (§5.4), invite key and decoy seed (§5.8–5.9), the group MAC keys `mk_ij` and `rk_i` (§8.1), the storage-name key `nk` (§10) | one call per contact per day for its topic and Announce key together (two days inside the rotation guard); the offset once per contact; `nk` once per sign-in; two per published invite per session; one per member per group epoch |
+| `ecdh(kid, peer_pub)` → raw 32 B | the cache base (§10); once, the storage names of a pre-4.0 client (§10) | one per session |
+| `derive(kid, peer, [(ctx, label, L)…])` → `HKDF(ECDH(IK, peer), salt = ctx, info = label, L)` for each item | the key `IK` contributes to an EH-2 handshake (`k1` or `k2`, salt `h1`, §6.2), pair and self topic (§5.1–5.2), Announce MAC keys (§5.5), rotation offset (§5.4), invite key and decoy seed (§5.8–5.9), the group MAC keys `mk_ij` and `rk_i` (§8.1), the storage-name key `nk` (§10) | one per handshake; one call per contact per day for its topic and Announce key together (two days inside the rotation guard); the offset once per contact; `nk` once per sign-in; two per published invite per session; one per member per group epoch |
 | `key_generate(X25519, purpose = ecdh)` | `IK` at onboarding; `GK` at group creation | once per identity, once per group |
 | `key_import(pub)` | a contact's `IK_pub`; a member's `GK_pub` (§8.6) | once per contact, once per group |
 | `key_delete(kid)` | contact removal, group leave, IK rotation | rare |
@@ -137,7 +137,7 @@ GROUP  label  Onchato-Group-<name>                     (truncated to fit)
 
 Signing and the HSM's own ML-KEM/ML-DSA are not used. Everything else (HMAC, AES-GCM, ML-KEM, ratchet, every HKDF) is client-side.
 
-The client never holds a pair secret: what it memoises are the derived values of a day (a topic, an Announce key, an offset, an epoch's MAC key). On a HEM `derive` runs in the device (firmware 1.3: one ECDH and an HKDF per item, the shared secret never returned) and `ECDH(IK_a, IK_b)` never leaves it; a software identity derives over its own ECDH output and wipes it. The device gives at least 16 bytes per item: a shorter `L` (the 4-byte rotation offset) is the first `L` bytes of 16, which are byte for byte HKDF with that `L`. The label goes in the HKDF info, and the firmware refuses an info starting with `encedo-`, hence the `onchato-` labels of §14. EH-2 needs raw mode: its DH outputs are concatenated client-side and wiped after `SK` is derived; a HEM answers a raw `ecdh` only when it is personalised with the `raw_ecdh_enabled` policy.
+The client never holds a pair secret: what it memoises are the derived values of a day (a topic, an Announce key, an offset, an epoch's MAC key). On a HEM `derive` runs in the device (firmware 1.3: one ECDH and an HKDF per item, the shared secret never returned) and `ECDH(IK_a, IK_b)` never leaves it; a software identity derives over its own ECDH output and wipes it. The device gives at least 16 bytes per item: a shorter `L` (the 4-byte rotation offset) is the first `L` bytes of 16, which are byte for byte HKDF with that `L`. The label goes in the HKDF info, and the firmware refuses an info starting with `encedo-`, hence the `onchato-` labels of §14. EH-2 asks for its `k` like any other derivation (§6.2). What still needs raw mode is the §10 cache base; a HEM answers a raw `ecdh` only when it is personalised with the `raw_ecdh_enabled` policy, and without it the stores of §10 are kept as that section says for an identity that refuses ECDH.
 
 ### 4.4 Contact integrity
 
@@ -367,8 +367,10 @@ R checks the tag before any DH: equal to the tag over the contact's `IK_pub`, pr
 ```
 h1  = SHA-256(serialize(msg1))
 ss  = ML-KEM-768 encapsulate (R) / decapsulate (I)
-ikm = DH(IK_r, EK_i) ‖ DH(EK_r, IK_i) ‖ DH(EK_r, EK_i) ‖ ss
-SK  = HKDF-SHA256(ikm, salt = h1, info = "onchato-handshake-v2", L = 32)
+k1  = HKDF-SHA256(DH(IK_r, EK_i), salt = h1, info = "onchato-eh2-ik-r-v1", L = 32)
+k2  = HKDF-SHA256(DH(EK_r, IK_i), salt = h1, info = "onchato-eh2-ik-i-v1", L = 32)
+ikm = k1 ‖ k2 ‖ DH(EK_r, EK_i) ‖ ss
+SK  = HKDF-SHA256(ikm, salt = h1, info = "onchato-handshake-v3", L = 32)
 
 h2_partial = SHA-256(serialize(msg1) ‖ EK_r_pub ‖ pq_ct ‖ u64be(ts_r))
 mac_r = HMAC-SHA256(SK, "responder" ‖ h2_partial)      // R authenticates to I (msg2)
@@ -376,21 +378,21 @@ h3    = SHA-256(h2_partial ‖ mac_r)
 mac_i = HMAC-SHA256(SK, "initiator" ‖ h3)               // I authenticates to R (msg3)
 ```
 
-Each side makes exactly one identity-backend ECDH (the DH involving its own `IK`); the other two DHs are local.
+Each side makes exactly one identity-backend call: the derivation (§4.3) of the key its own `IK` contributes — R asks for `k1`, I for `k2`, each salted with `h1`, which both know by then — so a HEM never returns the raw DH with `IK`. The DH with the peer's `IK` uses the side's own ephemeral key and is derived locally to the same `k`; `DH(EK_r, EK_i)` is local.
 
-- **Erasure.** `dh1`, `dh2` and `ss` are wiped as soon as `SK` is derived. `dh3` survives until the first ratchet step consumes it (§7.2). In `core-rs` (WASM and native, §3.2) the key types of `sk_i` and the `EK` private halves and every derived secret are zeroed on drop (`x25519-dalek` and `ml-kem` built with `zeroize`); in the TypeScript engine `sk_i` is dropped with its decapsulation closure and the `EK` private halves are non-extractable WebCrypto keys. `EK_i_priv` lives longest: R seeds the ratchet's first `DH_peer_pub` with `EK_i_pub` from msg1, so I keeps `EK_i_priv` as its initial ratchet private key until the first DH step replaces it.
+- **Erasure.** `k1`, `k2` (and the raw DH a side computed locally for its `k`) and `ss` are wiped as soon as `SK` is derived. `dh3` survives until the first ratchet step consumes it (§7.2). In `core-rs` (WASM and native, §3.2) the key types of `sk_i` and the `EK` private halves and every derived secret are zeroed on drop (`x25519-dalek` and `ml-kem` built with `zeroize`); in the TypeScript engine `sk_i` is dropped with its decapsulation closure and the `EK` private halves are non-extractable WebCrypto keys. `EK_i_priv` lives longest: R seeds the ratchet's first `DH_peer_pub` with `EK_i_pub` from msg1, so I keeps `EK_i_priv` as its initial ratchet private key until the first DH step replaces it.
 - **msg3 gates the responder.** I holds `SK` after msg2 and may transmit after msg3; R MUST NOT accept any ratchet message from I until `mac_i` verifies.
 - **`pq_ct` binding.** The ciphertext enters `SK` only through `ss`; it is authenticated through `h2_partial` inside both MACs.
 
 ### 6.3 DH ordering
 
-Both sides concatenate in responder perspective: `DH(IK_r, EK_i) ‖ DH(EK_r, IK_i) ‖ DH(EK_r, EK_i) ‖ ss`. The initiator computes the same values by X25519 commutativity.
+Both sides concatenate in responder perspective: `k1 ‖ k2 ‖ DH(EK_r, EK_i) ‖ ss`, `k1` from `DH(IK_r, EK_i)` and `k2` from `DH(EK_r, IK_i)`. The initiator computes the same values by X25519 commutativity. The two labels differ, so the two IK contributions are never interchangeable.
 
 ### 6.4 Properties
 
-- **Mutual authentication.** R authenticates I through `mac_i` (needs `DH(IK_i, EK_r)`, hence `IK_i_priv`); I authenticates R through `mac_r` symmetrically.
+- **Mutual authentication.** R authenticates I through `mac_i` (needs `k2`, hence `DH(IK_i, EK_r)` and `IK_i_priv`, or the identity backend holding it); I authenticates R through `mac_r` symmetrically.
 - **Forward secrecy.** `SK` needs the wiped ephemerals; a later `IK` compromise does not recover it.
-- **PQ hybrid.** `SK` confidentiality holds while either ECDLP (X25519) or MLWE (ML-KEM-768) is hard; concatenation in HKDF is the combiner. EH-2 is a MAC-authenticated AKE whose classical component is a NIKE; the argument lives at the AKE level.
+- **PQ hybrid.** `SK` confidentiality holds while either ECDLP (X25519) or MLWE (ML-KEM-768) is hard; concatenation in HKDF is the combiner. `k1` and `k2` are HKDF outputs of their DHs (pseudorandom under the same random-oracle view of HKDF the combiner already relies on), so they stand in the concatenation where the raw DHs stood. EH-2 is a MAC-authenticated AKE whose classical component is a NIKE; the argument lives at the AKE level.
 - **Deniability.** Both MACs are under `SK`, shared by both parties; neither holds proof of the other's authorship.
 - **KCI resistance.** Holding `IK_r_priv` does not allow impersonating a third party to R: `mac_i` needs `IK_i_priv`.
 - **Replay.** Timestamps ±5 min; `h1` salts `SK`, so every session's `SK` differs; Announce nonces are deduplicated (§5.5).
@@ -767,7 +769,7 @@ node → client   0x11 DELIVER  u8 len ‖ from ‖ u8 len ‖ topic ‖ data
 | **KDF convention** | `HKDF-SHA256(ikm, salt = context, info = label, L)`: date and network for the rendezvous keys (§5), `h1` for `SK` (§6.2), `RK` for a root step and ∅ for a chain walk (§7.2, §8.1), `group_id ‖ epoch` for the group MAC keys (§8.1), `invite_secret` for the invite key, the knock key and the decoy seed (§5.8, §5.9), `u32be(slot)` for the decoy instant (§5.9), the message counter for the AEAD nonce (§7.2, §8.2), the constant `"local storage names"` for the storage-name key `nk` (§10). The local stores of §10 put the label in the salt |
 | Wire versions | EH-2 frames and ratchet header `ver = 3`; group frame `version = 3`; Announce `v = 3`; envelope `v = 1` |
 | HKDF labels (rendezvous) | `onchato-rendezvous-v1`, `onchato-announce-mac-v1`, `onchato-rotation-v1` |
-| HKDF labels (handshake, ratchet) | `onchato-handshake-v2`, `onchato-ratchet-dh-v1`, `onchato-ratchet-hybrid-v1`, `onchato-msg-key`, `onchato-chain-key`, `onchato-aead-nonce` |
+| HKDF labels (handshake, ratchet) | `onchato-handshake-v3`, `onchato-eh2-ik-r-v1` (`k1`), `onchato-eh2-ik-i-v1` (`k2`), `onchato-ratchet-dh-v1`, `onchato-ratchet-hybrid-v1`, `onchato-msg-key`, `onchato-chain-key`, `onchato-aead-nonce` |
 | HKDF labels (groups) | `onchato-group-rendezvous-v1`, `onchato-group-msg`, `onchato-group-chain`, `onchato-group-msg-mac`, `onchato-group-roster-mac` |
 | HKDF labels (published invites) | `onchato-invite-key-v1`, `onchato-invite-knock-v2`, `onchato-invite-decoy-v1`, `onchato-invite-decoy-slot-v1` |
 | HKDF labels (decoy subscriptions, §5.10) | `onchato-decoy-v1`, `onchato-decoy-offset-v1`, `onchato-decoy-topic-v1` |

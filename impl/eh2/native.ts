@@ -19,8 +19,9 @@
 
 import type { Eh2Handshake, StartOpts } from './establish.ts'
 import type { Session } from '../lib/session.ts'
-import { HandshakeError } from './handshake.ts'
-import { T_MSG1, T_MSG2, T_MSG3 } from './wire.ts'
+import { HandshakeError, IK_I_INFO, IK_R_INFO } from './handshake.ts'
+import { T_MSG1, T_MSG2, T_MSG3, h1 as hashMsg1 } from './wire.ts'
+import { dhKey } from '../lib/x25519.ts'
 import { nowMs } from '../lib/time.ts'
 import { b64, unb64 } from '../lib/wc.ts'
 
@@ -94,9 +95,10 @@ export async function startHandshakeNative(opts: StartOpts): Promise<Eh2Handshak
   if (opts.role === 'initiator') {
     const s = await invoke<Started>('core_initiate', { ik_pub: ikPubB64, peer_ik_pub: peerB64, tag_key: tagB64, now_ms: now() }).catch((e) => { throw wrap(e) })
     const handle = s.handle
+    const msg1 = unb64(s.out)
     let live = true
     return {
-      initial: [unb64(s.out)],
+      initial: [msg1],
       session,
       get authenticated() { return authenticated },
       async feed(frame) {
@@ -105,9 +107,11 @@ export async function startHandshakeNative(opts: StartOpts): Promise<Eh2Handshak
         try {
           const msg2 = b64(frame)
           const ekR = unb64(await invoke<string>('core_peer_ek', { handle, msg2 }))
-          const dh2 = await opts.ik.dh(ekR)                 // DH(EK_r, IK_i): the identity backend's call
-          const msg3 = await invoke<string>('core_initiator_complete', { handle, msg2, dh2: b64(dh2), now_ms: now() })
-          dh2.fill(0)
+          // k2 = HKDF(DH(EK_r, IK_i), h1): the identity backend's call. The IPC
+          // field keeps its name (`dh2`); what it carries is the derived key.
+          const k2 = await dhKey(opts.ik, IK_I_INFO, ekR, await hashMsg1(msg1))
+          const msg3 = await invoke<string>('core_initiator_complete', { handle, msg2, dh2: b64(k2), now_ms: now() })
+          k2.fill(0)
           live = false
           authenticated = true
           resolve(await toSession(handle))
@@ -129,9 +133,10 @@ export async function startHandshakeNative(opts: StartOpts): Promise<Eh2Handshak
           if (frame[0] !== T_MSG1) throw new HandshakeError(`responder expected msg1, got frame type 0x${frame[0]?.toString(16)}`)
           const s = await invoke<Started>('core_respond', { ik_pub: ikPubB64, peer_ik_pub: peerB64, tag_key: tagB64, msg1: b64(frame), now_ms: now(), max_skew_ms: 0 })
           handle = s.handle
-          const dh1 = await opts.ik.dh(unb64(s.out))        // DH(IK_r, EK_i): the identity backend's call
-          const msg2 = await invoke<string>('core_responder_complete', { handle, dh1: b64(dh1) })
-          dh1.fill(0)
+          // k1 = HKDF(DH(IK_r, EK_i), h1): the identity backend's call (IPC field `dh1`)
+          const k1 = await dhKey(opts.ik, IK_R_INFO, unb64(s.out), await hashMsg1(frame))
+          const msg2 = await invoke<string>('core_responder_complete', { handle, dh1: b64(k1) })
+          k1.fill(0)
           return unb64(msg2)                                 // SK exists in the host; I unauthenticated until msg3
         }
         if (done) throw new HandshakeError('unexpected frame after the handshake completed')

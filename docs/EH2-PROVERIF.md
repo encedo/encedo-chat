@@ -12,7 +12,9 @@ This is the formal model `RATIONALE.md` §4 says EH-2 gives up by not being Nois
 msg1  = (EK_i, pq_pub, ts_i, initiator_tag)
         initiator_tag = HMAC(HMAC(announce_key, "onchato-eh2-initiator-tag-v1"), IK_i)
         announce_key  = HKDF(ECDH(IK_i, IK_r), date, "onchato-announce-mac-v1")
-SK    = HKDF(salt = H(msg1), ikm = DH(IK_r,EK_i) ‖ DH(EK_r,IK_i) ‖ DH(EK_r,EK_i) ‖ ss, "onchato-handshake-v2")
+k1    = HKDF(salt = H(msg1), ikm = DH(IK_r,EK_i), "onchato-eh2-ik-r-v1")
+k2    = HKDF(salt = H(msg1), ikm = DH(EK_r,IK_i), "onchato-eh2-ik-i-v1")
+SK    = HKDF(salt = H(msg1), ikm = k1 ‖ k2 ‖ DH(EK_r,EK_i) ‖ ss, "onchato-handshake-v3")
 msg2  = (EK_r, pq_ct, ts_r, mac_r)      mac_r = HMAC(SK, "responder" ‖ H(msg1 ‖ EK_r ‖ pq_ct ‖ ts_r))
 msg3  = mac_i                           mac_i = HMAC(SK, "initiator" ‖ H(h2_partial ‖ mac_r))
 ```
@@ -38,6 +40,7 @@ Secrecy is tested through a private witness, which each side seals under SK at t
   - `kem-public.pvl`: the ciphertext *is* the shared secret, so the attacker knows every `ss`.
 - **Timestamps** are chosen by the attacker. The ±5 min window is not modelled. Replay is excluded by fresh ephemerals, which the injective queries check.
 - **Type and version bytes** are folded into the tuple shapes.
+- **Who computes `k1` / `k2`** (spec 4.0): the side holding the IK asks its identity backend for the HKDF of that DH, the other side derives it from its ephemeral DH. The values are the same either way, so the model computes them where the protocol has them. Not modelled: the identity backend as an oracle a compromised host can query for `HKDF(DH(IK, X), salt, label)` with its own `X` and salt - the same scope as before, when it could ask for the raw DH; compromise of a host is modelled as the static key leaking.
 
 ## Results
 

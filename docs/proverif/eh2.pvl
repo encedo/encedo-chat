@@ -10,8 +10,14 @@
        announce_key = HKDF(ECDH(IK_i, IK_r), date, LABEL_ANNOUNCE)   5.5
      h1  = H(msg1)                                                    6.2
      ss  = ML-KEM-768 encap (R) / decap (I)
-     SK  = HKDF(DH(IK_r,EK_i) || DH(EK_r,IK_i) || DH(EK_r,EK_i) || ss,
-                salt = h1, info = "onchato-handshake-v2")              6.2, 6.3
+     k1  = HKDF(DH(IK_r,EK_i), salt = h1, info = "onchato-eh2-ik-r-v1")    6.2
+     k2  = HKDF(DH(EK_r,IK_i), salt = h1, info = "onchato-eh2-ik-i-v1")    6.2
+     SK  = HKDF(k1 || k2 || DH(EK_r,EK_i) || ss,
+                salt = h1, info = "onchato-handshake-v3")              6.2, 6.3
+       (spec 4.0: the side holding the IK derives its k in the identity
+        backend, which never returns the raw DH; the other side derives the
+        same k from its ephemeral DH. Who computes what does not change the
+        values, so the model computes them where the protocol has them.)
      h2p = H(msg1 || EK_r || pq_ct || ts_r)
      mac_r = HMAC(SK, "responder" || h2p)                             msg2
      h3  = H(h2p || mac_r)
@@ -62,7 +68,9 @@ fun senc(bitstring, key): bitstring.
 reduc forall m: bitstring, k: key; sdec(senc(m, k), k) = m.
 
 (* ---- labels (SPEC.md 14) ---- *)
-const L_SK: bitstring [data].          (* "onchato-handshake-v2" *)
+const L_SK: bitstring [data].          (* "onchato-handshake-v3" *)
+const L_IKR: bitstring [data].         (* "onchato-eh2-ik-r-v1" *)
+const L_IKI: bitstring [data].         (* "onchato-eh2-ik-i-v1" *)
 const L_TAG: bitstring [data].         (* "onchato-eh2-initiator-tag-v1" *)
 const L_ANNOUNCE: bitstring [data].    (* "onchato-announce-mac-v1" *)
 const L_RESP: bitstring [data].        (* "responder" *)
@@ -107,9 +115,10 @@ let Initiator(ik: exponent, pkR: G, honestPeer: bool) =
   out(c, msg1);
   in(c, (ekR: G, ct: bitstring, tsR: bitstring, macR: bitstring));
   let ss = kem_dec(pqsk, ct) in
-  (* responder perspective, by commutativity: DH(IK_r,EK_i), DH(EK_r,IK_i), DH(EK_r,EK_i) *)
-  let ikm = (exp(pkR, eki), exp(ekR, ik), exp(ekR, eki), ss) in
   let h1 = sha(msg1) in
+  (* responder perspective, by commutativity: DH(IK_r,EK_i), DH(EK_r,IK_i), DH(EK_r,EK_i);
+     the two IK DHs enter through their own HKDF (k1 locally, k2 from the identity backend) *)
+  let ikm = (hkdf(h1, g2b(exp(pkR, eki)), L_IKR), hkdf(h1, g2b(exp(ekR, ik)), L_IKI), exp(ekR, eki), ss) in
   let sk = hkdf(h1, ikm, L_SK) in
   let h2p = sha((msg1, ekR, ct, tsR)) in
   if macR = hmac(sk, (L_RESP, h2p)) then
@@ -135,8 +144,9 @@ let Responder(ik: exponent, pkI: G, honestPeer: bool) =
   let ekR = exp(g, ekr) in
   let ct = kem_ct(pqpk, coins) in
   let ss = kem_ss(pqpk, coins) in
-  let ikm = (exp(ekI, ik), exp(pkI, ekr), exp(ekI, ekr), ss) in
   let h1 = sha(msg1) in
+  (* k1 from the identity backend, k2 locally *)
+  let ikm = (hkdf(h1, g2b(exp(ekI, ik)), L_IKR), hkdf(h1, g2b(exp(pkI, ekr)), L_IKI), exp(ekI, ekr), ss) in
   let sk = hkdf(h1, ikm, L_SK) in
   let h2p = sha((msg1, ekR, ct, tsR)) in
   let macR = hmac(sk, (L_RESP, h2p)) in

@@ -12,13 +12,17 @@
  * **DH ordering is responder-perspective (§6.3)** — the classic "SK doesn't
  * match" bug. Both sides build:
  *
- *     ikm = DH(IK_r, EK_i) || DH(EK_r, IK_i) || DH(EK_r, EK_i) || ss
- *     SK  = HKDF-SHA256(ikm, salt = h1, info = "onchato-handshake-v2", L = 32)
+ *     k1  = HKDF(DH(IK_r, EK_i), salt = h1, info = "onchato-eh2-ik-r-v1", L = 32)
+ *     k2  = HKDF(DH(EK_r, IK_i), salt = h1, info = "onchato-eh2-ik-i-v1", L = 32)
+ *     ikm = k1 || k2 || DH(EK_r, EK_i) || ss
+ *     SK  = HKDF-SHA256(ikm, salt = h1, info = "onchato-handshake-v3", L = 32)
  *
- * Each side performs exactly ONE DH with its own long-term IK — that one goes
- * through the HSM in raw mode; the other two are local ephemeral DHs. The `Dh`
- * interface hides which is which, so this module works identically with a HEM
- * identity and a software one.
+ * Each side performs exactly ONE DH with its own long-term IK, and asks its
+ * holder for the derived key (`dhKey`): a HEM runs the HKDF in the device, so
+ * the raw DH with IK never leaves it (spec 4.0). The DH with the peer's IK
+ * uses our ephemeral key and is derived here the same way. The `Dh` interface
+ * hides which is which, so this module works identically with a HEM identity
+ * and a software one.
  *
  * Layering: this module computes and verifies, it does NOT do I/O. The caller
  * moves the three frames over whatever transport it has and decides who the
@@ -37,14 +41,17 @@ import { subtle, hkdfBits, concat } from '../lib/wc.ts'
 import { plog, val } from '../lib/protolog.ts'
 import { nowMs } from '../lib/time.ts'
 import type { Dh } from '../lib/x25519.ts'
-import { generateX25519 } from '../lib/x25519.ts'
+import { generateX25519, dhKey } from '../lib/x25519.ts'
 import {
   encodeMsg1, decodeMsg1, encodeMsg2, decodeMsg2, encodeMsg3, decodeMsg3,
   h1 as hashMsg1, h2Partial, h3 as hashH3,
 } from './wire.ts'
 
 const enc = new TextEncoder()
-const SK_INFO = enc.encode('onchato-handshake-v2')
+const SK_INFO = enc.encode('onchato-handshake-v3')
+/** k1 = HKDF(DH(IK_r, EK_i), h1, IK_R_INFO); k2 = HKDF(DH(EK_r, IK_i), h1, IK_I_INFO). */
+export const IK_R_INFO = 'onchato-eh2-ik-r-v1'
+export const IK_I_INFO = 'onchato-eh2-ik-i-v1'
 const LABEL_R = enc.encode('responder')
 const LABEL_I = enc.encode('initiator')
 
@@ -142,12 +149,12 @@ function checkSkew(ts: number, now: number, what: string, maxSkewMs: number): vo
   }
 }
 
-async function deriveSK(dh1: Uint8Array, dh2: Uint8Array, dh3: Uint8Array, ss: Uint8Array, h1: Uint8Array): Promise<Uint8Array> {
-  const ikm = concat(dh1, dh2, dh3, ss)
+async function deriveSK(k1: Uint8Array, k2: Uint8Array, dh3: Uint8Array, ss: Uint8Array, h1: Uint8Array): Promise<Uint8Array> {
+  const ikm = concat(k1, k2, dh3, ss)
   try {
     return await hkdfBits(ikm, h1, SK_INFO, 32)
   } finally {
-    wipe(ikm, dh1, dh2, ss) // dh3 survives: it is the first ratchet step's input
+    wipe(ikm, k1, k2, ss) // dh3 survives: it is the first ratchet step's input
   }
 }
 
@@ -219,17 +226,17 @@ export async function initiatorComplete(
   checkSkew(msg2.ts, opts.now ?? nowMs(), 'msg2', state.maxSkewMs)
 
   // Responder perspective (§6.3), computed from I's side via X25519 commutativity.
-  const dh1 = await state.ekI.dh(state.peerIkPub)   // DH(IK_r, EK_i)
-  const dh2 = await state.ik.dh(msg2.ekPub)         // DH(EK_r, IK_i)  <- the HSM call
-  const dh3 = await state.ekI.dh(msg2.ekPub)        // DH(EK_r, EK_i)
+  const h1 = await hashMsg1(state.msg1Bytes)
+  const k1 = await dhKey(state.ekI, IK_R_INFO, state.peerIkPub, h1) // from DH(IK_r, EK_i)
+  const k2 = await dhKey(state.ik, IK_I_INFO, msg2.ekPub, h1)       // from DH(EK_r, IK_i)  <- the HSM call
+  const dh3 = await state.ekI.dh(msg2.ekPub)                        // DH(EK_r, EK_i)
   const ss = await state.pq.decapsulate(msg2.pqCt)
 
-  const h1 = await hashMsg1(state.msg1Bytes)
-  // Logged BEFORE the derivation: deriveSK wipes dh1/dh2/ss on its way out (only
+  // Logged BEFORE the derivation: deriveSK wipes k1/k2/ss on its way out (only
   // dh3 survives, as the first ratchet step's input), so reading them afterwards
   // prints zeros and looks like a broken DH.
-  plog('§6.3', `I ikm (responder perspective): DH(IK_r,EK_i)=${val(dh1)} DH(EK_r,IK_i)=${val(dh2)} DH(EK_r,EK_i)=${val(dh3)} mlkem_ss=${val(ss)}`)
-  const sk = await deriveSK(dh1, dh2, dh3, ss, h1)
+  plog('§6.3', `I ikm (responder perspective): k1=${val(k1)} k2=${val(k2)} DH(EK_r,EK_i)=${val(dh3)} mlkem_ss=${val(ss)}`)
+  const sk = await deriveSK(k1, k2, dh3, ss, h1)
   plog('§6.2', `I h1=${val(h1)} -> SK=${val(sk)}`)
 
   const key = await macKey(sk)
@@ -299,13 +306,13 @@ export async function respond(opts: {
   const ekR = opts.ek ?? await generateX25519()
   const { ct, ss } = await kem.encapsulate(msg1.pqPub)
 
-  const dh1 = await ik.dh(msg1.ekPub)      // DH(IK_r, EK_i)  <- the HSM call
-  const dh2 = await ekR.dh(peerIkPub)      // DH(EK_r, IK_i)
-  const dh3 = await ekR.dh(msg1.ekPub)     // DH(EK_r, EK_i)
-
   const h1 = await hashMsg1(opts.msg1)
-  plog('§6.3', `R ikm: DH(IK_r,EK_i)=${val(dh1)} DH(EK_r,IK_i)=${val(dh2)} DH(EK_r,EK_i)=${val(dh3)} mlkem_ss=${val(ss)}`)
-  const sk = await deriveSK(dh1, dh2, dh3, ss, h1)
+  const k1 = await dhKey(ik, IK_R_INFO, msg1.ekPub, h1)    // from DH(IK_r, EK_i)  <- the HSM call
+  const k2 = await dhKey(ekR, IK_I_INFO, peerIkPub, h1)    // from DH(EK_r, IK_i)
+  const dh3 = await ekR.dh(msg1.ekPub)                     // DH(EK_r, EK_i)
+
+  plog('§6.3', `R ikm: k1=${val(k1)} k2=${val(k2)} DH(EK_r,EK_i)=${val(dh3)} mlkem_ss=${val(ss)}`)
+  const sk = await deriveSK(k1, k2, dh3, ss, h1)
   plog('§6.2', `R h1=${val(h1)} -> SK=${val(sk)}`)
 
   // EK_r_priv is not retained past this point: dh3 already carries everything

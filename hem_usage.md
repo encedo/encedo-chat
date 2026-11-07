@@ -99,8 +99,10 @@ contact**, spread over the day by the per-pair instant.
 
 ### §6 — EH-2 handshake
 
-**One raw `ecdh` per handshake**, and it is unavoidable: §6.3 needs one DH
-between our IK and the peer's ephemeral key. The other two DHs are our own
+**One derivation per handshake** (`ecdhHkdf`, one item), and it is unavoidable:
+§6.2 needs the key our IK contributes, `HKDF(DH(IK, peer's ephemeral), salt =
+h1)`. Since spec 4.0 it is a derivation, not a raw DH, so a HEM without the
+`raw_ecdh_enabled` policy handshakes too. The other DHs use our own
 ephemerals, computed locally, and ML-KEM is entirely client-side.
 
 It recurs on every re-handshake — §7.3 forces a fresh session every 4–8 h per
@@ -226,13 +228,13 @@ competing with the room the user is waiting for.
 | crosses the daily topic rotation | **none** |
 | pins or unpins a message | **none** — the pin key comes off the memoised `base` |
 | has the contact book MAC-verified at sign-in | **none** — same `base` |
-| opens a conversation with a contact | one `ecdh` for the EH-2 handshake |
-| is re-handshaked by §7.3 (every 4–8 h) | one `ecdh`, plus a token if the last one expired |
+| opens a conversation with a contact | one `ecdhHkdf` for the EH-2 handshake |
+| is re-handshaked by §7.3 (every 4–8 h) | one `ecdhHkdf`, plus a token if the last one expired |
 | adds a contact | broad `key_search` (the collision precheck) + `imp` token + `importPublicKey`, then the book reloads |
 | renames or removes a contact | one token for the scope + the operation |
 | creates a group | `createKeyPair` (returns the public half) + one `ecdhHkdf` per member |
 | adds or removes a group member | `updateKey` + one `ecdhHkdf` per NEW member |
-| joins a group | `importPublicKey` of `GK_pub`, then one `ecdh` per member on first traffic |
+| joins a group | `importPublicKey` of `GK_pub`, then one derivation (`ecdhHkdf`) per member on first traffic |
 | leaves a group | `deleteKey` |
 | signs out | none |
 

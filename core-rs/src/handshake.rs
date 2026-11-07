@@ -1,12 +1,14 @@
 //! The EH-2 state machines (SPEC.md 6). The one DH with the long-term IK is
-//! not computed here: the host (an HSM, or a software identity) does it and
-//! hands the 32 bytes in - `need_*` says which public key to DH against.
+//! not computed here: the host (an HSM, or a software identity) derives from
+//! it and hands the 32 bytes in - `k = HKDF(DH, salt = h1, info = label)`, so
+//! an HSM never returns the raw DH (spec 4.0). The DH with the PEER's IK is
+//! local, and goes through the same HKDF here.
 //!
 //!   I: Initiator::new(..)            -> msg1
-//!      peer_ek_of(msg2) -> ek_r_pub  (host: dh2 = IK_i.dh(ek_r_pub))
-//!      complete(msg2, dh2)           -> msg3 + HandshakeResult
-//!   R: ResponderBegin::new(.., msg1) -> ek_i_pub (host: dh1 = IK_r.dh(ek_i_pub))
-//!      complete(dh1)                 -> msg2 + Responder (SK held, I unauthenticated)
+//!      peer_ek_of(msg2) -> ek_r_pub  (host: k2 = HKDF(IK_i.dh(ek_r_pub), h1, IK_I_INFO))
+//!      complete(msg2, k2)            -> msg3 + HandshakeResult
+//!   R: ResponderBegin::new(.., msg1) -> ek_i_pub (host: k1 = HKDF(IK_r.dh(ek_i_pub), h1, IK_R_INFO))
+//!      complete(k1)                  -> msg2 + Responder (SK held, I unauthenticated)
 //!      Responder::finish(msg3)       -> HandshakeResult   <- the msg3 gate
 
 use zeroize::{Zeroize, Zeroizing};
@@ -17,7 +19,11 @@ use crate::wire::{self, Msg1, Msg2, Msg3};
 use crate::x25519::Priv;
 
 pub const MAX_SKEW_MS: u64 = 5 * 60_000;
-const SK_INFO: &[u8] = b"onchato-handshake-v2";
+const SK_INFO: &[u8] = b"onchato-handshake-v3";
+/// k1 = HKDF(DH(IK_r, EK_i), salt = h1, info = IK_R_INFO) - the responder's IK DH.
+pub const IK_R_INFO: &[u8] = b"onchato-eh2-ik-r-v1";
+/// k2 = HKDF(DH(EK_r, IK_i), salt = h1, info = IK_I_INFO) - the initiator's IK DH.
+pub const IK_I_INFO: &[u8] = b"onchato-eh2-ik-i-v1";
 const LABEL_R: &[u8] = b"responder";
 const LABEL_I: &[u8] = b"initiator";
 
@@ -56,9 +62,17 @@ fn check_skew(ts: u64, now: u64, max: u64) -> Result<(), HandshakeError> {
     if ts.abs_diff(now) > max { Err(HandshakeError::Skew) } else { Ok(()) }
 }
 
-fn derive_sk(dh1: &[u8; 32], dh2: &[u8; 32], dh3: &[u8; 32], ss: &[u8; 32], h1: &[u8; 32]) -> Zeroizing<[u8; 32]> {
+/// The key an IK DH contributes: what the host derives in the HSM, and what
+/// this side derives from the DH it computes locally with its ephemeral key.
+pub fn ik_key(dh: &[u8; 32], h1: &[u8; 32], info: &[u8]) -> Zeroizing<[u8; 32]> {
+    let mut k = Zeroizing::new([0u8; 32]);
+    hkdf(dh, h1, info, &mut k[..]);
+    k
+}
+
+fn derive_sk(k1: &[u8; 32], k2: &[u8; 32], dh3: &[u8; 32], ss: &[u8; 32], h1: &[u8; 32]) -> Zeroizing<[u8; 32]> {
     let mut ikm = Zeroizing::new([0u8; 128]);
-    ikm[..32].copy_from_slice(dh1); ikm[32..64].copy_from_slice(dh2); ikm[64..96].copy_from_slice(dh3); ikm[96..].copy_from_slice(ss);
+    ikm[..32].copy_from_slice(k1); ikm[32..64].copy_from_slice(k2); ikm[64..96].copy_from_slice(dh3); ikm[96..].copy_from_slice(ss);
     let mut sk = Zeroizing::new([0u8; 32]);
     hkdf(&ikm[..], h1, SK_INFO, &mut sk[..]);
     sk
@@ -87,15 +101,16 @@ impl Initiator {
     /// The responder's ephemeral public key in msg2: the host computes DH(IK_i, EK_r) against it.
     pub fn peer_ek_of(&self, msg2: &[u8]) -> Result<[u8; 32], HandshakeError> { Ok(wire::decode_msg2(msg2)?.ek_pub) }
 
-    /// `dh2 = DH(EK_r, IK_i)`, from the host. Verifies mac_r (R is authenticated), returns msg3.
-    pub fn complete(self, msg2_bytes: &[u8], dh2: &[u8; 32], now_ms: u64) -> Result<(Vec<u8>, HandshakeResult), HandshakeError> {
+    /// `k2 = HKDF(DH(EK_r, IK_i), salt = h1, info = IK_I_INFO)`, from the host.
+    /// Verifies mac_r (R is authenticated), returns msg3.
+    pub fn complete(self, msg2_bytes: &[u8], k2: &[u8; 32], now_ms: u64) -> Result<(Vec<u8>, HandshakeResult), HandshakeError> {
         let msg2: Msg2 = wire::decode_msg2(msg2_bytes)?;
         check_skew(msg2.ts, now_ms, self.max_skew_ms)?;
-        let dh1 = self.ek.dh(&self.peer_ik_pub);          // DH(IK_r, EK_i)
+        let h1 = wire::h1(&self.msg1);
+        let k1 = ik_key(&self.ek.dh(&self.peer_ik_pub), &h1, IK_R_INFO); // from DH(IK_r, EK_i)
         let dh3 = self.ek.dh(&msg2.ek_pub);               // DH(EK_r, EK_i)
         let ss = self.pq.decapsulate(&msg2.pq_ct).ok_or(HandshakeError::Kem)?;
-        let h1 = wire::h1(&self.msg1);
-        let sk = derive_sk(&dh1, dh2, &dh3, &ss, &h1);
+        let sk = derive_sk(&k1, k2, &dh3, &ss, &h1);
         let h2p = wire::h2_partial(&self.msg1, &msg2.ek_pub, &msg2.pq_ct, msg2.ts);
         if !hmac_verify(&sk[..], &[LABEL_R, &h2p], &msg2.mac_r) { return Err(HandshakeError::MacR) }
         let h3 = wire::h3(&h2p, &msg2.mac_r);
@@ -130,13 +145,14 @@ impl ResponderBegin {
     /// The initiator's ephemeral public key: the host computes DH(IK_r, EK_i) against it.
     pub fn peer_ek(&self) -> [u8; 32] { self.msg1.ek_pub }
 
-    /// `dh1 = DH(IK_r, EK_i)` from the host; `ek` and `m` fresh (Rng in production, fixed in a KAT).
-    pub fn complete(self, dh1: &[u8; 32], ek: Priv, kem_m: [u8; 32]) -> Result<(Vec<u8>, Responder), HandshakeError> {
+    /// `k1 = HKDF(DH(IK_r, EK_i), salt = h1, info = IK_R_INFO)` from the host;
+    /// `ek` and `m` fresh (Rng in production, fixed in a KAT).
+    pub fn complete(self, k1: &[u8; 32], ek: Priv, kem_m: [u8; 32]) -> Result<(Vec<u8>, Responder), HandshakeError> {
         let (ct, ss) = kem::encapsulate(&self.msg1.pq_pub, kem_m).ok_or(HandshakeError::Kem)?;
-        let dh2 = ek.dh(&self.peer_ik_pub);      // DH(EK_r, IK_i)
-        let dh3 = ek.dh(&self.msg1.ek_pub);      // DH(EK_r, EK_i)
         let h1 = wire::h1(&self.msg1_bytes);
-        let sk = derive_sk(dh1, &dh2, &dh3, &ss, &h1);
+        let k2 = ik_key(&ek.dh(&self.peer_ik_pub), &h1, IK_I_INFO); // from DH(EK_r, IK_i)
+        let dh3 = ek.dh(&self.msg1.ek_pub);      // DH(EK_r, EK_i)
+        let sk = derive_sk(k1, &k2, &dh3, &ss, &h1);
         let ts_r = self.now_ms;
         let ek_pub = ek.public();
         let h2p = wire::h2_partial(&self.msg1_bytes, &ek_pub, &ct, ts_r);

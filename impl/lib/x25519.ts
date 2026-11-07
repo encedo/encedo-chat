@@ -10,7 +10,7 @@
  * why callers get a `dh()` function, not key bytes.
  */
 
-import { subtle, b64, unb64 } from './wc.ts'
+import { subtle, b64, unb64, kdf } from './wc.ts'
 
 /** A private X25519 key you can compute raw DH outputs with. */
 export interface Dh {
@@ -18,6 +18,18 @@ export interface Dh {
   pub: Uint8Array
   /** Raw X25519 shared secret (32 B) with a peer's raw public key. */
   dh(peerPub: Uint8Array): Promise<Uint8Array>
+  /** `HKDF(DH(this, peer), salt, info = label, len)` where the key's holder
+   *  runs it - a HEM in the device, so the raw DH never leaves it. Absent,
+   *  `dhKey` derives over `dh` here. */
+  derive?(label: string, peerPub: Uint8Array, salt: Uint8Array, len: number): Promise<Uint8Array>
+}
+
+/** `HKDF(DH(key, peer), salt, info = label, 32)`: through the holder's own
+ *  derivation when it has one, else over its raw DH, wiped at once. */
+export async function dhKey(key: Dh, label: string, peerPub: Uint8Array, salt: Uint8Array): Promise<Uint8Array> {
+  if (key.derive) return key.derive(label, peerPub, salt, 32)
+  const raw = await key.dh(peerPub)
+  try { return await kdf(label, raw, salt, 32) } finally { raw.fill(0) }
 }
 
 /** Fresh ephemeral X25519 keypair; the private key stays non-extractable. */
@@ -59,6 +71,12 @@ async function rawDh(priv: CryptoKey, peerPub: Uint8Array): Promise<Uint8Array> 
  * software identity) into a `Dh` over raw bytes — the form the handshake and
  * ratchet speak. This is the single place base64 meets the crypto layer.
  */
-export function dhFromEcdh(pubB64: string, ecdh: (peerPubB64: string) => Promise<Uint8Array>): Dh {
-  return { pub: unb64(pubB64), dh: (peerPub) => ecdh(b64(peerPub)) }
+export function dhFromEcdh(
+  pubB64: string,
+  ecdh: (peerPubB64: string) => Promise<Uint8Array>,
+  derive?: (label: string, peerPubB64: string, salt: Uint8Array, len: number) => Promise<Uint8Array>,
+): Dh {
+  const key: Dh = { pub: unb64(pubB64), dh: (peerPub) => ecdh(b64(peerPub)) }
+  if (derive) key.derive = (label, peerPub, salt, len) => derive(label, b64(peerPub), salt, len)
+  return key
 }

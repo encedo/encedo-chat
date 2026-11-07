@@ -132,9 +132,19 @@ The storage-name key `nk` changed with its label: `migrateNamesKey`
 (`lib/storenames.ts`) moves a pre-0.8.0 identity's records once, deriving the
 old `nk` over a raw `ecdh` (pins move when their room opens, `pinName`).
 
-**Raw `ecdh` is what is left**, for the one DH with IK inside EH-2 and the §10
-cache base `ECDH(IK, emp_pub)`. A HEM answers it only when personalised with
-the `raw_ecdh_enabled` policy (403 otherwise) - the live test reports which.
+**EH-2 asks for a derived key too** (spec 4.0, §6.2): `k1 = HKDF(DH(IK_r,
+EK_i), salt = h1, "onchato-eh2-ik-r-v1")`, `k2` likewise with
+`"onchato-eh2-ik-i-v1"`; the side holding the IK gets its `k` from the backend
+(`dhKey` in `lib/x25519.ts`, `Dh.derive`), the other derives the same `k` from
+its ephemeral DH. The engines (`eh2/wasm.ts`, `eh2/native.ts`) hand `k` to
+core-rs where the raw DH used to go - the Tauri IPC fields keep their names
+`dh1`/`dh2`. `test/eh2-wasm.test.ts` runs every engine pairing with an IK
+that REFUSES a raw DH.
+
+**Raw `ecdh` is what is left** for the §10 cache base `ECDH(IK, emp_pub)` (and
+once, `migrateNamesKey`). A HEM answers it only when personalised with the
+`raw_ecdh_enabled` policy (403 otherwise) - the live test reports which;
+without it the §10 stores behave as for an identity that refuses ECDH.
 `hem_usage.md` lists what each operation costs on the device; read it before
 adding anything that talks to the HEM. No automated test reaches a device:
 `npm run hem-gk-test -- --hsm <url>` (password in `HEM_PASS`) checks the
@@ -543,7 +553,8 @@ reproduces `docs/kat/eh2-handshake-mlkem.json`, `ratchet-hybrid.json`,
   with a CompileError that reads like a broken file.
 - **No wasm-bindgen.** Flat C ABI (`core-rs/src/ffi.rs`): `ec_alloc`/`ec_free`,
   one per-call output buffer, negative return + `ec_err_*`, handles for state;
-  the host supplies randomness and the IK's one DH. Re-create memory views after
+  the host supplies randomness and the key the IK's one DH contributes (`k1` /
+  `k2`, already through HKDF - never the raw DH). Re-create memory views after
   every call.
 - **A KAT with an injected KEM runs the TS path** whatever the switch.
 - **What WASM buys, honestly:** keys out of the JS heap and zeroed
