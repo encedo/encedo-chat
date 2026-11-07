@@ -72,6 +72,7 @@ try {
   const member = await generateX25519() // stands in for a member's IK, client-side
   const marker0 = await buildMarker({
     admin: { pub: new Uint8Array(32) }, // placeholder: the real admin KID is filled in below
+    owner: { pub: new Uint8Array(32) }, // the admin writes its own marker, so it is the owner too
     members: [{ pub: member.pub }],
     name: 'gk-selftest',
   })
@@ -155,7 +156,7 @@ try {
 
   // ---- 3. the marker: rewrite (membership change) and find it -------------
   step('marker: updateKey (bucket D write path)')
-  const real = await buildMarker({ admin: { kid: gkKid }, members: [{ pub: member.pub }], name: 'gk-selftest' })
+  const real = await buildMarker({ admin: { kid: gkKid }, owner: { kid: gkKid }, members: [{ pub: member.pub }], name: 'gk-selftest' })
   ok(byteLen(real.descr) <= DESCR_MAX, 'marker fits the 128-byte field', `${byteLen(real.descr)} B`)
   let updOk = true
   try {
