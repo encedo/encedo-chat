@@ -4053,7 +4053,8 @@ async function main() {
         await tapAt(`document.getElementById('enroll-cancel')`)
         await b.waitFor('the sign-in card with the reason, after a reload', `
           const n = document.getElementById('login-notice'), a = document.getElementById('app');
-          return !window.__notReloaded && a.hidden && !!n && !n.hidden && n.textContent.includes('Harness Allow') && /kodu od administratora/.test(n.textContent)`, 20_000)
+          // Defensive: mid-reload the document may not have #app yet - that is "not yet", not a failure.
+          return !window.__notReloaded && !!a && a.hidden && !!n && !n.hidden && n.textContent.includes('Harness Allow') && /kodu od administratora/.test(n.textContent)`, 20_000)
         step('"not now" leaves for the sign-in card, which says why - not a chat stuck on "connecting"')
         // The code: on the list, and in.
         await signIn('signing in with the code at hand')
