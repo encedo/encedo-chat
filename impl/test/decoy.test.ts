@@ -32,14 +32,14 @@ test('the count follows the contact list, up to the cap', () => {
 })
 
 test('decoy topics are pair-shaped, distinct, and stable for the identity across a restart', async () => {
-  const seed = await deriveSelf('encedo-chat-decoy-v1', new TextEncoder().encode('test\0'), 32)
+  const seed = await deriveSelf('onchato-decoy-v1', new TextEncoder().encode('test\0'), 32)
   const a = await decoyMaterial(seed, 0, P), b = await decoyMaterial(seed, 1, P)
   assert.match(a.topic, /^[a-z2-7]{52}$/)
   assert.notEqual(a.topic, b.topic)
   assert.notEqual(a.offsetSec, b.offsetSec, 'each decoy hops at its own instant')
   assert.deepEqual(await decoyMaterial(seed, 0, P), a, 'deterministic: a restart resumes the same decoys')
   assert.notEqual((await decoyMaterial(seed, 0, { ...P, dateUTC: '2026-10-14' })).topic, a.topic, 'and they rotate daily')
-  const other = await kdf('encedo-chat-decoy-v1', new Uint8Array(32).fill(0x43), new TextEncoder().encode('test\0'), 32)
+  const other = await kdf('onchato-decoy-v1', new Uint8Array(32).fill(0x43), new TextEncoder().encode('test\0'), 32)
   assert.notEqual((await decoyMaterial(other, 0, P)).topic, a.topic, 'another identity has other decoys')
 })
 

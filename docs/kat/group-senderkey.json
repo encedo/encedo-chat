@@ -3,7 +3,7 @@
   "header_aad": "aabbccdd",
   "plaintext": "hello",
   "ctr": 0,
-  "ct": "59ec59409bb175107ae1fe6cf187a3d98c21127850",
+  "ct": "e2106c9478917e771c32813a5a90995aa96c9b6703",
   "mk_ij": "9999999999999999999999999999999999999999999999999999999999999999",
   "cases": [
     {
@@ -11,61 +11,61 @@
       "chain_key_at_ctr": "1111111111111111111111111111111111111111111111111111111111111111",
       "header_aad": "aabbccdd",
       "plaintext": "hello",
-      "mk": "16d6262fd2c3ce541a7f1aa117806e963ea7ba95ce6fdcb48b5d3d6c19e5ba4f",
-      "nonce": "4cc3d9a12758d2884a7e1d1d",
-      "ct": "59ec59409bb175107ae1fe6cf187a3d98c21127850",
-      "mac_under_mk_ij": "8687795c567c2971cab0b1f25d917845c963ebe56581912838161267d6fb82c9"
+      "mk": "536c2ef9214b318741f8ef8def79428357de8515c41d2b00758b5315d0a56a3c",
+      "nonce": "f00e51f8911f52718abb504b",
+      "ct": "e2106c9478917e771c32813a5a90995aa96c9b6703",
+      "mac_under_mk_ij": "a8f964e9dbe66f49aa0e1fd818309c045ddce7b5d405b3a3fb2d57e96819bd14"
     },
     {
       "ctr": 1,
-      "chain_key_at_ctr": "dabf37e1926955687a95f6c21864ad2789fd829ad3396a559a6534dbc436d3d9",
+      "chain_key_at_ctr": "8e9dbe62cb137c0b70c9b5c22b64663827edec832d0f8feb71acaf12672cc4ee",
       "header_aad": "aabbccdd",
       "plaintext": "world",
-      "mk": "5feaebfe146c033a97aee5f27ae6f7778dd42eeaf8be54254fb34ac556a69235",
-      "nonce": "5e4092739f9d34576e94f97d",
-      "ct": "9fe45f7aec14052b020661c60b820dfd71cad4d4ff",
-      "mac_under_mk_ij": "bf4526bdc59e54eebcce864e50148a29890b424d85a1784885f7670aeaa6d025"
+      "mk": "f407fd0285a714ec657fb2569312d86fa2d15d2c860749d1bec9dea67a055e9a",
+      "nonce": "b61ebcfb2f1a00c7744d27f3",
+      "ct": "46e3783c66ba864b83d6137d65c5fdddd848115d23",
+      "mac_under_mk_ij": "0b4de282ec9ffec4dfe0378ca03f3b0895d91b4ec548b04cca360c063a40d02c"
     },
     {
       "ctr": 2,
-      "chain_key_at_ctr": "a3232f598fe13fc8281762e369697565e9aa5c503c6712619e65828bb764598f",
+      "chain_key_at_ctr": "4f6536855010d1b6f59977e90b414679e3042c2df0d4fc5588b6c86c7abe70b5",
       "header_aad": "aabbccdd",
       "plaintext": "",
-      "mk": "1fe9d580c776726f1bd7dd4455182e7f1336c6414df7468413de2cb8ba1545f6",
-      "nonce": "4f59bf6ada866b3cd5758194",
-      "ct": "a2e5300dbcab314327c80344bdca2dc2",
-      "mac_under_mk_ij": "3eaef72818bf57388255b514986fa389bba67d4ad893aa69628a841f92535dc4"
+      "mk": "aa661d726be5e6b38e38baacfe77aa7ebedc3853f25ca7629bf983824d72dd2e",
+      "nonce": "8d13adca9a8047da6ce4b3e7",
+      "ct": "708466dd5ecf0e076b663ff9ddafd2aa",
+      "mac_under_mk_ij": "eb1fc96d3990e8a8e12e3eb57e420d3d7a6a773b46bac33cbf94491bb45f1bae"
     },
     {
       "ctr": 0,
       "chain_key_at_ctr": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
       "header_aad": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1b2b2b2b2b2b2b2b20000000500000000",
       "plaintext": "pierwsza",
-      "mk": "c861a7a2f455ef9eb7fed0d29dd1a5f68be2483e1be9d0ae4be073cdd4e50fa0",
-      "nonce": "6cf97e877d45a95ef0d66f4d",
-      "ct": "bdeaf953d3acdf36e60172deb256fc45c6cde387ef091a0b",
-      "mac_under_mk_ij": "f669005d4074bce5a6d6564ab8f0db0baa8862ad647b4023246c16ff518f263f"
+      "mk": "4874f93870b33af26f39f40ec7ef05df0a301e375009bc102b942e73cee01db2",
+      "nonce": "350bfb90183247c3d41eda84",
+      "ct": "b71fe4344c56c6302a17d686ee6fac54324a2052daee1720",
+      "mac_under_mk_ij": "efc56feaef8cea72edd7800f8dec06ef0fd968c6a66a2fd03d5009a5cb9baf92"
     },
     {
       "ctr": 3,
-      "chain_key_at_ctr": "dd3d7bceaae9e193db5258ef37bcb9019ef1a735e3d38a394abd5740737e28d0",
+      "chain_key_at_ctr": "df38fe06592419e827e6e8943364fa3fd8e63c495b8eb2e086a1e661b8147712",
       "header_aad": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1b2b2b2b2b2b2b2b20000000500000003",
       "plaintext": "zażółć gęślą jaźń - a body past one AES block, with UTF-8 in it",
-      "mk": "b9bc40ea28a14f2852d0224ebe6c330a7e654328ae33855368286d3f1bc2666d",
-      "nonce": "843e884c6cf74d2d77a16724",
-      "ct": "efce659cc822d291579577b8253bdc89fb2a0a20d7f537e3cd531428d6faaa55425a48be50bd39a55b1224f1b7171d72cee6d65d6020f9114adb9edd28055d96e255cac02f05ec9f84a9b94e832b34cac3c056af1e6c3949",
-      "mac_under_mk_ij": "546f609bcd3b319b0c3000739a8d78917f4070cd24ea82e0d7c21b8043b68038"
+      "mk": "9bbe419a66a4b23a2401fa48ff34deb889026b54fa053671b38119271cf81b1c",
+      "nonce": "dd820544be103dd6be36f8bb",
+      "ct": "e87e8448a10b0e4162eef52071fac1ad8faa1e32183ab2862b7dd37bb5ce9faec5accf06f4527e2b7370026cb70d5b5c7cc25ea06fd121bb5f93d1de3212b310ad13997248d3a4b55cf43ea269007bb5402499bfffeab3e1",
+      "mac_under_mk_ij": "1484c19672e41e9b656767c0a30c204530970103c1db3bec6ce63bc092863cb5"
     },
     {
       "ctr": 7,
-      "chain_key_at_ctr": "20f6060f8c71e983c1e7b82c5a6cbb08e85f2fcd30fc6317472c0d9254551f23",
+      "chain_key_at_ctr": "93b50188c6fe765e8fb7395a3319fa638e6806766fa86a11967515a8741ac328",
       "header_aad": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1b2b2b2b2b2b2b2b20000000500000007",
       "plaintext": "siódma",
-      "mk": "3d6f112f3c99460bcfac539f5b34d8e7c5c1be09956571f22e386274e2ba26de",
-      "nonce": "42aa777b264ee22a2fd39eb7",
-      "ct": "d0fea24b645555291619bff93a3ef7661ce72a8892b58b",
-      "mac_under_mk_ij": "ea72023dfe229a2ce16cf038ad12ee5471d8dc760f9591f014a498e53325596d"
+      "mk": "04b438b1fda0e9eb4bd4387c0a449685c194bbe62b7fdea8909ea14046b45b7e",
+      "nonce": "1b53aec4d24e1c03acfe125d",
+      "ct": "5492e13285c44a0515e16da8d095c0ba37246037a76dac",
+      "mac_under_mk_ij": "8a66a401dedadb3bfeac8cc07b372b0917824978cfa5b9b4d5cf2654d5178cc8"
     }
   ],
-  "note": "chain_key' = HKDF(chain, salt=empty, info=\"encedo-group-chain\", 32); MK = HKDF(chain, salt=empty, info=\"encedo-group-msg\", 32); nonce = HKDF(MK, salt=u32be(ctr), info=\"encedo-aead-nonce\", 12); ct = AES-256-GCM(MK, nonce, plaintext, aad=header); mac = HMAC-SHA256(mk_ij, header || ct) (8.1, 8.2). Counters not listed in a case were sealed with \"skipped <n>\" to advance the chain. The 32-byte header is gid 0xa1 x16 || sender_id 0xb2 x8 || u32be(epoch 5) || u32be(ctr)."
+  "note": "chain_key' = HKDF(chain, salt=empty, info=\"onchato-group-chain\", 32); MK = HKDF(chain, salt=empty, info=\"onchato-group-msg\", 32); nonce = HKDF(MK, salt=u32be(ctr), info=\"onchato-aead-nonce\", 12); ct = AES-256-GCM(MK, nonce, plaintext, aad=header); mac = HMAC-SHA256(mk_ij, header || ct) (8.1, 8.2). Counters not listed in a case were sealed with \"skipped <n>\" to advance the chain. The 32-byte header is gid 0xa1 x16 || sender_id 0xb2 x8 || u32be(epoch 5) || u32be(ctr)."
 }

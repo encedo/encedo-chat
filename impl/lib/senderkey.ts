@@ -7,9 +7,9 @@
  * each message's counter. There is NO DH ratchet here — post-compromise recovery
  * for a group comes from epoch rotation on a membership change, not the chain.
  *
- *   MK_n        = HKDF(chain_n, "encedo-group-msg")
- *   chain_{n+1} = HKDF(chain_n, "encedo-group-chain")
- *   nonce       = HKDF(MK_n, salt = n, info = "encedo-aead-nonce")  // the one nonce of 1:1 and groups
+ *   MK_n        = HKDF(chain_n, "onchato-group-msg")
+ *   chain_{n+1} = HKDF(chain_n, "onchato-group-chain")
+ *   nonce       = HKDF(MK_n, salt = n, info = "onchato-aead-nonce")  // the one nonce of 1:1 and groups
  *   ct          = AES-256-GCM(MK_n, nonce, plaintext, aad = header)
  *
  * Authentication is a per-recipient HMAC, NOT a signature (deniability, S3
@@ -26,8 +26,8 @@ import { subtle, kdf, aeadNonce, randomBytes, concat } from './wc.ts'
 import { nowMs } from './time.ts'
 
 const enc = new TextEncoder()
-const MK_LABEL = 'encedo-group-msg'
-const CK_LABEL = 'encedo-group-chain'
+const MK_LABEL = 'onchato-group-msg'
+const CK_LABEL = 'onchato-group-chain'
 
 /** Bounded catch-up: a header claiming a jump past this many messages is dropped
  *  (DoS — a peer must not make us derive unbounded keys). Group chains are not

@@ -33,10 +33,10 @@ export interface RvParams {
   dateUTC: string     // YYYY-MM-DD (UTC)
 }
 
-export const RV_LABEL = 'encedo-chat-rendezvous-v1'
-export const ANNOUNCE_LABEL = 'encedo-chat-announce-mac-v1'
-export const ROTATION_LABEL = 'encedo-chat-rotation-v1'
-export const GROUP_RV_LABEL = 'encedo-chat-group-rendezvous-v1'
+export const RV_LABEL = 'onchato-rendezvous-v1'
+export const ANNOUNCE_LABEL = 'onchato-announce-mac-v1'
+export const ROTATION_LABEL = 'onchato-rotation-v1'
+export const GROUP_RV_LABEL = 'onchato-group-rendezvous-v1'
 
 /** The context of the rotation offset: network_id || 0x00, NO date (§5.4). */
 export function rotationCtx(networkId: string): Uint8Array {
@@ -65,14 +65,14 @@ export function paramsInfo({ networkId, dateUTC }: RvParams): Uint8Array {
 export async function topicFromSecret(ss: Uint8Array, p: RvParams): Promise<string> {
   const mat = await kdf(RV_LABEL, ss, paramsInfo(p))
   const topic = topicFromMaterial(mat)
-  plog('§5.1', `pair topic: kdf("encedo-chat-rendezvous-v1", ss=${val(ss)}, ctx=net|date=${p.networkId}|${p.dateUTC}) -> ${topic}`)
+  plog('§5.1', `pair topic: kdf("onchato-rendezvous-v1", ss=${val(ss)}, ctx=net|date=${p.networkId}|${p.dateUTC}) -> ${topic}`)
   return topic
 }
 
 /** Announce MAC key as a non-extractable HMAC CryptoKey (§5.5). */
 export async function announceMacKey(ss: Uint8Array, p: RvParams): Promise<CryptoKey> {
   const raw = await kdf(ANNOUNCE_LABEL, ss, paramsInfo(p))
-  plog('§5.5', `announce MAC key: kdf("encedo-chat-announce-mac-v1", ss, ctx=net|date=${p.networkId}|${p.dateUTC}) -> ${val(raw)}`)
+  plog('§5.5', `announce MAC key: kdf("onchato-announce-mac-v1", ss, ctx=net|date=${p.networkId}|${p.dateUTC}) -> ${val(raw)}`)
   return announceKeyFromMaterial(raw)
 }
 
@@ -88,7 +88,7 @@ export function todayUTC(): string {
 export async function groupTopicFromSecret(groupSecret: Uint8Array, p: RvParams): Promise<string> {
   const mat = await kdf(GROUP_RV_LABEL, groupSecret, paramsInfo(p))
   const topic = topicFromMaterial(mat)
-  plog('§5.3', `group topic: kdf("encedo-chat-group-rendezvous-v1", group_secret=${val(groupSecret)}, ctx=net|date=${p.networkId}|${p.dateUTC}) -> ${topic}`)
+  plog('§5.3', `group topic: kdf("onchato-group-rendezvous-v1", group_secret=${val(groupSecret)}, ctx=net|date=${p.networkId}|${p.dateUTC}) -> ${topic}`)
   return topic
 }
 
@@ -106,7 +106,7 @@ export async function groupTopicFromSecret(groupSecret: Uint8Array, p: RvParams)
 export async function rotationOffsetSec(ss: Uint8Array, p: RvParams): Promise<number> {
   const mat = await kdf(ROTATION_LABEL, ss, rotationCtx(p.networkId), 4)
   const off = offsetFromMaterial(mat)
-  plog('§5.4', `rotation offset: kdf("encedo-chat-rotation-v1", ss, ctx=net=${p.networkId}, no date) -> ${off}s `
+  plog('§5.4', `rotation offset: kdf("onchato-rotation-v1", ss, ctx=net=${p.networkId}, no date) -> ${off}s `
     + `(${String(Math.floor(off / 3600)).padStart(2, '0')}:${String(Math.floor((off % 3600) / 60)).padStart(2, '0')} UTC)`)
   return off
 }

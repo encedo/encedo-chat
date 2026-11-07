@@ -56,7 +56,7 @@ async function handshake(kem) {
 const common = {
   ik_i_priv: hex(fill(0x11)), ik_r_priv: hex(fill(0x22)), ek_i_priv: hex(fill(0x33)), ek_r_priv: hex(fill(0x44)),
   tag_key: hex(TAG_KEY), now_ms: NOW,
-  note: 'X25519 private scalars as given (clamped by X25519); initiator_tag = HMAC(k_tag, IK_i_pub) with k_tag = HMAC(tag_key, "encedo-eh2-initiator-tag-v1") (6.1); SK per 6.2.',
+  note: 'X25519 private scalars as given (clamped by X25519); initiator_tag = HMAC(k_tag, IK_i_pub) with k_tag = HMAC(tag_key, "onchato-eh2-initiator-tag-v1") (6.1); SK per 6.2.',
 }
 
 const classical = { ...common, kem: 'toy (impl/test/toy-kem.ts) with the seeded RNG - a stand-in that pins the schedule, not a KEM', ...(await handshake(toyKem(seededRand()))) }
@@ -88,7 +88,7 @@ async function chainCases(key, header, plan) {
     const pt = te.encode(want ? want.plaintext : 'skipped ' + c)
     const { n, ct } = await seal(chain, hdr, pt)
     if (!want) continue
-    const mk = await kdf('encedo-group-msg', ck)
+    const mk = await kdf('onchato-group-msg', ck)
     out.push({
       ctr: n, chain_key_at_ctr: hex(ck), header_aad: hex(hdr), plaintext: want.plaintext,
       mk: hex(mk), nonce: hex(await aeadNonce(mk, n)), ct: hex(ct),
@@ -108,8 +108,8 @@ const senderkey = {
       { ctr: 7, plaintext: 'siódma' },
     ])),
   ],
-  note: 'chain_key\' = HKDF(chain, salt=empty, info="encedo-group-chain", 32); MK = HKDF(chain, salt=empty, info="encedo-group-msg", 32); '
-    + 'nonce = HKDF(MK, salt=u32be(ctr), info="encedo-aead-nonce", 12); ct = AES-256-GCM(MK, nonce, plaintext, aad=header); '
+  note: 'chain_key\' = HKDF(chain, salt=empty, info="onchato-group-chain", 32); MK = HKDF(chain, salt=empty, info="onchato-group-msg", 32); '
+    + 'nonce = HKDF(MK, salt=u32be(ctr), info="onchato-aead-nonce", 12); ct = AES-256-GCM(MK, nonce, plaintext, aad=header); '
     + 'mac = HMAC-SHA256(mk_ij, header || ct) (8.1, 8.2). Counters not listed in a case were sealed with "skipped <n>" to advance the chain. '
     + 'The 32-byte header is gid 0xa1 x16 || sender_id 0xb2 x8 || u32be(epoch 5) || u32be(ctr).',
 }
@@ -126,18 +126,18 @@ async function groupKeys() {
     gk_pub: hex(gk.pub), group_id: hex(gid), sender_id: { a: await sid(ia.pub), b: await sid(ib.pub), c: await sid(ic.pub) }, epochs: [] }
   const roster = [ia.pub, ib.pub, ic.pub].map((p) => b64(p))
   for (const epoch of [0, 1, 7]) {
-    const mk_ab = await kdf('encedo-group-msg-mac', await ia.dh(ib.pub), ctx(epoch))
-    const mk_ba = await kdf('encedo-group-msg-mac', await ib.dh(ia.pub), ctx(epoch))
+    const mk_ab = await kdf('onchato-group-msg-mac', await ia.dh(ib.pub), ctx(epoch))
+    const mk_ba = await kdf('onchato-group-msg-mac', await ib.dh(ia.pub), ctx(epoch))
     if (hex(mk_ab) !== hex(mk_ba)) throw new Error('mk_ij not symmetric')
-    const mk_ac = await kdf('encedo-group-msg-mac', await ia.dh(ic.pub), ctx(epoch))
-    const rk_b = await kdf('encedo-chat-group-roster-mac', await gk.dh(ib.pub), ctx(epoch))
-    const rk_b2 = await kdf('encedo-chat-group-roster-mac', await ib.dh(gk.pub), ctx(epoch))
+    const mk_ac = await kdf('onchato-group-msg-mac', await ia.dh(ic.pub), ctx(epoch))
+    const rk_b = await kdf('onchato-group-roster-mac', await gk.dh(ib.pub), ctx(epoch))
+    const rk_b2 = await kdf('onchato-group-roster-mac', await ib.dh(gk.pub), ctx(epoch))
     if (hex(rk_b) !== hex(rk_b2)) throw new Error('rk_i not symmetric')
     const rmac_b = await hmacSha256(rk_b, te.encode(roster.join('\n')))
     out.epochs.push({ epoch, mk_ab: hex(mk_ab), mk_ac: hex(mk_ac), rk_b: hex(rk_b), roster, rmac_b: hex(rmac_b) })
   }
-  out.note = 'group_id = SHA-256(GK_pub)[0:16]; sender_id = SHA-256(IK_pub)[0:8]; mk_ij = HKDF(ECDH(IK_i, IK_j), salt = group_id || u32be(epoch), info="encedo-group-msg-mac", 32); '
-    + 'rk_i = HKDF(ECDH(GK, IK_i), same salt, info="encedo-chat-group-roster-mac", 32); rmac = HMAC-SHA256(rk_i, UTF-8(roster.join("\\n"))) over the base64 IK_pubs in the order given, roster[0] the admin (8.1, 8.3). '
+  out.note = 'group_id = SHA-256(GK_pub)[0:16]; sender_id = SHA-256(IK_pub)[0:8]; mk_ij = HKDF(ECDH(IK_i, IK_j), salt = group_id || u32be(epoch), info="onchato-group-msg-mac", 32); '
+    + 'rk_i = HKDF(ECDH(GK, IK_i), same salt, info="onchato-group-roster-mac", 32); rmac = HMAC-SHA256(rk_i, UTF-8(roster.join("\\n"))) over the base64 IK_pubs in the order given, roster[0] the admin (8.1, 8.3). '
     + 'X25519 private scalars as given (clamped by X25519).'
   return out
 }
@@ -170,7 +170,7 @@ async function ratchetKat() {
     if (td.decode(await to.decrypt(f)) !== text) throw new Error('ratchet KAT: frame did not open')
   }
   return { ...common, kem: hybrid.kem, ratchet_dh_privs: 'fill(0x50), fill(0x51), ... in generation order', pq_every_steps: 1, script, frames, pq_steps: I.stats().pqSteps,
-    note: 'Header 0x10/0x11 per 7.2; hybrid step info "encedo-ratchet-hybrid-v1" with ikm = X25519 || ss; classical step info "encedo-ratchet-dh-v1".' }
+    note: 'Header 0x10/0x11 per 7.2; hybrid step info "onchato-ratchet-hybrid-v1" with ikm = X25519 || ss; classical step info "onchato-ratchet-dh-v1".' }
 }
 const ratchet = await ratchetKat()
 
@@ -187,8 +187,8 @@ async function knockKat() {
     ik_priv: hex(fill(0x11)), invite_secret: hex(inviteSecret), invite_pub: hex(key.pub),
     eph_priv: hex(fill(0x33)), answerer_ik_pub: hex(answerer.pub), name: 'Ala', note: 'Dzień dobry',
     frame: hex(frame),
-    note_construction: 'invite_priv = HKDF(ECDH(IK, IK_pub), salt=invite_secret, info="encedo-chat-invite-key-v1", 32), clamped by X25519; '
-      + 'k || nonce = HKDF(ECDH(eph, invite_pub), salt=invite_secret, info="encedo-chat-invite-knock-v2", 44); '
+    note_construction: 'invite_priv = HKDF(ECDH(IK, IK_pub), salt=invite_secret, info="onchato-invite-key-v1", 32), clamped by X25519; '
+      + 'k || nonce = HKDF(ECDH(eph, invite_pub), salt=invite_secret, info="onchato-invite-knock-v2", 44); '
       + 'frame = eph_pub || AES-256-GCM(k, nonce, kind 0x01 || ik || nameLen || name(64) || noteLen u16be || note(200), no aad) (5.8).',
   }
 }
@@ -221,11 +221,11 @@ async function rendezvousKat() {
     self: { ss: hex(selfSs), topic: await topicFromSecret(selfSs, p), rotation_offset_sec: await rotationOffsetSec(selfSs, p) },
     group: { group_secret: hex(fill(0x44)), topic: await groupTopicFromSecret(fill(0x44), p) },
     decoy: { seed: hex(seed), cases: decoys },
-    note: 'ctx = UTF-8(network_id) || 0x00 || UTF-8(date_utc); topic = base32(HKDF(ss, salt=ctx, info="encedo-chat-rendezvous-v1", 32))[0:52], RFC 4648 lower case, no padding; '
-      + 'announce_key = HKDF(ss, salt=ctx, info="encedo-chat-announce-mac-v1", 32); mac = HMAC-SHA256(announce_key, UTF-8(v|peer|nonce|ts)), base64; '
-      + 'rotation: HKDF(ss, salt=UTF-8(network_id)||0x00, info="encedo-chat-rotation-v1", 4) as u32be mod 86400; self: the same with ss = ECDH(IK_a, IK_a_pub); '
-      + 'group topic: info "encedo-chat-group-rendezvous-v1", ikm = group_secret; decoy seed = HKDF(self ss, salt=UTF-8(network_id)||0x00, info="encedo-chat-decoy-v1", 32), '
-      + 'decoy i: offset = HKDF(seed, salt=[i], info="encedo-chat-decoy-offset-v1", 4) u32be mod 86400, topic = base32(HKDF(seed, salt=[i]||ctx, info="encedo-chat-decoy-topic-v1", 32))[0:52] (5.1-5.5, 5.10).',
+    note: 'ctx = UTF-8(network_id) || 0x00 || UTF-8(date_utc); topic = base32(HKDF(ss, salt=ctx, info="onchato-rendezvous-v1", 32))[0:52], RFC 4648 lower case, no padding; '
+      + 'announce_key = HKDF(ss, salt=ctx, info="onchato-announce-mac-v1", 32); mac = HMAC-SHA256(announce_key, UTF-8(v|peer|nonce|ts)), base64; '
+      + 'rotation: HKDF(ss, salt=UTF-8(network_id)||0x00, info="onchato-rotation-v1", 4) as u32be mod 86400; self: the same with ss = ECDH(IK_a, IK_a_pub); '
+      + 'group topic: info "onchato-group-rendezvous-v1", ikm = group_secret; decoy seed = HKDF(self ss, salt=UTF-8(network_id)||0x00, info="onchato-decoy-v1", 32), '
+      + 'decoy i: offset = HKDF(seed, salt=[i], info="onchato-decoy-offset-v1", 4) u32be mod 86400, topic = base32(HKDF(seed, salt=[i]||ctx, info="onchato-decoy-topic-v1", 32))[0:52] (5.1-5.5, 5.10).',
   }
 }
 const rendezvous = await rendezvousKat()
@@ -241,7 +241,7 @@ async function storeNamesKat() {
     ik_priv: hex(fill(0x11)), kid, nk: hex(nk), prefix: names.prefix, fixed: names.fixed,
     pin: { scope: room, name: await names.scoped('pin', room) },
     group: { scope: gid, name: await names.scoped('group', gid) },
-    note: 'nk = HKDF(ECDH(IK, IK_pub), salt=UTF-8("local storage names"), info="encedo-chat-store-names-v1", 32); '
+    note: 'nk = HKDF(ECDH(IK, IK_pub), salt=UTF-8("local storage names"), info="onchato-store-names-v1", 32); '
       + 'name = "ec-" || hex(HMAC-SHA256(nk, "id")[0:8]) || "-" || hex(HMAC-SHA256(nk, UTF-8(label) || 0x00 || UTF-8(scope))[0:16]); '
       + 'fixed labels have an empty scope; pin scope = roomId, group scope = group_id as hex; kid = SHA-1(IK_pub)[0:16] hex (10, 4.2).',
   }

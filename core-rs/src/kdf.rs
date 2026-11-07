@@ -17,10 +17,10 @@ pub fn hkdf(ikm: &[u8], salt: &[u8], info: &[u8], out: &mut [u8]) {
 /// `kdf(label, ikm, ctx, L)` = HKDF(ikm, salt = ctx, info = label) - lib/wc.ts `kdf`.
 pub fn kdf(label: &str, ikm: &[u8], ctx: &[u8], out: &mut [u8]) { hkdf(ikm, ctx, label.as_bytes(), out) }
 
-/// The one AEAD nonce of 1:1 and group frames (7.2, 8.2): HKDF(MK, salt = u32be(n), info = "encedo-aead-nonce", 12).
+/// The one AEAD nonce of 1:1 and group frames (7.2, 8.2): HKDF(MK, salt = u32be(n), info = "onchato-aead-nonce", 12).
 pub fn aead_nonce(mk: &[u8; 32], n: u32) -> [u8; 12] {
     let mut out = [0u8; 12];
-    kdf("encedo-aead-nonce", mk, &n.to_be_bytes(), &mut out);
+    kdf("onchato-aead-nonce", mk, &n.to_be_bytes(), &mut out);
     out
 }
 

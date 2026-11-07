@@ -94,7 +94,7 @@ import { cachePubKeys, traceHem } from '../../lib/hemwrap.ts'
 import { sealCache, openCache } from '../../lib/gcache.ts'
 import { sealPins, openPins, withPin, withoutPin, PIN_LIMIT, type Pin } from '../../lib/pincache.ts'
 import { readSealedKV, writeSealedKV, sealPlainStores, type Store } from '../../lib/sealedstore.ts'
-import { namesFor, migrateToNames, type Names } from '../../lib/storenames.ts'
+import { namesFor, migrateToNames, migrateNamesKey, pinName, type Names } from '../../lib/storenames.ts'
 import { markLeft, unmarkLeft, leftCovers, isLeftMap, type LeftMap } from '../../lib/gleft.ts'
 import { loadPrefs, savePrefs, type Prefs } from '../../lib/prefs.ts'
 import type { GroupRoom } from '../../lib/grouproom.ts'
@@ -6305,7 +6305,7 @@ async function loadPins(roomId: string, log: Ev[]) {
   if (pinsLoaded.has(roomId)) return
   pinsLoaded.add(roomId) // claimed BEFORE the awaits: two fast entries must not both read
   const base = await ensureCacheBase(); if (!base || !storeNames) return
-  const blob = localStorage.getItem(await storeNames.scoped('pin', roomId)); if (!blob) return
+  const blob = localStorage.getItem(await pinName(localKV(), storeNames, roomId, legacyNames)); if (!blob) return
   const kept = await openPins(base, roomId, blob)
   if (!kept?.length) return
   pins.set(roomId, kept)
@@ -9790,6 +9790,8 @@ const legacyGroupsKey = () => 'ec-groups-' + (session?.idKey ?? '') // B1 plaint
 let cacheBase: Uint8Array | null = null
 /** Set at sign-in by openNames: where this identity's records are stored. */
 let storeNames: Names | null = null
+/** The pre-0.8.0 names while records are left under them (storenames.ts, migrateNamesKey). */
+let legacyNames: Names | null = null
 let persistTimer: any
 
 /** The §10 cache master secret ECDH(IK, emp_pub), computed once and cached. The
@@ -9811,6 +9813,11 @@ async function openNames(id: Identity, idKey: string): Promise<Names> {
     const n = await migrateToNames(localKV(), names)
     if (n) ecLog(`storage: moved ${n} record(s) off names that carried the KID`, 'debug')
   } catch (e: any) { ecLog('storage: moving to the new names failed - ' + (e?.message ?? e)) }
+  try {
+    const r = await migrateNamesKey(localKV(), id, names)
+    legacyNames = r.legacy
+    if (r.moved) ecLog(`storage: moved ${r.moved} record(s) to the 0.8.0 names`, 'debug')
+  } catch (e: any) { ecLog('storage: moving to the 0.8.0 names failed - ' + (e?.message ?? e)) }
   storeNames = names
   // Like `__pub`, a hook for the browser harness: the page holds these names
   // anyway, and without them the harness could only find a record by the very

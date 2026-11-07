@@ -16,6 +16,15 @@ by signing in with `?debug=1` and filtering:
 grep -E '^\[(HEM|§|ec )' log.txt
 ```
 
+**Firmware 1.3 (client 0.8.0) changed the shape, not yet the numbers.** Every
+derivation runs in the device (`ecdhHkdf`: one ECDH, up to eight HKDF
+outputs), a contact's topic and Announce key are one call, the key search
+returns public keys (with the `pubkey_in_search` policy) so the per-contact
+read goes, every search reads all its pages, and sign-in takes list + get +
+use:<kid> in one authorisation. The tables below say what is called; the
+seconds are the 2026-08-10 measurements and are to be taken again on 1.3
+(`?debug=1`).
+
 **The one line to remember:** a message costs **nothing**. Every ratchet step,
 every sender key, every reaction and typing notice is client-side. What the
 device is for is *establishing* things — identity, rendezvous, a handshake, a
@@ -56,41 +65,37 @@ Two properties worth knowing before optimising anything:
 |---|---|
 | **register** | `authorizePassword(gen)` + `createKeyPair` + read the new key's public half |
 | **sign in** | `authorizePassword(list)` + `searchKeys("ETSEIC:self1,")` + read my own public key |
-| **contact book** | `searchKeys("ETSEIC:peer1,<ownerKid>,")` + **one `getPubKey` per contact** |
+| **contact book** | `searchKeysAll("ETSEIC:peer1,<ownerKid>,", returnPubkey)` - one call per 15 contacts; one `getKeyPublicInfo` per contact only on a device without `pubkey_in_search` |
 | **add / rename / remove a contact** | a token for the scope (`imp` / `upd` / `del`) + the operation |
 
-The per-contact `getPubKey` exists because the current firmware does not return
-public keys from `key_search`. It no longer drags a token behind it — one
-`keymgmt:get` covers every read — so what remains is one ~0.6 s call per
-contact, next to the ~1.25 s `ecdh` the presence watch needs. Those two are the
-whole per-contact term; see §6 for what the newer firmware removes.
+On firmware 1.3 with `pubkey_in_search` the key search carries the public
+keys, so the per-contact term is the presence watch's one derivation per day.
+Without the policy each contact costs one ~0.6 s read (one `keymgmt:get`
+token covers all of them).
 
 ### §5 — Rendezvous
 
 Every topic and Announce key is a derivation `HKDF(ECDH(IK_me, IK_peer), ctx,
-label)` asked of the identity backend (`lib/derive.ts`). On the current
-firmware the backend answers with one raw `ecdh` per derivation and the HKDF
-runs in the client; the raw secret is wiped after each.
+label)` asked of the identity backend (`lib/derive.ts`); on firmware 1.3 the
+device runs it (`ecdhHkdf`) and only the outputs come back.
 
-| derivation | device, current firmware | device, firmware with in-device HKDF |
+| derivation | device, firmware 1.3 | before 1.3 (client 0.7.x) |
 |---|---|---|
-| pair topic (§5.1) | one `ecdh` per contact per day | one `derive` per contact per day |
-| Announce MAC key (§5.5) | one `ecdh` per contact per day | one `derive` per contact per day |
-| rotation offset (§5.4) | one `ecdh` per contact, once (date-independent) | one `derive`, once |
-| self topic + MAC (§5.2/§9.1) | two `ecdh` per day + one for the offset | the same, as `derive` |
+| pair topic + Announce MAC key (§5.1, §5.5) | **one** `ecdhHkdf` per contact per day (two items) | two raw `ecdh` per contact per day |
+| rotation offset (§5.4) | one `ecdhHkdf` per contact, once (16 bytes asked, 4 used) | one `ecdh`, once |
+| self topic + MAC (§5.2/§9.1) | one per day + one for the offset | two per day + one |
 | group topic (§5.3) | no — HKDF over `group_secret`, which never leaves the client | no |
-| published invite: invite key + decoy seed (§5.8–5.9) | two `ecdh` per invite per session (self-DH, under the invite secret) | two `derive` per invite per session |
+| published invite: invite key + decoy seed (§5.8–5.9) | two `ecdhHkdf` per invite per session (self-DH) | two `ecdh` |
 | a frame arriving on an inbox topic (§5.8) | **none** — opened with the invite key, a local X25519 | none |
-| decoy subscriptions (§5.10) | one `ecdh` per session (self-DH seed) | one `derive` |
+| decoy subscriptions (§5.10) | one `ecdhHkdf` per session (self-DH seed) | one `ecdh` |
+| storage names `nk` (§10) | one `ecdhHkdf` per sign-in; once more, raw, to move a pre-0.8.0 identity's records | one `ecdh` per sign-in |
 
 The session memoises the **derived values** of a day per contact (`pairDay` in
 `lib/core.ts`), shared by the presence watch, the room and the realignment
 after a rotation; the promise is memoised, so callers racing each other share
 one device call. No pair secret is cached. Inside the ±30 min rotation guard a
-second day is derived; otherwise **the daily rollover costs two calls per
-contact**, spread over the day by the per-pair instant. A batch form of the
-firmware call (one ECDH, a list of `(ctx, label, L)`) would bring a contact's
-day back to one call.
+second day is derived; otherwise **the daily rollover costs one call per
+contact**, spread over the day by the per-pair instant.
 
 ### §6 — EH-2 handshake
 
@@ -115,10 +120,10 @@ without the device being present at all.
 | sender key distribution | no — it rides the 1:1 ratchet |
 | group topic, epoch rotation | no |
 | **per-recipient MAC key `mk_ij`** | one derivation per member **per epoch**, memoised for the session |
-| creating a group | `createKeyPair` (GK) + read its public half + one derivation per member for the roster MAC |
+| creating a group | `createKeyPair` (GK, returns its public half) + one derivation per member for the roster MAC |
 | membership change | `updateKey` (the marker) + one derivation per member of the new epoch (the epoch is the derivation's context, so the device answers it; the raw `ECDH(GK, IK_i)` is not kept) |
 | a member's own record | `importPublicKey` of `GK_pub` at joining, `updateKey` on rename, `deleteKey` on leaving |
-| reading the device's group list | `searchKeys("ETSEIC:chan")` + one `getPubKey` per group |
+| reading the device's group list | `searchKeysAll("ETSEIC:chan", returnPubkey)`; one `getKeyPublicInfo` per group only without `pubkey_in_search` |
 
 So a group of five costs four derivations on the first message of a session and
 four more on each membership change, nothing per message.
@@ -225,8 +230,8 @@ competing with the room the user is waiting for.
 | is re-handshaked by §7.3 (every 4–8 h) | one `ecdh`, plus a token if the last one expired |
 | adds a contact | broad `key_search` (the collision precheck) + `imp` token + `importPublicKey`, then the book reloads |
 | renames or removes a contact | one token for the scope + the operation |
-| creates a group | `createKeyPair` + read the public half + one `ecdh` per member |
-| adds or removes a group member | `updateKey` + one `ecdh` per NEW member |
+| creates a group | `createKeyPair` (returns the public half) + one `ecdhHkdf` per member |
+| adds or removes a group member | `updateKey` + one `ecdhHkdf` per NEW member |
 | joins a group | `importPublicKey` of `GK_pub`, then one `ecdh` per member on first traffic |
 | leaves a group | `deleteKey` |
 | signs out | none |

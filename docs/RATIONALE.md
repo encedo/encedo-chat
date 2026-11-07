@@ -246,6 +246,7 @@ The numbers of `SPEC.md` §11.3 are stable identifiers; these entries no longer 
 - **S6** described IK reuse for X25519 and Ed25519. Does not occur: IK is native X25519, purpose `ecdh`, no conversion, no signing capability.
 - **S7** asked a reviewer to confirm that an HKDF-derived nonce has no collision edge case, and noted two constructions under one label. Closed by section 10: every `MK` seals once, and both paths derive the nonce the same way.
 - **S10** noted that in-session PCS was classical and bounded only by the session lifetime. Closed by the hybrid step of §7.2 (section 5): a quantum adversary holding a ratchet snapshot is cut off at the next hybrid step rather than at the timer.
+- **S13** described the pair secret `ECDH(IK_a, IK_b)` transiting client RAM for one HKDF on HEM firmware without in-device HKDF. Closed with spec 4.0: on firmware 1.3 every such derivation runs in the device (section 14, open questions).
 
 ---
 
@@ -270,7 +271,7 @@ Two problems on different horizons: PQ confidentiality (needed now, against harv
 **Open questions.**
 
 - **P1** — HSM authentication is the SDK's scoped-JWT model; an OIDC-fronted enrollment remains open.
-- **P2** — EPA rate limits: a session costs one `ecdh` per contact, memoised; re-confirm when HKDF-in-HSM firmware moves derivations in-device.
+- **P2** — EPA rate limits: a session costs one in-device derivation per contact per day (topic and Announce key together), memoised; to be measured on an EPA.
 - **P3** — serialization: JSON today; Protobuf or CBOR as an optimisation; wire-format stability.
 - **P4** — flood control is per-address limits at the reverse proxy, where the real address exists; GossipSub's own scoring is off behind it (every client arrives from loopback, and IP-colocation scoring graylisted the whole user base).
 - **P5** — device enrollment: how a user authorises a new device to use its `IK` (OIDC, TOTP, push to a primary device); remote attestation with the next firmware.
@@ -278,13 +279,7 @@ Two problems on different horizons: PQ confidentiality (needed now, against harv
 - **P7** — crypto library audit, especially `@noble/post-quantum`.
 - **P8** — cache backend: localStorage today; IndexedDB or SQLite in the shell as data outgrows it.
 - **P9** — published invites (put to the cryptographer 2026-09-15, no answer recorded): with the decoy schedule seeded per invite, does the arrival pattern of real knocks still link two invites of one inviter over months; and for a rare event under continuous cover, is a constant decoy rate better than a pseudo-random one?
-- **HKDF in the HSM** — the client is already on the seam (`lib/derive.ts`): every rendezvous, Announce, rotation, decoy-seed and group-MAC key is asked of the identity backend as `derive(label, peer, ctx, L)`, and the HEM backend realises it today over its raw `ecdh`. When firmware ships `ecdh` + HKDF in one call, what changes is:
-  1. `hemIdentityFrom` in `lib/core.ts`: `derive` becomes the SDK call (`ecdhDerive(token, kid, peerKid ?? peerPub, ctx, label, L)` or whatever the SDK names it), for both the public-key and the two-KID form;
-  2. `hemGkBackend` in `lib/core.ts`: the admin's `rk_i` likewise, through the GK's kid;
-  3. nothing in `lib/rendezvous.ts`, `lib/group.ts`, `lib/inbox.ts` or any consumer — the labels, contexts and lengths they pass are the ones §14 lists;
-  4. S13 in `SPEC.md` §11.3 closes and §4.3 loses its sentence about the raw output;
-  5. `hem_usage.md` is re-measured: topic and Announce key become one device call each per contact per day (a batch form of the SDK call, one ECDH with a list of `(ctx, label, L)`, would keep it at one), and a group rekey one call per member per epoch.
-  What stays raw by decision: the one DH with `IK` inside EH-2 (four components under one HKDF) and the §10 cache base. The knock no longer touches `IK` at all (§5.8): it was a raw DH with every stranger's one-shot ephemeral on a public topic, which on a HEM made each frame a device call anybody holding the link could buy, before any rate limit saw it; it is now a DH with a per-invite key derived once per session through this seam.
+- **HKDF in the HSM — done (spec 4.0, HEM firmware 1.3).** Every rendezvous, Announce, rotation, decoy-seed, invite-key, storage-name and group-MAC key is asked of the identity backend (`lib/derive.ts`), and a HEM answers in the device (`ecdhHkdf`: one ECDH, up to eight HKDF outputs, the shared secret never returned). A contact's topic and Announce key of a day are one call. Two firmware rules shaped it: an info starting with `encedo-` is reserved, so every protocol label became `onchato-…` (the local-store salts, which never reach the device, and the safety-number label kept their names, so that no stored record and no compared safety number changed); and an output is at least 16 bytes, so the 4-byte rotation offset is the first 4 of 16 - the same bytes, as HKDF-Expand's first block does not depend on L. S13 is retired. What stays raw: the one DH with `IK` inside EH-2 and the §10 cache base (a HEM answers a raw `ecdh` only with the `raw_ecdh_enabled` policy).
 - **Hardened tier** — stage 1 is built: `core-rs` (EH-2, the ratchet and the hybrid step in Rust, built to WASM, the same frames and the same known-answer vectors as the TypeScript engine; the default engine; `?core=ts`, `--core ts` select the TypeScript one). What it buys: ephemeral keys and ratchet state out of the JS heap and zeroed deterministically, a smaller and typed surface for review. What it does not buy: a boundary against a fully compromised page — WASM memory is a JS object of the same realm. Stage 2 (the same crate native in the Tauri host, the webview holding only ciphertext and results) is the boundary that narrows S1 and S5: the shells' default, falling back to WASM when the host does not answer. Its commands are driven through Tauri's real dispatch in CI (`test/native-ipc.test.ts`); that harness's first run found 0.7.27–0.7.30 refusing every argument by name and running on WASM. The webview transport underneath is checked on devices by hand. Stage 3 puts the transport behind a trait. The WASM engine is the default in browsers since 0.7.21.
 - **Decoy subscriptions — done (§5.10).** A client holds up to 8 topics shaped like the pair topics of offline contacts, raising the floor under the contact-list count a node reads and blurring which topics are real. Seeded from the self-DH so the set is stable and identity-bound, MAC'd under a random key so nothing answers them, dropped wholesale the moment the node refuses any topic (a real room must never lose its slot to cover traffic). It narrows what section 9 describes without hiding anything the node needs; for a self-hosted deployment, own nodes are trusted (`THREAT-MODELS.md`).
 
@@ -420,12 +415,12 @@ flowchart TD
         dh2 --> CAT
         dh3 --> CAT
         ss --> CAT
-        CAT --> K0["HKDF-SHA256 (salt = h1, info = encedo-handshake-v2)"]
+        CAT --> K0["HKDF-SHA256 (salt = h1, info = onchato-handshake-v2)"]
         K0 --> SK["SK = RK_0"]
     end
 
     subgraph ROOT ["Root chain (every DH step; every K-th step or every 30 min is hybrid)"]
-        SK --> K1["HKDF (salt = RK, info = encedo-ratchet-dh-v1, or encedo-ratchet-hybrid-v1 with the ML-KEM ss in the ikm)"]
+        SK --> K1["HKDF (salt = RK, info = onchato-ratchet-dh-v1, or onchato-ratchet-hybrid-v1 with the ML-KEM ss in the ikm)"]
         DHa["X25519(DH_self, DH_peer)"] --> K1
         K1 --> RK1["RK_1"]
         K1 --> CKs["CK_send"]
@@ -439,7 +434,7 @@ flowchart TD
         CKs --> M1["HKDF msg-key"] --> MK1["MK (msg n), single use"]
         CKs --> C1["HKDF chain-key"] --> CKs2["CK_send'"]
         CKs2 --> M2["HKDF msg-key"] --> MK2["MK (msg n+1)"]
-        MK1 --> N1["nonce = HKDF(MK, salt = n, info = encedo-aead-nonce)"]
+        MK1 --> N1["nonce = HKDF(MK, salt = n, info = onchato-aead-nonce)"]
         MK1 --> AE1["AES-256-GCM"]
         N1 --> AE1
     end

@@ -17,10 +17,10 @@ use crate::kem::{self, KemSecret};
 use crate::rng::Rng;
 use crate::x25519::Priv;
 
-const RK_INFO: &[u8] = b"encedo-ratchet-dh-v1";
-const RK_PQ_INFO: &[u8] = b"encedo-ratchet-hybrid-v1";
-const MK_LABEL: &str = "encedo-msg-key";
-const CK_LABEL: &str = "encedo-chain-key";
+const RK_INFO: &[u8] = b"onchato-ratchet-dh-v1";
+const RK_PQ_INFO: &[u8] = b"onchato-ratchet-hybrid-v1";
+const MK_LABEL: &str = "onchato-msg-key";
+const CK_LABEL: &str = "onchato-chain-key";
 
 pub const T_DATA: u8 = 0x10;
 pub const T_DATA_PQ: u8 = 0x11;

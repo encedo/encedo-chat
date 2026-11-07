@@ -31,7 +31,7 @@ export function kdf(label: string | Uint8Array, ikm: Uint8Array, ctx: Uint8Array
 export function aeadNonce(mk: Uint8Array, n: number): Promise<Uint8Array> {
   const nb = new Uint8Array(4)
   new DataView(nb.buffer).setUint32(0, n, false)
-  return kdf('encedo-aead-nonce', mk, nb, 12)
+  return kdf('onchato-aead-nonce', mk, nb, 12)
 }
 
 /** SHA-256 -> 32 raw bytes. */

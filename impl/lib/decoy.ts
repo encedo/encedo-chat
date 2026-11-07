@@ -16,9 +16,9 @@
  * restart resumes the same decoys - a set that changed on every reload while
  * the real topics stayed would mark itself.
  *
- *   seed     = derive(IK, IK_pub, ctx = network_id || 0x00, "encedo-chat-decoy-v1", 32)
- *   offset_i = u32be(HKDF(seed, salt = u8(i), info = "encedo-chat-decoy-offset-v1", 4)) mod 86400
- *   topic_i  = base32(HKDF(seed, salt = u8(i) || network_id || 0x00 || date, info = "encedo-chat-decoy-topic-v1", 32))[0:52]
+ *   seed     = derive(IK, IK_pub, ctx = network_id || 0x00, "onchato-decoy-v1", 32)
+ *   offset_i = u32be(HKDF(seed, salt = u8(i), info = "onchato-decoy-offset-v1", 4)) mod 86400
+ *   topic_i  = base32(HKDF(seed, salt = u8(i) || network_id || 0x00 || date, info = "onchato-decoy-topic-v1", 32))[0:52]
  *
  * Decoys yield: a node that refuses a topic is full, and a real room must
  * never lose its slot to cover traffic, so a refusal of any real topic
@@ -30,9 +30,9 @@ import { paramsInfo, rotationCtx, topicFromMaterial, offsetFromMaterial, type Rv
 import { watchPresenceRotating, type PresenceWatch } from './presence.ts'
 
 export const DECOY_MAX = 8
-export const DECOY_SEED_LABEL = 'encedo-chat-decoy-v1'
-const OFFSET_LABEL = 'encedo-chat-decoy-offset-v1'
-const TOPIC_LABEL = 'encedo-chat-decoy-topic-v1'
+export const DECOY_SEED_LABEL = 'onchato-decoy-v1'
+const OFFSET_LABEL = 'onchato-decoy-offset-v1'
+const TOPIC_LABEL = 'onchato-decoy-topic-v1'
 
 /** How many decoys a client with `contacts` contacts holds. */
 export const decoyCount = (contacts: number): number => Math.max(0, Math.min(contacts, DECOY_MAX))

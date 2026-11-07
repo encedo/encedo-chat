@@ -6,8 +6,8 @@
    What is modelled, against SPEC.md 8:
      group_id  = H(GK_pub)                                        8.1
      sender_id = H(IK_pub)                    (recipient_id likewise)
-     mk_ij = HKDF(ECDH(IK_i, IK_j), salt = gid || epoch, "encedo-group-msg-mac")
-     rk_i  = HKDF(ECDH(GK,   IK_i), salt = gid || epoch, "encedo-chat-group-roster-mac")
+     mk_ij = HKDF(ECDH(IK_i, IK_j), salt = gid || epoch, "onchato-group-msg-mac")
+     rk_i  = HKDF(ECDH(GK,   IK_i), salt = gid || epoch, "onchato-group-roster-mac")
      frame: header = (gid, sender_id, epoch, ctr)                 8.2
             ct     = AEAD(MK, envelope, aad = header)
             one (recipient_id, HMAC(mk_ij, header || ct)) per other member
@@ -54,8 +54,8 @@ fun k2b(key): bitstring [typeConverter].
 fun aenc(bitstring, key, bitstring): bitstring.     (* aenc(plaintext, key, aad) *)
 reduc forall m: bitstring, k: key, ad: bitstring; adec(aenc(m, k, ad), k, ad) = m.
 
-const L_MSGMAC: bitstring [data].       (* "encedo-group-msg-mac" *)
-const L_ROSTER: bitstring [data].       (* "encedo-chat-group-roster-mac" *)
+const L_MSGMAC: bitstring [data].       (* "onchato-group-msg-mac" *)
+const L_ROSTER: bitstring [data].       (* "onchato-group-roster-mac" *)
 const L_MK: bitstring [data].           (* the per-message key off the chain *)
 const e0: bitstring [data].
 const e1: bitstring [data].

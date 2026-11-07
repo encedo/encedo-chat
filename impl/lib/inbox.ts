@@ -58,12 +58,12 @@ import { openKnock, decoyKnock, sealKnock, type Knock } from './knock.ts'
 import { x25519FromPriv, type Dh } from './x25519.ts'
 import { nowMs } from './time.ts'
 
-const SEED_LABEL = 'encedo-chat-invite-decoy-v1'
-const SLOT_LABEL = 'encedo-chat-invite-decoy-slot-v1'
+const SEED_LABEL = 'onchato-invite-decoy-v1'
+const SLOT_LABEL = 'onchato-invite-decoy-slot-v1'
 /** The invite's own X25519 key: HKDF(ECDH(IK, IK_pub), salt = invite_secret).
  *  A sibling of the decoy seed - computable only by the identity holder, never
  *  from the link, and the same in every window and on every device of it. */
-export const INVITE_KEY_LABEL = 'encedo-chat-invite-key-v1'
+export const INVITE_KEY_LABEL = 'onchato-invite-key-v1'
 
 /** The self-derivation an inbox needs, through the identity backend. */
 export type SelfDerive = (label: string, ctx: Uint8Array, len: number) => Promise<Uint8Array>

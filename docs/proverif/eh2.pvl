@@ -11,7 +11,7 @@
      h1  = H(msg1)                                                    6.2
      ss  = ML-KEM-768 encap (R) / decap (I)
      SK  = HKDF(DH(IK_r,EK_i) || DH(EK_r,IK_i) || DH(EK_r,EK_i) || ss,
-                salt = h1, info = "encedo-handshake-v2")              6.2, 6.3
+                salt = h1, info = "onchato-handshake-v2")              6.2, 6.3
      h2p = H(msg1 || EK_r || pq_ct || ts_r)
      mac_r = HMAC(SK, "responder" || h2p)                             msg2
      h3  = H(h2p || mac_r)
@@ -62,9 +62,9 @@ fun senc(bitstring, key): bitstring.
 reduc forall m: bitstring, k: key; sdec(senc(m, k), k) = m.
 
 (* ---- labels (SPEC.md 14) ---- *)
-const L_SK: bitstring [data].          (* "encedo-handshake-v2" *)
-const L_TAG: bitstring [data].         (* "encedo-eh2-initiator-tag-v1" *)
-const L_ANNOUNCE: bitstring [data].    (* "encedo-chat-announce-mac-v1" *)
+const L_SK: bitstring [data].          (* "onchato-handshake-v2" *)
+const L_TAG: bitstring [data].         (* "onchato-eh2-initiator-tag-v1" *)
+const L_ANNOUNCE: bitstring [data].    (* "onchato-announce-mac-v1" *)
 const L_RESP: bitstring [data].        (* "responder" *)
 const L_INIT: bitstring [data].        (* "initiator" *)
 

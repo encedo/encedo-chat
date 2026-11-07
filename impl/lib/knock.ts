@@ -53,7 +53,7 @@ const td = new TextDecoder()
 
 /** HKDF info. Versioned: v1 sealed to the identity key, and a v1 frame must
  *  not open under a v2 key or the reverse. */
-const LABEL = 'encedo-chat-invite-knock-v2'
+const LABEL = 'onchato-invite-knock-v2'
 
 /** Longest display name a knock carries, in BYTES — the wire budget is bytes,
  *  and a name arrives as UTF-8 from a stranger. */

@@ -15,7 +15,7 @@ Status: **design of record for a shipping product** (onchato 0.7.x: web at `app.
 
 | Claim | Shipped and measured | Roadmap |
 |---|---|---|
-| HSM-anchored identity | the IK never leaves the HEM; every new session, topic and Announce needs a device call; a stolen unlocked client lives at most one lifetime (4–8 h) | HKDF inside the HSM (closes S13); enrollment by attestation |
+| HSM-anchored identity | the IK never leaves the HEM; every new session, topic and Announce needs a device call; a stolen unlocked client lives at most one lifetime (4–8 h) | enrollment by attestation |
 | PQ confidentiality | EH-2 is X25519 + ML-KEM-768; TLS to the HEM is X25519MLKEM768; recorded traffic needs both broken | — |
 | PQ post-compromise security | the hybrid ratchet: every fourth DH step, or every 30 minutes, mixes an ML-KEM-768 secret into the root (`SPEC.md` §7.2) | — |
 | Hardened tier | `core-rs`: in a browser a WASM module (keys out of the JS heap, same realm); in the Tauri shells native in the host process (keys outside the webview) since 0.7.31, driven through Tauri's command dispatch by CI (`native-ipc`), the webview transport checked on devices by hand (S1, S5) | the HEM client and the identity backend in the host as well |
@@ -106,7 +106,7 @@ Beside the flags, three things run that a reader of the protocol would not guess
 Key properties (`SPEC.md` §4):
 
 - **IK never signs anything** — mutual authentication is MAC-based on the handshake transcript (deniability); groups too (ECDH-HMAC, §8). No dual-use, no curve conversion; on a HEM the purpose flag is enforced by hardware. (The HEM `x25519` dual key type ships in firmware as a platform capability, but Chat's IK does not use it.)
-- Chat's HSM crypto surface is **one call** — raw `ecdh` — plus key management. Current firmware has no in-HSM HKDF, so IK-derived derivations run client-side over the raw output; the exposure and its closure are recorded in `SPEC.md` §4.3/S13. Zero firmware changes needed for Phase 1.
+- Chat's HSM crypto surface is **two calls** — `ecdh` with in-device HKDF (`ecdhHkdf`, firmware 1.3: every rendezvous, Announce, group-MAC and storage-name key) and raw `ecdh` (the one DH with IK in EH-2, the §10 cache base) — plus key management (`SPEC.md` §4.3).
 - Contacts are imported **out-of-band** (QR / invite link + fingerprint verification); the stored book is sealed (AES-GCM under the §10 base), which also keeps it from being swapped (`SPEC.md` §4.4).
 - A **published invite** is the second door (`SPEC.md` §5.7-5.9): one long-lived link its owner may hang anywhere, naming a **public** topic that strangers can knock on. Several per identity, each retirable alone. It trades an exposed topic for reachability without a prior exchange — the fingerprint comparison above is unchanged, and accepting a knock is what creates the contact.
 - **Single active session per identity** (`SPEC.md` §9): a duplicate is detected on the self-topic and **both copies stand down** — the user re-enters one deliberately; a stolen device without the HSM dies at the next forced re-handshake.
@@ -120,7 +120,7 @@ Key properties (`SPEC.md` §4):
 topic = base32( HKDF-SHA256(
   ikm  = ECDH(IK_a_priv, IK_b_pub),          // identity backend call — same value both sides
   salt = network_id || 0x00 || date_UTC,      // date on the pair's shifted clock (§5.4)
-  info = "encedo-chat-rendezvous-v1"          // the label; one convention for every derivation (§14)
+  info = "onchato-rendezvous-v1"          // the label; one convention for every derivation (§14)
 ) )[0:52]
 ```
 
@@ -242,6 +242,6 @@ Look & feel is open; a reference skin beyond the shipped web UI is a question to
 | 7 | Hardened tier: `core-rs` ships as the default WASM engine in browsers and the terminal, natively in the Tauri host in the shells (`SPEC.md` §3.2); remaining: the HEM client in the host | WASM default since 0.7.21; native in the shells since 0.7.31, IPC in CI |
 | 8 | ~~Identity backend for the open channel~~ — **resolved: the software profile ships** (`SPEC.md` §4.5) | — |
 | 9 | Spec open questions (`RATIONALE.md` — the remaining ones: device enrollment, IK rotation, lib audit, serialization) | pre-1.0 |
-| 10 | HEM side-items: `x25519` dual key type (decided: ships) + attestation PoP variant; **HKDF-in-HSM firmware** (closes S13) | HEM firmware roadmap |
+| 10 | HEM side-items: `x25519` dual key type (decided: ships) + attestation PoP variant; HKDF-in-HSM firmware (done: firmware 1.3, spec 4.0) | HEM firmware roadmap |
 | 11 | ~~Network id as a parameter~~ — **resolved**: `EC_NETWORK` at build time for the app, `--network` on the terminal client | — |
 | 12 | ~~A per-message size bound at the node~~ — **resolved**: `relay/limits.mjs` (a PUSH past 64 KiB refused, an oversize GossipSub message ignored, 1 MiB per inbound RPC) | — |

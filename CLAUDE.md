@@ -99,41 +99,41 @@ names its lines.
 
 Older iterations (v2–v5) are the separate repo `encedo/onchato.com`.
 
-## HEM / SDK reality vs. design  ← the important one
+## HEM / SDK reality  ← the important one
 
-**Design (in the specs):** the HSM exposes `ecdh` raw and `ecdh`+**HKDF executed
-inside the HSM**, so that IK-derived secrets (rendezvous topics, Announce MAC
-keys, cache key) never leave the device. `docs/SPEC.md` §4.3 is written against
-this.
+**Every IK derivation runs in the device (firmware 1.3, spec 4.0).** No
+consumer calls `id.ecdh` for a rendezvous, Announce, rotation, decoy-seed,
+group-MAC, invite or storage-name key; they call `deriveWith(id, label, peer,
+ctx, L)` (or `deriveManyWith` for several outputs of one ECDH - a contact's
+topic and Announce key of a day are ONE device call), and the HEM backend
+realises it with the SDK's `ecdhHkdf` (`hemDerivation` in `lib/derive.ts`):
+the label is the HKDF info, the context the salt (none when empty), and the
+shared secret never comes back. A software identity derives over its own
+`ecdh` and wipes it. `test/derive.test.ts` pins the bytes against the client
+derivation and that a HEM identity never asks for the raw secret there.
 
-**Current firmware / `hem-sdk-js`: no in-HSM HKDF yet.** `ecdh` returns the raw
-32-byte shared secret only. HKDF-in-HEM comes with newer firmware; the specs
-describe that target and stay as they are.
+Two firmware rules shape it, and both are pinned by the fakes in the tests:
 
-**The seam is built (`lib/derive.ts`).** No consumer calls `id.ecdh` for a
-rendezvous, Announce, rotation, decoy-seed, group-MAC, invite or storage-name
-key; they call `deriveWith(id, label, peer, ctx, L)`, and the backend's `derive`
-decides where the HKDF runs. Today the HEM backend's `derive` is
-`deriveOverEcdh(ecdh)` — HKDF in the client over the raw output, wiped at once.
-The session memoises **derived values** (`pairDay` in `lib/core.ts`; an epoch's
-`rk_i` per member in `GroupManager`), never a pair secret;
-`test/derive.test.ts` pins that a backend which derives is the one asked and
-its raw `ecdh` is never called.
+1. **An info starting with `encedo-` is refused (400).** Every protocol label
+   is `onchato-…` since 0.8.0. The local-store salts of §10, the store index
+   and the safety number keep `encedo-chat-…`: they never reach the device,
+   and renaming them would orphan every stored record or change every safety
+   number someone compared.
+2. **An output is 16..128 bytes.** A shorter `L` (the 4-byte rotation offset)
+   is asked as 16 and cut; HKDF-Expand's first block does not depend on `L`,
+   so the bytes are the same.
 
-**When the newer FW lands, change exactly this** (also in `docs/RATIONALE.md`,
-open questions):
+The storage-name key `nk` changed with its label: `migrateNamesKey`
+(`lib/storenames.ts`) moves a pre-0.8.0 identity's records once, deriving the
+old `nk` over a raw `ecdh` (pins move when their room opens, `pinName`).
 
-1. `hemIdentityFrom` (`lib/core.ts`): `derive:` becomes the SDK's in-device
-   call — label, ctx and L go to the device; cover the public-key form and the
-   two-KID form (`peerKid`).
-2. `hemGkBackend` (`lib/core.ts`): the GK's `derive` likewise.
-3. Nothing else in the engine. Then close S13 in `docs/SPEC.md` §11.3, drop the
-   raw-output sentence of §4.3, re-measure `hem_usage.md` (ask for a batch form,
-   one ECDH with a list of `(ctx, label, L)`), and run the live HEM test
-   (`hem-gk-test`) — no automated test reaches a device.
-
-Raw `ecdh` stays, by decision, for the one DH with IK inside EH-2 and the §10
-cache base `ECDH(IK, emp_pub)`.
+**Raw `ecdh` is what is left**, for the one DH with IK inside EH-2 and the §10
+cache base `ECDH(IK, emp_pub)`. A HEM answers it only when personalised with
+the `raw_ecdh_enabled` policy (403 otherwise) - the live test reports which.
+`hem_usage.md` lists what each operation costs on the device; read it before
+adding anything that talks to the HEM. No automated test reaches a device:
+`npm run hem-gk-test -- --hsm <url>` (password in `HEM_PASS`) checks the
+in-device HKDF against the client byte for byte.
 
 **A knock costs the device nothing.** Knocks are sealed to a per-invite key
 (`inviteKey` in `lib/inbox.ts`, derived once per invite per session); opening is

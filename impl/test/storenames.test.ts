@@ -10,7 +10,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { randomBytes } from '../lib/wc.ts'
-import { namesFor, namesFromKey, migrateToNames, FIXED } from '../lib/storenames.ts'
+import { namesFor, namesFromKey, migrateToNames, migrateNamesKey, pinName, FIXED, NAMES_LABEL_PRE_080 } from '../lib/storenames.ts'
+import { deriveOverEcdh } from '../lib/derive.ts'
 import { browserSoftwareIdentity } from '../lib/core.ts'
 
 const KID = '5954eb6d5a1dd906ec78fe9dae5645e3'
@@ -90,4 +91,50 @@ test('the group index is sealed, keeps one entry per group, and goes when it is 
   assert.deepEqual(await (await namesFromKey(randomBytes(32), KID)).groups(kv), [], 'another key reads nothing')
   await n.setGroups(kv, [])
   assert.equal(kv.get(n.fixed.groups), null)
+})
+
+test('0.8.0: every record moves from the old name key to the new one, the group index re-sealed, pins when their room opens', async () => {
+  let saved: string | null = null
+  const id = await browserSoftwareIdentity('m', () => saved, (v) => { saved = v })
+  const ctx = new TextEncoder().encode('local storage names')
+  const oldNk = await deriveOverEcdh(id.ecdh)(NAMES_LABEL_PRE_080, id.pub, ctx, 32)
+  const old = await namesFromKey(oldNk, KID)
+  const kv = mem()
+  kv.set(old.fixed.emp, 'EMP'); kv.set(old.fixed.book, 'BOOK'); kv.set(old.fixed.prefs, 'PREFS')
+  kv.set(await old.scoped('group', GID), 'GROUP')
+  await old.setGroups(kv, [GID])
+  kv.set(await old.scoped('pin', PEER), 'PIN')
+  kv.set('ec-soft-id-m', 'PROFILE') // not this identity's record: never touched
+
+  const names = await namesFor(id, KID)
+  assert.notEqual(names.prefix, old.prefix, 'the label moved, so did the names')
+  const r = await migrateNamesKey(kv, id, names)
+  assert.equal(r.moved, 4, 'emp, book, prefs and the group')
+  assert.equal(kv.get(names.fixed.emp), 'EMP'); assert.equal(kv.get(names.fixed.book), 'BOOK'); assert.equal(kv.get(names.fixed.prefs), 'PREFS')
+  assert.equal(kv.get(await names.scoped('group', GID)), 'GROUP')
+  assert.deepEqual(await names.groups(kv), [GID], 'the index opens under the new key')
+  assert.equal(kv.get('ec-soft-id-m'), 'PROFILE')
+  assert.ok(r.legacy, 'a pin is left, so the old names are handed back')
+  assert.equal(kv.get(names.fixed.moved), null, 'not done while a record is left')
+
+  const pin = await pinName(kv, names, PEER, r.legacy)
+  assert.equal(kv.get(pin), 'PIN', 'the pin moves when its room asks for it')
+  assert.equal(kv.keys().filter((k) => k.startsWith(old.prefix)).length, 0, 'nothing left under the old names')
+
+  const again = await migrateNamesKey(kv, id, names)
+  assert.deepEqual(again, { moved: 0, legacy: null })
+  assert.equal(kv.get(names.fixed.moved), '1', 'done, and recorded')
+  let asked = 0
+  const counting = { ...id, ecdh: async (p: string) => { asked++; return id.ecdh(p) } }
+  await migrateNamesKey(kv, counting, names)
+  assert.equal(asked, 0, 'once recorded, no ECDH is spent on it again')
+})
+
+test('0.8.0: an identity that refuses a raw ECDH (a HEM without the policy) has nothing to move, and says so once', async () => {
+  const id = await browserSoftwareIdentity('h', () => null, () => {})
+  const names = await namesFor(id, KID)
+  const kv = mem()
+  const refusing = { ...id, ecdh: async () => { throw Object.assign(new Error('403'), { code: 'http_403' }) } }
+  assert.deepEqual(await migrateNamesKey(kv, refusing, names), { moved: 0, legacy: null })
+  assert.equal(kv.get(names.fixed.moved), '1')
 })

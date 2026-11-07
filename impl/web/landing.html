@@ -620,12 +620,12 @@ if (location.hash.startsWith('#i=')) location.replace('https://app.onchato.com/'
     // The rotation instant is the pair's own: midnight shifted by an offset that
     // both members derive from their shared secret and nobody else can predict.
     // Date-independent, so it is computed once.
-    var off = await hkdf(ss, 'encedo-chat-rotation-v1', paramsInfo(null), 4)
+    var off = await hkdf(ss, 'onchato-rotation-v1', paramsInfo(null), 4)
     var offsetSec = new DataView(off.buffer, off.byteOffset, 4).getUint32(0) % 86400
 
     var now = Date.now()
     var day = utcDate(now - offsetSec * 1000)     // the day on the pair's shifted clock
-    var mat = await hkdf(ss, 'encedo-chat-rendezvous-v1', paramsInfo(day), 32)
+    var mat = await hkdf(ss, 'onchato-rendezvous-v1', paramsInfo(day), 32)
     var topic = base32(mat).slice(0, 52)
 
     var el = document.getElementById('rail-topic')

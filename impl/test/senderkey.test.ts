@@ -25,8 +25,8 @@ test('KAT: a sealed frame opens with an independently derived MK and nonce', asy
   // ...and matches the recorded vector in docs/kat/ (scripts/export-kat.mjs).
   assert.equal(hex(key0), KAT.chain_key); assert.equal(hex(H), KAT.header_aad); assert.equal(n, KAT.ctr)
   assert.equal(hex(ct), KAT.ct)
-  const mk0 = await hkdfBits(key0, NO_SALT, enc.encode('encedo-group-msg'), 32)
-  const nonce = await hkdfBits(mk0, new Uint8Array([0, 0, 0, 0]), enc.encode('encedo-aead-nonce'), 12) // counter 0 as the context
+  const mk0 = await hkdfBits(key0, NO_SALT, enc.encode('onchato-group-msg'), 32)
+  const nonce = await hkdfBits(mk0, new Uint8Array([0, 0, 0, 0]), enc.encode('onchato-aead-nonce'), 12) // counter 0 as the context
   const k = await subtle.importKey('raw', mk0, { name: 'AES-GCM' }, false, ['decrypt'])
   const pt = new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: nonce, additionalData: H }, k, ct))
   assert.deepEqual(pt, body('hello'))
@@ -115,16 +115,16 @@ test('KAT cases: one chain walked to several counters - chain key, MK, nonce, ct
   let ck: Uint8Array = new Uint8Array(0), at = -1
   for (const c of KAT.cases) {
     if (c.ctr === 0) { ck = unhex(c.chain_key_at_ctr); at = 0 }
-    while (at < c.ctr) { ck = await hkdfBits(ck, NO_SALT, label('encedo-group-chain'), 32); at++ }
+    while (at < c.ctr) { ck = await hkdfBits(ck, NO_SALT, label('onchato-group-chain'), 32); at++ }
     assert.equal(hex(ck), c.chain_key_at_ctr, `chain key at ctr ${c.ctr}`)
-    const mk = await hkdfBits(ck, NO_SALT, label('encedo-group-msg'), 32)
+    const mk = await hkdfBits(ck, NO_SALT, label('onchato-group-msg'), 32)
     assert.equal(hex(mk), c.mk, `MK at ctr ${c.ctr}`)
-    const nonce = await hkdfBits(mk, u32(c.ctr), label('encedo-aead-nonce'), 12)
+    const nonce = await hkdfBits(mk, u32(c.ctr), label('onchato-aead-nonce'), 12)
     assert.equal(hex(nonce), c.nonce, `nonce at ctr ${c.ctr}`)
     if (c.ctr > 0) {
       // The point of the extra cases: past 0 an empty salt is a DIFFERENT
       // nonce, so a port that drops the counter fails here, not in the field.
-      const noCounter = await hkdfBits(mk, NO_SALT, label('encedo-aead-nonce'), 12)
+      const noCounter = await hkdfBits(mk, NO_SALT, label('onchato-aead-nonce'), 12)
       assert.notEqual(hex(noCounter), c.nonce, `ctr ${c.ctr}: the counter must reach the nonce`)
     }
     const k = await subtle.importKey('raw', mk, { name: 'AES-GCM' }, false, ['decrypt'])

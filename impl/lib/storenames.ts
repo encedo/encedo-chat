@@ -11,7 +11,7 @@
  * ## Key schedule
  *
  *   nk     = HKDF(ECDH(IK, IK_pub), salt = "local storage names",
- *                 info = "encedo-chat-store-names-v1")       // deriveWith, self
+ *                 info = "onchato-store-names-v1")           // deriveWith, self
  *   idTag  = HMAC-SHA-256(nk, "id")[0:8]                       // hex, 16 chars
  *   name   = "ec-" + idTag + "-" + HMAC-SHA-256(nk, label || 0x00 || scope)[0:16]   // hex, 32 chars
  *
@@ -33,18 +33,21 @@
  * write it before `base` exists).
  */
 
-import { deriveWith, type Deriving } from './derive.ts'
+import { deriveWith, deriveOverEcdh, type Deriving } from './derive.ts'
 import { subtle, hkdfBits } from './wc.ts'
 import { sealLocal, openLocal } from './localstore.ts'
 import type { KV } from './migrate.ts'
 
 const enc = new TextEncoder()
-export const NAMES_LABEL = 'encedo-chat-store-names-v1'
+export const NAMES_LABEL = 'onchato-store-names-v1'
+/** The label before 0.8.0. Firmware 1.3 refuses an HKDF info starting with
+ *  `encedo-`, so the names moved; this one only finds the records to move. */
+export const NAMES_LABEL_PRE_080 = 'encedo-chat-store-names-v1'
 const NAMES_CTX = enc.encode('local storage names')
 const INDEX_SALT = 'encedo-chat-store-index-v1'
 
 /** The records every identity has one of. */
-export const FIXED = ['emp', 'book', 'book-signed', 'sealed', 'invites', 'waiting', 'ignored', 'outbox', 'prefs', 'seen', 'gleft', 'groups', 'netkey'] as const
+export const FIXED = ['emp', 'book', 'book-signed', 'sealed', 'invites', 'waiting', 'ignored', 'outbox', 'prefs', 'seen', 'gleft', 'groups', 'netkey', 'moved'] as const
 export type Fixed = typeof FIXED[number]
 
 export interface Names {
@@ -130,4 +133,65 @@ export async function migrateToNames(kv: KV, names: Names): Promise<number> {
   }
   if (gids.length) await names.setGroups(kv, [...await names.groups(kv), ...gids])
   return moved
+}
+
+/**
+ * Move this identity's records from the names of the pre-0.8.0 name key to
+ * the current one (0.8.0: the label of `nk` changed, see NAMES_LABEL_PRE_080).
+ *
+ * The old `nk` is computed the way every build before 0.8.0 computed it: HKDF
+ * in the client over the raw `ECDH(IK, IK_pub)`. A software identity always
+ * can; a HEM can when it is personalised with the `raw_ecdh_enabled` policy,
+ * and when it is not, there is nothing to move (no build could have written
+ * those records against that device) and the attempt is recorded as done.
+ *
+ * Values move unchanged - the seals are keyed by `base` and the KID, neither
+ * of which moved - except the group index, which is sealed under a key from
+ * `nk` and is re-sealed. Pins are named by a room id this function does not
+ * know, so they are moved when their room is first opened (`pinName`); while
+ * any old record is left, the old names are returned for that, and the `moved`
+ * marker is written only once none is.
+ *
+ * Returns how many records moved and the old names when some are left.
+ */
+export async function migrateNamesKey(kv: KV, id: Deriving & { pub: string }, names: Names): Promise<{ moved: number; legacy: Names | null }> {
+  if (kv.get(names.fixed.moved) !== null) return { moved: 0, legacy: null }
+  let old: Names
+  try {
+    const nk = await deriveOverEcdh(id.ecdh)(NAMES_LABEL_PRE_080, id.pub, NAMES_CTX, 32)
+    try { old = await namesFromKey(nk, names.kid) } finally { nk.fill(0) }
+  } catch {
+    kv.set(names.fixed.moved, '1') // no raw ECDH: no record of this identity can be under the old names
+    return { moved: 0, legacy: null }
+  }
+  let moved = 0
+  const move = (from: string, to: string) => {
+    const v = kv.get(from)
+    if (v === null) return
+    if (kv.get(to) === null) { kv.set(to, v); moved++ }
+    kv.remove?.(from)
+  }
+  for (const f of FIXED) if (f !== 'groups' && f !== 'moved') move(old.fixed[f], names.fixed[f])
+  const gids = await old.groups(kv)
+  for (const gid of gids) move(await old.scoped('group', gid), await names.scoped('group', gid))
+  if (gids.length) await names.setGroups(kv, [...await names.groups(kv), ...gids])
+  kv.remove?.(old.fixed.groups)
+  const left = kv.keys().some((k) => k.startsWith(old.prefix))
+  if (!left) kv.set(names.fixed.moved, '1')
+  return { moved, legacy: left ? old : null }
+}
+
+/**
+ * The name of a room's pins, after moving them there from the pre-0.8.0 name
+ * when the old names are still around (`migrateNamesKey`). The one place that
+ * knows a room id is the one that opens the room.
+ */
+export async function pinName(kv: KV, names: Names, roomId: string, legacy: Names | null): Promise<string> {
+  const name = await names.scoped('pin', roomId)
+  if (legacy && kv.get(name) === null) {
+    const from = await legacy.scoped('pin', roomId)
+    const v = kv.get(from)
+    if (v !== null) { kv.set(name, v); kv.remove?.(from) }
+  }
+  return name
 }

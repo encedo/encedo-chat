@@ -1,6 +1,6 @@
 # v6 — SPEC.md
 
-Normative protocol specification of the shipped implementation (`impl/`). **`spec_version` 3.0.** On the wire: `ver = 3` on the EH-2 frames and the ratchet header, `version = 3` on the group frame, `v = 3` on the Announce, `v = 1` on the application envelope. One `ver` names one spec version: a client accepts exactly the versions written here and nothing earlier, and the known-answer vectors of `docs/kat/` (§12) belong to this version.
+Normative protocol specification of the shipped implementation (`impl/`). **`spec_version` 4.0.** On the wire: `ver = 3` on the EH-2 frames and the ratchet header, `version = 3` on the group frame, `v = 3` on the Announce, `v = 1` on the application envelope. Before 1.0 a change on the wire does not move these marks (`RATIONALE.md`, section 10): a client accepts exactly what is written here and nothing earlier, clients of different spec versions do not interoperate, and the known-answer vectors of `docs/kat/` (§12) belong to this version. 4.0 renamed every label of the protocol from `encedo-…` to `onchato-…` (§14): the HEM firmware 1.3 reserves the `encedo-` prefix in the info of an in-device HKDF.
 
 This document states what is on the wire, what is derived and how, and what a conforming client accepts or refuses. It is kept 1:1 with the code: a wire behaviour the client has and this document omits, or the reverse, is a defect in one of them. The reasoning behind the choices, the alternatives considered, the roadmap and the open questions are in `RATIONALE.md`; product and infrastructure in `ARCHITECTURE.md`; deployment profiles and adversary tiers in `THREAT-MODELS.md`.
 
@@ -127,17 +127,17 @@ GROUP  label  Onchato-Group-<name>                     (truncated to fit)
 
 | Operation | Use | Frequency |
 |---|---|---|
-| `ecdh(kid, peer_pub)` → raw 32 B | the one DH with `IK` in EH-2 (§6.2); the cache base (§10) | one per handshake; one per session |
-| `derive(kid, peer_pub, ctx, label, L)` → `HKDF(ECDH(IK, peer_pub), salt = ctx, info = label, L)` | pair and self topic (§5.1–5.2), Announce MAC keys (§5.5), rotation offset (§5.4), invite key and decoy seed (§5.8–5.9), the group MAC keys `mk_ij` and `rk_i` (§8.1), the storage-name key `nk` (§10) | topic and MAC key once per contact per day (two days inside the rotation guard); the offset once per contact; `nk` once per sign-in; two per published invite per session; one per member per group epoch |
+| `ecdh(kid, peer_pub)` → raw 32 B | the one DH with `IK` in EH-2 (§6.2); the cache base (§10); once, the storage names of a pre-4.0 client (§10) | one per handshake; one per session |
+| `derive(kid, peer, [(ctx, label, L)…])` → `HKDF(ECDH(IK, peer), salt = ctx, info = label, L)` for each item | pair and self topic (§5.1–5.2), Announce MAC keys (§5.5), rotation offset (§5.4), invite key and decoy seed (§5.8–5.9), the group MAC keys `mk_ij` and `rk_i` (§8.1), the storage-name key `nk` (§10) | one call per contact per day for its topic and Announce key together (two days inside the rotation guard); the offset once per contact; `nk` once per sign-in; two per published invite per session; one per member per group epoch |
 | `key_generate(X25519, purpose = ecdh)` | `IK` at onboarding; `GK` at group creation | once per identity, once per group |
 | `key_import(pub)` | a contact's `IK_pub`; a member's `GK_pub` (§8.6) | once per contact, once per group |
 | `key_delete(kid)` | contact removal, group leave, IK rotation | rare |
-| `key_search(prefix)` | identities, contacts, group markers | sign-in and add paths |
-| `getPubKey(kid)` | read a public half | per contact and group at sign-in |
+| `key_search(prefix)` | identities, contacts, group markers, with their public halves; every page | sign-in and add paths |
+| `get(kid)` | read a public half the search did not return | per contact and group at sign-in, on a device without public keys in the search |
 
 Signing and the HSM's own ML-KEM/ML-DSA are not used. Everything else (HMAC, AES-GCM, ML-KEM, ratchet, every HKDF) is client-side.
 
-The client never holds a pair secret: what it memoises are the derived values of a day (a topic, an Announce key, an offset, an epoch's MAC key). On a backend that derives in-device, `ECDH(IK_a, IK_b)` never leaves the device; on one that derives in the client (the current HEM firmware, a software identity) the raw output exists for the duration of one HKDF and is wiped. Either way the material is rendezvous-only and disjoint from the message-key DHs: what a compromised client can leak is pair-linkability for the days whose keys it holds, never content (§11.3, S13). EH-2 needs raw mode: its DH outputs are concatenated client-side and wiped after `SK` is derived.
+The client never holds a pair secret: what it memoises are the derived values of a day (a topic, an Announce key, an offset, an epoch's MAC key). On a HEM `derive` runs in the device (firmware 1.3: one ECDH and an HKDF per item, the shared secret never returned) and `ECDH(IK_a, IK_b)` never leaves it; a software identity derives over its own ECDH output and wipes it. The device gives at least 16 bytes per item: a shorter `L` (the 4-byte rotation offset) is the first `L` bytes of 16, which are byte for byte HKDF with that `L`. The label goes in the HKDF info, and the firmware refuses an info starting with `encedo-`, hence the `onchato-` labels of §14. EH-2 needs raw mode: its DH outputs are concatenated client-side and wiped after `SK` is derived; a HEM answers a raw `ecdh` only when it is personalised with the `raw_ecdh_enabled` policy.
 
 ### 4.4 Contact integrity
 
@@ -178,7 +178,7 @@ Assurance: the key is on disk under a password. Theft of the sealed blob plus a 
 shared_secret  = ECDH(IK_a_priv, IK_b_pub)                // equal on both sides
 topic_material = HKDF-SHA256(ikm  = shared_secret,
                              salt = network_id ‖ 0x00 ‖ date_UTC,
-                             info = "encedo-chat-rendezvous-v1",
+                             info = "onchato-rendezvous-v1",
                              L    = 32)
 topic          = base32(topic_material)[0:52]
 ```
@@ -197,7 +197,7 @@ The §5.1 construction with `ss = ECDH(IK_a_priv, IK_a_pub)`, the key's DH with 
 ```
 topic = base32(HKDF-SHA256(ikm  = group_secret,
                            salt = network_id ‖ 0x00 ‖ date_UTC,
-                           info = "encedo-chat-group-rendezvous-v1",
+                           info = "onchato-group-rendezvous-v1",
                            L    = 32))[0:52]
 ```
 
@@ -210,7 +210,7 @@ The topic rotates per epoch and daily at the group's own instant, `offset = rota
 ```
 rotation_material = HKDF-SHA256(ikm  = shared_secret,      // the topic's own key: pair ss, self ss, group_secret, invite_secret
                                 salt = network_id ‖ 0x00,  // no date: the offset is stable per key
-                                info = "encedo-chat-rotation-v1",
+                                info = "onchato-rotation-v1",
                                 L    = 4)
 offset_seconds    = u32be(rotation_material) mod 86400
 ```
@@ -232,7 +232,7 @@ Published on pair topics and the self-topic, never on group topics (§8.5). On a
 ```
 announce_mac_key = HKDF-SHA256(ikm  = shared_secret,        // the pair ss; the self-DH value on the self-topic
                                salt = network_id ‖ 0x00 ‖ date_UTC,
-                               info = "encedo-chat-announce-mac-v1",
+                               info = "onchato-announce-mac-v1",
                                L    = 32)
 mac = base64( HMAC-SHA256(announce_mac_key, ASCII("<v>|<peer>|<nonce>|<ts>")) )
 ```
@@ -256,7 +256,7 @@ An identity may mint any number of invites, each a random 32-byte `invite_secret
 ```
 topic_material = HKDF-SHA256(ikm  = invite_secret,
                              salt = network_id ‖ 0x00 ‖ date_UTC,
-                             info = "encedo-chat-rendezvous-v1",
+                             info = "onchato-rendezvous-v1",
                              L    = 32)
 topic          = base32(topic_material)[0:52]        // rotates per §5.4 with offset = rotationOffsetSec(invite_secret)
 ```
@@ -274,13 +274,13 @@ frame = eph_pub (32) ‖ AES-256-GCM ciphertext (300) ‖ tag (16)
 
 invite_priv = HKDF-SHA256(ikm  = ECDH(IK_priv, IK_pub),          // the §5.2 self-DH; inviter only
                           salt = invite_secret,
-                          info = "encedo-chat-invite-key-v1", L = 32)     // an X25519 scalar (RFC 7748 clamping)
+                          info = "onchato-invite-key-v1", L = 32)     // an X25519 scalar (RFC 7748 clamping)
 invite_pub  = X25519(invite_priv, 9)                              // the link's `k` (§4.2)
 
 k ‖ nonce = HKDF-SHA256(ikm  = ECDH(eph_priv, invite_pub)        // answerer
                              = ECDH(invite_priv, eph_pub)        // inviter
                         salt = invite_secret,
-                        info = "encedo-chat-invite-knock-v2",
+                        info = "onchato-invite-knock-v2",
                         L    = 44)                               // 32 B key ‖ 12 B nonce
 
 plaintext (300 B, zero-padded) = kind (1) ‖ ik (32) ‖ nameLen (1) ‖ name (64) ‖ noteLen (2) ‖ note (200)
@@ -296,10 +296,10 @@ The inviter's own client publishes decoy frames (`kind = 0x00`), sealed to its o
 ```
 seed    = HKDF-SHA256(ikm  = ECDH(IK_priv, IK_pub),          // the §5.2 self-DH
                       salt = invite_secret,
-                      info = "encedo-chat-invite-decoy-v1", L = 32)
+                      info = "onchato-invite-decoy-v1", L = 32)
 instant = slot * 45_000 + (u32be(HKDF-SHA256(seed,
                       salt = u32be(slot),
-                      info = "encedo-chat-invite-decoy-slot-v1", L = 4)) mod 45_000)
+                      info = "onchato-invite-decoy-slot-v1", L = 4)) mod 45_000)
 ```
 
 `slot` counts 45 s periods. The seed is the self-DH, never the invite secret: a schedule computable from the link would let any link holder subtract the decoys. The schedule is deterministic, so every window of one identity produces one stream and a restart resumes it with nothing stored. A slot whose instant fell while the client was not ticking is paid late with one frame. The decoy is also the keepalive of a full GossipSub peer's inbox topic (§5.6 eviction). Invite secrets live sealed on disk (§10).
@@ -311,9 +311,9 @@ What an observer of an inbox topic learns: that a 348-byte frame was published, 
 Per connection a node sees how many topics it carries - the size of the contact list - and which of them hop together (§11.4). A client holds **up to 8** extra topics, `min(contacts, 8)`, indistinguishable from the pair topics of contacts who are offline: the same 52-character base32 shape, the same Announce cadence (§5.5: the beacons, the 15 s heartbeat on the session's radio phase, the hidden-tab slowdown), each rotating daily at its own per-topic instant under the §5.4 guard. They raise the floor under the contact-list count and blur which topics are a client's real pairs.
 
 ```
-seed      = HKDF-SHA256(ikm = ECDH(IK_priv, IK_pub), salt = network_id ‖ 0x00, info = "encedo-chat-decoy-v1",        L = 32)
-offset_i  = u32be(HKDF-SHA256(seed, salt = u8(i), info = "encedo-chat-decoy-offset-v1", L = 4)) mod 86400
-topic_i   = base32(HKDF-SHA256(seed, salt = u8(i) ‖ network_id ‖ 0x00 ‖ date_UTC, info = "encedo-chat-decoy-topic-v1", L = 32))[0:52]
+seed      = HKDF-SHA256(ikm = ECDH(IK_priv, IK_pub), salt = network_id ‖ 0x00, info = "onchato-decoy-v1",        L = 32)
+offset_i  = u32be(HKDF-SHA256(seed, salt = u8(i), info = "onchato-decoy-offset-v1", L = 4)) mod 86400
+topic_i   = base32(HKDF-SHA256(seed, salt = u8(i) ‖ network_id ‖ 0x00 ‖ date_UTC, info = "onchato-decoy-topic-v1", L = 32))[0:52]
 ```
 
 - The Announces carry a MAC under a **random per-session key** nobody else holds, so no peer ever verifies one and no peer ever answers - which is exactly how a pair topic reads when its contact is away. A decoy therefore invites no traffic and completes no handshake.
@@ -356,7 +356,7 @@ msg3 = 0x03 ‖ ver(1) ‖ mac_i(32)
 `ver = 3`. Timestamps are checked to ±5 min on the anchored clock (§5.4).
 
 ```
-k_tag         = HMAC-SHA256(announce_key, "encedo-eh2-initiator-tag-v1")   // announce_key: the pair's Announce MAC key of the day (§5.5)
+k_tag         = HMAC-SHA256(announce_key, "onchato-eh2-initiator-tag-v1")   // announce_key: the pair's Announce MAC key of the day (§5.5)
 initiator_tag = HMAC-SHA256(k_tag, IK_i_pub)                                 // 32 bytes
 ```
 
@@ -368,7 +368,7 @@ R checks the tag before any DH: equal to the tag over the contact's `IK_pub`, pr
 h1  = SHA-256(serialize(msg1))
 ss  = ML-KEM-768 encapsulate (R) / decapsulate (I)
 ikm = DH(IK_r, EK_i) ‖ DH(EK_r, IK_i) ‖ DH(EK_r, EK_i) ‖ ss
-SK  = HKDF-SHA256(ikm, salt = h1, info = "encedo-handshake-v2", L = 32)
+SK  = HKDF-SHA256(ikm, salt = h1, info = "onchato-handshake-v2", L = 32)
 
 h2_partial = SHA-256(serialize(msg1) ‖ EK_r_pub ‖ pq_ct ‖ u64be(ts_r))
 mac_r = HMAC-SHA256(SK, "responder" ‖ h2_partial)      // R authenticates to I (msg2)
@@ -414,12 +414,12 @@ DR_State { RK, CK_send, CK_recv, DH_self_priv, DH_self_pub, DH_peer_pub,
 
 ```
 DH step:        RK', CK = HKDF-SHA256(ikm = X25519(DH_self, DH_peer), salt = RK,
-                                      info = "encedo-ratchet-dh-v1", L = 64)
+                                      info = "onchato-ratchet-dh-v1", L = 64)
 Hybrid step:    RK', CK = HKDF-SHA256(ikm = X25519(DH_self, DH_peer) ‖ ss, salt = RK,
-                                      info = "encedo-ratchet-hybrid-v1", L = 64)     // ss: ML-KEM-768 shared secret
-Message key:    MK       = HKDF-SHA256(CK, salt = ∅, info = "encedo-msg-key",   L = 32)
-Chain advance:  CK'      = HKDF-SHA256(CK, salt = ∅, info = "encedo-chain-key", L = 32)
-Nonce:          12 B     = HKDF-SHA256(MK, salt = u32be(N), info = "encedo-aead-nonce", L = 12)
+                                      info = "onchato-ratchet-hybrid-v1", L = 64)     // ss: ML-KEM-768 shared secret
+Message key:    MK       = HKDF-SHA256(CK, salt = ∅, info = "onchato-msg-key",   L = 32)
+Chain advance:  CK'      = HKDF-SHA256(CK, salt = ∅, info = "onchato-chain-key", L = 32)
+Nonce:          12 B     = HKDF-SHA256(MK, salt = u32be(N), info = "onchato-aead-nonce", L = 12)
 AEAD:           AES-256-GCM(MK, nonce, plaintext, aad = header)
 Header:         0x10 ‖ ver(1) ‖ dh_pub(32) ‖ pn(u32be) ‖ n(u32be)                                              // 42 B
                 0x11 ‖ ver(1) ‖ dh_pub(32) ‖ pn ‖ n ‖ flags(1) ‖ [u16be len ‖ pq_ct] ‖ [u16be len ‖ pq_pub]   // ≤ 2 319 B
@@ -505,10 +505,10 @@ A group is a layer over the 1:1 sessions: each member has its own sending chain,
 ```
 group_id   = SHA-256(GK_pub)[0:16]
 sender_id  = SHA-256(IK_pub)[0:8]                                        // recipient_id likewise
-mk_ij      = HKDF-SHA256(ECDH(IK_i, IK_j), salt = group_id ‖ u32be(epoch), info = "encedo-group-msg-mac",         L = 32)
-rk_i       = HKDF-SHA256(ECDH(GK,   IK_i), salt = group_id ‖ u32be(epoch), info = "encedo-chat-group-roster-mac", L = 32)
-MK         = HKDF-SHA256(chain_key, salt = ∅, info = "encedo-group-msg",   L = 32)   // per message
-chain_key' = HKDF-SHA256(chain_key, salt = ∅, info = "encedo-group-chain", L = 32)  // forward; the old key is discarded
+mk_ij      = HKDF-SHA256(ECDH(IK_i, IK_j), salt = group_id ‖ u32be(epoch), info = "onchato-group-msg-mac",         L = 32)
+rk_i       = HKDF-SHA256(ECDH(GK,   IK_i), salt = group_id ‖ u32be(epoch), info = "onchato-group-roster-mac", L = 32)
+MK         = HKDF-SHA256(chain_key, salt = ∅, info = "onchato-group-msg",   L = 32)   // per message
+chain_key' = HKDF-SHA256(chain_key, salt = ∅, info = "onchato-group-chain", L = 32)  // forward; the old key is discarded
 ```
 
 Per group: `GK`, a per-group X25519 keypair the admin generates in its identity backend (members hold `GK_pub`), stable for the group's life; `group_secret`, random 32 B, admin-generated, client-side only, rotated per epoch; per member a sending `chain_key`, client-side in the sealed cache (§10).
@@ -518,7 +518,7 @@ Per group: `GK`, a per-group X25519 keypair the admin generates in its identity 
 ```
 frame  = 0x20 ‖ version(1) ‖ header(32) ‖ macCount(1) ‖ { recipient_id(8) ‖ mac(32) }* ‖ ct      // version = 3
 header = group_id(16) ‖ sender_id(8) ‖ u32be(epoch) ‖ u32be(ctr)                                  // also the AAD
-ct     = AES-256-GCM(MK, nonce = HKDF-SHA256(MK, salt = u32be(ctr), info = "encedo-aead-nonce", L = 12), envelope, aad = header)
+ct     = AES-256-GCM(MK, nonce = HKDF-SHA256(MK, salt = u32be(ctr), info = "onchato-aead-nonce", L = 12), envelope, aad = header)
 mac    = HMAC-SHA256(mk_ij, header ‖ ct)                                                           // one per other member
 ```
 
@@ -578,7 +578,7 @@ member  ETSEIC:chan1:<owner hint>:<admin hint>:<name ≤ 16 chars>:
 
 ### 8.7 Labels
 
-`encedo-chat-group-rendezvous-v1` (§5.3), `encedo-group-msg`, `encedo-group-chain`, `encedo-group-msg-mac`, `encedo-chat-group-roster-mac`.
+`onchato-group-rendezvous-v1` (§5.3), `onchato-group-msg`, `onchato-group-chain`, `onchato-group-msg-mac`, `onchato-group-roster-mac`.
 
 ---
 
@@ -630,7 +630,7 @@ base = ECDH(IK_priv, emp_pub)          // one identity-backend call per session,
 
 `idKey` is the identity's KID (§4.2) as 32 lowercase hex characters; `roomId` is the peer's public key for a 1:1 and the group id as hex for a group. A sealed value is stored as `base64(iv(12) ‖ ct)`. A store that predates its seal is read as plain JSON once: at sign-in, after the first reads, the client seals every store of the identity that is still plain and sets its `sealed` record; from then on plain JSON in a sealed store, and the plain preference keys of an older build, are ignored. Without `base` nothing is sealed and the record is not set.
 
-**Storage names.** A record's name says neither whose it is nor what it is. With `nk = HKDF(ECDH(IK, IK_pub), salt = "local storage names", info = "encedo-chat-store-names-v1", L = 32)`, derived through the identity backend (§4.3) at sign-in, every record of the identity sits under `"ec-" ‖ hex(HMAC-SHA-256(nk, "id")[0:8]) ‖ "-" ‖ hex(HMAC-SHA-256(nk, label ‖ 0x00 ‖ scope)[0:16])`, with `label` one of `emp`, `book`, `book-signed`, `sealed`, `invites`, `waiting`, `ignored`, `outbox`, `prefs`, `seen`, `gleft`, `groups`, `netkey` (scope empty), `pin` (scope `roomId`) or `group` (scope `group_id` as hex). `nk` depends on nothing stored, because the first name it gives is the one `emp_pub`, and so `base`, is under. The group ids, which the names no longer list, are kept in the `groups` record: a sorted JSON array sealed with AES-256-GCM under `HKDF(HKDF(nk, salt = "encedo-chat-store-index-v1", info = idKey), salt = "encedo-chat-store-index-v1", info = idKey)`, a key from `nk` so that it can be written before `base` exists. At sign-in every record under an earlier name that carried the KID (`ec-<store>-<KID>`, `ec-gcache-emp-<KID>`, `ec-gcache-<KID>-<group_id>`, `ec-pins-<KID>-<roomId>`) is moved, unchanged, to its name; a name already present keeps its value. What a reader of the store learns: which keys share an identity tag, how many there are and their sizes. Stores kept plain under fixed names, because they carry no contact, key or timing: the node list with the user's edits (`ec-nodes`), the transport choice (`ec-transport`), language, theme, layout, the close-to-tray preference, the last profile name and sign-in method, and `ec-idkey-swept`, a marker that a one-time sweep of pre-KID records ran in this browser (never exported); the sealed software identity is `ec-soft-id-<name>`, the name being what the sign-in screen lists.
+**Storage names.** A record's name says neither whose it is nor what it is. With `nk = HKDF(ECDH(IK, IK_pub), salt = "local storage names", info = "onchato-store-names-v1", L = 32)`, derived through the identity backend (§4.3) at sign-in, every record of the identity sits under `"ec-" ‖ hex(HMAC-SHA-256(nk, "id")[0:8]) ‖ "-" ‖ hex(HMAC-SHA-256(nk, label ‖ 0x00 ‖ scope)[0:16])`, with `label` one of `emp`, `book`, `book-signed`, `sealed`, `invites`, `waiting`, `ignored`, `outbox`, `prefs`, `seen`, `gleft`, `groups`, `netkey`, `moved` (scope empty), `pin` (scope `roomId`) or `group` (scope `group_id` as hex). `nk` depends on nothing stored, because the first name it gives is the one `emp_pub`, and so `base`, is under. The group ids, which the names no longer list, are kept in the `groups` record: a sorted JSON array sealed with AES-256-GCM under `HKDF(HKDF(nk, salt = "encedo-chat-store-index-v1", info = idKey), salt = "encedo-chat-store-index-v1", info = idKey)`, a key from `nk` so that it can be written before `base` exists. At sign-in every record under an earlier name that carried the KID (`ec-<store>-<KID>`, `ec-gcache-emp-<KID>`, `ec-gcache-<KID>-<group_id>`, `ec-pins-<KID>-<roomId>`) is moved, unchanged, to its name; a name already present keeps its value. Likewise the names of a pre-4.0 client, whose `nk` had the info `"encedo-chat-store-names-v1"` and was derived over the raw ECDH in the client: at sign-in that `nk` is derived the old way (a raw `ecdh`, §4.3; an identity that refuses one cannot have such records), every fixed record and every group named in its `groups` record moves to the current name, the `groups` record is sealed again under the current `nk`, and a room's pins move when the room is first opened; once no record is left under the old prefix, the `moved` record (`"1"`) says so and the old `nk` is never derived again. What a reader of the store learns: which keys share an identity tag, how many there are and their sizes. Stores kept plain under fixed names, because they carry no contact, key or timing: the node list with the user's edits (`ec-nodes`), the transport choice (`ec-transport`), language, theme, layout, the close-to-tray preference, the last profile name and sign-in method, and `ec-idkey-swept`, a marker that a one-time sweep of pre-KID records ran in this browser (never exported); the sealed software identity is `ec-soft-id-<name>`, the name being what the sign-in screen lists.
 
 The terminal client keeps the same records under the same keys in `~/.config/onchato/store.json` (mode 0600, its directory 0700). The desktop shell on Linux and macOS creates its data, cache and log directories at mode 0700 before the webview opens them, so the webview's storage, which it writes with the process umask, is not reachable by other local accounts.
 
@@ -681,7 +681,6 @@ Numbers are stable identifiers; the retired ones are listed in `RATIONALE.md`.
 - **S9 — classical authentication.** Confidentiality is PQ-hybrid; authentication rests on X25519. A future active quantum MITM is the one unaddressed threat (`RATIONALE.md`, PQ roadmap). Retrospective impersonation proof is impossible even with a broken `IK` (no signatures).
 - **S11 — the file store sees file metadata.** The store and its gateway observe blob size, timing, uploader and downloader addresses, and the fetch pattern of a CID for the blob's ~5-minute life (§7.5). Content is covered by the AEAD.
 - **S12 — software-identity assurance.** A password-sealed `IK` on disk is offline-guessable after theft, has no hardware bound on §9.3, and travels whole in the §10 export. The HEM path is the assurance tier.
-- **S13 — the pair secret transits client RAM on firmware without in-device HKDF.** On the current HEM firmware each rendezvous derivation runs in the client over the raw `ECDH(IK_a, IK_b)` for the duration of one HKDF (§4.3); the client memoises only derived values. Rendezvous-only material; exposure is pair-linkability for the days derived, not content. Closes when the firmware derives in-device.
 - **S14 — a published invite topic is public.** Anyone who read the link can subscribe and publish (§5.7). An observer learns that a 348-byte frame was published and when, never by whom; cover traffic (§5.9) removes the signal in "a knock happened". Seeding the decoy schedule from the invite secret would destroy this. Flooding the topic costs the inviter at most 60 local X25519 per minute and pushes real knocks past the open cap until it stops (a real knock is re-sent every 90 s); it never reaches the identity backend (§5.8). Once derived, `invite_priv` is in client memory for the session: a compromised client can read the knocks of that invite, as it can read everything else it receives.
 
 ### 11.4 What each party can see
@@ -767,14 +766,14 @@ node → client   0x11 DELIVER  u8 len ‖ from ‖ u8 len ‖ topic ‖ data
 |---|---|
 | **KDF convention** | `HKDF-SHA256(ikm, salt = context, info = label, L)`: date and network for the rendezvous keys (§5), `h1` for `SK` (§6.2), `RK` for a root step and ∅ for a chain walk (§7.2, §8.1), `group_id ‖ epoch` for the group MAC keys (§8.1), `invite_secret` for the invite key, the knock key and the decoy seed (§5.8, §5.9), `u32be(slot)` for the decoy instant (§5.9), the message counter for the AEAD nonce (§7.2, §8.2), the constant `"local storage names"` for the storage-name key `nk` (§10). The local stores of §10 put the label in the salt |
 | Wire versions | EH-2 frames and ratchet header `ver = 3`; group frame `version = 3`; Announce `v = 3`; envelope `v = 1` |
-| HKDF labels (rendezvous) | `encedo-chat-rendezvous-v1`, `encedo-chat-announce-mac-v1`, `encedo-chat-rotation-v1` |
-| HKDF labels (handshake, ratchet) | `encedo-handshake-v2`, `encedo-ratchet-dh-v1`, `encedo-ratchet-hybrid-v1`, `encedo-msg-key`, `encedo-chain-key`, `encedo-aead-nonce` |
-| HKDF labels (groups) | `encedo-chat-group-rendezvous-v1`, `encedo-group-msg`, `encedo-group-chain`, `encedo-group-msg-mac`, `encedo-chat-group-roster-mac` |
-| HKDF labels (published invites) | `encedo-chat-invite-key-v1`, `encedo-chat-invite-knock-v2`, `encedo-chat-invite-decoy-v1`, `encedo-chat-invite-decoy-slot-v1` |
-| HKDF labels (decoy subscriptions, §5.10) | `encedo-chat-decoy-v1`, `encedo-chat-decoy-offset-v1`, `encedo-chat-decoy-topic-v1` |
+| HKDF labels (rendezvous) | `onchato-rendezvous-v1`, `onchato-announce-mac-v1`, `onchato-rotation-v1` |
+| HKDF labels (handshake, ratchet) | `onchato-handshake-v2`, `onchato-ratchet-dh-v1`, `onchato-ratchet-hybrid-v1`, `onchato-msg-key`, `onchato-chain-key`, `onchato-aead-nonce` |
+| HKDF labels (groups) | `onchato-group-rendezvous-v1`, `onchato-group-msg`, `onchato-group-chain`, `onchato-group-msg-mac`, `onchato-group-roster-mac` |
+| HKDF labels (published invites) | `onchato-invite-key-v1`, `onchato-invite-knock-v2`, `onchato-invite-decoy-v1`, `onchato-invite-decoy-slot-v1` |
+| HKDF labels (decoy subscriptions, §5.10) | `onchato-decoy-v1`, `onchato-decoy-offset-v1`, `onchato-decoy-topic-v1` |
 | Decoy subscriptions (§5.10) | `min(contacts, 8)`; random per-session MAC key; drop all on any refusal |
-| HKDF labels (local stores, §10) | `encedo-chat-group-cache-v1`, `encedo-chat-pin-cache-v1`, `encedo-chat-contact-book-v2` (`-v1`: the MAC of the older format, verified once), `encedo-chat-invites-v1`, `encedo-chat-waiting-v1`, `encedo-chat-ignored-v1`, `encedo-chat-seen-v1`, `encedo-chat-group-left-v1`, `encedo-chat-prefs-v1`, `encedo-chat-outbox-v1`, `encedo-chat-netkey-v1`; storage names `encedo-chat-store-names-v1`, group index `encedo-chat-store-index-v1` |
-| EH-2 initiator tag (§6.1) | label `encedo-eh2-initiator-tag-v1` under the day's Announce key → `k_tag`; `initiator_tag = HMAC-SHA256(k_tag, IK_i_pub)`, 32 B; msg1 1260 B |
+| HKDF labels (local stores, §10) — these, the store index and the safety number keep the `encedo-chat-` prefix: they are salts of local derivations or a hash, never an identity-backend info, and renaming them would orphan every stored record or change every safety number | `encedo-chat-group-cache-v1`, `encedo-chat-pin-cache-v1`, `encedo-chat-contact-book-v2` (`-v1`: the MAC of the older format, verified once), `encedo-chat-invites-v1`, `encedo-chat-waiting-v1`, `encedo-chat-ignored-v1`, `encedo-chat-seen-v1`, `encedo-chat-group-left-v1`, `encedo-chat-prefs-v1`, `encedo-chat-outbox-v1`, `encedo-chat-netkey-v1`; storage names `onchato-store-names-v1`, group index `encedo-chat-store-index-v1` |
+| EH-2 initiator tag (§6.1) | label `onchato-eh2-initiator-tag-v1` under the day's Announce key → `k_tag`; `initiator_tag = HMAC-SHA256(k_tag, IK_i_pub)`, 32 B; msg1 1260 B |
 | Hybrid ratchet cadence (§7.2) | a key every K = 4 own DH steps or T = 30 min; `pq_pub` 1184 B on every frame until answered; `pq_ct` 1088 B on every frame of the answering chain |
 | Safety number (§4.4.1) | label `encedo-chat-safety-v1`, 5200 SHA-512 iterations per half, 60 digits; QR prefix `onchato-sn1:` |
 | Fingerprint (§4.2) | `SHA-256(pub)[0:8]`, 16 hex digits; identification only |

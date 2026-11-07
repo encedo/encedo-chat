@@ -15,8 +15,8 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::kdf::{aead_nonce, ct_eq, hmac, kdf};
 
-const MK_LABEL: &str = "encedo-group-msg";
-const CK_LABEL: &str = "encedo-group-chain";
+const MK_LABEL: &str = "onchato-group-msg";
+const CK_LABEL: &str = "onchato-group-chain";
 
 pub const MAX_SKIP: u32 = 2000;
 pub const SKIPPED_TTL_MS: u64 = 24 * 60 * 60 * 1000;

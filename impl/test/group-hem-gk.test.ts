@@ -19,7 +19,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { generateX25519, x25519FromPriv } from '../lib/x25519.ts'
-import { b64, unb64, randomBytes } from '../lib/wc.ts'
+import { b64, unb64, randomBytes, kdf } from '../lib/wc.ts'
 import { GroupManager, softwareGk, groupIdFromGK, type GroupId, type Member, type GkBackend } from '../lib/group.ts'
 import { hemGkBackend } from '../lib/core.ts'
 import { parseMarker, hemKid } from '../lib/gmarker.ts'
@@ -43,7 +43,7 @@ async function softId(): Promise<GroupId> {
  */
 function fakeHem() {
   const keys = new Map<string, { priv: Uint8Array; pub: Uint8Array; label: string; descr: string }>()
-  const calls = { ecdh: 0, createKeyPair: 0, getKeyPublicInfo: 0, authorize: 0, updateKey: 0, deleteKey: 0, importPublicKey: 0, searchKeys: 0 }
+  const calls = { ecdh: 0, ecdhHkdf: 0, createKeyPair: 0, getKeyPublicInfo: 0, authorize: 0, updateKey: 0, deleteKey: 0, importPublicKey: 0, searchKeys: 0 }
   let n = 0
   return {
     calls,
@@ -80,6 +80,22 @@ function fakeHem() {
       const peerPub = peer.pubkey ?? keys.get(peer.extKid ?? '')?.pub
       if (!peerPub) throw new Error('no peer')
       return (await x25519FromPriv(k.priv)).dh(peerPub)
+    },
+    // Firmware 1.3: ECDH and an HKDF per item in the device; only the outputs
+    // come back. The rules the device enforces are asserted, so a client that
+    // broke one would fail here and not first on hardware.
+    async ecdhHkdf(_t: string, kid: string, opts: { pubkey?: Uint8Array; extKid?: string; items: Array<{ hkdfSalt: Uint8Array | null; hkdfCtx: string | Uint8Array; hkdfLen: number }> }) {
+      calls.ecdhHkdf++
+      const k = keys.get(kid); if (!k) throw new Error('no such kid')
+      const peerPub = opts.pubkey ?? keys.get(opts.extKid ?? '')?.pub
+      if (!peerPub) throw new Error('no peer')
+      assert.ok(opts.items.length >= 1 && opts.items.length <= 8)
+      const ss = await (await x25519FromPriv(k.priv)).dh(peerPub)
+      return Promise.all(opts.items.map((it) => {
+        assert.ok(it.hkdfLen >= 16 && it.hkdfLen <= 128, 'hkdf_len 16..128')
+        assert.ok(!(typeof it.hkdfCtx === 'string' ? it.hkdfCtx : new TextDecoder().decode(it.hkdfCtx)).startsWith('encedo-'), "'encedo-' is reserved")
+        return kdf(it.hkdfCtx, ss, it.hkdfSalt ?? new Uint8Array(0), it.hkdfLen)
+      }))
     },
     // Anchored PREFIX matching, as the device does it — the owner filter is the
     // whole scoping mechanism, so a stub that ignored the prefix would let a
@@ -150,16 +166,18 @@ test('the roster-MAC key is memoised per member and epoch: a repeat SKD is free,
   const roster: Member[] = [{ pub: A.id.pub }, { pub: B.id.pub }, { pub: C.id.pub }]
   const gid = await A.mgr.createGroupWithNewKey('chat-gk-test', roster)
 
-  // First distribution: one ecdh per recipient, unavoidable.
+  // First distribution: one derivation per recipient, unavoidable - in the
+  // device, so the raw ECDH(GK, member) is never asked for.
   await A.mgr.skdFor(gid, B.id.pub)
   await A.mgr.skdFor(gid, C.id.pub)
-  const afterFirst = hem.calls.ecdh
-  assert.equal(afterFirst, 2, 'one ecdh per member the first time')
+  const afterFirst = hem.calls.ecdhHkdf
+  assert.equal(afterFirst, 2, 'one device derivation per member the first time')
+  assert.equal(hem.calls.ecdh, 0, 'and no raw ECDH')
 
   // MACing the same members again — same epoch — must not touch the device.
   await A.mgr.skdFor(gid, B.id.pub)
   await A.mgr.skdFor(gid, C.id.pub)
-  assert.equal(hem.calls.ecdh, afterFirst, 'a repeat SKD is free')
+  assert.equal(hem.calls.ecdhHkdf, afterFirst, 'a repeat SKD is free')
 
   // A membership change bumps the epoch and re-MACs the whole roster. The epoch
   // is the derivation's context, and the derivation runs where the GK backend
@@ -167,16 +185,17 @@ test('the roster-MAC key is memoised per member and epoch: a repeat SKD is free,
   // in the client - which makes a rekey one call per remaining member.
   await A.mgr.rekey(gid, [{ pub: A.id.pub }, { pub: B.id.pub }])
   await A.mgr.skdFor(gid, B.id.pub)
-  assert.equal(hem.calls.ecdh, afterFirst + 1, 'a rekey re-derives the existing member\'s key for the new epoch')
+  assert.equal(hem.calls.ecdhHkdf, afterFirst + 1, 'a rekey re-derives the existing member\'s key for the new epoch')
   await A.mgr.skdFor(gid, B.id.pub)
-  assert.equal(hem.calls.ecdh, afterFirst + 1, 'and the repeat at that epoch is free again')
+  assert.equal(hem.calls.ecdhHkdf, afterFirst + 1, 'and the repeat at that epoch is free again')
 
   // Adding a member: one call for each member of the new epoch.
   const D = await peer()
   await A.mgr.rekey(gid, [{ pub: A.id.pub }, { pub: B.id.pub }, { pub: D.id.pub }])
   await A.mgr.skdFor(gid, B.id.pub)
   await A.mgr.skdFor(gid, D.id.pub)
-  assert.equal(hem.calls.ecdh, afterFirst + 3, 'one derivation per member of the new epoch')
+  assert.equal(hem.calls.ecdhHkdf, afterFirst + 3, 'one derivation per member of the new epoch')
+  assert.equal(hem.calls.ecdh, 0, 'still no raw ECDH')
 })
 
 test('a memoised secret is still the RIGHT secret — the member verifies after a rekey', async () => {

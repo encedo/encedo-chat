@@ -17,7 +17,7 @@ use crate::wire::{self, Msg1, Msg2, Msg3};
 use crate::x25519::Priv;
 
 pub const MAX_SKEW_MS: u64 = 5 * 60_000;
-const SK_INFO: &[u8] = b"encedo-handshake-v2";
+const SK_INFO: &[u8] = b"onchato-handshake-v2";
 const LABEL_R: &[u8] = b"responder";
 const LABEL_I: &[u8] = b"initiator";
 
@@ -48,7 +48,7 @@ pub struct HandshakeResult {
     pub first_step_ikm: Zeroizing<[u8; 32]>,
 }
 
-/// `k_tag = HMAC(announce_key, "encedo-eh2-initiator-tag-v1")` is the host's
+/// `k_tag = HMAC(announce_key, "onchato-eh2-initiator-tag-v1")` is the host's
 /// (it holds the Announce key); this is the tag itself.
 pub fn initiator_tag(tag_key: &[u8; 32], ik_pub: &[u8; 32]) -> [u8; 32] { hmac(tag_key, &[ik_pub]) }
 

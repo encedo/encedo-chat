@@ -8,10 +8,10 @@
  * recovery).
  *
  *     DH step:   RK', CK = HKDF(ikm = X25519(DH_self, DH_peer), salt = RK,
- *                               info = "encedo-ratchet-dh-v1", L = 64)
- *     MK         = HKDF(CK, info = "encedo-msg-key",   L = 32)
- *     CK'        = HKDF(CK, info = "encedo-chain-key", L = 32)
- *     nonce      = HKDF(MK, salt = N, info = "encedo-aead-nonce", L = 12)
+ *                               info = "onchato-ratchet-dh-v1", L = 64)
+ *     MK         = HKDF(CK, info = "onchato-msg-key",   L = 32)
+ *     CK'        = HKDF(CK, info = "onchato-chain-key", L = 32)
+ *     nonce      = HKDF(MK, salt = N, info = "onchato-aead-nonce", L = 12)
  *     frame      = header || AES-256-GCM(MK, nonce, plaintext, aad = header)
  *     header     = { dh_pub, pn, n }
  *
@@ -37,11 +37,11 @@ import { mlkem768 } from './mlkem.ts'
 import { plog, val } from '../lib/protolog.ts'
 
 const enc = new TextEncoder()
-const RK_INFO = enc.encode('encedo-ratchet-dh-v1')
+const RK_INFO = enc.encode('onchato-ratchet-dh-v1')
 /** The hybrid step (7.2): the X25519 output with the ML-KEM shared secret behind it. */
-const RK_PQ_INFO = enc.encode('encedo-ratchet-hybrid-v1')
-const MK_LABEL = 'encedo-msg-key'
-const CK_LABEL = 'encedo-chain-key'
+const RK_PQ_INFO = enc.encode('onchato-ratchet-hybrid-v1')
+const MK_LABEL = 'onchato-msg-key'
+const CK_LABEL = 'onchato-chain-key'
 
 /** Frame tags + version (distinct from the handshake frames of eh2/wire.ts). */
 const T_DATA = 0x10

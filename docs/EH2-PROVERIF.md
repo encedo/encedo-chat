@@ -10,9 +10,9 @@ This is the formal model `RATIONALE.md` §4 says EH-2 gives up by not being Nois
 
 ```
 msg1  = (EK_i, pq_pub, ts_i, initiator_tag)
-        initiator_tag = HMAC(HMAC(announce_key, "encedo-eh2-initiator-tag-v1"), IK_i)
-        announce_key  = HKDF(ECDH(IK_i, IK_r), date, "encedo-chat-announce-mac-v1")
-SK    = HKDF(salt = H(msg1), ikm = DH(IK_r,EK_i) ‖ DH(EK_r,IK_i) ‖ DH(EK_r,EK_i) ‖ ss, "encedo-handshake-v2")
+        initiator_tag = HMAC(HMAC(announce_key, "onchato-eh2-initiator-tag-v1"), IK_i)
+        announce_key  = HKDF(ECDH(IK_i, IK_r), date, "onchato-announce-mac-v1")
+SK    = HKDF(salt = H(msg1), ikm = DH(IK_r,EK_i) ‖ DH(EK_r,IK_i) ‖ DH(EK_r,EK_i) ‖ ss, "onchato-handshake-v2")
 msg2  = (EK_r, pq_ct, ts_r, mac_r)      mac_r = HMAC(SK, "responder" ‖ H(msg1 ‖ EK_r ‖ pq_ct ‖ ts_r))
 msg3  = mac_i                           mac_i = HMAC(SK, "initiator" ‖ H(h2_partial ‖ mac_r))
 ```

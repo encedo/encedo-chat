@@ -13,7 +13,7 @@
  * match" bug. Both sides build:
  *
  *     ikm = DH(IK_r, EK_i) || DH(EK_r, IK_i) || DH(EK_r, EK_i) || ss
- *     SK  = HKDF-SHA256(ikm, salt = h1, info = "encedo-handshake-v2", L = 32)
+ *     SK  = HKDF-SHA256(ikm, salt = h1, info = "onchato-handshake-v2", L = 32)
  *
  * Each side performs exactly ONE DH with its own long-term IK — that one goes
  * through the HSM in raw mode; the other two are local ephemeral DHs. The `Dh`
@@ -44,18 +44,18 @@ import {
 } from './wire.ts'
 
 const enc = new TextEncoder()
-const SK_INFO = enc.encode('encedo-handshake-v2')
+const SK_INFO = enc.encode('onchato-handshake-v2')
 const LABEL_R = enc.encode('responder')
 const LABEL_I = enc.encode('initiator')
 
 /**
- * `k_tag = HMAC-SHA256(announce_key, "encedo-eh2-initiator-tag-v1")` (§6.1).
+ * `k_tag = HMAC-SHA256(announce_key, "onchato-eh2-initiator-tag-v1")` (§6.1).
  * The Announce key is the pair's and the day's, so the tag means nothing to
  * anybody outside the pair and changes every day. Domain-separated from the
  * Announce itself, whose MAC input starts with a digit (`v|peer|nonce|ts`).
  */
 export async function initiatorTagKey(announceKey: CryptoKey): Promise<Uint8Array> {
-  return new Uint8Array(await subtle.sign('HMAC', announceKey, new TextEncoder().encode('encedo-eh2-initiator-tag-v1')))
+  return new Uint8Array(await subtle.sign('HMAC', announceKey, new TextEncoder().encode('onchato-eh2-initiator-tag-v1')))
 }
 
 /** `initiator_tag = HMAC-SHA256(k_tag, IK_i_pub)`, full 32 bytes (§6.1). */

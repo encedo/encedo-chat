@@ -59,7 +59,7 @@ test('the key schedule is exactly ikm = DH(IK_r,EK_i) || DH(EK_r,IK_i) || DH(EK_
   const dh3 = await i1.state.ekI.dh(msg2.ekPub)  // DH(EK_r, EK_i)
   const ss = await i1.state.pq.decapsulate(msg2.pqCt)
   const salt = await hashMsg1(i1.msg1)
-  const info = enc.encode('encedo-handshake-v2')
+  const info = enc.encode('onchato-handshake-v2')
 
   assert.deepEqual(i2.result.sk, await hkdfBits(concat(dh1, dh2, dh3, ss), salt, info, 32))
   // and the ordering is load-bearing: any other permutation is a different key

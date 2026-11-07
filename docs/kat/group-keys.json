@@ -15,40 +15,40 @@
   "epochs": [
     {
       "epoch": 0,
-      "mk_ab": "181c1355072cfd383bbff5668030390a75b808af97e7b7803936a741ec85e0ce",
-      "mk_ac": "20261b7f7c8519368d70acbe93f176c70eff8ec9cf4f9fb437f0c92ca815513f",
-      "rk_b": "d2f7e550c8be60fe6f7fc38a7be744fef56962a5dff6e22b42fa2c53e12ab0d5",
+      "mk_ab": "9c164d07ab95dd153dec95cea97898f77c19d3b6eac7a33fbec6d52f82a98d57",
+      "mk_ac": "6d3ada40101cae6eb1e74d9e3b9b403eb05cdaa2905eaaa7e8500494d2729112",
+      "rk_b": "b9b6fac5e9d292557b2bd035c18a5cadea8cc54152158f2af1e9dfc01fde0e4b",
       "roster": [
         "BPXykWLDGo3voY5udCIk7oBvwXGKJ4voWbpWIEArjzo=",
         "WdkiVHNFHv/+azbbyu/b97GJXeYghFCaf1tYvwHQZBg=",
         "ew1H2TQn+DERYHgcfHM/2J+IlwrvSQ2KoO4ZpMuKGxQ="
       ],
-      "rmac_b": "6ec420b66ab2106408cf029e20c95838407fb8e5f1ae41d9e6856766fd97f647"
+      "rmac_b": "bebfb4dc843be8e080eb1acc5d1de3c433bcaaf19227481618cb0c782ad25297"
     },
     {
       "epoch": 1,
-      "mk_ab": "2902499b89e7997b2ddc6bcb26a05214cd1eb773d61fca6e3142dc4b6fcffb0a",
-      "mk_ac": "5b2c13b675f46b0c927f95e805b8061635727b7a1e6c831b67bd2e4e67aaf16c",
-      "rk_b": "44636df3cc9a48d87ff9df6a84c64cac7266c22f7934ac7b3c47d16be659efd0",
+      "mk_ab": "b44c7c065db6dd3cadd6bf3e164a07acb185b2884d6f0c48d85671f15623a03b",
+      "mk_ac": "1951c17a589a265ed98c98d6ec82e35608a6e6dab28f072621ec6a6009e53a82",
+      "rk_b": "e06d2f30646fb743026a675d81e929daeb637901e9ef257daf8541c69820a370",
       "roster": [
         "BPXykWLDGo3voY5udCIk7oBvwXGKJ4voWbpWIEArjzo=",
         "WdkiVHNFHv/+azbbyu/b97GJXeYghFCaf1tYvwHQZBg=",
         "ew1H2TQn+DERYHgcfHM/2J+IlwrvSQ2KoO4ZpMuKGxQ="
       ],
-      "rmac_b": "17d563738334773429a12ffd150afd90f23a53503a93b052838c7ea91d77b8f6"
+      "rmac_b": "dc14eabd31a3953cc233a1a3434955280b7116f36e3e1da52d3525816c72daa9"
     },
     {
       "epoch": 7,
-      "mk_ab": "d7afe519f26326181e027088a923347860d67e72abb3bf6099dc69e3314ea47f",
-      "mk_ac": "9c63ec7349b5627ab90a13aaac5c9c54231c2b46883e9bb5faa2fd36e0c29d8b",
-      "rk_b": "0438e02a10742d2f80270261c0c3b2b31640f3b1bd7c33c717e3663885ff8104",
+      "mk_ab": "2f929cd91132503a1d843587483e6f7852f97f6ad41fc8c52512a2b39a0ce185",
+      "mk_ac": "8b8f4dab056a1879fcc5bff524d7f28bf7492686001d9d78a1c2386c6348f8fb",
+      "rk_b": "9451713df7186089b7751b9543e9a5e81336d9fc285e365d744a850abb11394e",
       "roster": [
         "BPXykWLDGo3voY5udCIk7oBvwXGKJ4voWbpWIEArjzo=",
         "WdkiVHNFHv/+azbbyu/b97GJXeYghFCaf1tYvwHQZBg=",
         "ew1H2TQn+DERYHgcfHM/2J+IlwrvSQ2KoO4ZpMuKGxQ="
       ],
-      "rmac_b": "7c975c2b0c0ce4e1c8e0784b1737e2a9e1a3a6788547e2ede7c59b432ec6ab4d"
+      "rmac_b": "3a0ea6d848c8326948ec4d3910cf22739c535a1c4ab5b7dd1a7e277421cd1bd7"
     }
   ],
-  "note": "group_id = SHA-256(GK_pub)[0:16]; sender_id = SHA-256(IK_pub)[0:8]; mk_ij = HKDF(ECDH(IK_i, IK_j), salt = group_id || u32be(epoch), info=\"encedo-group-msg-mac\", 32); rk_i = HKDF(ECDH(GK, IK_i), same salt, info=\"encedo-chat-group-roster-mac\", 32); rmac = HMAC-SHA256(rk_i, UTF-8(roster.join(\"\\n\"))) over the base64 IK_pubs in the order given, roster[0] the admin (8.1, 8.3). X25519 private scalars as given (clamped by X25519)."
+  "note": "group_id = SHA-256(GK_pub)[0:16]; sender_id = SHA-256(IK_pub)[0:8]; mk_ij = HKDF(ECDH(IK_i, IK_j), salt = group_id || u32be(epoch), info=\"onchato-group-msg-mac\", 32); rk_i = HKDF(ECDH(GK, IK_i), same salt, info=\"onchato-group-roster-mac\", 32); rmac = HMAC-SHA256(rk_i, UTF-8(roster.join(\"\\n\"))) over the base64 IK_pubs in the order given, roster[0] the admin (8.1, 8.3). X25519 private scalars as given (clamped by X25519)."
 }

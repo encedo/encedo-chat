@@ -12,7 +12,7 @@
  */
 
 import { topicFromSecret, announceMacKey, todayUTC, paramsInfo, rotationCtx, topicFromMaterial, announceKeyFromMaterial, offsetFromMaterial, RV_LABEL, ANNOUNCE_LABEL, ROTATION_LABEL, type RvParams } from './rendezvous.ts'
-import { deriveWith, deriveOverEcdh, type Derive } from './derive.ts'
+import { deriveWith, deriveManyWith, deriveOverEcdh, hemDerivation, type Derive, type DeriveMany } from './derive.ts'
 import { startDecoys, decoyCount, type Decoys } from './decoy.ts'
 import { nowMs } from './time.ts'
 import { joinChat, type RoomKeys, type ChatOpts, type Eh2Options } from './room.ts'
@@ -47,6 +47,8 @@ export interface Identity {
    *  (lib/derive.ts). Every rendezvous, announce, rotation and group-MAC key
    *  comes through here; absent, the client derives over `ecdh`. */
   derive?: Derive
+  /** Several outputs of one ECDH in one go (one device call on a HEM). */
+  deriveMany?: DeriveMany
 }
 export type RoomParams = RvParams
 /** A chat peer: raw pubkey, plus an in-HSM `kid` when it's a HEM (imported) contact. */
@@ -60,18 +62,14 @@ export function hemIdentityFrom(hem: any, kid: string, handle: string, pub: stri
     // Local / one-off contact (no kid): raw peer pubkey.
     return hem.ecdh(t, kid, peerKid ? { extKid: peerKid } : { pubkey: unb64(peerPubB64) })
   }
-  return {
-    handle,
-    pub,
-    ecdh,
-    // FIRMWARE SEAM (SPEC.md 4.3, S13): the current firmware exposes raw ecdh
-    // only, so the derivation runs here over its output. When the SDK exposes
-    // ecdh+HKDF in one call, this line becomes that call - the label, the
-    // context and L go to the device, and the raw secret never comes back:
-    //   derive: (label, peerPubB64, ctx, len, peerKid) =>
-    //     hem.ecdhDerive(await use(kid), kid, peerKid ?? peerPubB64, ctx, label, len)
-    derive: deriveOverEcdh(ecdh),
-  }
+  // SPEC.md 4.3: every derivation runs in the device (firmware 1.3); the
+  // label, the context and L go there and the pair secret never comes back.
+  // The raw `ecdh` above is what is left for the DHs that need the bytes.
+  const { derive, deriveMany } = hemDerivation(
+    async (peer, items) => hem.ecdhHkdf(await hem.authorizePassword(null, `keymgmt:use:${kid}`), kid, { ...peer, items }),
+    unb64,
+  )
+  return { handle, pub, ecdh, derive, deriveMany }
 }
 
 /**
@@ -120,10 +118,9 @@ export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
   const readPub = pubKeyReader(hem)
   const fromKid = (kid: string): AdminGk => {
     const dh = async (peerPub: Uint8Array): Promise<Uint8Array> => hem.ecdh(await use(kid), kid, { pubkey: peerPub })
-    // FIRMWARE SEAM: the roster-MAC key rk_i = HKDF(ECDH(GK, IK_i), gid||epoch,
-    // label) derives here today; with ecdh+HKDF in firmware it is one device
-    // call and ECDH(GK, IK_i) never leaves the HSM (same note as hemIdentityFrom).
-    const derive = deriveOverEcdh((peerPubB64) => dh(unb64(peerPubB64)))
+    // The roster-MAC key rk_i = HKDF(ECDH(GK, IK_i), gid||epoch, label) is
+    // derived in the device: ECDH(GK, IK_i) never leaves the HSM.
+    const { derive } = hemDerivation(async (peer, items) => hem.ecdhHkdf(await use(kid), kid, { ...peer, items }), unb64)
     return { kid, dh, derive: (label, peerPub, ctx, len) => derive(label, b64(peerPub), ctx, len) }
   }
   return {
@@ -476,8 +473,10 @@ export async function deriveRoom(
  */
 export async function derivePresence(id: Identity, peer: Peer, p: RoomParams): Promise<{ topic: string; macKey: CryptoKey }> {
   const ctx = paramsInfo(p)
-  const topic = topicFromMaterial(await deriveWith(id, RV_LABEL, peer.pub, ctx, 32, peer.kid))
-  const macKey = await announceKeyFromMaterial(await deriveWith(id, ANNOUNCE_LABEL, peer.pub, ctx, 32, peer.kid))
+  // One ECDH, two outputs: one device call on a HEM.
+  const [rv, mac] = await deriveManyWith(id, [{ label: RV_LABEL, ctx, len: 32 }, { label: ANNOUNCE_LABEL, ctx, len: 32 }], peer.pub, peer.kid)
+  const topic = topicFromMaterial(rv)
+  const macKey = await announceKeyFromMaterial(mac)
   return { topic, macKey }
 }
 

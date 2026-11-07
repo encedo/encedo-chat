@@ -11,8 +11,8 @@
  *   group_id  = SHA-256(GK_pub)[0:16]                          (GK = §8 group identity key)
  *   sender_id = SHA-256(IK_pub)[0:8]
  *   topic     = groupTopicFromSecret(group_secret, params)     (§5.3, rendezvous.ts)
- *   mk_ij     = HKDF(ECDH(IK_i,IK_j), salt = gid || epoch, info = "encedo-group-msg-mac")         msg auth
- *   rk_i      = HKDF(ECDH(GK,   IK_i), salt = gid || epoch, info = "encedo-chat-group-roster-mac")  roster auth
+ *   mk_ij     = HKDF(ECDH(IK_i,IK_j), salt = gid || epoch, info = "onchato-group-msg-mac")         msg auth
+ *   rk_i      = HKDF(ECDH(GK,   IK_i), salt = gid || epoch, info = "onchato-group-roster-mac")  roster auth
  *
  * Distribution of `group_secret` + each member's sending key rides the 1:1 ratchet
  * (stage 3); this module takes them as inputs and does the crypto/state/wire.
@@ -34,8 +34,8 @@ import { groupLabel } from './descr.ts'
 import { plog, val } from './protolog.ts'
 
 const enc = new TextEncoder()
-const MSG_MAC_LABEL = enc.encode('encedo-group-msg-mac')
-const ROSTER_MAC_LABEL = enc.encode('encedo-chat-group-roster-mac')
+const MSG_MAC_LABEL = enc.encode('onchato-group-msg-mac')
+const ROSTER_MAC_LABEL = enc.encode('onchato-group-roster-mac')
 
 const T_GMSG = 0x20
 const VERSION = 3 // one ver names one spec (SPEC.md header): the MAC-key derivation changed with spec 3.0

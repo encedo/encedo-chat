@@ -208,17 +208,17 @@ fn group_senderkey_cases_walk_the_chain_with_the_counter_in_the_nonce() {
             if let Some(c) = case {
                 // Independently of SendChain: the chain key, MK and nonce at this counter.
                 assert_eq!(hex(&ck), c["chain_key_at_ctr"].as_str().unwrap(), "chain key at {n}");
-                let mut mk = [0u8; 32]; kdf("encedo-group-msg", &ck, &[], &mut mk);
+                let mut mk = [0u8; 32]; kdf("onchato-group-msg", &ck, &[], &mut mk);
                 assert_eq!(hex(&mk), c["mk"].as_str().unwrap(), "MK at {n}");
                 assert_eq!(hex(&aead_nonce(&mk, n)), c["nonce"].as_str().unwrap(), "nonce at {n}");
                 if n > 0 {
-                    let mut no_ctr = [0u8; 12]; kdf("encedo-aead-nonce", &mk, &[], &mut no_ctr);
+                    let mut no_ctr = [0u8; 12]; kdf("onchato-aead-nonce", &mk, &[], &mut no_ctr);
                     assert_ne!(hex(&no_ctr), c["nonce"].as_str().unwrap(), "ctr {n}: the counter must reach the nonce");
                 }
                 assert_eq!(hex(&ct), c["ct"].as_str().unwrap(), "ct at {n}");
                 assert_eq!(hex(&tag(&mk_ij, &hdr, &ct)), c["mac_under_mk_ij"].as_str().unwrap(), "MAC at {n}");
             }
-            let mut next = [0u8; 32]; kdf("encedo-group-chain", &ck, &[], &mut next); ck = next;
+            let mut next = [0u8; 32]; kdf("onchato-group-chain", &ck, &[], &mut next); ck = next;
         }
         // A receiver at 0 opens the last case, walking past the skipped counters.
         let lc = g.last().unwrap();
@@ -247,13 +247,13 @@ fn group_keys_match_the_vector() {
         let epoch = e["epoch"].as_u64().unwrap() as u32;
         let mut ctx = gid.to_vec(); ctx.extend_from_slice(&epoch.to_be_bytes());
         let d = |label: &str, ss: &[u8; 32]| { let mut o = [0u8; 32]; kdf(label, ss, &ctx, &mut o); o };
-        let mk_ab = d("encedo-group-msg-mac", &a.dh(&b.public()));
+        let mk_ab = d("onchato-group-msg-mac", &a.dh(&b.public()));
         assert_eq!(hex(&mk_ab), e["mk_ab"].as_str().unwrap(), "mk_ab at {epoch}");
-        assert_eq!(hex(&d("encedo-group-msg-mac", &b.dh(&a.public()))), e["mk_ab"].as_str().unwrap());
-        assert_eq!(hex(&d("encedo-group-msg-mac", &a.dh(&c.public()))), e["mk_ac"].as_str().unwrap(), "mk_ac at {epoch}");
-        let rk_b = d("encedo-chat-group-roster-mac", &gk.dh(&b.public()));
+        assert_eq!(hex(&d("onchato-group-msg-mac", &b.dh(&a.public()))), e["mk_ab"].as_str().unwrap());
+        assert_eq!(hex(&d("onchato-group-msg-mac", &a.dh(&c.public()))), e["mk_ac"].as_str().unwrap(), "mk_ac at {epoch}");
+        let rk_b = d("onchato-group-roster-mac", &gk.dh(&b.public()));
         assert_eq!(hex(&rk_b), e["rk_b"].as_str().unwrap(), "rk_b at {epoch}");
-        assert_eq!(hex(&d("encedo-chat-group-roster-mac", &b.dh(&gk.public()))), e["rk_b"].as_str().unwrap());
+        assert_eq!(hex(&d("onchato-group-roster-mac", &b.dh(&gk.public()))), e["rk_b"].as_str().unwrap());
         let roster: Vec<&str> = e["roster"].as_array().unwrap().iter().map(|x| x.as_str().unwrap()).collect();
         assert_eq!(roster, vec![b64(&a.public()), b64(&b.public()), b64(&c.public())]);
         assert_eq!(hex(&hmac(&rk_b, &[roster.join("\n").as_bytes()])), e["rmac_b"].as_str().unwrap(), "rmac at {epoch}");

@@ -10,8 +10,8 @@ Groups are half of the system and the most original part of its cryptography. Th
 
 ```
 group_id  = H(GK_pub)                 sender_id = H(IK_pub)
-mk_ij     = HKDF(ECDH(IK_i, IK_j), salt = group_id ‖ epoch, "encedo-group-msg-mac")
-rk_i      = HKDF(ECDH(GK,   IK_i), salt = group_id ‖ epoch, "encedo-chat-group-roster-mac")
+mk_ij     = HKDF(ECDH(IK_i, IK_j), salt = group_id ‖ epoch, "onchato-group-msg-mac")
+rk_i      = HKDF(ECDH(GK,   IK_i), salt = group_id ‖ epoch, "onchato-group-roster-mac")
 frame     = header (gid, sender_id, epoch, ctr) ‖ AEAD(MK, envelope, aad = header)
             ‖ one (recipient_id, HMAC(mk_ij, header ‖ ct)) per other member
 group-skd = { gid, GK_pub, epoch, chain, roster, rmac? }      rmac = HMAC(rk_i, roster in order)
