@@ -26,7 +26,9 @@ WORKDIR /app
 COPY impl/package.json impl/package-lock.json impl/
 RUN cd impl && npm ci --omit=dev --ignore-scripts --no-audit --no-fund && npm cache clean --force
 
-COPY hem-sdk-js/hem-sdk.js hem-sdk-js/LICENSE hem-sdk-js/
+# The HEM SDK travels as impl/lib/hem-sdk.mini.js (stripped to what the client
+# calls, scripts/sdk-mini.mjs); its licence goes with it.
+COPY hem-sdk-js/LICENSE hem-sdk-js/
 COPY infra/nodes.json infra/network.json infra/
 # The client shares these two with the relay (net/light.ts, lib/nodepick.ts).
 COPY relay/pick.mjs relay/load.mjs relay/

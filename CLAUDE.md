@@ -84,7 +84,7 @@ names its lines.
   (`python3 -m unittest` there, `live-test.sh` over the relays) are not in
   `npm test`. Guide: `tools/onchato-bot/GUIDE.md`.
 - `Dockerfile` + `.dockerignore` (allow-list) — the **CLI** image only; the
-  context is the repo root because the CLI imports `hem-sdk-js/`,
+  context is the repo root because the CLI takes the SDK's licence from `hem-sdk-js/` (the code itself is `impl/lib/hem-sdk.mini.js`),
   `relay/pick.mjs`/`load.mjs` and `impl/core-wasm/core.wasm`.
 - `hem-sdk-js/` — the Encedo HEM SDK as a **git submodule**. Do not fork;
   update via `git submodule update --remote`. **The client never imports it
