@@ -1,0 +1,17 @@
+{
+  "methods": [
+    "authorizePassword",
+    "createKeyPair",
+    "deleteKey",
+    "ecdh",
+    "ecdhHkdf",
+    "getKeyPublicInfo",
+    "getStatus",
+    "getVersion",
+    "hemCheckin",
+    "importPublicKey",
+    "searchKeysAll",
+    "updateKey"
+  ],
+  "exports": ["HEM", "HemError"]
+}

@@ -5,7 +5,7 @@
  * The Identity interface + the browser-safe HEM constructor live in lib/core.ts.
  */
 
-import { HEM } from '../../hem-sdk-js/hem-sdk.js'
+import { HEM } from '../lib/hem-sdk.mini.js' // the SDK stripped to what we call (scripts/sdk-mini.mjs)
 import { diffieHellman } from 'node:crypto'
 import { Keystore, rawToPriv, rawToPub } from './keystore.ts'
 import { hemIdentityFrom, hemWarmTokens, collect, type Identity } from '../lib/core.ts'

@@ -37,7 +37,7 @@
  *      and said so.
  */
 
-import { HEM } from '../../hem-sdk-js/hem-sdk.js'
+import { HEM } from '../lib/hem-sdk.mini.js' // the SDK stripped to what we call (scripts/sdk-mini.mjs)
 import { generateX25519 } from '../lib/x25519.ts'
 import { b64, unb64, sha256, kdf } from '../lib/wc.ts'
 import { buildMarker, parseMarker, MARKER_PREFIX, MARKER_SEARCH, DESCR_MAX, byteLen } from '../lib/gmarker.ts'

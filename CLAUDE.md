@@ -87,7 +87,12 @@ names its lines.
   context is the repo root because the CLI imports `hem-sdk-js/`,
   `relay/pick.mjs`/`load.mjs` and `impl/core-wasm/core.wasm`.
 - `hem-sdk-js/` — the Encedo HEM SDK as a **git submodule**. Do not fork;
-  update via `git submodule update --remote`.
+  update via `git submodule update --remote`. **The client never imports it
+  directly:** it imports `impl/lib/hem-sdk.mini.js`, the SDK stripped to the
+  methods in `impl/lib/hem-sdk.keep.json` (the SDK's `rollup.mini.config.js`,
+  run by `node scripts/sdk-mini.mjs`). After a submodule bump or a new SDK call,
+  run that script; `test/sdk-mini.test.ts` fails on a stale file or on a call
+  the list does not keep.
 - Root `*.md` — `README`, `SECURITY`, `CLI`, `hem_usage` (**which operations
   reach the HSM and what they cost** — read it before adding anything that talks
   to the device), plus design records and plans

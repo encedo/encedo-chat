@@ -14,7 +14,7 @@
  * exists; everything else on screen is backed by the engine.
  */
 
-import { HEM } from '../../../hem-sdk-js/hem-sdk.js'
+import { HEM } from '../../lib/hem-sdk.mini.js' // the SDK stripped to what we call (scripts/sdk-mini.mjs)
 import { setCoreBackend, coreStatus, onCoreFallback, type CoreBackend } from '../../eh2/establish.ts'
 import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, hemWarmTokens, collect, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
