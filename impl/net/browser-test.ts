@@ -750,9 +750,9 @@ async function softProfile(b: Page, handle: string) {
 }
 
 /** Log in with the software identity already in this profile's localStorage. */
-async function login(b: Page, handle: string, hasContacts = true) {
+async function login(b: Page, handle: string, hasContacts = true, hemAddr?: string) {
   await b.waitFor('login form', `return !!document.getElementById('go-soft')`)
-  await hemFormGoesBack(b)
+  await hemFormGoesBack(b, hemAddr)
   await softProfile(b, handle)
   if (hasContacts) await b.waitFor('contact list', `return !!document.querySelector('#pane-contacts .contact')`, 30_000)
   else await b.waitFor('app shell', `return !!document.getElementById('app') && !document.getElementById('app').hidden`, 30_000)
@@ -766,12 +766,21 @@ async function login(b: Page, handle: string, hasContacts = true) {
  * control, it is a workaround. Checked on every login because it costs two
  * clicks and it is exactly the kind of thing a layout change breaks silently.
  */
-async function hemFormGoesBack(b: Page) {
+async function hemFormGoesBack(b: Page, hemAddr?: string) {
   const shown = await b.eval<boolean>(`
     document.getElementById('go-hem').click();
     return !document.getElementById('hem-sec').hidden;
   `)
   if (!shown) throw new Error(`${b.name}: the HEM form did not open`)
+  // The form starts at the last address a device answered on (ec-hem-url),
+  // my.ence.do when there is none (lib/hemaddr.ts).
+  if (hemAddr) {
+    const addr = await b.eval<string>(`return document.getElementById('hsm').value`)
+    if (addr !== hemAddr) throw new Error(`${b.name}: the HEM form starts at ${addr}, expected ${hemAddr}`)
+    // ...and the browser's password manager may keep the pair (index.html).
+    const ac = await b.eval<string>(`return document.getElementById('hsm').autocomplete + '/' + document.getElementById('pass').autocomplete`)
+    if (ac !== 'username/current-password') throw new Error(`${b.name}: the HEM form is closed to the password manager (${ac})`)
+  }
   const back = await b.eval<boolean>(`
     document.getElementById('hem-back').click();
     const sec = document.getElementById('hem-sec');
@@ -874,8 +883,12 @@ async function main() {
     // never negotiating anything. The relay path is what everything else covers,
     // and `FAILOVER=1` / `?webrtc=0` still exercise it deliberately.
     for (const b of [A, B]) await b.eval(`localStorage.setItem('ec-transport', 'auto'); return 1`)
+    // A remembers a HEM it signed in on before, B none: the form starts there / at my.ence.do.
+    const HEM_SEEN = 'https://hem-sim-a.invalid'
+    await A.eval(`localStorage.setItem('ec-hem-url', ${JSON.stringify(HEM_SEEN)}); return 1`)
     await Promise.all([A.reload(A_URL), B.reload(B_URL)])
-    await Promise.all([login(A, 'sim-a', false), login(B, 'sim-b', false)])
+    await Promise.all([login(A, 'sim-a', false, HEM_SEEN), login(B, 'sim-b', false, 'https://my.ence.do')])
+    step('the HEM form starts at the last address used, my.ence.do when none')
     // Contacts go in the way a person adds them - the add window, a key typed
     // in - since 0.8.2 nothing reads a book planted in an older format.
     const addByKey = async (b: Page, name: string, pub: string) => {

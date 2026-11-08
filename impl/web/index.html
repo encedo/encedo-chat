@@ -1403,7 +1403,11 @@
            below it; inside, both boxes are the same width and the state belongs
            visibly to the address it is about. -->
       <div class="field-dot">
-        <input id="hsm" type="text" value="https://my.ence.do" autocomplete="off">
+        <!-- username / current-password: the browser's password manager may keep
+             the pair (address + device password) - its owner's choice, as for
+             a software profile. The app keeps the address itself too
+             (lib/hemaddr.ts), for the webviews that have no manager. -->
+        <input id="hsm" type="text" value="https://my.ence.do" autocomplete="username" spellcheck="false" autocapitalize="off">
         <span class="dot" id="status-dot" title="status HEM" data-i18n-title="status HEM"></span>
       </div>
       <!-- Aligned with the END of the FIELD, not the end of the row: the row is
@@ -1413,7 +1417,7 @@
       <!-- The answer about the field, at the end of the field. -->
       <div class="hint" id="status-hint" style="text-align:right"></div>
       <label data-i18n="Hasło">Hasło</label>
-      <input id="pass" type="password" autocomplete="off">
+      <input id="pass" type="password" autocomplete="current-password">
       <div id="reg-handle-wrap" hidden><div class="label-row"><label data-i18n="Handle (widoczny dla kontaktów)">Handle (widoczny dla kontaktów)</label><span class="bytes-left" id="handle-bytes"></span></div><input id="handle" type="text" placeholder="np. alice" data-i18n-placeholder="np. alice" autocomplete="off"></div>
       <button class="btn" id="go" data-i18n="Zaloguj">Zaloguj</button>
       <div class="toggle"><span id="toggle-pre" data-i18n="Nie masz konta?">Nie masz konta?</span> <a id="toggle" data-i18n="Zarejestruj tożsamość">Zarejestruj tożsamość</a></div>

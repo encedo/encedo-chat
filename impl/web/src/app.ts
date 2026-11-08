@@ -101,6 +101,7 @@ import type { GroupRoom } from '../../lib/grouproom.ts'
 import type { GroupSkdEnv } from '../../lib/envelope.ts'
 // The published relay list, compiled in — see DEFAULT_NODES below for why.
 import published from '../../../infra/nodes.json'
+import { lastHemAddr, rememberHemAddr } from '../../lib/hemaddr.ts'
 
 declare const __EC_NETWORK_PROFILE__: string
 declare const __EC_NETWORK__: string
@@ -767,6 +768,9 @@ function startHemPoll() {
   }
   void tick()
 }
+// The form starts at the last address a device answered on, my.ence.do when
+// none (lib/hemaddr.ts) - set before any probe can read the field.
+;($('hsm') as HTMLInputElement).value = lastHemAddr(localStorage)
 $('hsm').addEventListener('blur', () => startHemPoll())
 // Typing a new address re-probes shortly after the typing stops. Without this the
 // button could only be unlocked by leaving the field, and the field arrives
@@ -943,6 +947,7 @@ $('go').addEventListener('click', async () => {
     // Wrapped once here, so every later call — core's contact book, the group
     // backend, every ECDH — narrates itself without any of them knowing.
     const hem = wrapHem(new HEM(url)); await hem.hemCheckin()
+    rememberHemAddr(localStorage, url) // a device answered here: the form starts here next time
     if (mode === 'register') {
       const handle = val('handle'); if (!handle) { setMsg('msg', tr('Podaj handle.'), 'err'); return }
       const gen = await hem.authorizePassword(pass, 'keymgmt:gen')
