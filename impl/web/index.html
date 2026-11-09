@@ -338,6 +338,12 @@
      keeps the list from running straight into the field (reported
      2026-09-25: narrower than the button, too far from it, no gap under). */
   .search-wrap{padding:2px 12px 8px}
+  .search-wrap.with-filter{display:flex;gap:8px;align-items:stretch}
+  .search-wrap.with-filter input{flex:1;min-width:0}
+  .pres-filter{flex:none;display:grid;place-items:center;padding:0 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--body);font-size:13px;font-weight:500;white-space:nowrap}
+  .pres-filter>span{grid-area:1/1;visibility:hidden}
+  .pres-filter[data-f="all"]>[data-v="all"],.pres-filter[data-f="online"]>[data-v="online"],.pres-filter[data-f="offline"]>[data-v="offline"]{visibility:visible}
+  .pres-filter:not([data-f="all"]){border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
   .tabs{display:flex;gap:6px;padding:12px 16px}
   .tab{flex:1;padding:8px 0;text-align:center;background:none;border:none;border-radius:5px;color:var(--muted);font-weight:500}
   .tab:hover{background:var(--bg)}.tab.active{background:var(--accent);color:var(--accent-ink)}
@@ -1499,7 +1505,11 @@
            add button moved out here rather than the search box moving in. -->
       <div id="head-contacts">
         <div class="add-row"><button class="add-btn" id="btn-add-peer" data-i18n="+ Dodaj peera">+ Dodaj peera</button></div>
-        <div class="search-wrap"><input id="contact-search" type="text" placeholder="Szukaj kontaktu…" data-i18n-placeholder="Szukaj kontaktu…" autocomplete="off"></div>
+        <!-- The presence filter: one button, All -> Online -> Offline. Its three
+             labels share one grid cell and only the current one is visible, so
+             the button is as wide as the longest label in any language and
+             never changes width as it steps. -->
+        <div class="search-wrap with-filter"><input id="contact-search" type="text" placeholder="Szukaj kontaktu…" data-i18n-placeholder="Szukaj kontaktu…" autocomplete="off"><button class="pres-filter" id="contact-presence" data-f="all" title="Pokaż: wszyscy, online, offline" data-i18n-title="Pokaż: wszyscy, online, offline"><span data-v="all" data-i18n="Wszyscy">Wszyscy</span><span data-v="online" data-i18n="Online">Online</span><span data-v="offline" data-i18n="Offline">Offline</span></button></div>
       </div>
       <div class="pane" id="pane-contacts"></div>
       <div id="head-groups" hidden>

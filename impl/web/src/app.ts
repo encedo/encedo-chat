@@ -81,6 +81,7 @@ import { cidMatches, isVerifiableCid } from '../../lib/cid.ts'
 import { parseNodeList } from '../../lib/nodelist.ts'
 import type { FileEnv, AlbumRef } from '../../lib/envelope.ts'
 import { dotFor } from '../../lib/dotstate.ts'
+import { nextPresenceFilter, presenceKeeps, type PresenceFilter } from '../../lib/presencefilter.ts'
 import { nowMs, localHHMM, localHHMMSS, utcISO } from '../../lib/time.ts'
 import { nextRotationAfter } from '../../lib/presence.ts'
 import { x25519FromPriv } from '../../lib/x25519.ts'
@@ -2096,18 +2097,37 @@ function seenText(pub: string): string {
   return tr('{d}, {t}', { d: l.date, t: l.hhmm })
 }
 
+// Not remembered anywhere (the user's call): every start shows everyone.
+let presenceFilter: PresenceFilter = 'all'
+
+// lib/dotstate.ts: green needs a secured channel AND the peer answering
+// now. A session outlives silence on purpose, so "secured" alone kept dots
+// green on conversations that received nothing (2026-09-29).
+function contactDot(c: { pub: string }) {
+  const room = rooms.get(c.pub)
+  const secured = !!room?.conv && room.conv.secured().length > 0
+  return dotFor({ secured, presence: room?.inRoom ? room.lastPresence : null, announcing: onlinePubs.has(c.pub) })
+}
+
 function renderContacts() {
   const pane = $('pane-contacts'); pane.innerHTML = ''
   // Add-peer and the filter are static markup above this pane — see index.html
   // for why neither can live inside something that is rebuilt on every keystroke.
   const filter = val('contact-search').toLowerCase()
-  const list = contactsCache.filter((c) => !filter || c.name.toLowerCase().includes(filter))
+  const byName = contactsCache.filter((c) => !filter || c.name.toLowerCase().includes(filter))
+  // The presence filter keys on the same dot the row draws (lib/presencefilter.ts).
+  const list = byName.filter((c) => presenceKeeps(presenceFilter, {
+    online: contactDot(c) !== '', unseen: rooms.get(c.pub)?.unseen ?? 0, active: activePub === c.pub,
+  }))
   if (!list.length) {
     // A search that matched nothing is not an empty address book, and must not
     // be answered with a tutorial: that person knows perfectly well what they have.
-    if (filter) {
+    if (filter || contactsCache.length) {
       const e = document.createElement('div'); e.className = 'pane-label'
-      e.textContent = tr('(brak dopasowań)'); pane.appendChild(e); return
+      e.textContent = byName.length && presenceFilter === 'online' ? tr('(nikt z Twoich kontaktów nie jest teraz online)')
+        : byName.length && presenceFilter === 'offline' ? tr('(wszyscy są teraz online)')
+          : tr('(brak dopasowań)')
+      pane.appendChild(e); return
     }
     const e = document.createElement('div'); e.className = 'pane-label'
     e.textContent = tr('(brak kontaktów — dodaj peera)')
@@ -2118,11 +2138,8 @@ function renderContacts() {
     const inRoom = !!room?.inRoom
     const online = onlinePubs.has(c.pub)
     const unseen = room?.unseen ?? 0
-    // lib/dotstate.ts: green needs a secured channel AND the peer answering
-    // now. A session outlives silence on purpose, so "secured" alone kept dots
-    // green on conversations that received nothing (2026-09-29).
     const secured = !!room?.conv && room.conv.secured().length > 0
-    const dotClass = dotFor({ secured, presence: room?.inRoom ? room.lastPresence : null, announcing: online })
+    const dotClass = contactDot(c)
     const dotTitle = dotClass === 'ok' ? tr('Bezpieczny kanał (EH-2)')
       : dotClass === 'online' ? tr('Dostępny — otwórz rozmowę, żeby zestawić kanał')
         : secured ? tr('Kanał zestawiony, ale rozmówca teraz nie odpowiada — wiadomości poczekają')
@@ -2207,6 +2224,11 @@ function renderContacts() {
   }
 }
 $('contact-search').addEventListener('input', renderContacts)
+$('contact-presence').addEventListener('click', () => {
+  presenceFilter = nextPresenceFilter(presenceFilter)
+  $('contact-presence').dataset.f = presenceFilter
+  renderContacts()
+})
 $('group-search').addEventListener('input', renderGroups)
 $('btn-add-peer').addEventListener('click', () => openModal())
 $('btn-new-group').addEventListener('click', openGroupModal)

@@ -101,6 +101,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     ' ⏱ spóźniona': ' ⏱ late',
     '(brak dopasowań)': '(no matches)',
     '(brak grup — utwórz)': '(no groups — create one)',
+    '(nikt z Twoich kontaktów nie jest teraz online)': '(none of your contacts is online now)',
+    '(wszyscy są teraz online)': '(everyone is online now)',
     '+ dodaj': '+ add',
     '+ Dodaj członka': '+ Add member',
     '+ Dodaj peera': '+ Add a peer',
@@ -684,6 +686,8 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'status HEM': 'HEM status',
     'Status węzła sieci': 'Network node status',
     'Szukaj kontaktu…': 'Search contacts…',
+    'Pokaż: wszyscy, online, offline': 'Show: everyone, online, offline',
+    'Wszyscy': 'All',
     'Szyfrowane E2E — każda rozmowa uzgadnia EH-2 przy otwarciu': 'E2E encrypted — every conversation agrees EH-2 when it opens',
     'Szyfruję…': 'Encrypting…',
     'Ta nazwa jest już zajęta przez kogoś o innym kluczu. Zastąpienie usunie tamten kontakt — jeśli to dwie różne osoby, wróć i nadaj inną nazwę.':

@@ -2742,6 +2742,57 @@ async function main() {
     if (search.restored.length !== search.before.length) throw new Error('clearing the box did not bring the list back')
     step('contacts narrow, say so when nothing matches, and come back')
 
+    // The presence filter (lib/presencefilter.ts): one button, All -> Online ->
+    // Offline -> All, keyed on the row's dot. Pressed with real mouse events.
+    {
+      await A.send('Page.bringToFront', {}, true)
+      // The group scenarios before this one leave A on the Groups tab, where the
+      // contacts head (and this button) is hidden.
+      await A.eval(`document.getElementById('tab-contacts').click(); return 1`)
+      const press = async () => {
+        const r = JSON.parse(await A.eval<string>(`const r = document.getElementById('contact-presence').getBoundingClientRect(); return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 })`))
+        await A.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 }, true)
+        await sleep(60)
+        await A.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 }, true)
+        await sleep(150)
+      }
+      const read = () => A.eval<any>(`
+        const btn = document.getElementById('contact-presence');
+        const rows = [...document.querySelectorAll('#pane-contacts .contact')].map((b) => ({
+          name: b.querySelector('.c-name').textContent,
+          lit: !!b.querySelector('.dot.ok, .dot.online'),
+          unread: !!b.querySelector('.c-unread') }));
+        const label = [...btn.children].find((s) => getComputedStyle(s).visibility === 'visible');
+        return { f: btn.dataset.f, w: Math.round(btn.getBoundingClientRect().width), label: label ? label.textContent : '', rows,
+                 empty: (document.querySelector('#pane-contacts .pane-label') || {}).textContent || '' };
+      `)
+      const all = await read()
+      if (all.f !== 'all' || !/Wszyscy|All/.test(all.label)) throw new Error(`the filter did not start at "all": ${all.f} / ${all.label}`)
+      const lit = all.rows.filter((r: any) => r.lit).map((r: any) => r.name)
+      const grey = all.rows.filter((r: any) => !r.lit).map((r: any) => r.name)
+      const unread = all.rows.filter((r: any) => r.unread).length
+      if (!lit.length) throw new Error('no lit contact on A - the online filter would be tested on nothing')
+      await press(); const on = await read()
+      await press(); const off = await read()
+      await press(); const back = await read()
+      const names = (s: any) => s.rows.map((r: any) => r.name)
+      if (on.f !== 'online' || off.f !== 'offline' || back.f !== 'all') {
+        const hit = await A.eval<string>(`const r = document.getElementById('contact-presence').getBoundingClientRect();
+          const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+          return JSON.stringify({ rect: [r.x, r.y, r.width, r.height], hit: e ? (e.id || e.className || e.tagName) : null, front: document.hasFocus(), vis: document.visibilityState })`)
+        throw new Error(`the button did not step all -> online -> offline -> all: ${on.f} ${off.f} ${back.f}; ${hit}`)
+      }
+      if (!lit.every((n: string) => names(on).includes(n))) throw new Error(`"online" hid a lit contact: ${JSON.stringify(names(on))}`)
+      // unread rows and the open conversation are kept on purpose; nothing else grey
+      if (on.rows.filter((r: any) => !r.lit).length > unread + 1) throw new Error(`"online" kept grey contacts: ${JSON.stringify(on.rows)}`)
+      if (!grey.every((n: string) => names(off).includes(n))) throw new Error(`"offline" hid a grey contact: ${JSON.stringify(names(off))}`)
+      if (off.rows.filter((r: any) => r.lit).length > unread + 1) throw new Error(`"offline" kept lit contacts: ${JSON.stringify(off.rows)}`)
+      if (!off.rows.length && !/online/.test(off.empty)) throw new Error(`an empty "offline" list did not say why: ${JSON.stringify(off.empty)}`)
+      if (back.rows.length !== all.rows.length) throw new Error('back at "all", the list did not come back whole')
+      if (new Set([all.w, on.w, off.w]).size !== 1) throw new Error(`the button changed width as it stepped: ${all.w}/${on.w}/${off.w}`)
+      step(`presence filter: ${all.rows.length} all, ${on.rows.length} online, ${off.rows.length} offline, button ${all.w}px wide in every state`)
+    }
+
     // Each list has its own box now, inside its own tab — the single box above
     // the tabs claimed to filter whatever was on screen and filtered one thing.
     const onGroups = await A.eval<any>(`
