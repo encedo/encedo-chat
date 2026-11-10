@@ -3782,6 +3782,135 @@ async function main() {
     if (!deleted.signedIn) throw new Error('deleting another profile signed the open one out')
     step('its sealed identity and every key under its KID are gone; the open profile is untouched')
 
+    // ---- a passkey as the second way into a software profile ---------------
+    // SPEC 4.5, Unlock slot (lib/unlockslot.ts, web/src/passkey.ts). Chromium's
+    // virtual authenticator stands in for Touch ID / Windows Hello: it does UV
+    // and PRF (hmac-secret) for real, so the slot is sealed and opened with a
+    // secret that exists only inside the authenticator. On localhost, a fresh
+    // origin: 127.0.0.1 is an IP address, which no passkey can belong to - and
+    // that keeps B's profiles there out of it. B comes back signed in.
+    if (B instanceof Browser && SERVE_LOCAL) {
+      scenario('a passkey opens a software profile; the password stays, and is asked for every 14 days')
+      const PK = 'ec-soft-unlock-pk-profil'
+      const authn = async (backup: boolean) => (await B.send('WebAuthn.addVirtualAuthenticator', { options: {
+        protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'internal', hasResidentKey: true,
+        hasUserVerification: true, isUserVerified: true, hasPrf: true, automaticPresenceSimulation: true,
+        defaultBackupEligibility: backup, defaultBackupState: false,
+      } }, true)).authenticatorId as string
+      await B.reload(B_URL.replace('127.0.0.1', 'localhost'))
+      await B.send('WebAuthn.enable', { enableUI: false }, true)
+      let authId = await authn(false)
+      const made = await createProfile('pk-profil')
+      if (!made.entered) throw new Error(`the passkey profile was not created: ${JSON.stringify(made)}`)
+      const fp = await B.eval<string>(`return document.getElementById('me-fp').textContent`)
+
+      const settings = async () => {
+        await B.eval(`if (!document.getElementById('drawer').classList.contains('open')) document.getElementById('btn-settings').click(); return 1`)
+        return B.waitFor<string>('the passkey line in Settings', `const s = document.getElementById('bio-sec'); return !!s && !s.hidden && document.getElementById('btn-bio').textContent`, 10_000)
+      }
+      const enable = async (pass: string, device: boolean) => {
+        await B.eval(`document.getElementById('btn-bio').click(); return 1`)
+        await B.waitFor('the passkey window', `return document.getElementById('bio-modal').classList.contains('open')`, 5_000)
+        await B.eval(`
+          document.getElementById(${JSON.stringify(device ? 'bio-kind-device' : 'bio-kind-synced')}).checked = true;
+          document.getElementById('bio-pass').value = ${JSON.stringify(pass)};
+          document.getElementById('bio-save').click(); return 1`)
+        return B.waitFor<any>('the passkey window to answer', `
+          const m = document.getElementById('bio-modal'), msg = document.getElementById('bio-msg').textContent;
+          if (m.classList.contains('open') && !msg) return '';
+          return { open: m.classList.contains('open'), msg, slot: localStorage.getItem(${JSON.stringify(PK)}) }`, 30_000)
+      }
+      const toCard = async () => {
+        await B.eval(`location.reload(); return 1`).catch(() => {})
+        await sleep(500)
+        await B.waitFor('the sign-in card', `return document.readyState === 'complete' && !!document.getElementById('go-soft') && document.getElementById('app').hidden`, 20_000)
+        await B.waitFor('the profile window', `
+          const row = [...document.querySelectorAll('#login-profiles .pick')].find((r) => r.textContent.includes('pk-profil'));
+          if (!row) return false;
+          const m = document.getElementById('soft-modal');
+          if (!m.classList.contains('open')) row.click();
+          return m.classList.contains('open');`, 20_000)
+        return B.eval<any>(`return { bio: !document.getElementById('soft-bio').hidden, note: document.getElementById('soft-bio-note').hidden ? '' : document.getElementById('soft-bio-note').textContent }`)
+      }
+      const inWithPassword = async (pass: string) => {
+        await B.eval(`document.getElementById('soft-pass').value = ${JSON.stringify(pass)}; document.getElementById('soft-go').click(); return 1`)
+        await B.waitFor('signed in with the password', `return !document.getElementById('app').hidden`, 30_000)
+      }
+
+      if (!/Włącz/.test(await settings())) throw new Error('Settings does not offer to turn the passkey on')
+      const bad = await enable('to-nie-jest-haslo', true)
+      if (!bad.open || !/Złe hasło/.test(bad.msg) || bad.slot) throw new Error(`a wrong password got a passkey anyway: ${JSON.stringify(bad)}`)
+      await B.eval(`document.getElementById('bio-cancel').click(); return 1`)
+      const good = await enable(SOFT_PASS, true)
+      if (good.open || !good.slot) throw new Error(`the passkey was not turned on: ${JSON.stringify(good)}`)
+      const slot = JSON.parse(good.slot)
+      if (slot.v !== 1 || slot.kind !== 'webauthn-prf' || slot.synced !== false || slot.rpId !== 'localhost') {
+        throw new Error(`the slot is not what was asked for: ${good.slot}`)
+      }
+      if (!/Wyłącz/.test(await settings())) throw new Error('Settings does not say the passkey is on')
+      step('turned on with the password, as device-bound; a wrong password makes no passkey')
+
+      const offer = await toCard()
+      if (!offer.bio || offer.note) throw new Error(`the sign-in window does not offer the passkey: ${JSON.stringify(offer)}`)
+      await B.eval(`document.getElementById('soft-bio').click(); return 1`)
+      await B.waitFor('signed in with the passkey', `return !document.getElementById('app').hidden`, 30_000)
+      const who = await B.eval<any>(`return { h: document.getElementById('me-handle').textContent, fp: document.getElementById('me-fp').textContent }`)
+      if (who.h !== 'pk-profil' || who.fp !== fp) throw new Error(`the passkey opened something else: ${JSON.stringify(who)} vs ${fp}`)
+      step('the sign-in window offers the passkey, and the passkey alone opens the same identity')
+
+      await B.eval(`const s = JSON.parse(localStorage.getItem(${JSON.stringify(PK)})); s.pwAt = Date.now() - 15 * 86400000; localStorage.setItem(${JSON.stringify(PK)}, JSON.stringify(s)); return 1`)
+      const due = await toCard()
+      if (due.bio || !/14 dni/.test(due.note)) throw new Error(`after 15 days the passkey is still offered: ${JSON.stringify(due)}`)
+      await inWithPassword(SOFT_PASS)
+      const pwAt = await B.eval<number>(`return JSON.parse(localStorage.getItem(${JSON.stringify(PK)})).pwAt`)
+      if (Math.abs(Date.now() - pwAt) > 120_000) throw new Error(`the password did not restart the clock: ${pwAt}`)
+      step('after 14 days the passkey steps aside for the password, and the password restarts the clock')
+
+      // Another PRF input: the authenticator answers with other bytes, as a
+      // different passkey would, and the AEAD refuses them.
+      await B.eval(`const s = JSON.parse(localStorage.getItem(${JSON.stringify(PK)})); s.prfSalt = btoa(String.fromCharCode(...new Uint8Array(32).fill(9))); localStorage.setItem(${JSON.stringify(PK)}, JSON.stringify(s)); return 1`)
+      await toCard()
+      await B.eval(`document.getElementById('soft-bio').click(); return 1`)
+      const refused = await B.waitFor<any>('the refusal', `
+        const m = document.getElementById('soft-msg').textContent;
+        return m ? { msg: m, slot: localStorage.getItem(${JSON.stringify(PK)}), bio: !document.getElementById('soft-bio').hidden, app: !document.getElementById('app').hidden } : ''`, 30_000)
+      if (refused.app || refused.slot || refused.bio || !/nie otwiera/.test(refused.msg)) throw new Error(`a passkey that does not open the slot: ${JSON.stringify(refused)}`)
+      step('a passkey whose secret does not open the slot turns it off and sends the person to the password')
+
+      // A passkey that can sync: refused when the person asked for this device
+      // only, taken when they allowed syncing (the user's call, P2).
+      await inWithPassword(SOFT_PASS)
+      await B.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId: authId }, true)
+      authId = await authn(true)
+      await settings()
+      const syncedRefused = await enable(SOFT_PASS, true)
+      if (!syncedRefused.open || !/synchronizować/.test(syncedRefused.msg) || syncedRefused.slot) {
+        throw new Error(`a syncable passkey was taken as device-bound: ${JSON.stringify(syncedRefused)}`)
+      }
+      await B.eval(`document.getElementById('bio-cancel').click(); return 1`)
+      const syncedOk = await enable(SOFT_PASS, false)
+      if (syncedOk.open || !syncedOk.slot || JSON.parse(syncedOk.slot).synced !== true) throw new Error(`a syncable passkey was not taken when allowed: ${JSON.stringify(syncedOk)}`)
+      step('a syncable passkey is refused for "this device only" and taken when syncing is allowed')
+
+      // Changing the password keeps the slot unless asked (P3).
+      await B.eval(`document.getElementById('btn-passwd').click(); return 1`)
+      await B.waitFor('the password window', `return document.getElementById('passwd-modal').classList.contains('open') && !document.getElementById('pw-bio-wrap').hidden`, 5_000)
+      await B.eval(`
+        document.getElementById('pw-old').value = ${JSON.stringify(SOFT_PASS)};
+        document.getElementById('pw-new').value = ${JSON.stringify(SOFT_PASS + '-2')};
+        document.getElementById('pw-new2').value = ${JSON.stringify(SOFT_PASS + '-2')};
+        document.getElementById('pw-bio-off').checked = true;
+        document.getElementById('pw-save').click(); return 1`)
+      await B.waitFor('the password changed', `return !document.getElementById('passwd-modal').classList.contains('open')`, 30_000)
+      if (await B.eval<boolean>(`return !!localStorage.getItem(${JSON.stringify(PK)})`)) throw new Error('"also turn off the passkey" left the slot')
+      step('a password change with "also turn off" removes the slot')
+
+      await B.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId: authId }, true)
+      await B.send('WebAuthn.disable', {}, true)
+      await B.reload(B_URL)
+      await login(B, 'drugi-profil', false)
+    }
+
     // ---- the published node list, fetched by the CID the manifest names -----
     // LAST, on A, and only with a node to read from: it replaces the relay list
     // and re-dials, so anything after it would be running against production

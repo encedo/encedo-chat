@@ -175,6 +175,15 @@ test('policy.access: "allowlist" is read; anything else is refused, absent means
   assert.throws(() => parseOperatorProfile(profile({ policy: { access: 'token' } })), /policy.access/)
 })
 
+test('policy.softUnlock: any, device-bound or none is read; anything else is refused, absent means allowed', () => {
+  for (const v of ['any', 'device-bound', 'none']) {
+    assert.equal(parseOperatorProfile(profile({ policy: { softUnlock: v } })).policy.softUnlock, v)
+  }
+  assert.equal(parseOperatorProfile(profile({ policy: {} })).policy.softUnlock, undefined)
+  assert.throws(() => parseOperatorProfile(profile({ policy: { softUnlock: 'synced' } })), /policy.softUnlock/)
+  assert.throws(() => parseOperatorProfile(profile({ policy: { softUnlock: true } })), /policy.softUnlock/)
+})
+
 test('policy.enroll: a sign-in at an https provider, only with the list; record defaults to nothing', () => {
   const p = parseOperatorProfile(profile({ policy: { access: 'allowlist', enroll: { method: 'oidc', issuer: 'https://oidc.example' } } })).policy
   assert.deepEqual(p.enroll, { method: 'oidc', issuer: 'https://oidc.example', record: 'none' })

@@ -49,6 +49,7 @@
 import { seal, unseal, isSealedProfile, type SealedProfile } from './profile.ts'
 import { importNetwork, REGISTRY_KEY } from './netprofile.ts'
 import { softBindingKey } from './activenet.ts'
+import { unlockSlotKey, UNLOCK_SLOT_PREFIX } from './unlockslot.ts'
 
 /** The storage this works over. An interface so the logic can be tested
  *  without a browser, and so the harness can seed one directly. */
@@ -156,7 +157,10 @@ export function collectProfile(store: KV, name: string, kid: string, prefix = ''
 export function keysOfProfile(store: KV, name: string, kid: string, prefix = ''): string[] {
   if (!/^[0-9a-f]{32}$/.test(kid)) throw new Error('not a KID: ' + kid)
   const identity = 'ec-soft-id-' + name
-  return store.keys().filter((k) => k === identity || ownedBy(k, prefix))
+  // Its passkey slot too (lib/unlockslot.ts): left behind, it would open the
+  // deleted identity for whoever holds the passkey.
+  const slot = unlockSlotKey(name)
+  return store.keys().filter((k) => k === identity || k === slot || ownedBy(k, prefix))
 }
 
 /** A key of this identity: under its storage-name prefix (lib/storenames.ts). */
@@ -240,9 +244,14 @@ export function applyBundle(store: KV, bundle: Bundle, now = Date.now()): number
       : `the network profile in the file does not open (${r.why})`)
     if (r.id !== bundle.net.id) throw new Error('the network profile in the file is for another network')
   }
+  // A passkey slot is this device's, never a file's (lib/unlockslot.ts): one
+  // left under this name by anything would open ITS plaintext, not the
+  // imported identity, so it goes before the identity arrives.
+  store.remove?.(unlockSlotKey(bundle.name))
   let n = 0
   for (const [k, v] of Object.entries(bundle.keys)) {
     if (!k.startsWith('ec-') || NOT_PORTABLE.includes(k)) continue // a file is not to be trusted about this
+    if (k.startsWith(UNLOCK_SLOT_PREFIX)) continue
     store.set(k, v); n++
   }
   return n

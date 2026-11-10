@@ -125,6 +125,26 @@ test('deleting a profile takes everything under its prefix, and nothing of anybo
   assert.deepEqual(keysOfProfile(store, 'Ala', A), ['ec-soft-id-Ala'], 'without the prefix only the sealed identity is found')
 })
 
+test('a passkey slot never leaves the device, goes with its profile, and is never written by an import', async () => {
+  const store = full()
+  store.set('ec-soft-unlock-Lab1', '{"v":1,"kind":"webauthn-prf"}')
+  store.set('ec-soft-unlock-Other', '{"v":1,"kind":"webauthn-prf"}')
+  assert.equal('ec-soft-unlock-Lab1' in collectProfile(store, 'Lab1', KID, PFX), false, 'not exported')
+  const gone = keysOfProfile(store, 'Lab1', '5954eb6d5a1dd906ec78fe9dae5645e3', PFX)
+  assert.ok(gone.includes('ec-soft-unlock-Lab1'), 'deleted with the profile')
+  assert.ok(!gone.includes('ec-soft-unlock-Other'), 'another profile keeps its slot')
+
+  const bundle = await openBundle(await exportProfile(store, 'Lab1', KID, PASS, 1, PFX), PASS)
+  bundle.keys['ec-soft-unlock-Lab1'] = 'FROM THE FILE'
+  bundle.keys['ec-soft-unlock-Ola'] = 'FROM THE FILE'
+  const target = kv({ 'ec-soft-unlock-Lab1': 'AN ORPHAN' })
+  ;(target as any).remove = (k: string) => { delete target.data[k] }
+  applyBundle(target, bundle)
+  assert.equal('ec-soft-unlock-Lab1' in target.data, false, 'an orphan slot under the name goes, the file\'s is not written')
+  assert.equal('ec-soft-unlock-Ola' in target.data, false)
+  assert.ok(target.data['ec-soft-id-Lab1'])
+})
+
 test('without a real KID nothing but a refusal comes back - an empty one would match every key', () => {
   const store = kv({ 'ec-soft-id-Ala': '{}', 'ec-lang': 'pl' })
   for (const bad of ['', 'a1b2', 'x'.repeat(32)]) assert.throws(() => keysOfProfile(store, 'Ala', bad), /not a KID/)

@@ -1706,6 +1706,10 @@
       <label data-i18n="Powtórz hasło">Powtórz hasło</label>
       <input id="soft-pass2" type="password" autocomplete="new-password">
     </div>
+    <!-- The passkey way in (SPEC 4.5, Unlock slot): only for a profile that has
+         one on this device, and not when its password is due (every 14 days). -->
+    <button class="btn" id="soft-bio" hidden style="margin-top:10px;background:var(--accent-soft);color:var(--accent)" data-i18n="Odblokuj passkeyem (Touch ID, Face ID, Windows Hello)">Odblokuj passkeyem (Touch ID, Face ID, Windows Hello)</button>
+    <div class="hint" id="soft-bio-note" hidden style="margin-top:8px"></div>
     <div class="msg" id="soft-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="soft-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="soft-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
@@ -1980,8 +1984,25 @@
     <label data-i18n="Nowe hasło">Nowe hasło</label><input id="pw-new" type="password" autocomplete="new-password">
     <div class="pw-meter" id="pwm-new" hidden><div class="pwm-bar"><i></i><i></i><i></i><i></i></div><div class="pwm-note"></div></div>
     <label data-i18n="Powtórz nowe hasło">Powtórz nowe hasło</label><input id="pw-new2" type="password" autocomplete="new-password">
+    <label class="store-opt" id="pw-bio-wrap" hidden style="margin-top:10px"><input type="checkbox" id="pw-bio-off"> <span data-i18n="Wyłącz też odblokowanie passkeyem">Wyłącz też odblokowanie passkeyem</span></label>
     <div class="msg" id="pw-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="pw-save" style="flex:1;border-radius:8px" data-i18n="Zapisz">Zapisz</button><button class="btn-ghost" id="pw-cancel" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
+  <!-- Turning on the passkey unlock of the open software profile. The password
+       is asked again: re-authentication before adding a way in, and the source
+       of the plaintext the slot seals (the app does not keep it after sign-in). -->
+  <div class="modal" id="bio-modal">
+    <h2 data-i18n="Odblokowanie passkeyem">Odblokowanie passkeyem</h2>
+    <div class="msub" data-i18n="Do tego profilu wejdziesz wtedy przez Touch ID, Face ID, Windows Hello albo odcisk palca, bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne: bez niego nie przeniesiesz profilu na inne urządzenie.">Do tego profilu wejdziesz wtedy przez Touch ID, Face ID, Windows Hello albo odcisk palca, bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne: bez niego nie przeniesiesz profilu na inne urządzenie.</div>
+    <div class="store-opts" style="margin:4px 0 6px">
+      <label class="store-opt"><input type="radio" name="bio-kind" id="bio-kind-synced" checked> <span data-i18n="Passkey z menedżera haseł (może się synchronizować, np. przez iCloud albo Google)">Passkey z menedżera haseł (może się synchronizować, np. przez iCloud albo Google)</span></label>
+      <label class="store-opt"><input type="radio" name="bio-kind" id="bio-kind-device"> <span data-i18n="Tylko to urządzenie albo klucz sprzętowy (bez synchronizacji)">Tylko to urządzenie albo klucz sprzętowy (bez synchronizacji)</span></label>
+    </div>
+    <div class="hint" id="bio-kind-note" hidden data-i18n="Ta sieć dopuszcza tylko passkeye bez synchronizacji.">Ta sieć dopuszcza tylko passkeye bez synchronizacji.</div>
+    <label data-i18n="Hasło profilu">Hasło profilu</label><input id="bio-pass" type="password" autocomplete="current-password">
+    <div class="msg" id="bio-msg"></div>
+    <div class="modal-actions"><button class="btn-send" id="bio-save" style="flex:1;border-radius:8px" data-i18n="Włącz">Włącz</button><button class="btn-ghost" id="bio-cancel" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
   <!-- Shown only when a HEM holds more than one identity; one signs straight in.
@@ -2187,6 +2208,11 @@
     <div class="hint" id="hem-ask-settings" hidden style="margin-bottom:8px"><span data-i18n="Ten profil trzyma klucz w przeglądarce. W HEM klucz nigdy nie opuszcza urządzenia —">Ten profil trzyma klucz w przeglądarce. W HEM klucz nigdy nie opuszcza urządzenia —</span> <a id="hem-ask-settings-link" style="color:var(--accent);cursor:pointer" data-i18n="zapytaj o HEM →">zapytaj o HEM →</a></div>
     <div id="profiles-list"></div>
     <button class="btn" id="btn-passwd" hidden style="margin-top:8px;background:var(--accent-soft);color:var(--accent)" data-i18n="Zmień hasło aktywnego profilu">Zmień hasło aktywnego profilu</button>
+    <!-- Passkey unlock of the open software profile (renderProfiles). -->
+    <div id="bio-sec" hidden style="margin-top:8px">
+      <div class="hint" id="bio-state" style="margin-bottom:6px"></div>
+      <button class="btn" id="btn-bio" style="background:var(--accent-soft);color:var(--accent)"></button>
+    </div>
     <!-- The profile list lives HERE and not on the login screen: naming who uses
          a device is something only that device's user should see. -->
     <button class="btn" id="btn-share" style="margin-top:10px;background:var(--accent-soft);color:var(--accent)" data-i18n="Udostępnij swój profil">Udostępnij swój profil</button>

@@ -18,6 +18,8 @@ import { HEM } from '../../lib/hem-sdk.mini.js' // the SDK stripped to what we c
 import { setCoreBackend, coreStatus, onCoreFallback, type CoreBackend } from '../../eh2/establish.ts'
 import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, hemWarmTokens, collect, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
+import { sealSlot, openSlot, readSlot, passwordDue, withPasswordAt, slotAllowed, unlockSlotKey, SlotRefused } from '../../lib/unlockslot.ts'
+import { passkeyPossible, enrollPasskey, unlockPasskey, PasskeyCancelled, PasskeyNoPrf, PasskeySynced } from './passkey.ts'
 import { exportProfile, openBundle, applyBundle, conflictsWith, identityHere, keysOfProfile, localKV, FILE_EXT, type KV } from '../../lib/migrate.ts'
 import { decodeInvite, inviteLink, inviteFromPaste, setInviteNetwork, inviteNetwork, type Invite } from '../../lib/invite.ts'
 import { pickFirst, orderFrom, nodeKey } from '../../lib/nodepick.ts'
@@ -1192,6 +1194,7 @@ function openSoftModal(name?: string, creating = false) {
 function softMode(creating: boolean) {
   softCreating = creating ? val('soft-name') : ''
   $('soft-pass2-wrap').hidden = !creating
+  paintSoftBio()
   ;($('soft-pass2') as HTMLInputElement).value = ''
   paintSoftMeter()
   $('soft-sub').textContent = creating
@@ -1339,44 +1342,10 @@ async function softLogin() {
       // password, or someone types the right one repeatedly and never learns why.
       if (!isSealedProfile(blob)) { setMsg('soft-msg', tr('Profil w starym, niezaszyfrowanym formacie — usuń go przyciskiem Wipeout i załóż nowy.'), 'err'); return }
       const plain = await unseal(pass, blob)
+      passwordUsed(name)
       id = await browserSoftwareIdentity(name, () => plain, () => {})
     }
-    endModals() // signed in: the app is behind this, not another window
-    activeSoftProfile = name
-    // The handle lives INSIDE the sealed blob, and the blob's own storage key is
-    // the name - so a rename is unseal, rewrite, re-seal, move, and only then is
-    // it safe to forget the old copy. Sealed under the new name BEFORE the old
-    // entry goes, so a failure anywhere in here leaves a profile that still opens.
-    renameIdentity = async (next: string) => {
-      const pw = await promptName(tr('Potwierdź hasłem'),
-        tr('Nazwa siedzi w zapieczętowanym profilu, więc zmiana wymaga hasła.'), '', tr('Hasło'), true)
-      if (pw === null) return false // backed out at the password: nothing written
-      const blob = JSON.parse(localStorage.getItem(softKey(activeSoftProfile)) ?? 'null')
-      if (!isSealedProfile(blob)) throw new Error(tr('Nie znaleziono profilu do zmiany.'))
-      const inner = JSON.parse(await unseal(pw, blob))
-      inner.handle = next
-      localStorage.setItem(softKey(next), JSON.stringify(await seal(pw, JSON.stringify(inner))))
-      if (next !== activeSoftProfile) {
-        setBinding(localKV(), softBindingKey(next), ACTIVE.id, BUILTIN_NET)
-        localStorage.removeItem(softKey(activeSoftProfile))
-        localStorage.removeItem(softBindingKey(activeSoftProfile))
-      }
-      localStorage.setItem(LAST_PROFILE, next)
-      activeSoftProfile = next
-      return true
-    }
-    rememberMethod('soft')
-    localStorage.setItem(LAST_PROFILE, name)
-    setLastNet(localKV(), ACTIVE.id, BUILTIN_NET)
-    const idKey2 = await identityKey(id.pub)
-    const names = await openNames(id, idKey2)
-    const local = await makeLocalBook(names, localStorage, id)
-    if (local.verdict === 'tampered') warnTampered()
-    const base = await cacheBaseFor(id, names)
-    await loadSeen(names, base)
-    await loadLeft(names, base)
-    await loadPrefsFor(names, base)
-      await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
+    await finishSoftLogin(name, id)
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
     else setMsg('soft-msg', tr('Błąd tożsamości software: ') + (e?.message ?? e), 'err')
@@ -1385,6 +1354,124 @@ async function softLogin() {
     // creation mode that had just been made three lines earlier.
   } finally { btn.disabled = false; btn.textContent = softCreating ? tr('Utwórz profil') : tr('Dalej') }
 }
+
+// ---- the passkey way in (SPEC 4.5, Unlock slot; lib/unlockslot.ts) --------
+/** This profile's slot, if it has one this page can use (same relying party). */
+function softSlotFor(name: string) {
+  if (!name || !localStorage.getItem(softKey(name))) return null
+  const slot = readSlot(localStorage.getItem(unlockSlotKey(name)))
+  return slot && slot.rpId === location.hostname ? slot : null
+}
+
+/**
+ * The password opened the profile: the slot's 14-day clock starts again - or,
+ * in a network that does not allow passkeys, the slot goes.
+ */
+function passwordUsed(name: string) {
+  const slot = readSlot(localStorage.getItem(unlockSlotKey(name)))
+  if (!slot) return
+  if (ACTIVE.policy.softUnlock === 'none') localStorage.removeItem(unlockSlotKey(name))
+  else localStorage.setItem(unlockSlotKey(name), JSON.stringify(withPasswordAt(slot, Date.now())))
+}
+
+/** The passkey button and its note, for the name in the field. */
+function paintSoftBio() {
+  const name = val('soft-name')
+  const slot = softCreating || softIntendsNew ? null : softSlotFor(name)
+  const usable = !!slot && passkeyPossible() && slotAllowed(ACTIVE.policy.softUnlock, slot.synced)
+  const due = usable && passwordDue(slot!, Date.now())
+  $('soft-bio').hidden = !usable || due
+  const note = $('soft-bio-note')
+  note.textContent = due ? tr('Raz na 14 dni wejdź hasłem, potem znowu wystarczy passkey.') : ''
+  note.hidden = !due
+}
+
+async function softBioLogin() {
+  const name = val('soft-name')
+  const slot = softSlotFor(name)
+  if (!slot || passwordDue(slot, Date.now())) { paintSoftBio(); return }
+  if (!inNetworkOrSwitch(bindingOf(localKV(), softBindingKey(name), BUILTIN_NET), () => localStorage.setItem(OPEN_PROFILE_KEY, name))) return
+  const btn = $('soft-bio') as HTMLButtonElement
+  btn.disabled = true
+  clr('soft-msg')
+  let secret: Uint8Array | null = null
+  try {
+    const got = await unlockPasskey(slot)
+    secret = got.secret
+    // The flag as the passkey reports it NOW: one that started syncing after
+    // enrolment is held to the network's rule too.
+    if (!slotAllowed(ACTIVE.policy.softUnlock, got.synced ?? slot.synced)) {
+      setMsg('soft-msg', tr('Ta sieć dopuszcza tylko passkeye bez synchronizacji. Wejdź hasłem.'), 'err')
+      return
+    }
+    const plain = await openSlot(secret, slot, name)
+    const id = await browserSoftwareIdentity(name, () => plain, () => {})
+    await finishSoftLogin(name, id)
+  } catch (e: any) {
+    if (e instanceof PasskeyCancelled) setMsg('soft-msg', tr('Passkey nie został użyty. Możesz też wejść hasłem.'), 'err')
+    else if (e instanceof PasskeyNoPrf) setMsg('soft-msg', tr('Ten passkey nie podał klucza do profilu. Wejdź hasłem.'), 'err')
+    else if (e instanceof SlotRefused) {
+      // Another passkey's secret, or an altered record: this slot will never
+      // open, so it goes rather than being offered again.
+      localStorage.removeItem(unlockSlotKey(name))
+      paintSoftBio()
+      setMsg('soft-msg', tr('Ten passkey nie otwiera już profilu, więc odblokowanie passkeyem zostało wyłączone. Wejdź hasłem i włącz je ponownie w Ustawieniach.'), 'err')
+    } else setMsg('soft-msg', tr('Błąd tożsamości software: ') + (e?.message ?? e), 'err')
+  } finally { secret?.fill(0); btn.disabled = false }
+}
+$('soft-bio').addEventListener('click', () => void softBioLogin())
+;($('soft-name') as HTMLInputElement).addEventListener('input', () => paintSoftBio())
+
+/**
+ * Everything after the identity is open, whichever way it was opened - the
+ * password (softLogin) or a passkey (softBioLogin). One copy, so the two ways
+ * in cannot drift apart in what a signed-in profile gets.
+ */
+async function finishSoftLogin(name: string, id: Identity) {
+  endModals() // signed in: the app is behind this, not another window
+  activeSoftProfile = name
+  // The handle lives INSIDE the sealed blob, and the blob's own storage key is
+  // the name - so a rename is unseal, rewrite, re-seal, move, and only then is
+  // it safe to forget the old copy. Sealed under the new name BEFORE the old
+  // entry goes, so a failure anywhere in here leaves a profile that still opens.
+  renameIdentity = async (next: string) => {
+    const pw = await promptName(tr('Potwierdź hasłem'),
+      tr('Nazwa siedzi w zapieczętowanym profilu, więc zmiana wymaga hasła.'), '', tr('Hasło'), true)
+    if (pw === null) return false // backed out at the password: nothing written
+    const blob = JSON.parse(localStorage.getItem(softKey(activeSoftProfile)) ?? 'null')
+    if (!isSealedProfile(blob)) throw new Error(tr('Nie znaleziono profilu do zmiany.'))
+    const inner = JSON.parse(await unseal(pw, blob))
+    inner.handle = next
+    localStorage.setItem(softKey(next), JSON.stringify(await seal(pw, JSON.stringify(inner))))
+    if (next !== activeSoftProfile) {
+      setBinding(localKV(), softBindingKey(next), ACTIVE.id, BUILTIN_NET)
+      localStorage.removeItem(softKey(activeSoftProfile))
+      localStorage.removeItem(softBindingKey(activeSoftProfile))
+      // The passkey slot sealed the plaintext under the old name (its AAD), and
+      // re-sealing it would need the passkey: it goes, and says so.
+      if (localStorage.getItem(unlockSlotKey(activeSoftProfile))) {
+        localStorage.removeItem(unlockSlotKey(activeSoftProfile))
+        toast(tr('Odblokowanie passkeyem wyłączone, bo zmieniła się nazwa profilu. Włączysz je ponownie w Ustawieniach.'))
+      }
+    }
+    localStorage.setItem(LAST_PROFILE, next)
+    activeSoftProfile = next
+    return true
+  }
+  rememberMethod('soft')
+  localStorage.setItem(LAST_PROFILE, name)
+  setLastNet(localKV(), ACTIVE.id, BUILTIN_NET)
+  const idKey2 = await identityKey(id.pub)
+  const names = await openNames(id, idKey2)
+  const local = await makeLocalBook(names, localStorage, id)
+  if (local.verdict === 'tampered') warnTampered()
+  const base = await cacheBaseFor(id, names)
+  await loadSeen(names, base)
+  await loadLeft(names, base)
+  await loadPrefsFor(names, base)
+  await enterApp(id, localOnlyManager(local.verdict === 'tampered' ? taintedBook() : local.book), 'Software')
+}
+
 $('soft-go').addEventListener('click', () => void softLogin())
 for (const f of ['soft-pass', 'soft-pass2']) {
   ;($(f) as HTMLInputElement).addEventListener('keydown', (e: any) => { if (e.key === 'Enter') void softLogin() })
@@ -3634,6 +3721,7 @@ function renderProfiles() {
   // Only the profile actually open can have its password changed — re-sealing
   // needs the old one, and we hold exactly one.
   $('btn-passwd').hidden = !activeSoftProfile
+  paintBioSetting()
   // The "ask about HEM" line is for the person whose key lives in this browser.
   const hemAsk = document.getElementById('hem-ask-settings'); if (hemAsk) hemAsk.hidden = !activeSoftProfile || !ACTIVE.feedback
 }
@@ -3672,7 +3760,7 @@ async function removeProfile(name: string) {
     }
   }
   // A profile in the pre-password format has no KID to find; only its blob goes.
-  for (const k of kid ? keysOfProfile(localKV(), name, kid, prefix) : [softKey(name)]) localStorage.removeItem(k)
+  for (const k of kid ? keysOfProfile(localKV(), name, kid, prefix) : [softKey(name), unlockSlotKey(name)]) localStorage.removeItem(k)
   localStorage.removeItem(softBindingKey(name))
   if (localStorage.getItem(LAST_PROFILE) === name) localStorage.removeItem(LAST_PROFILE)
   // Deleting the identity you are holding leaves a session with nothing behind
@@ -3686,6 +3774,8 @@ const openPasswd = () => {
   for (const f of ['pw-old', 'pw-new', 'pw-new2']) ($(f) as HTMLInputElement).value = ''
   paintMeter($('pwm-new'), '', true) // empty hides — no stale bar from last time
   ;($('pw-who') as HTMLInputElement).value = activeSoftProfile
+  ;($('pw-bio-off') as HTMLInputElement).checked = false
+  $('pw-bio-wrap').hidden = !localStorage.getItem(unlockSlotKey(activeSoftProfile))
   $('pw-old').focus()
 }
 const closePasswd = () => dropModal('passwd-modal')
@@ -3710,11 +3800,84 @@ $('pw-save').addEventListener('click', async () => {
     // failure anywhere in here leaves the profile openable with the old one.
     const next = await reseal(oldPw, a, blob)
     localStorage.setItem(softKey(activeSoftProfile), JSON.stringify(next))
+    // The passkey slot seals the same identity and does not depend on the
+    // password, so it stays unless the person asked for it to go (the user's
+    // call, 2026-11-10).
+    if (($('pw-bio-off') as HTMLInputElement).checked) localStorage.removeItem(unlockSlotKey(activeSoftProfile))
+    else passwordUsed(activeSoftProfile)
+    paintBioSetting()
     endModals(); toast(tr('Hasło zmienione.')) // changed; Settings is outside the stack and stays
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('pw-msg', tr('Złe obecne hasło.'), 'err')
     else setMsg('pw-msg', tr('Błąd: ') + (e?.message ?? e), 'err')
   } finally { btn.disabled = false; btn.textContent = label ?? tr('Zapisz') }
+})
+
+// ---- passkey unlock of the open software profile, in Settings -------------
+function paintBioSetting() {
+  const on = !!activeSoftProfile && passkeyPossible() && ACTIVE.policy.softUnlock !== 'none'
+  $('bio-sec').hidden = !on
+  if (!on) return
+  const slot = softSlotFor(activeSoftProfile)
+  $('bio-state').textContent = !slot
+    ? tr('Do tego profilu możesz wchodzić passkeyem (Touch ID, Face ID, Windows Hello) zamiast hasłem.')
+    : slot.synced
+      ? tr('Odblokowanie passkeyem jest włączone. Passkey może się synchronizować przez menedżer haseł.')
+      : tr('Odblokowanie passkeyem jest włączone. Passkey jest tylko na tym urządzeniu albo kluczu sprzętowym.')
+  $('btn-bio').textContent = slot ? tr('Wyłącz odblokowanie passkeyem') : tr('Włącz odblokowanie passkeyem')
+}
+
+function openBio() {
+  pushModal('bio-modal'); clr('bio-msg')
+  ;($('bio-pass') as HTMLInputElement).value = ''
+  // A network that refuses synced passkeys leaves one choice, and says why.
+  const deviceOnly = ACTIVE.policy.softUnlock === 'device-bound'
+  const synced = $('bio-kind-synced') as HTMLInputElement, device = $('bio-kind-device') as HTMLInputElement
+  synced.disabled = deviceOnly
+  if (deviceOnly) device.checked = true
+  else synced.checked = true
+  $('bio-kind-note').hidden = !deviceOnly
+  $('bio-pass').focus()
+}
+$('bio-cancel').addEventListener('click', () => dropModal('bio-modal'))
+$('btn-bio').addEventListener('click', async () => {
+  if (!activeSoftProfile) return
+  if (!localStorage.getItem(unlockSlotKey(activeSoftProfile))) { openBio(); return }
+  const { ok } = await ask(tr('Wyłączyć odblokowanie passkeyem?'),
+    tr('Do profilu wejdziesz wtedy tylko hasłem. Sam passkey zostaje w menedżerze haseł i możesz go tam usunąć.'), tr('Wyłącz'))
+  if (!ok) return
+  localStorage.removeItem(unlockSlotKey(activeSoftProfile))
+  paintBioSetting()
+  toast(tr('Odblokowanie passkeyem wyłączone.'))
+})
+$('bio-save').addEventListener('click', async () => {
+  const name = activeSoftProfile
+  const pw = ($('bio-pass') as HTMLInputElement).value
+  if (!name) return
+  if (!pw) { setMsg('bio-msg', tr('Podaj hasło.'), 'err'); return }
+  const blob = JSON.parse(localStorage.getItem(softKey(name)) ?? 'null')
+  if (!isSealedProfile(blob)) { setMsg('bio-msg', tr('Nie znaleziono profilu do zmiany.'), 'err'); return }
+  const btn = $('bio-save') as HTMLButtonElement
+  btn.disabled = true; clr('bio-msg')
+  try {
+    // The password first: a wrong one must not cost the person a passkey made for nothing.
+    const plain = await unseal(pw, blob)
+    btn.textContent = tr('Czekam na passkey…')
+    const deviceOnly = ($('bio-kind-device') as HTMLInputElement).checked || ACTIVE.policy.softUnlock === 'device-bound'
+    const made = await enrollPasskey(name, deviceOnly)
+    try {
+      localStorage.setItem(unlockSlotKey(name), JSON.stringify(await sealSlot(made.secret, plain, name, made, Date.now())))
+    } finally { made.secret.fill(0) }
+    dropModal('bio-modal')
+    paintBioSetting()
+    toast(tr('Odblokowanie passkeyem włączone.'))
+  } catch (e: any) {
+    if (e instanceof BadPassword) setMsg('bio-msg', tr('Złe hasło.'), 'err')
+    else if (e instanceof PasskeyCancelled) setMsg('bio-msg', tr('Passkey nie został utworzony.'), 'err')
+    else if (e instanceof PasskeyNoPrf) setMsg('bio-msg', tr('Ta przeglądarka albo menedżer haseł nie potrafi odblokować profilu passkeyem (brak rozszerzenia PRF). Spróbuj innej przeglądarki albo klucza sprzętowego.'), 'err')
+    else if (e instanceof PasskeySynced) setMsg('bio-msg', tr('Ten passkey może się synchronizować, a wybrano tylko to urządzenie. Użyj klucza sprzętowego albo passkeya zapisanego tylko na tym urządzeniu.'), 'err')
+    else setMsg('bio-msg', tr('Błąd: ') + (e?.message ?? e), 'err')
+  } finally { btn.disabled = false; btn.textContent = tr('Włącz') }
 })
 
 $('btn-settings').addEventListener('click', openDrawer)

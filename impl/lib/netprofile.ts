@@ -36,6 +36,15 @@ export interface NetworkPolicy {
   /** false: a managed device (MDM) shows no public network beside this one. */
   allowPublic?: boolean
   /**
+   * Unlocking a software profile with a passkey (SPEC 4.5, Unlock slot).
+   * Absent or `any`: allowed, the person chooses synced or device-bound;
+   * `device-bound`: a passkey that can be synced (BE flag) is refused;
+   * `none`: not offered, and a slot already on the device is deleted at the
+   * next sign-in with the password. Kept by the client only - the BE flag is
+   * the authenticator's declaration, not an attestation.
+   */
+  softUnlock?: 'any' | 'device-bound' | 'none'
+  /**
    * `allowlist`: the nodes let in only devices on their list (access tier B,
    * OPERATOR-NODE-PLAN.md). Each identity then keeps a stable libp2p key - a
    * stable PeerId the node recognises, a pseudonym unrelated to the identity
@@ -129,6 +138,7 @@ export function parseOperatorProfile(raw: unknown): OperatorProfile {
   const p = o.policy ?? {}
   if (p.transport !== undefined) { if (p.transport !== 'node-only') throw new Error('policy.transport may only be "node-only"'); policy.transport = 'node-only' }
   if (p.softwareProfiles !== undefined) { if (typeof p.softwareProfiles !== 'boolean') throw new Error('policy.softwareProfiles must be true or false'); policy.softwareProfiles = p.softwareProfiles }
+  if (p.softUnlock !== undefined) { if (!['any', 'device-bound', 'none'].includes(p.softUnlock)) throw new Error('policy.softUnlock must be "any", "device-bound" or "none"'); policy.softUnlock = p.softUnlock }
   if (p.allowPublic !== undefined) { if (typeof p.allowPublic !== 'boolean') throw new Error('policy.allowPublic must be true or false'); policy.allowPublic = p.allowPublic }
   if (p.access !== undefined) { if (p.access !== 'allowlist') throw new Error('policy.access may only be "allowlist"'); policy.access = 'allowlist' }
   if (p.enroll !== undefined) {
