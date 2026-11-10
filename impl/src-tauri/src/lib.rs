@@ -1674,6 +1674,7 @@ mod mobile {
         // web/src/app.ts and can be zoomed - by the person through the slider,
         // and by the decoder itself when it decides the code is too small.
         b.plugin(tauri_plugin_barcode_scanner::init())
+            .plugin(tauri_plugin_onchato_bio::init())
             .plugin(tauri_plugin_notification::init())
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_fs::init())

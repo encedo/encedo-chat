@@ -65,7 +65,10 @@ const LOOKS_LIKE_A_FLAG = /^[a-z][a-z0-9-]*$/
 
 function trKeys(src: string): string[] {
   const out: string[] = []
-  for (const m of src.matchAll(/\btr\(/g)) {
+  // `bt(passkey, phone)` and `bioText(id, passkey, phone)` (app.ts) pick one of
+  // two captions by platform; both are keys, and their calls span lines.
+  for (const m of src.matchAll(/\b(tr|bt|bioText)\(/g)) {
+    const multiline = m[1] !== 'tr'
     // Walk to the matching close paren, collecting the quoted literals on the
     // way: `tr(cond ? 'a' : 'b')` has two keys and both must exist.
     let depth = 1
@@ -74,7 +77,7 @@ function trKeys(src: string): string[] {
       const c = src[i]
       if (c === '(') depth++
       else if (c === ')') depth--
-      else if (c === '\n') break
+      else if (c === '\n' && !multiline) break
       else if (c === "'") {
         let lit = ''
         for (i++; i < src.length && src[i] !== "'"; i++) {

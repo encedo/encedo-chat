@@ -3362,6 +3362,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-notification",
+ "tauri-plugin-onchato-bio",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
@@ -5514,6 +5515,14 @@ dependencies = [
  "thiserror 2.0.19",
  "time",
  "url",
+]
+
+[[package]]
+name = "tauri-plugin-onchato-bio"
+version = "0.1.0"
+dependencies = [
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

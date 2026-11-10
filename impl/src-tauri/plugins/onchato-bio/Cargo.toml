@@ -1,0 +1,23 @@
+# The Android side of a software profile's unlock slot (SPEC 4.5, Unlock
+# slot; web/src/passkey.ts): an AES key in AndroidKeyStore that only a
+# fingerprint, a face or the device's own unlock releases. Ours, not a fork.
+
+[package]
+name = "tauri-plugin-onchato-bio"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+publish = false
+build = "build.rs"
+links = "tauri-plugin-onchato-bio"
+license = "MIT"
+
+[lib]
+name = "tauri_plugin_onchato_bio"
+path = "src/lib.rs"
+
+[dependencies]
+tauri = { version = "2.10", default-features = false }
+
+[build-dependencies]
+tauri-plugin = { version = "2.5", features = ["build"] }

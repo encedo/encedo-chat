@@ -5,9 +5,10 @@
  * The sealed profile (`profile.ts`) stays exactly what it was, and the password
  * keeps opening it. A slot is a SECOND sealing of the same plaintext, under a
  * key that comes from the platform's authenticator instead of from a password:
- * the WebAuthn PRF output of a passkey (`web/src/passkey.ts`). Touch ID, Face
- * ID, Windows Hello or a phone's fingerprint is what unlocks the passkey; this
- * file never sees any of that, only the 32 bytes it yields.
+ * the WebAuthn PRF output of a passkey in a browser, or a random secret the
+ * Android keystore releases (`web/src/passkey.ts` hides which). Touch ID, Face
+ * ID, Windows Hello or a phone's fingerprint is what unlocks it; this file
+ * never sees any of that, only the 32 bytes it yields.
  *
  * What it changes about the assurance, honestly: a profile with a slot opens
  * by EITHER way, so it is as strong as the weaker one. A synced passkey puts
@@ -43,16 +44,9 @@ export const UNLOCK_SLOT_PREFIX = 'ec-soft-unlock-'
 /** What a network allows (NetworkPolicy.softUnlock); absent = 'any'. */
 export type SoftUnlockPolicy = 'any' | 'device-bound' | 'none'
 
-export interface UnlockSlot {
+interface SlotCommon {
   v: 1
-  kind: 'webauthn-prf'
-  /** The WebAuthn relying party: this page's host. A slot of another origin is not offered. */
-  rpId: string
-  /** The passkey's credential id, base64. */
-  credId: string
-  /** The PRF input (`eval.first`), 32 random bytes, base64. */
-  prfSalt: string
-  /** The passkey could be synced (the authenticator's BE flag): its secret may live in a provider's cloud. */
+  /** The secret could leave this device (a synced passkey): it may live in a provider's cloud. */
   synced: boolean
   /** When the password last opened this profile (ms). */
   pwAt: number
@@ -60,13 +54,45 @@ export interface UnlockSlot {
   ct: string
 }
 
+/** The browser: a passkey's PRF output is the secret. */
+export interface PrfSlot extends SlotCommon {
+  kind: 'webauthn-prf'
+  /** The WebAuthn relying party: this page's host. A slot of another origin is not offered. */
+  rpId: string
+  /** The passkey's credential id, base64. */
+  credId: string
+  /** The PRF input (`eval.first`), 32 random bytes, base64. */
+  prfSalt: string
+}
+
+/**
+ * The Android app: a random secret wrapped by a non-exportable AES key in
+ * AndroidKeyStore that only a fingerprint, a face or the device's own unlock
+ * releases (src-tauri/plugins/onchato-bio). `synced` is always false.
+ */
+export interface KeystoreSlot extends SlotCommon {
+  kind: 'android-keystore'
+  /** The keystore entry, random hex: it names no profile. */
+  alias: string
+  /** The secret as the keystore key sealed it (AES-GCM), base64. */
+  wiv: string
+  wct: string
+}
+
+export type UnlockSlot = PrfSlot | KeystoreSlot
+/** What a slot records about the key behind it: everything but the seal. */
+export type SlotMeta =
+  | Pick<PrfSlot, 'kind' | 'rpId' | 'credId' | 'prfSalt' | 'synced'>
+  | Pick<KeystoreSlot, 'kind' | 'alias' | 'wiv' | 'wct' | 'synced'>
+
+const str = (x: any) => typeof x === 'string' && x.length > 0
+
 export function isUnlockSlot(v: any): v is UnlockSlot {
-  return !!v && v.v === 1 && v.kind === 'webauthn-prf'
-    && typeof v.rpId === 'string' && v.rpId.length > 0
-    && typeof v.credId === 'string' && v.credId.length > 0
-    && typeof v.prfSalt === 'string' && typeof v.synced === 'boolean'
-    && Number.isSafeInteger(v.pwAt) && v.pwAt >= 0
-    && typeof v.iv === 'string' && typeof v.ct === 'string'
+  if (!v || v.v !== 1 || typeof v.synced !== 'boolean' || !Number.isSafeInteger(v.pwAt) || v.pwAt < 0
+    || typeof v.iv !== 'string' || typeof v.ct !== 'string') return false
+  if (v.kind === 'webauthn-prf') return str(v.rpId) && str(v.credId) && typeof v.prfSalt === 'string'
+  if (v.kind === 'android-keystore') return /^[0-9a-f]{32}$/.test(v.alias) && str(v.wiv) && str(v.wct) && v.synced === false
+  return false
 }
 
 /** The AEAD refused: the passkey answered with a different secret, or the slot was altered. */
@@ -86,13 +112,15 @@ async function slotKey(secret: Uint8Array): Promise<CryptoKey> {
 const aad = (name: string) => new TextEncoder().encode(name)
 
 export async function sealSlot(
-  secret: Uint8Array, plaintext: string, name: string,
-  meta: { rpId: string; credId: string; prfSalt: string; synced: boolean }, now: number,
+  secret: Uint8Array, plaintext: string, name: string, meta: SlotMeta, now: number,
 ): Promise<UnlockSlot> {
   const iv = randomBytes(12)
   const key = await slotKey(secret)
   const ct = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(name) }, key, new TextEncoder().encode(plaintext)))
-  return { v: 1, kind: 'webauthn-prf', rpId: meta.rpId, credId: meta.credId, prfSalt: meta.prfSalt, synced: meta.synced, pwAt: now, iv: b64(iv), ct: b64(ct) }
+  const seal = { v: 1 as const, pwAt: now, iv: b64(iv), ct: b64(ct) }
+  return meta.kind === 'android-keystore'
+    ? { ...seal, kind: 'android-keystore', alias: meta.alias, wiv: meta.wiv, wct: meta.wct, synced: false }
+    : { ...seal, kind: 'webauthn-prf', rpId: meta.rpId, credId: meta.credId, prfSalt: meta.prfSalt, synced: meta.synced }
 }
 
 export async function openSlot(secret: Uint8Array, slot: UnlockSlot, name: string): Promise<string> {

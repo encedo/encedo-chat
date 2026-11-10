@@ -15,10 +15,12 @@
  *
  * Not offered in the packaged apps: their pages load from tauri://localhost or
  * http://tauri.localhost, which is no relying party a passkey can belong to.
- * Those get the platform's own keystore later (BIOMETRIA-PLAN, stage 6).
+ * The Android app uses its keystore instead (the bottom of this file, and
+ * src-tauri/plugins/onchato-bio); the desktop shells and iOS have none yet.
  */
 
 import { randomBytes, b64, unb64 } from '../../lib/wc.ts'
+import type { SlotMeta, UnlockSlot } from '../../lib/unlockslot.ts'
 
 /** The person closed the prompt, or it timed out: not an error to report. */
 export class PasskeyCancelled extends Error {
@@ -104,7 +106,7 @@ function forget(credId: Uint8Array) {
 }
 const b64url = (u8: Uint8Array) => b64(u8).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 
-export interface Enrolled { rpId: string; credId: string; prfSalt: string; synced: boolean; secret: Uint8Array }
+export type Enrolled = SlotMeta & { secret: Uint8Array }
 
 /**
  * Make a passkey for this profile and get its PRF secret. `deviceOnly` asks
@@ -151,11 +153,115 @@ export async function enrollPasskey(name: string, deviceOnly: boolean): Promise<
   // Unknown counts as syncable: the safe reading for a rule that refuses them.
   const synced = be !== false
   if (deviceOnly && synced) { forget(credId); secret.fill(0); throw new PasskeySynced() }
-  return { rpId: rpId(), credId: b64(credId), prfSalt: b64(salt), synced, secret }
+  return { kind: 'webauthn-prf', rpId: rpId(), credId: b64(credId), prfSalt: b64(salt), synced, secret }
 }
 
 /** The PRF secret of an enrolled passkey, after the platform verified the person. */
 export async function unlockPasskey(slot: { credId: string; prfSalt: string }): Promise<{ secret: Uint8Array; synced: boolean | null }> {
   const { secret, be } = await assertPrf(unb64(slot.credId), unb64(slot.prfSalt))
   return { secret, synced: be }
+}
+
+// ---- the Android app: AndroidKeyStore behind BiometricPrompt -----------------
+//
+// The host makes a non-exportable AES key that opens only after a fingerprint,
+// a face or the device's own unlock (BIOMETRIC_STRONG | DEVICE_CREDENTIAL),
+// draws 32 random bytes and returns them with their sealing by that key. The
+// 32 bytes are the slot's secret exactly as a passkey's PRF output is; the
+// sealing goes into the slot, and only the keystore can undo it.
+
+/** The keystore entry is gone or was invalidated (a new fingerprint, a removed screen lock). */
+export class UnlockKeyGone extends Error {
+  constructor() { super('the unlock key is gone'); this.name = 'UnlockKeyGone' }
+}
+
+const tauriInvoke = (): ((cmd: string, args?: any) => Promise<any>) | null => {
+  const i = (globalThis as any).__TAURI_INTERNALS__
+  return typeof i?.invoke === 'function' ? i.invoke.bind(i) : null
+}
+
+/** The host's rejection as one of its codes: the plugin rejects with the code as the message. */
+function hostCode(e: any): string {
+  const m = typeof e === 'string' ? e : (e?.message ?? '')
+  return String(m).trim()
+}
+
+function mapHost(e: any): Error {
+  const c = hostCode(e)
+  if (c === 'cancelled') return new PasskeyCancelled()
+  if (c === 'invalidated' || c === 'missing') return new UnlockKeyGone()
+  return e instanceof Error ? e : new Error(c || String(e))
+}
+
+let nativeState: boolean | null = null
+/** Ask the host once whether it can hold an unlock key (Android with a screen lock). */
+async function nativeAvailable(): Promise<boolean> {
+  if (nativeState !== null) return nativeState
+  const inv = tauriInvoke()
+  if (!inv) return (nativeState = false)
+  try {
+    const r = await inv('plugin:onchato-bio|status')
+    nativeState = r?.available === true
+  } catch { nativeState = false }   // a shell without the plugin (desktop, iOS)
+  return nativeState
+}
+
+export type UnlockKind = 'passkey' | 'android'
+let kind: UnlockKind | null = null
+/**
+ * Which way in this page can offer: a passkey in a browser, the keystore in
+ * the Android app, or none. Resolved once at startup (`resolveUnlockKind`);
+ * null until then, which shows nothing.
+ */
+export const unlockKind = (): UnlockKind | null => kind
+export async function resolveUnlockKind(): Promise<UnlockKind | null> {
+  kind = passkeyPossible() ? 'passkey' : (await nativeAvailable()) ? 'android' : null
+  return kind
+}
+
+/** Whether a stored slot belongs to the way in this page has. */
+export function slotUsableHere(slot: UnlockSlot): boolean {
+  if (slot.kind === 'webauthn-prf') return kind === 'passkey' && slot.rpId === rpId()
+  return kind === 'android'
+}
+
+const hexId = () => Array.from(randomBytes(16), (b) => b.toString(16).padStart(2, '0')).join('')
+
+/** Titles for the system prompt, in the page's language. */
+export interface PromptText { title: string; subtitle: string }
+
+/** A new unlock key: a passkey here, the keystore in the Android app. */
+export async function enrollUnlock(name: string, deviceOnly: boolean, text: PromptText): Promise<Enrolled> {
+  if (kind !== 'android') return enrollPasskey(name, deviceOnly)
+  const inv = tauriInvoke()
+  if (!inv) throw new Error('not the app')
+  const alias = hexId()
+  let r: any
+  try { r = await inv('plugin:onchato-bio|enroll', { alias, ...text }) } catch (e) { throw mapHost(e) }
+  const secret = unb64(String(r?.secret ?? ''))
+  if (secret.length !== 32 || !r?.iv || !r?.ct) { forgetUnlock({ kind: 'android-keystore', alias } as any); throw new Error('the keystore answered without a key') }
+  return { kind: 'android-keystore', alias, wiv: String(r.iv), wct: String(r.ct), synced: false, secret }
+}
+
+/** The slot's secret, after the platform verified the person. */
+export async function unlockWith(slot: UnlockSlot, text: PromptText): Promise<{ secret: Uint8Array; synced: boolean | null }> {
+  if (slot.kind === 'webauthn-prf') return unlockPasskey(slot)
+  const inv = tauriInvoke()
+  if (!inv) throw new Error('not the app')
+  let r: any
+  try { r = await inv('plugin:onchato-bio|unlock', { alias: slot.alias, iv: slot.wiv, ct: slot.wct, ...text }) } catch (e) { throw mapHost(e) }
+  const secret = unb64(String(r?.secret ?? ''))
+  if (secret.length !== 32) throw new UnlockKeyGone()
+  return { secret, synced: false }
+}
+
+/**
+ * The slot is being dropped: delete what stands behind it where we can. A
+ * keystore entry goes; a passkey stays in the person's password manager
+ * (the page cannot delete one), which the UI says.
+ */
+export function forgetUnlock(slot: UnlockSlot | null) {
+  if (!slot || slot.kind !== 'android-keystore') return
+  const inv = tauriInvoke()
+  if (inv) void inv('plugin:onchato-bio|remove', { alias: slot.alias }).catch(() => {})
 }

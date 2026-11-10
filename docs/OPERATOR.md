@@ -337,7 +337,7 @@ The profile, for reference:
 
 - `policy.transport: "node-only"` keeps all content on your servers.
 - `policy.softwareProfiles: false` allows only HEM-backed identities.
-- `policy.softUnlock` decides whether a software profile may be opened with a passkey: `any` (the default), `device-bound` (a passkey that can sync is refused) or `none`. Enforced by the client only.
+- `policy.softUnlock` decides whether a software profile may be opened with a passkey (or, in the Android app, a fingerprint or the screen lock): `any` (the default), `device-bound` (a passkey that can sync is refused; the Android keystore is device-bound and allowed) or `none`. Enforced by the client only.
 - `feedback: null` shows no feedback form.
 
 ## Appendix C: without Docker

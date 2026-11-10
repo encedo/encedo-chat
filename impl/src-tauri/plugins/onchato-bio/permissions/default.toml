@@ -1,0 +1,4 @@
+"$schema" = "schemas/schema.json"
+[default]
+description = "The unlock key of a software profile: availability, enrolment, unlock and removal."
+permissions = ["allow-status", "allow-enroll", "allow-unlock", "allow-remove"]

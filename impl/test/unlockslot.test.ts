@@ -10,7 +10,7 @@ import { kdf } from '../lib/wc.ts'
 const NOW = 1_800_000_000_000
 const DAY = 86_400_000
 const SECRET = new Uint8Array(32).fill(7)
-const META = { rpId: 'app.example', credId: 'Y3JlZA==', prfSalt: Buffer.alloc(32, 1).toString('base64'), synced: true }
+const META = { kind: 'webauthn-prf' as const, rpId: 'app.example', credId: 'Y3JlZA==', prfSalt: Buffer.alloc(32, 1).toString('base64'), synced: true }
 const PLAIN = JSON.stringify({ handle: 'Lab1', priv: 'x'.repeat(44) })
 
 test('the slot key is HKDF(info = onchato-soft-unlock-v1, empty salt) - pinned against node:crypto', async () => {
@@ -75,4 +75,22 @@ test('a network policy decides which slots may be used', () => {
   assert.equal(slotAllowed('device-bound', false), true)
   assert.equal(slotAllowed('device-bound', true), false)
   assert.equal(slotAllowed('none', false), false)
+})
+
+test('a keystore slot (the Android app) seals the same way and keeps its wrapped secret', async () => {
+  const KS = { kind: 'android-keystore' as const, alias: 'ab'.repeat(16), wiv: 'aXY=', wct: 'Y3Q=', synced: false }
+  const slot = await sealSlot(SECRET, PLAIN, 'Lab1', KS, NOW)
+  assert.equal(slot.kind, 'android-keystore')
+  assert.ok(isUnlockSlot(slot))
+  assert.deepEqual(readSlot(JSON.stringify(slot)), slot)
+  assert.equal(await openSlot(SECRET, slot, 'Lab1'), PLAIN)
+  await assert.rejects(openSlot(SECRET, slot, 'Lab2'), SlotRefused)
+  assert.equal('rpId' in slot, false, 'no WebAuthn fields on a keystore slot')
+  // The keystore is device-bound by construction: a record claiming otherwise is not a slot.
+  assert.equal(readSlot(JSON.stringify({ ...slot, synced: true })), null)
+  assert.equal(readSlot(JSON.stringify({ ...slot, alias: 'Lab1' })), null, 'the alias is random hex, never a name')
+  assert.equal(readSlot(JSON.stringify({ ...slot, wct: '' })), null)
+  // And a passkey slot without its relying party is not one either.
+  const prf = await sealSlot(SECRET, PLAIN, 'Lab1', META, NOW)
+  assert.equal(readSlot(JSON.stringify({ ...prf, rpId: '' })), null)
 })

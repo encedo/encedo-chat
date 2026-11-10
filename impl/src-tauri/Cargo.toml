@@ -60,6 +60,10 @@ tauri-plugin-notification = "2"
 # `desk_open_url`). The desktop launches xdg-open / open / rundll32 itself.
 tauri-plugin-opener = "2"
 tauri-plugin-barcode-scanner = { path = "plugins/barcode-scanner" }
+# The unlock key of a software profile (web/src/passkey.ts): AndroidKeyStore
+# behind BiometricPrompt. Ours. Registered on iOS too but with no native side
+# there yet, so its commands fail and the page offers no unlock.
+tauri-plugin-onchato-bio = { path = "plugins/onchato-bio" }
 # "Save" on a phone. Android's WebView ignores `<a download>` on a blob URL,
 # so the button did nothing there (reported 2026-09-25). The host asks the
 # system where to put the file (dialog: ACTION_CREATE_DOCUMENT, a content://
