@@ -1,0 +1,59 @@
+# A test build of the Windows app from a work branch: the bare onchato.exe for
+# x64 and ARM64, unsigned, as a workflow artifact. No release, no installer, no
+# signing, no secrets - it exists so a Windows-only change (Windows Hello
+# unlock, plugins/onchato-bio/src/hello.rs) can be tried on a real machine
+# before it is tagged. WebView2 ships with Windows 11, so the bare exe runs
+# without the installer; SmartScreen warns because it is unsigned.
+#
+# Runs on a push to a `wip/win-*` branch, or by hand from such a branch.
+name: windows-dev
+
+on:
+  push:
+    branches: ['wip/win-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: x64,   target: x86_64-pc-windows-msvc }
+          - { label: arm64, target: aarch64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: recursive }
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: impl/package-lock.json
+      - run: npm ci
+        working-directory: impl
+
+      - uses: dtolnay/rust-toolchain@stable
+        with: { targets: '${{ matrix.target }}' }
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: impl/src-tauri
+          key: dev-${{ matrix.label }}
+
+      # --no-bundle: the exe alone (no NSIS/WiX download, no updater signature).
+      - name: Build
+        working-directory: impl
+        shell: bash
+        run: npm run tauri -- build --no-bundle --target ${{ matrix.target }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: onchato-${{ matrix.label }}-${{ github.sha }}
+          path: impl/src-tauri/target/${{ matrix.target }}/release/onchato.exe
+          if-no-files-found: error
+          retention-days: 7
