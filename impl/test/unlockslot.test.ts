@@ -94,3 +94,18 @@ test('a keystore slot (the Android app) seals the same way and keeps its wrapped
   const prf = await sealSlot(SECRET, PLAIN, 'Lab1', META, NOW)
   assert.equal(readSlot(JSON.stringify({ ...prf, rpId: '' })), null)
 })
+
+test('a Hello slot (the Windows app) stores nothing but its alias, and is device-bound', async () => {
+  const H = { kind: 'windows-hello' as const, alias: 'cd'.repeat(16), synced: false }
+  const slot = await sealSlot(SECRET, PLAIN, 'Lab1', H, NOW)
+  assert.equal(slot.kind, 'windows-hello')
+  assert.ok(isUnlockSlot(slot))
+  assert.deepEqual(readSlot(JSON.stringify(slot)), slot)
+  assert.equal(await openSlot(SECRET, slot, 'Lab1'), PLAIN)
+  await assert.rejects(openSlot(SECRET, slot, 'Lab2'), SlotRefused)
+  // The secret is re-derived from a signature each time: no wrapped copy rides along.
+  assert.equal('wct' in slot || 'rpId' in slot, false)
+  assert.equal(readSlot(JSON.stringify({ ...slot, synced: true })), null)
+  assert.equal(readSlot(JSON.stringify({ ...slot, alias: 'Lab1' })), null)
+  assert.equal(readSlot(JSON.stringify({ ...slot, kind: 'windows-helo' })), null)
+})

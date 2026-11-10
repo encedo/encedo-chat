@@ -193,35 +193,41 @@ function mapHost(e: any): Error {
   return e instanceof Error ? e : new Error(c || String(e))
 }
 
-let nativeState: boolean | null = null
-/** Ask the host once whether it can hold an unlock key (Android with a screen lock). */
-async function nativeAvailable(): Promise<boolean> {
-  if (nativeState !== null) return nativeState
+type NativeKind = 'android' | 'windows'
+let nativeState: NativeKind | null | undefined
+/**
+ * Ask the host once whether it can hold an unlock key: Android with a screen
+ * lock, Windows with Hello set up. Windows names itself (`platform`); the
+ * Kotlin side predates that and answers without it.
+ */
+async function nativeKind(): Promise<NativeKind | null> {
+  if (nativeState !== undefined) return nativeState
   const inv = tauriInvoke()
-  if (!inv) return (nativeState = false)
+  if (!inv) return (nativeState = null)
   try {
     const r = await inv('plugin:onchato-bio|status')
-    nativeState = r?.available === true
-  } catch { nativeState = false }   // a shell without the plugin (desktop, iOS)
+    nativeState = r?.available !== true ? null : r?.platform === 'windows' ? 'windows' : 'android'
+  } catch { nativeState = null }   // a shell without the plugin (macOS, Linux, iOS)
   return nativeState
 }
 
-export type UnlockKind = 'passkey' | 'android'
+export type UnlockKind = 'passkey' | NativeKind
 let kind: UnlockKind | null = null
 /**
  * Which way in this page can offer: a passkey in a browser, the keystore in
- * the Android app, or none. Resolved once at startup (`resolveUnlockKind`);
+ * the Android app, Windows Hello in the Windows app, or none. Resolved once at startup (`resolveUnlockKind`);
  * null until then, which shows nothing.
  */
 export const unlockKind = (): UnlockKind | null => kind
 export async function resolveUnlockKind(): Promise<UnlockKind | null> {
-  kind = passkeyPossible() ? 'passkey' : (await nativeAvailable()) ? 'android' : null
+  kind = passkeyPossible() ? 'passkey' : await nativeKind()
   return kind
 }
 
 /** Whether a stored slot belongs to the way in this page has. */
 export function slotUsableHere(slot: UnlockSlot): boolean {
   if (slot.kind === 'webauthn-prf') return kind === 'passkey' && slot.rpId === rpId()
+  if (slot.kind === 'windows-hello') return kind === 'windows'
   return kind === 'android'
 }
 
@@ -230,15 +236,19 @@ const hexId = () => Array.from(randomBytes(16), (b) => b.toString(16).padStart(2
 /** Titles for the system prompt, in the page's language. */
 export interface PromptText { title: string; subtitle: string }
 
-/** A new unlock key: a passkey here, the keystore in the Android app. */
+/** A new unlock key: a passkey here, the keystore in the Android app, Hello in the Windows app. */
 export async function enrollUnlock(name: string, deviceOnly: boolean, text: PromptText): Promise<Enrolled> {
-  if (kind !== 'android') return enrollPasskey(name, deviceOnly)
+  if (kind !== 'android' && kind !== 'windows') return enrollPasskey(name, deviceOnly)
   const inv = tauriInvoke()
   if (!inv) throw new Error('not the app')
   const alias = hexId()
   let r: any
   try { r = await inv('plugin:onchato-bio|enroll', { alias, ...text }) } catch (e) { throw mapHost(e) }
   const secret = unb64(String(r?.secret ?? ''))
+  if (kind === 'windows') {
+    if (secret.length !== 32) { forgetUnlock({ kind: 'windows-hello', alias } as any); throw new Error('Windows Hello answered without a key') }
+    return { kind: 'windows-hello', alias, synced: false, secret }
+  }
   if (secret.length !== 32 || !r?.iv || !r?.ct) { forgetUnlock({ kind: 'android-keystore', alias } as any); throw new Error('the keystore answered without a key') }
   return { kind: 'android-keystore', alias, wiv: String(r.iv), wct: String(r.ct), synced: false, secret }
 }
@@ -249,7 +259,8 @@ export async function unlockWith(slot: UnlockSlot, text: PromptText): Promise<{ 
   const inv = tauriInvoke()
   if (!inv) throw new Error('not the app')
   let r: any
-  try { r = await inv('plugin:onchato-bio|unlock', { alias: slot.alias, iv: slot.wiv, ct: slot.wct, ...text }) } catch (e) { throw mapHost(e) }
+  const sealed = slot.kind === 'android-keystore' ? { iv: slot.wiv, ct: slot.wct } : {}
+  try { r = await inv('plugin:onchato-bio|unlock', { alias: slot.alias, ...sealed, ...text }) } catch (e) { throw mapHost(e) }
   const secret = unb64(String(r?.secret ?? ''))
   if (secret.length !== 32) throw new UnlockKeyGone()
   return { secret, synced: false }
@@ -257,11 +268,11 @@ export async function unlockWith(slot: UnlockSlot, text: PromptText): Promise<{ 
 
 /**
  * The slot is being dropped: delete what stands behind it where we can. A
- * keystore entry goes; a passkey stays in the person's password manager
+ * keystore entry or a Hello credential goes; a passkey stays in the person's password manager
  * (the page cannot delete one), which the UI says.
  */
 export function forgetUnlock(slot: UnlockSlot | null) {
-  if (!slot || slot.kind !== 'android-keystore') return
+  if (!slot || slot.kind === 'webauthn-prf') return
   const inv = tauriInvoke()
   if (inv) void inv('plugin:onchato-bio|remove', { alias: slot.alias }).catch(() => {})
 }
