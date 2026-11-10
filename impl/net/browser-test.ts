@@ -2746,6 +2746,11 @@ async function main() {
     // Offline -> All, keyed on the row's dot. Pressed with real mouse events.
     {
       await A.send('Page.bringToFront', {}, true)
+      // A desktop window: under GROUP_ONLY (the CI job) nothing has resized A
+      // yet, and headless Chrome starts at 800x600 - the one-pane layout, where
+      // an open group hides the list and this button has no box at all (red
+      // CI from 0.8.4 to 0.8.6; the full run passed because it resizes first).
+      await A.resize(1200, 800); await sleep(300)
       // The group scenarios before this one leave A on the Groups tab, where the
       // contacts head (and this button) is hidden.
       await A.eval(`document.getElementById('tab-contacts').click(); return 1`)
@@ -3931,6 +3936,12 @@ async function main() {
       await B.send('WebAuthn.disable', {}, true)
       await B.reload(B_URL)
       await login(B, 'drugi-profil', false)
+      // drugi-profil has nobody in its book, so every sign-in opens the
+      // first-run card; left open, it stood in front of every later scenario.
+      await B.waitFor('the first-run card after signing back in', `
+        return document.getElementById('welcome-modal').classList.contains('open')`, 20_000)
+      await B.eval(`document.getElementById('welcome-close').click(); return 1`)
+      await B.waitFor('the card closed', `return !document.getElementById('welcome-modal').classList.contains('open')`, 5_000)
     }
 
     // ---- the published node list, fetched by the CID the manifest names -----
@@ -3986,7 +3997,7 @@ async function main() {
     scenario('Sign-out from the header: confirmed, the page reloads to the sign-in screen')
     {
       await B.eval(`if (document.getElementById('drawer').classList.contains('open')) document.getElementById('btn-close-drawer').click(); return 1`)
-      await B.waitFor('nothing open', `return !document.getElementById('drawer').classList.contains('open') && !document.querySelector('.modal.open')`, 5_000)
+        await B.waitFor('nothing open', `return !document.getElementById('drawer').classList.contains('open') && !document.querySelector('.modal.open')`, 5_000)
       await B.resize(390, 780, true)
       if (await B.eval<boolean>(`return document.getElementById('app').classList.contains('chat-open')`)) {
         await B.eval(`document.getElementById('btn-back').click(); return 1`); await sleep(600)
