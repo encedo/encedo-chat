@@ -19,7 +19,7 @@ import { setCoreBackend, coreStatus, onCoreFallback, type CoreBackend } from '..
 import { hemIdentityFrom, hemRenameIdentity, browserSoftwareIdentity, startSession, hemContactBook, localContactBook, mergedContactBook, localOnlyManager, hemGkBackend, pubKeyReader, hemWarmTokens, collect, type Conversation, type ClientSession, type Identity, type ContactManager, type Contact, type ContactBook } from '../../lib/core.ts'
 import { seal, unseal, reseal, isSealedProfile, BadPassword } from '../../lib/profile.ts'
 import { sealSlot, openSlot, readSlot, passwordDue, withPasswordAt, slotAllowed, unlockSlotKey, SlotRefused } from '../../lib/unlockslot.ts'
-import { passkeyPossible, enrollPasskey, unlockPasskey, PasskeyCancelled, PasskeyNoPrf, PasskeySynced } from './passkey.ts'
+import { passkeyPossible, prfDeclaredMissing, enrollPasskey, unlockPasskey, PasskeyCancelled, PasskeyNoPrf, PasskeySynced } from './passkey.ts'
 import { exportProfile, openBundle, applyBundle, conflictsWith, identityHere, keysOfProfile, localKV, FILE_EXT, type KV } from '../../lib/migrate.ts'
 import { decodeInvite, inviteLink, inviteFromPaste, setInviteNetwork, inviteNetwork, type Invite } from '../../lib/invite.ts'
 import { pickFirst, orderFrom, nodeKey } from '../../lib/nodepick.ts'
@@ -1315,6 +1315,7 @@ async function softLogin() {
     }
 
     let id: Identity
+    let created = ''
     if (!raw && ACTIVE.policy.softwareProfiles === false) {
       setMsg('soft-msg', tr('Ta sieć wymaga tożsamości w HEM.'), 'err'); return
     }
@@ -1331,6 +1332,7 @@ async function softLogin() {
       let generated = ''
       id = await browserSoftwareIdentity(name, () => null, (v) => { generated = v })
       localStorage.setItem(softKey(name), JSON.stringify(await seal(pass, generated)))
+      created = generated
       // Born in this page's network, and in it for good (lib/activenet.ts).
       setBinding(localKV(), softBindingKey(name), ACTIVE.id, BUILTIN_NET)
     } else {
@@ -1346,6 +1348,7 @@ async function softLogin() {
       id = await browserSoftwareIdentity(name, () => plain, () => {})
     }
     await finishSoftLogin(name, id)
+    if (created) void offerPasskey(name, created)
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('soft-msg', tr('Złe hasło.'), 'err')
     else setMsg('soft-msg', tr('Błąd tożsamości software: ') + (e?.message ?? e), 'err')
@@ -1380,7 +1383,7 @@ function paintSoftBio() {
   const slot = softCreating || softIntendsNew ? null : softSlotFor(name)
   const usable = !!slot && passkeyPossible() && slotAllowed(ACTIVE.policy.softUnlock, slot.synced)
   const due = usable && passwordDue(slot!, Date.now())
-  $('soft-bio').hidden = !usable || due
+  $('soft-bio-wrap').hidden = !usable || due
   const note = $('soft-bio-note')
   note.textContent = due ? tr('Raz na 14 dni wejdź hasłem, potem znowu wystarczy passkey.') : ''
   note.hidden = !due
@@ -3875,9 +3878,50 @@ $('bio-save').addEventListener('click', async () => {
     if (e instanceof BadPassword) setMsg('bio-msg', tr('Złe hasło.'), 'err')
     else if (e instanceof PasskeyCancelled) setMsg('bio-msg', tr('Passkey nie został utworzony.'), 'err')
     else if (e instanceof PasskeyNoPrf) setMsg('bio-msg', tr('Ta przeglądarka albo menedżer haseł nie potrafi odblokować profilu passkeyem (brak rozszerzenia PRF). Spróbuj innej przeglądarki albo klucza sprzętowego.'), 'err')
-    else if (e instanceof PasskeySynced) setMsg('bio-msg', tr('Ten passkey może się synchronizować, a wybrano tylko to urządzenie. Użyj klucza sprzętowego albo passkeya zapisanego tylko na tym urządzeniu.'), 'err')
+    else if (e instanceof PasskeySynced) setMsg('bio-msg', tr('Ten passkey się synchronizuje, a wybrano opcję bez synchronizacji. Na Macu i iPhonie passkey zawsze trafia do iCloud albo Google, więc tam ta opcja działa tylko z kluczem sprzętowym (np. YubiKey). Wybierz pierwszą opcję albo użyj klucza sprzętowego.'), 'err')
     else setMsg('bio-msg', tr('Błąd: ') + (e?.message ?? e), 'err')
   } finally { btn.disabled = false; btn.textContent = tr('Włącz') }
+})
+
+/**
+ * Right after a profile is created: offer the passkey once, where the platform
+ * has its own authenticator (the user's call, 2026-11-10 - Settings alone was
+ * too hidden). The plaintext the creation just sealed is held only while the
+ * window is up. Not offered where the network allows only device-bound
+ * passkeys: on a Mac every platform passkey syncs, so the offer would fail.
+ */
+let offerPlain = ''
+let offerName = ''
+async function offerPasskey(name: string, plain: string) {
+  if (!passkeyPossible() || (ACTIVE.policy.softUnlock ?? 'any') !== 'any') return
+  try {
+    if (!(await (PublicKeyCredential as any).isUserVerifyingPlatformAuthenticatorAvailable?.())) return
+  } catch { return }
+  if (await prfDeclaredMissing()) return
+  if (activeSoftProfile !== name) return
+  offerPlain = plain; offerName = name
+  clr('bio-offer-msg')
+  pushModal('bio-offer-modal')
+}
+MODAL_EXIT['bio-offer-modal'] = () => { offerPlain = ''; offerName = '' }
+$('bio-offer-no').addEventListener('click', () => dropModal('bio-offer-modal'))
+$('bio-offer-yes').addEventListener('click', async () => {
+  const name = offerName, plain = offerPlain
+  if (!name || !plain || name !== activeSoftProfile) { dropModal('bio-offer-modal'); return }
+  const btn = $('bio-offer-yes') as HTMLButtonElement
+  btn.disabled = true; clr('bio-offer-msg'); btn.textContent = tr('Czekam na passkey…')
+  try {
+    const made = await enrollPasskey(name, false)
+    try {
+      localStorage.setItem(unlockSlotKey(name), JSON.stringify(await sealSlot(made.secret, plain, name, made, Date.now())))
+    } finally { made.secret.fill(0) }
+    dropModal('bio-offer-modal')
+    toast(tr('Odblokowanie passkeyem włączone.'))
+  } catch (e: any) {
+    if (e instanceof PasskeyCancelled) setMsg('bio-offer-msg', tr('Passkey nie został utworzony.'), 'err')
+    else if (e instanceof PasskeyNoPrf) setMsg('bio-offer-msg', tr('Ta przeglądarka albo menedżer haseł nie potrafi odblokować profilu passkeyem (brak rozszerzenia PRF). Spróbuj innej przeglądarki albo klucza sprzętowego.'), 'err')
+    else setMsg('bio-offer-msg', tr('Błąd: ') + (e?.message ?? e), 'err')
+  } finally { btn.disabled = false; btn.textContent = tr('Włącz passkey') }
 })
 
 $('btn-settings').addEventListener('click', openDrawer)

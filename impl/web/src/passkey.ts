@@ -126,6 +126,9 @@ export async function enrollPasskey(name: string, deviceOnly: boolean): Promise<
         attestation: 'none',
         timeout: 120_000,
         // A hint, not a rule: the browser still offers whatever the person has.
+        // Device-bound means a security key first: on macOS and iOS every
+        // platform passkey lands in iCloud Keychain or Google Password Manager
+        // and reports BE (Windows Hello is the platform that keeps one local).
         ...(deviceOnly ? { hints: ['security-key', 'client-device'] } : {}),
         extensions: { prf: { eval: { first: salt } } } as any,
       } as any,

@@ -3802,6 +3802,15 @@ async function main() {
       let authId = await authn(false)
       const made = await createProfile('pk-profil')
       if (!made.entered) throw new Error(`the passkey profile was not created: ${JSON.stringify(made)}`)
+      // A platform authenticator is present: the passkey is offered right
+      // after creation, and "not now" writes nothing.
+      await B.waitFor('the passkey offer after creation', `return document.getElementById('bio-offer-modal').classList.contains('open')`, 10_000)
+      await B.eval(`document.getElementById('bio-offer-no').click(); return 1`)
+      await sleep(300)
+      if (await B.eval<boolean>(`return document.getElementById('bio-offer-modal').classList.contains('open') || !!localStorage.getItem(${JSON.stringify(PK)})`)) {
+        throw new Error('"not now" on the passkey offer left the window up or wrote a slot')
+      }
+      step('a new profile is offered the passkey once; "not now" writes nothing')
       const fp = await B.eval<string>(`return document.getElementById('me-fp').textContent`)
 
       const settings = async () => {
@@ -3830,7 +3839,7 @@ async function main() {
           const m = document.getElementById('soft-modal');
           if (!m.classList.contains('open')) row.click();
           return m.classList.contains('open');`, 20_000)
-        return B.eval<any>(`return { bio: !document.getElementById('soft-bio').hidden, note: document.getElementById('soft-bio-note').hidden ? '' : document.getElementById('soft-bio-note').textContent }`)
+        return B.eval<any>(`return { bio: !document.getElementById('soft-bio-wrap').hidden, note: document.getElementById('soft-bio-note').hidden ? '' : document.getElementById('soft-bio-note').textContent }`)
       }
       const inWithPassword = async (pass: string) => {
         await B.eval(`document.getElementById('soft-pass').value = ${JSON.stringify(pass)}; document.getElementById('soft-go').click(); return 1`)
@@ -3873,7 +3882,7 @@ async function main() {
       await B.eval(`document.getElementById('soft-bio').click(); return 1`)
       const refused = await B.waitFor<any>('the refusal', `
         const m = document.getElementById('soft-msg').textContent;
-        return m ? { msg: m, slot: localStorage.getItem(${JSON.stringify(PK)}), bio: !document.getElementById('soft-bio').hidden, app: !document.getElementById('app').hidden } : ''`, 30_000)
+        return m ? { msg: m, slot: localStorage.getItem(${JSON.stringify(PK)}), bio: !document.getElementById('soft-bio-wrap').hidden, app: !document.getElementById('app').hidden } : ''`, 30_000)
       if (refused.app || refused.slot || refused.bio || !/nie otwiera/.test(refused.msg)) throw new Error(`a passkey that does not open the slot: ${JSON.stringify(refused)}`)
       step('a passkey whose secret does not open the slot turns it off and sends the person to the password')
 
@@ -3884,7 +3893,7 @@ async function main() {
       authId = await authn(true)
       await settings()
       const syncedRefused = await enable(SOFT_PASS, true)
-      if (!syncedRefused.open || !/synchronizować/.test(syncedRefused.msg) || syncedRefused.slot) {
+      if (!syncedRefused.open || !/synchronizuje/.test(syncedRefused.msg) || syncedRefused.slot) {
         throw new Error(`a syncable passkey was taken as device-bound: ${JSON.stringify(syncedRefused)}`)
       }
       await B.eval(`document.getElementById('bio-cancel').click(); return 1`)
@@ -3904,6 +3913,19 @@ async function main() {
       await B.waitFor('the password changed', `return !document.getElementById('passwd-modal').classList.contains('open')`, 30_000)
       if (await B.eval<boolean>(`return !!localStorage.getItem(${JSON.stringify(PK)})`)) throw new Error('"also turn off the passkey" left the slot')
       step('a password change with "also turn off" removes the slot')
+
+      // The offer, accepted: the creation password is not asked again.
+      await B.eval(`location.reload(); return 1`).catch(() => {})
+      await sleep(500)
+      await B.waitFor('the sign-in card', `return document.readyState === 'complete' && !!document.getElementById('go-soft') && document.getElementById('app').hidden`, 20_000)
+      const second = await createProfile('pk-drugi')
+      if (!second.entered) throw new Error(`the second passkey profile was not created: ${JSON.stringify(second)}`)
+      await B.waitFor('the passkey offer after creation', `return document.getElementById('bio-offer-modal').classList.contains('open')`, 10_000)
+      await B.eval(`document.getElementById('bio-offer-yes').click(); return 1`)
+      const accepted = await B.waitFor<string>('the offer to make a slot', `
+        return !document.getElementById('bio-offer-modal').classList.contains('open') && localStorage.getItem('ec-soft-unlock-pk-drugi')`, 30_000)
+      if (!JSON.parse(accepted).ct) throw new Error(`the offer wrote no usable slot: ${accepted}`)
+      step('accepting the offer makes the slot without asking for the password again')
 
       await B.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId: authId }, true)
       await B.send('WebAuthn.disable', {}, true)

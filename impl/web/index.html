@@ -1005,6 +1005,8 @@
   .xfer-name{font-size:13.5px;color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .modal h2{margin:0 0 4px;font-size:16px;color:var(--text)}
   .modal .msub{font-size:12px;color:var(--muted);margin-bottom:8px}
+  .or-sep{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px;margin:14px 0 10px}
+  .or-sep::before,.or-sep::after{content:"";flex:1;border-top:1px solid var(--border)}
   .store-opts{display:flex;flex-direction:column;gap:6px;margin-top:4px}
   .store-opt{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--body);cursor:pointer;padding:7px 10px;border:1px solid var(--border);border-radius:8px}
   #btn-knock{width:30px;height:30px}
@@ -1706,12 +1708,17 @@
       <label data-i18n="Powtórz hasło">Powtórz hasło</label>
       <input id="soft-pass2" type="password" autocomplete="new-password">
     </div>
-    <!-- The passkey way in (SPEC 4.5, Unlock slot): only for a profile that has
-         one on this device, and not when its password is due (every 14 days). -->
-    <button class="btn" id="soft-bio" hidden style="margin-top:10px;background:var(--accent-soft);color:var(--accent)" data-i18n="Odblokuj passkeyem (Touch ID, Face ID, Windows Hello)">Odblokuj passkeyem (Touch ID, Face ID, Windows Hello)</button>
     <div class="hint" id="soft-bio-note" hidden style="margin-top:8px"></div>
     <div class="msg" id="soft-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="soft-go" style="flex:1;border-radius:8px" data-i18n="Dalej">Dalej</button><button class="btn-ghost" id="soft-cancel" data-i18n="Anuluj">Anuluj</button></div>
+    <!-- The passkey way in (SPEC 4.5, Unlock slot): after the password's own
+         buttons, so Enter in the password field still means "Dalej"; only for a
+         profile that has a slot on this device, and not when its password is
+         due (every 14 days). -->
+    <div id="soft-bio-wrap" hidden>
+      <div class="or-sep" data-i18n="lub">lub</div>
+      <button class="btn-send" id="soft-bio" style="width:100%;border-radius:8px" data-i18n="Kontynuuj z passkeyem">Kontynuuj z passkeyem</button>
+    </div>
   </div>
 
   <!-- Recording, as a window rather than a chip.
@@ -1997,12 +2004,23 @@
     <div class="msub" data-i18n="Do tego profilu wejdziesz wtedy przez Touch ID, Face ID, Windows Hello albo odcisk palca, bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne: bez niego nie przeniesiesz profilu na inne urządzenie.">Do tego profilu wejdziesz wtedy przez Touch ID, Face ID, Windows Hello albo odcisk palca, bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne: bez niego nie przeniesiesz profilu na inne urządzenie.</div>
     <div class="store-opts" style="margin:4px 0 6px">
       <label class="store-opt"><input type="radio" name="bio-kind" id="bio-kind-synced" checked> <span data-i18n="Passkey z menedżera haseł (może się synchronizować, np. przez iCloud albo Google)">Passkey z menedżera haseł (może się synchronizować, np. przez iCloud albo Google)</span></label>
-      <label class="store-opt"><input type="radio" name="bio-kind" id="bio-kind-device"> <span data-i18n="Tylko to urządzenie albo klucz sprzętowy (bez synchronizacji)">Tylko to urządzenie albo klucz sprzętowy (bez synchronizacji)</span></label>
+      <label class="store-opt"><input type="radio" name="bio-kind" id="bio-kind-device"> <span data-i18n="Klucz sprzętowy albo Windows Hello (bez synchronizacji)">Klucz sprzętowy albo Windows Hello (bez synchronizacji)</span></label>
     </div>
     <div class="hint" id="bio-kind-note" hidden data-i18n="Ta sieć dopuszcza tylko passkeye bez synchronizacji.">Ta sieć dopuszcza tylko passkeye bez synchronizacji.</div>
     <label data-i18n="Hasło profilu">Hasło profilu</label><input id="bio-pass" type="password" autocomplete="current-password">
     <div class="msg" id="bio-msg"></div>
     <div class="modal-actions"><button class="btn-send" id="bio-save" style="flex:1;border-radius:8px" data-i18n="Włącz">Włącz</button><button class="btn-ghost" id="bio-cancel" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
+  <!-- Offered once, right after a software profile is created, and only where
+       the platform has its own authenticator (Touch ID, Windows Hello...): the
+       creation password is still in hand, so nothing is asked again. A security
+       key, or a passkey that must not sync, is a choice made in Settings. -->
+  <div class="modal" id="bio-offer-modal">
+    <h2 data-i18n="Wchodź do profilu passkeyem">Wchodź do profilu passkeyem</h2>
+    <div class="msub" data-i18n="To urządzenie potrafi otworzyć profil przez Touch ID, Face ID, Windows Hello albo odcisk palca, bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne. Klucz sprzętowy (np. YubiKey) włączysz w Ustawieniach.">To urządzenie potrafi otworzyć profil przez Touch ID, Face ID, Windows Hello albo odcisk palca, bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne. Klucz sprzętowy (np. YubiKey) włączysz w Ustawieniach.</div>
+    <div class="msg" id="bio-offer-msg"></div>
+    <div class="modal-actions"><button class="btn-send" id="bio-offer-yes" style="flex:1;border-radius:8px" data-i18n="Włącz passkey">Włącz passkey</button><button class="btn-ghost" id="bio-offer-no" data-i18n="Nie teraz">Nie teraz</button></div>
   </div>
 
   <!-- Shown only when a HEM holds more than one identity; one signs straight in.
