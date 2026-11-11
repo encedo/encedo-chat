@@ -170,6 +170,14 @@ X25519 client-side) or `authorizeRemote` (mobile push); a scope may be an
 array of up to 8, and the SDK caches the token under each (`hemWarmTokens`
 takes list + get + use:<kid> in one authorisation at sign-in); crypto ops
 need `keymgmt:use:<kid>` (of `kid` alone - a stored peer needs no scope).
+**The engine never calls `authorizePassword(null, …)` itself**: it calls
+`token(hem, scope, why?)` (`lib/hemauth.ts`). With a password that IS the old
+call; with the phone (a HEM holding an `EXTAID…` key - a paired authenticator,
+found by a token-less search) a call WITHOUT `why` is background and never
+pushes (`hem_reauth` instead), a call WITH `why` asks the phone with a note.
+A new device call on a path nobody clicked gets no `why`; one a person
+triggers gets one. `test/hemauth.test.ts` pins both, and that a member's
+group import never pushes.
 Optional values always go in the options object: an old positional call
 throws `invalid_arg` (the SDK's `MIGRATION.md`).
 

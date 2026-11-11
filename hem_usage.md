@@ -40,6 +40,7 @@ contact, or per group.
 | bare round trip | **~0.6 s** | `getStatus`, `getVersion`, `searchKeys`, `getPubKey` |
 | `authorizePassword`, **new** scope | **~2.5 s** | TWO round trips: `GET /api/auth/token` for the challenge, then `POST` with the signed eJWT |
 | `authorizePassword`, cached scope | **0** | in-memory, and it says `‹cached›` in the trace |
+| `authorizeRemote` (the phone), new scope | **~3.5 s + a person** | broker session, `ext/request`, broker event, poll, `ext/token`; measured 3.5 s with an authenticator that answers at once (onchato-tester + the PHP simulator, 2026-11-12) - a real phone adds the time to look and tap |
 | `ecdh` / `ecdhKid` | **~1.5 s** | one round trip plus X25519 on the device |
 | `hemCheckin` | **~1.5 s** | three requests, two of them to the broker |
 
@@ -51,6 +52,15 @@ Two properties worth knowing before optimising anything:
 - **A token lives 5 minutes** (`expSeconds = 300`, purged by the SDK's cache).
   So `‹cached›` holds within a burst of work. A conversation that goes quiet and
   then re-handshakes pays for a fresh token first.
+- **With the phone, a token is a PERSON, not a round trip** (`lib/hemauth.ts`).
+  There is no derived key to sign a new scope silently, so the session takes
+  its scopes in ONE push at sign-in (`keymgmt:list` + `keymgmt:use:<IK>`;
+  `keymgmt:get` only on a device without `pubkey_in_search`) and a background
+  call never pushes: without a token it fails `hem_reauth`. `imp` / `del` /
+  `upd` / `gen` / `use:<GK>` are asked when the person does the thing (adding
+  a contact, an admin changing a group). The phone chooses the lifetime; the
+  app asks for a renewal from 80 % of it. A member's group record
+  (`importPub` on joining) is written only with a token already held.
 - **`ecdh(kid, extKid)` is not faster than `ecdh(kid, pub)`** — measured
   1.5–1.7 s against 1.1–2.1 s, the same order. The device dominates; the payload
   does not. Use whichever is natural.
@@ -63,8 +73,8 @@ Two properties worth knowing before optimising anything:
 
 | what | calls |
 |---|---|
-| **register** | `authorizePassword(gen)` + `createKeyPair` + read the new key's public half |
-| **sign in** | `authorizePassword(list)` + `searchKeys("ETSEIC:self1,")` + read my own public key |
+| **register** | `authorizePassword(gen)` + `createKeyPair` + read the new key's public half; with the phone: a `gen` push, then the sign-in push |
+| **sign in** | `authorizePassword(list)` + `searchKeys("ETSEIC:self1,")` + read my own public key; with the phone: a token-less `searchKeys("ETSEIC:self1,")` and `searchKeys("EXTAID")` (is a phone paired?), then ONE push for `list` + `use:<IK>` |
 | **contact book** | `searchKeysAll("ETSEIC:peer1,<ownerKid>,", returnPubkey)` - one call per 15 contacts; one `getKeyPublicInfo` per contact only on a device without `pubkey_in_search` |
 | **add / rename / remove a contact** | a token for the scope (`imp` / `upd` / `del`) + the operation |
 
