@@ -31,6 +31,7 @@ import type { GkBackend } from '../../lib/group.ts'
 // local shadowing the translator fails at runtime with "t is not a function" —
 // which is exactly how it failed once. `tr` cannot collide.
 import { t as tr, setLocale, getLocale, applyDom } from './i18n.ts'
+import { HemAuth, authOf, renewStep, type Why, type AskPrompt } from '../../lib/hemauth.ts'
 import { probeCapabilities, formatReport } from '../../lib/capabilities.ts'
 import { initFeedback, openFeedback } from './feedback.ts'
 import { probeWebrtc, formatWebrtcProbe, type WebrtcProbeResult, type ProbeStage } from '../../lib/webrtc-probe.ts'
@@ -691,6 +692,208 @@ const probeStatus = (url: string, ms = HEM_STATUS_MS) => wrapHem(new HEM(url)).g
 /** Ran out of time, as opposed to answering with a refusal or not being there. */
 const isTimeout = (e: any) => e?.code === 'timeout' || e?.code === 'aborted'
 
+// ---- HEM: the phone as the way in (lib/hemauth.ts) ----------------------------
+/**
+ * A HEM with a paired mobile authenticator holds a key described `EXTAID…`, and
+ * a prefix search of six bytes or more needs no token (FW 1.3, unless the
+ * device was personalised with `allow_keysearch` off) - so the form can know,
+ * before anything is typed, that the phone can sign in. The same probe the OIDC
+ * sign-in uses. Null = no phone seen at this address (or the device does not
+ * let a stranger search, and then the password is the way in, as before).
+ */
+let hemPhone: { url: string; name: string } | null = null
+/** Which door the HEM form offers first; the phone when one is paired. */
+let hemMethod: 'phone' | 'password' = 'password'
+/** How this session takes HEM tokens; set at sign-in, read by the expiry bar. */
+let hemAuth: HemAuth | null = null
+/** The last phone sign-in was refused or timed out: the button says "try again". */
+let hemPhoneRetry = false
+
+const phonePaired = () => (hemPhone && hemPhone.url === val('hsm') ? hemPhone : null)
+
+async function detectPhone(url: string) {
+  if (hemPhone?.url === url) return
+  let found: { url: string; name: string } | null = null
+  try {
+    const r: any = await wrapHem(new HEM(url)).searchKeys(null, 'EXTAID', { limit: 1 })
+    const k = r?.list?.[0]
+    // The label is what the authenticator called itself when it paired
+    // ("Samsung SM-S921B (Android)"); it is device text, so it goes in as text.
+    if (k) found = { url, name: String(k.label || tr('telefon')) }
+  } catch { /* 4xx: no token-less search on this device - the password it is */ }
+  if (val('hsm') !== url) return // the address changed while we asked
+  hemPhone = found
+  hemMethod = found ? 'phone' : 'password'
+  paintHemMethod()
+}
+
+const goLabel = () => hemPhoneRetry ? tr('Spróbuj ponownie')
+  : mode === 'register'
+    ? (hemMethod === 'phone' ? tr('Zarejestruj telefonem') : tr('Zarejestruj'))
+    : (hemMethod === 'phone' ? tr('Zaloguj telefonem') : tr('Zaloguj'))
+
+function paintHemMethod() {
+  const phone = phonePaired()
+  if (!phone) hemMethod = 'password'
+  const usePhone = hemMethod === 'phone'
+  $('hem-phone-line').hidden = !usePhone
+  if (phone) $('hem-phone-name').textContent = phone.name
+  $('hem-pass-wrap').hidden = usePhone
+  $('hem-method-row').hidden = !phone
+  $('hem-method').textContent = usePhone ? tr('Użyj hasła') : tr('Zaloguj telefonem: {name}', { name: phone?.name ?? '' })
+  $('go').textContent = goLabel()
+}
+
+function setPhoneNotice(text: string | null) {
+  const n = $('hem-phone-notice')
+  n.hidden = !text
+  n.textContent = text ?? ''
+}
+
+$('hem-method').addEventListener('click', () => {
+  hemMethod = hemMethod === 'phone' ? 'password' : 'phone'
+  hemPhoneRetry = false
+  setPhoneNotice(null); clr('msg')
+  paintHemMethod()
+  if (hemMethod === 'password') $('pass').focus()
+})
+
+/** The words for what a push is for: the note on the phone and the line here. */
+function phoneWhat(w: Why): string {
+  const d = w.detail ?? ''
+  const s = ({
+    'login': tr('logowanie {d}', { d }),
+    'register': tr('nowa tożsamość {d}', { d }),
+    'read-keys': tr('odczyt kluczy kontaktów'),
+    'renew': tr('odnowienie sesji'),
+    'contact-add': tr('dodanie kontaktu {d}', { d }),
+    'contact-del': tr('usunięcie kontaktu {d}', { d }),
+    'contact-rename': tr('zmiana nazwy kontaktu {d}', { d }),
+    'self-rename': tr('zmiana nazwy na {d}', { d }),
+    'group-create': tr('nowa grupa'),
+    'group-admin': tr('zmiana w grupie'),
+  } as Record<string, string>)[w.kind] ?? w.kind
+  return s.trim()
+}
+const phoneNote = (w: Why) => `onchato: ${phoneWhat(w)}`
+
+/** The prompt on screen now: the login card's or the in-app modal's. */
+let phoneAsk: AskPrompt | null = null
+let phoneAskT: any = null
+
+function paintPhoneLeft(el: string) {
+  if (!phoneAsk) return
+  const s = Math.max(0, Math.ceil((phoneAsk.deadline - Date.now()) / 1000))
+  $(el).textContent = `${hemPhone?.name ?? tr('telefon')} · ${tr('zostało {n} s', { n: s })}`
+}
+
+function showPhoneAsk(p: AskPrompt) {
+  phoneAsk = p
+  clearInterval(phoneAskT)
+  if (!$('login').hidden) {
+    // On the sign-in card the card itself becomes the wait; the identity
+    // picker (if it was up) goes, or it would cover the only way to cancel.
+    closeIdentityModal()
+    $('hem-form-body').hidden = true
+    $('hem-wait').hidden = false
+    $('hem-wait-note').textContent = tr('Na telefonie: „{note}”', { note: phoneNote(p.why) })
+    paintPhoneLeft('hem-wait-left')
+    phoneAskT = setInterval(() => paintPhoneLeft('hem-wait-left'), 1000)
+  } else {
+    const what = phoneWhat(p.why)
+    $('hem-ask-sub').textContent = tr('{what} wymaga zgody w HEM.', { what: what.charAt(0).toUpperCase() + what.slice(1) })
+      + ' ' + tr('Na telefonie: „{note}”', { note: phoneNote(p.why) })
+    paintPhoneLeft('hem-ask-left')
+    phoneAskT = setInterval(() => paintPhoneLeft('hem-ask-left'), 1000)
+    pushModal('hem-ask-modal')
+  }
+}
+
+function hidePhoneAsk() {
+  phoneAsk = null
+  clearInterval(phoneAskT)
+  $('hem-wait').hidden = true
+  $('hem-form-body').hidden = false
+  if ($('hem-ask-modal').classList.contains('open')) dropModal('hem-ask-modal')
+}
+
+$('hem-wait-cancel').addEventListener('click', () => phoneAsk?.cancel())
+$('hem-ask-cancel').addEventListener('click', () => phoneAsk?.cancel())
+$('hem-wait-pass').addEventListener('click', () => {
+  phoneAsk?.cancel()
+  hemMethod = 'password'
+  hemPhoneRetry = false
+  paintHemMethod()
+  $('pass').focus()
+})
+
+/** What the phone said, in a sentence; null when there is nothing to say
+ *  (cancelled), undefined when the failure was not the phone's answer. */
+function phoneFailText(e: any, onCard: boolean): string | null | undefined {
+  if (e?.code === 'aborted') return null
+  if (e?.code === 'denied') return onCard ? tr('Odmówiono na telefonie. Nic nie zostało odblokowane.') : tr('Odmówiono na telefonie.')
+  if (e?.code === 'timeout') return onCard ? tr('Telefon nie odpowiedział w czasie. Spróbuj ponownie albo użyj hasła.') : tr('Telefon nie odpowiedział w czasie.')
+  if (e?.code === 'hem_scope_refused') return tr('Telefon nie zgodził się na wszystko, o co prosiliśmy.')
+  return undefined
+}
+
+function phoneAuthFor(hem: any): HemAuth {
+  return new HemAuth(hem, {
+    mode: 'remote',
+    note: phoneNote,
+    onAsk: showPhoneAsk,
+    onSettle: hidePhoneAsk,
+    onReauth: () => checkRenew(),
+    onFail: (e) => {
+      // On the sign-in card the sign-in handler says it; in the app a toast,
+      // because the action that wanted the token reports its own failure in
+      // words about itself ("could not add"), not about the phone.
+      if (!$('login').hidden) return
+      const t = phoneFailText(e, false)
+      if (t) toast(t, 3500)
+    },
+  })
+}
+
+// ---- the expiry bar ------------------------------------------------------------
+let renewT: any = null
+/** The step the person closed the bar at; it returns only at a higher one. */
+let renewClosed = 0
+
+function startRenewWatch() {
+  clearInterval(renewT)
+  renewClosed = 0
+  if (hemAuth?.mode !== 'remote') return
+  renewT = setInterval(checkRenew, 5000)
+}
+
+function checkRenew() {
+  const bar = $('hem-renew')
+  const a = hemAuth
+  if (!a || a.mode !== 'remote') { bar.hidden = true; return }
+  const w = a.sessionWindow()
+  const now = Date.now() / 1000
+  const step = renewStep(w, now)
+  if (step === 0) { bar.hidden = true; renewClosed = 0; return }
+  if (step <= renewClosed) return
+  const expired = step >= 5
+  bar.hidden = false
+  bar.classList.toggle('expired', expired)
+  $('hem-renew-txt').textContent = expired
+    ? tr('Sesja HEM wygasła. Otwarte rozmowy działają, nowe połączenia czekają.')
+    : tr('Sesja HEM wygasa za {n} min.', { n: Math.max(1, Math.ceil((w!.exp - now) / 60)) })
+  $('hem-renew-go').textContent = expired ? tr('Zaloguj telefonem') : tr('Odnów na telefonie')
+}
+
+$('hem-renew-go').addEventListener('click', () => {
+  if (!hemAuth) return
+  hemAuth.renew().then(() => { renewClosed = 0; checkRenew() }, () => { /* the toast said why */ })
+})
+$('hem-renew-x').addEventListener('click', () => {
+  renewClosed = renewStep(hemAuth?.sessionWindow() ?? null, Date.now() / 1000)
+  $('hem-renew').hidden = true
+})
+
 /**
  * Sign-in stays disabled until the device has answered `/status`.
  *
@@ -737,6 +940,7 @@ async function refreshStatus(opts: { quiet?: boolean } = {}) {
     // somebody who needs them will look and nobody else has to read them.
     hint.textContent = tr('Online')
     hint.title = v?.fwv ? `fw ${v.fwv}` : ''
+    void detectPhone(url) // once per address: is a phone paired to sign in with?
     return true
   } catch (e: any) {
     dot.className = 'dot bad'
@@ -780,7 +984,7 @@ $('hsm').addEventListener('blur', () => startHemPoll())
 // pre-filled — so the first probe also runs now, or a default address would sit
 // there with the button dead and nothing to click.
 let hsmProbeT: any
-$('hsm').addEventListener('input', () => { clearTimeout(hsmProbeT); hsmProbeT = setTimeout(startHemPoll, 600) })
+$('hsm').addEventListener('input', () => { clearTimeout(hsmProbeT); paintHemMethod(); hsmProbeT = setTimeout(startHemPoll, 600) })
 // No probe at module load: the HEM form is hidden until the user chooses HEM
 // (showHemForm starts the poll), so a software-profile screen never touches the
 // HEM. Probing my.ence.do from the profile chooser was the reported bug.
@@ -793,7 +997,8 @@ $('toggle').addEventListener('click', () => {
   // WARNING: All four through `tr`. Three of them were bare Polish sitting next to
   // translated siblings in the same expression — which is how an English UI ends
   // up half in Polish and why the mix is invisible to whoever wrote it.
-  $('go').textContent = reg ? tr('Zarejestruj') : tr('Zaloguj')
+  hemPhoneRetry = false; setPhoneNotice(null)
+  $('go').textContent = goLabel()
   $('toggle-pre').textContent = reg ? tr('Masz już konto?') : tr('Nie masz konta?')
   $('toggle').textContent = reg ? tr('Zaloguj') : tr('Zarejestruj tożsamość')
   clr('msg')
@@ -833,6 +1038,11 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
     localStorage.setItem(hemBindingKey(id.kid), pick)
   }
   if (!inNetworkOrSwitch(bindingOf(localKV(), hemBindingKey(id.kid), BUILTIN_NET))) return
+  // A phone session takes its session scopes in ONE push, here: the contact
+  // search and this identity's own ECDH (lib/hemauth.ts). Everything after it
+  // in the background uses that token; actions ask for their own.
+  const auth = authOf(hem)
+  if (auth?.mode === 'remote') await auth.authorize(['keymgmt:list', `keymgmt:use:${id.kid}`], { kind: 'login', detail: id.handle })
   await hemWarmTokens(hem, id.kid) // one authorisation for the first three scopes
   const pubkey = await pubKeyReader(hem)(id.kid)
   rememberMethod('hem')
@@ -853,6 +1063,7 @@ async function signInAs(hem: any, id: { kid: string; handle: string }) {
     mergedContactBook(hemContactBook(hem, id.kid), local.verdict === 'tampered' ? taintedBook() : local.book),
     'HEM', id.kid, hemGkBackend(hem, id.kid),
   )
+  startRenewWatch()
 }
 
 /**
@@ -922,11 +1133,37 @@ function showIdentityPicker(ids: Array<{ kid: string; handle: string }>, onPick:
   pushModal('identity-modal')
 }
 
+/**
+ * The identities on a HEM, for a phone sign-in. The prefix search needs no
+ * token (13 bytes, well over the six the firmware asks for), so the phone is
+ * asked ONCE, for the chosen identity. A device personalised without token-less
+ * search answers 4xx; then the list costs a push of its own.
+ */
+async function phoneIdentities(hem: any): Promise<any[]> {
+  try { return await collect(hem.searchKeysAll(null, SELF_PREFIX)) } catch (e: any) {
+    if (!(e?.status >= 400 && e?.status < 500)) throw e
+    return collect(hem.searchKeysAll(await hemAuth!.authorize('keymgmt:list', { kind: 'login' }), SELF_PREFIX))
+  }
+}
+
+/** A sign-in that did not finish: the phone's answer on the card, anything else as before. */
+function signInFailed(e: any) {
+  closeIdentityModal()
+  hidePhoneAsk()
+  const t = phoneFailText(e, true)
+  if (t === undefined) { setMsg('msg', tr('Błąd: ') + (e?.message ?? e), 'err'); return }
+  hemPhoneRetry = t !== null
+  setPhoneNotice(t)
+  $('go').textContent = goLabel()
+}
+
 $('go').addEventListener('click', async () => {
   const url = val('hsm'), pass = val('pass')
-  if (!url || !pass) { setMsg('msg', tr('Podaj adres HEM i hasło.'), 'err'); return }
+  const phone = hemMethod === 'phone' && !!phonePaired()
+  if (!url || (!phone && !pass)) { setMsg('msg', tr('Podaj adres HEM i hasło.'), 'err'); return }
   const btn = $('go') as HTMLButtonElement
   btn.disabled = true; btn.textContent = tr('…'); clr('msg')
+  hemPhoneRetry = false; setPhoneNotice(null)
   try {
     // The gate: nothing is authorised until the device says it is in a state to
     // be talked to. Doing this first also means a wrong address or a sleeping
@@ -951,17 +1188,20 @@ $('go').addEventListener('click', async () => {
     // backend, every ECDH — narrates itself without any of them knowing.
     const hem = wrapHem(new HEM(url)); await hem.hemCheckin()
     rememberHemAddr(localStorage, url) // a device answered here: the form starts here next time
+    // How every later token is taken: the password's key, or the phone.
+    hemAuth = phone ? phoneAuthFor(hem) : new HemAuth(hem, { mode: 'password' })
     if (mode === 'register') {
       const handle = val('handle'); if (!handle) { setMsg('msg', tr('Podaj handle.'), 'err'); return }
-      const gen = await hem.authorizePassword(pass, 'keymgmt:gen')
+      const gen = phone
+        ? await hemAuth.authorize('keymgmt:gen', { kind: 'register', detail: handle })
+        : await hem.authorizePassword(pass, 'keymgmt:gen')
       // The DESCR goes as text: the SDK sends a string as its UTF-8 bytes, so
       // registering as "Zażółć" works (btoa, once, threw above U+00FF).
       const { kid } = await hem.createKeyPair(gen, selfLabel(handle), 'CURVE25519', { descr: buildSelfDescr(handle) })
       await signInAs(hem, { kid, handle })
     } else {
-      const listTok = await hem.authorizePassword(pass, 'keymgmt:list')
       // Every page: the first one alone ends at 15 entries.
-      const keys: any[] = await collect(hem.searchKeysAll(listTok, SELF_PREFIX))
+      const keys: any[] = phone ? await phoneIdentities(hem) : await collect(hem.searchKeysAll(await hem.authorizePassword(pass, 'keymgmt:list'), SELF_PREFIX))
       if (!keys.length) { setMsg('msg', tr('Brak tożsamości czatu na tym HEM — zarejestruj.'), 'err'); return }
       // Alphabetical, so the list does not reorder itself as identities are
       // added — the device returns them in whatever order it stores them.
@@ -969,12 +1209,12 @@ $('go').addEventListener('click', async () => {
         .map((k) => ({ kid: String(k.kid).toLowerCase(), handle: parseSelfDescr(k.description)?.handle || '(?)' }))
         .sort((a, b) => a.handle.localeCompare(b.handle, undefined, { sensitivity: 'base' }))
       if (ids.length === 1) { await signInAs(hem, ids[0]); return }
-      showIdentityPicker(ids, (chosen) => { void signInAs(hem, chosen) })
+      showIdentityPicker(ids, (chosen) => { signInAs(hem, chosen).catch(signInFailed) })
     }
-  } catch (e: any) { closeIdentityModal(); setMsg('msg', tr('Błąd: ') + (e?.message ?? e), 'err') }
+  } catch (e: any) { signInFailed(e) }
   finally {
     const b = $('go') as HTMLButtonElement
-    b.textContent = mode === 'register' ? tr('Zarejestruj') : tr('Zaloguj')
+    b.textContent = goLabel()
     // Re-probe rather than simply re-enabling: an attempt that failed because the
     // device went away must not leave a live-looking button behind it.
     startHemPoll() // re-probe: an attempt that failed because the device went away

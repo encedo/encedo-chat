@@ -173,6 +173,17 @@
   .login-card h1{margin:0 0 4px;font-size:20px;color:var(--text)}
   .login-card .sub{margin:0 0 20px;color:var(--muted);font-size:13px}
   .login-notice{margin:0 0 16px;padding:10px 12px;border-radius:8px;background:var(--warn-soft);color:var(--text);font-size:13px;line-height:1.45}
+  #hem-phone-notice{margin:14px 0 0}
+  /* Signing in with the phone (lib/hemauth.ts): the paired device under the
+     address, and the card that stands in for the form while the phone is asked.
+     The same spinner and lines serve the in-app "confirm on the phone" modal. */
+  .phone-line{margin:2px 0 4px;font-size:12.5px;color:var(--text)}
+  .phone-wait-title{margin:14px 0 0;text-align:center;font-weight:600;color:var(--text);font-size:14px}
+  .phone-spin{width:26px;height:26px;border-radius:50%;border:2px solid var(--border);
+    border-top-color:var(--accent);animation:boot-spin .8s linear infinite;margin:18px auto 10px}
+  @media (prefers-reduced-motion:reduce){.phone-spin{animation:boot-pulse 1.6s ease-in-out infinite;border-top-color:var(--border);background:var(--accent-soft)}}
+  .phone-wait-line{text-align:center;font-size:12.5px;color:var(--muted)}
+  .phone-wait-note{text-align:center;font-size:11px;color:var(--muted);margin-top:4px;min-height:15px}
   label{display:block;font-size:12px;color:var(--muted);margin:14px 0 6px}
   .row{display:flex;gap:8px;align-items:center}
   input,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:14px}
@@ -713,6 +724,7 @@
   .upd-banner .upd-go{border:none;border-radius:6px;padding:5px 10px;background:var(--accent);
     color:var(--accent-ink);font-size:12px;font-weight:600;cursor:pointer;flex:none}
   .upd-banner .x{border:none;background:none;color:var(--muted);cursor:pointer;padding:2px 4px;flex:none}
+  .upd-banner.expired{background:var(--warn-soft)}  /* #hem-renew once the phone's token has run out */
 
   /* Password strength, advisory (lib/passmeter.ts): four segments lit up to
      the score, one muted line of words under them. Colors ride the state
@@ -1424,15 +1436,34 @@
            is where the eye leaves it. -->
       <!-- The answer about the field, at the end of the field. -->
       <div class="hint" id="status-hint" style="text-align:right"></div>
+      <!-- A paired mobile authenticator (a key described EXTAID… in the HEM,
+           found by a token-less search) makes the phone the first way in; the
+           password stays one link away (lib/hemauth.ts). -->
+      <div class="phone-line" id="hem-phone-line" hidden><span data-i18n="Sparowany telefon:">Sparowany telefon:</span> <b id="hem-phone-name"></b></div>
+      <div id="hem-form-body">
+      <div id="hem-pass-wrap">
       <label data-i18n="Hasło">Hasło</label>
       <input id="pass" type="password" autocomplete="current-password">
+      </div>
       <div id="reg-handle-wrap" hidden><div class="label-row"><label data-i18n="Handle (widoczny dla kontaktów)">Handle (widoczny dla kontaktów)</label><span class="bytes-left" id="handle-bytes"></span></div><input id="handle" type="text" placeholder="np. alice" data-i18n-placeholder="np. alice" autocomplete="off"></div>
+      <p class="login-notice" id="hem-phone-notice" role="status" hidden></p>
       <button class="btn" id="go" data-i18n="Zaloguj">Zaloguj</button>
+      <div class="toggle" id="hem-method-row" hidden><a id="hem-method"></a></div>
       <div class="toggle"><span id="toggle-pre" data-i18n="Nie masz konta?">Nie masz konta?</span> <a id="toggle" data-i18n="Zarejestruj tożsamość">Zarejestruj tożsamość</a></div>
       <!-- The way back, UNDER the form rather than over it: a button above the
            title was a control standing where a heading belongs, and this screen
            should read as one thing to do with the exit at the end of it. -->
       <div class="toggle"><a id="hem-back" data-i18n="Wróć do profili na tym urządzeniu">Wróć do profili na tym urządzeniu</a></div>
+      </div>
+      <!-- While the phone is asked: the form steps aside for this card. -->
+      <div id="hem-wait" hidden>
+        <p class="phone-wait-title" data-i18n="Potwierdź na telefonie">Potwierdź na telefonie</p>
+        <div class="phone-spin" aria-hidden="true"></div>
+        <div class="phone-wait-line" id="hem-wait-left"></div>
+        <div class="phone-wait-note" id="hem-wait-note"></div>
+        <button class="btn btn-alt" id="hem-wait-cancel" data-i18n="Anuluj">Anuluj</button>
+        <div class="toggle"><a id="hem-wait-pass" data-i18n="Użyj hasła zamiast tego">Użyj hasła zamiast tego</a></div>
+      </div>
       </div>
 
       <!-- Every other way in, on one line, none of them a gate. `go-soft` keeps
@@ -1479,6 +1510,14 @@
         <span data-i18n="Jest nowa wersja aplikacji — odśwież, gdy skończysz rozmowę.">Jest nowa wersja aplikacji — odśwież, gdy skończysz rozmowę.</span>
         <button class="upd-go" id="web-upd-go" data-i18n="Odśwież">Odśwież</button>
         <button class="x" id="web-upd-x" title="Zamknij" data-i18n-title="Zamknij" aria-label="Zamknij">✕</button>
+      </div>
+      <!-- A phone-signed HEM session ends when the phone's token does: from 80%
+           of its life this asks for a renewal, again at 85/90/95% after a close,
+           and says so plainly once it has run out (lib/hemauth.ts renewStep). -->
+      <div class="upd-banner" id="hem-renew" hidden>
+        <span id="hem-renew-txt"></span>
+        <button class="upd-go" id="hem-renew-go"></button>
+        <button class="x" id="hem-renew-x" title="Zamknij" data-i18n-title="Zamknij" aria-label="Zamknij">✕</button>
       </div>
       <div class="me">
         <div class="avatar" id="me-avatar" role="button" tabindex="0" title="Udostępnij swój profil" data-i18n-title="Udostępnij swój profil">··</div>
@@ -2032,6 +2071,16 @@
     <div class="msub" data-i18n="Ten HEM trzyma więcej niż jedną tożsamość. Krótki identyfikator obok nazwy rozróżnia je, gdy nazwy się powtarzają.">Ten HEM trzyma więcej niż jedną tożsamość. Krótki identyfikator obok nazwy rozróżnia je, gdy nazwy się powtarzają.</div>
     <div id="identity-list"></div>
     <div class="modal-actions"><button class="btn-ghost" id="identity-cancel" style="flex:1" data-i18n="Anuluj">Anuluj</button></div>
+  </div>
+
+  <!-- Something the person just did needs a HEM scope the phone session does
+       not hold: the phone is asked, and this says what for (lib/hemauth.ts). -->
+  <div class="modal" id="hem-ask-modal" role="dialog" aria-modal="true" aria-labelledby="hem-ask-title">
+    <h2 id="hem-ask-title" data-i18n="Potwierdź na telefonie">Potwierdź na telefonie</h2>
+    <div class="msub" id="hem-ask-sub"></div>
+    <div class="phone-spin" aria-hidden="true"></div>
+    <div class="phone-wait-line" id="hem-ask-left"></div>
+    <div class="modal-actions"><button class="btn-ghost" id="hem-ask-cancel" style="flex:1" data-i18n="Anuluj">Anuluj</button></div>
   </div>
 
   <!-- Scanning does double duty: an unknown key is an invite (and goes through
