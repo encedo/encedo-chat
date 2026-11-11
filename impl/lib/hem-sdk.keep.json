@@ -1,6 +1,7 @@
 {
   "methods": [
     "authorizePassword",
+    "authorizeRemote",
     "createKeyPair",
     "deleteKey",
     "ecdh",
@@ -10,6 +11,7 @@
     "getVersion",
     "hemCheckin",
     "importPublicKey",
+    "searchKeys",
     "searchKeysAll",
     "updateKey"
   ],
