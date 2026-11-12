@@ -99,6 +99,7 @@ export function pickAdapter(self: string, opts: LightOpts) {
   const held = new Set<string>()          // what the engine asked for
   const picked = new Set<string>()        // what the relay confirmed
   const waitingAck = new Map<string, Array<(n: number | null) => void>>()
+  const waitingPicked = new Map<string, Array<(ok: boolean) => void>>() // probe() answers
   let stream: PickStream | null = null
   let relayId: string | null = null
 
@@ -109,6 +110,8 @@ export function pickAdapter(self: string, opts: LightOpts) {
       for (const h of [...listeners]) { try { h(evt) } catch (e: any) { log(`light: listener threw: ${e?.message ?? e}`) } }
     } else if (f.type === T.PICKED) {
       if (held.has(f.topic)) picked.add(f.topic)
+      const q = waitingPicked.get(f.topic)
+      if (q) { waitingPicked.delete(f.topic); for (const r of q) r(true) }
     } else if (f.type === T.REFUSED) {
       picked.delete(f.topic)
       log(`light: relay REFUSED topic ${f.topic.slice(0, 12)}...`)
@@ -127,6 +130,8 @@ export function pickAdapter(self: string, opts: LightOpts) {
     picked.clear()
     for (const [, q] of waitingAck) for (const r of q) r(null)
     waitingAck.clear()
+    for (const [, q] of waitingPicked) for (const r of q) r(false)
+    waitingPicked.clear()
   }
 
   return {
@@ -151,6 +156,35 @@ export function pickAdapter(self: string, opts: LightOpts) {
       log(`light: pick stream open to ${toRelayId.slice(0, 12)}..., re-picked ${held.size} topic(s)`)
     },
     detach() { current = null; try { stream?.close() } catch {}; onClose() },
+    /**
+     * Does the relay still answer on this stream? After a long sleep a phone
+     * can hold a stream that looks open and carries nothing (Android,
+     * 2026-11-12: a minute of "reconnecting" after ten hours in the
+     * background). A PICK of a topic we already hold is answered with PICKED
+     * and changes nothing on the relay - no new topic, no quota, no log line -
+     * so it is the cheapest round trip the protocol has. Nothing held: nothing
+     * to ask with, and the stream being there is all we know.
+     */
+    probe(timeoutMs: number): Promise<boolean> {
+      if (!stream) return Promise.resolve(false)
+      const t = held.values().next().value
+      if (t === undefined) return Promise.resolve(true)
+      return new Promise<boolean>((resolve) => {
+        let done = false
+        const settle = (ok: boolean) => { if (done) return; done = true; clearTimeout(timer); resolve(ok) }
+        const timer = setTimeout(() => {
+          const q = waitingPicked.get(t)
+          const i = q?.indexOf(settle) ?? -1
+          if (q && i >= 0) { q.splice(i, 1); if (!q.length) waitingPicked.delete(t) }
+          settle(false)
+        }, timeoutMs)
+        ;(timer as any).unref?.()
+        const q = waitingPicked.get(t) ?? []
+        waitingPicked.set(t, q)
+        q.push(settle)
+        stream!.send(encodePick(t))
+      })
+    },
     connected: () => stream !== null,
     pubsub: {
       addEventListener: (_e: string, h: (evt: any) => void) => { listeners.push(h) },
@@ -233,6 +267,8 @@ export async function createLightPeer(opts: LightOpts = {}) {
     async stop() { adapter.detach(); await node.stop() },
     /** Is the pick stream up? A connection without it carries nothing. */
     pickConnected: () => adapter.connected(),
+    /** One round trip to the relay on the pick stream (lib/core.ts, on return from the background). */
+    probe: (timeoutMs: number) => adapter.probe(timeoutMs),
     /** `dial(node, addr, opts)` in net/peer.ts lands here: connect, then open the pick stream. */
     async dial(addr: any, dialOpts?: any) {
       const ma = typeof addr === 'string' ? multiaddr(addr) : addr

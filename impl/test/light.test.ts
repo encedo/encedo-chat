@@ -134,3 +134,30 @@ test('an old stream ending late does not take the new one; the current one endin
   assert.equal(a.connected(), false)
   assert.equal(closedReports, 1, 'the live stream ending is reported, so the session can re-open it')
 })
+
+test('probe: a PICK of a held topic, answered by PICKED, is a live relay', async () => {
+  const s = fakeStream()
+  const a = pickAdapter('me', {})
+  await a.attach(RELAY, s.open)
+  a.pubsub.subscribe('T'); s.answer(encodePicked('T'))
+  const n = s.sent.length
+  const p = a.probe(1_000)
+  assert.deepEqual([s.sent.at(-1).type, s.sent.at(-1).topic], [T.PICK, 'T'], 'asks with a topic already held')
+  assert.equal(s.sent.length, n + 1, 'one frame, nothing new picked')
+  s.answer(encodePicked('T'))
+  assert.equal(await p, true)
+})
+
+test('probe: no answer in time, or the stream gone, is a dead relay', async () => {
+  const s = fakeStream()
+  const a = pickAdapter('me', {})
+  await a.attach(RELAY, s.open)
+  a.pubsub.subscribe('T'); s.answer(encodePicked('T'))
+  assert.equal(await a.probe(20), false, 'silence past the timeout')
+  const p = a.probe(5_000)
+  s.drop()
+  assert.equal(await p, false, 'the stream ending answers a waiting probe at once')
+  assert.equal(await a.probe(5_000), false, 'no stream: false without asking')
+  // A late PICKED for a probe that already gave up must not resolve anything twice.
+  s.answer(encodePicked('T'))
+})

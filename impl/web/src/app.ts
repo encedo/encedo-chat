@@ -10827,6 +10827,8 @@ $('group-create').addEventListener('click', async () => {
   } catch (e: any) { setMsg('group-msg', tr('Błąd: ') + (e?.message ?? e), 'err') }
 })
 
+/** When the page went hidden; refresh() asks the relay after a long absence (lib/core.ts resumeStep). */
+let hiddenAt = 0
 document.addEventListener('visibilitychange', () => {
   ecLog(document.hidden ? 'tab hidden — browser will throttle our timers' : 'tab visible — re-announcing')
   diag.note(`vis ${document.hidden ? 'hidden' : 'visible'}`)
@@ -10852,14 +10854,16 @@ document.addEventListener('visibilitychange', () => {
   const prof = profileFor(document.hidden, host)
   setRadioProfile(prof)
   diag.note(`radio ${prof} (${host})`)
-  if (document.hidden) { void persistGroups(); diagFlush(); return } // best-effort flush on backgrounding (encrypt is async); sends are already durable
+  if (document.hidden) { hiddenAt = Date.now(); void persistGroups(); diagFlush(); return } // best-effort flush on backgrounding (encrypt is async); sends are already durable
+  const awayMs = hiddenAt ? Date.now() - hiddenAt : 0
+  hiddenAt = 0
   // Back on screen. The rooms were refreshed above; the LIGHT presence watches
   // — the contact dots — were not, and neither was the transport. `refresh()`
   // re-dials if the socket died unseen and announces on every watch at once,
   // so the dots light up now instead of on the next heartbeat (up to a minute
   // away on a slowed link). Reported 2026-09-09: opening from the tray showed
   // no dot beside a peer that was there all along.
-  void client?.refresh().catch((e: any) => ecLog('refresh on reveal failed: ' + (e?.message ?? e), 'debug'))
+  void client?.refresh(awayMs).catch((e: any) => ecLog('refresh on reveal failed: ' + (e?.message ?? e), 'debug'))
 })
 // Alt-tab back does not change visibility (the window never left the screen),
 // but focus fires — and an idle-away person who returns that way deserves the

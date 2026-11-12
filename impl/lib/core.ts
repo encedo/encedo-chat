@@ -717,8 +717,12 @@ export interface ClientSession {
   /** Join an established group's topic (broadcast + dispatch). The group must
    *  already exist in `groups` (created here, or admitted from a received SKD). */
   openGroup(gidHex: string, handlers: GroupRoomOpts): Promise<GroupRoom>
-  /** The tab came back: re-dial if needed, then wake every open room. */
-  refresh(): Promise<void>
+  /**
+   * The tab came back: re-dial if needed, then wake every open room. `awayMs`
+   * is how long it was hidden; after a real absence the relay is asked, not
+   * trusted (`resumeStep`).
+   */
+  refresh(awayMs?: number): Promise<void>
   /**
    * The platform says the network went away or came back (the browser's
    * `offline`/`online` events). Worth wiring: it is immediate and certain,
@@ -854,6 +858,46 @@ export type RoomOpts = Omit<OpenOpts, 'relay' | 'params' | 'onLink' | 'onSession
 
 const REDIAL_BACKOFF = [1_000, 2_000, 5_000, 10_000, 20_000, 30_000]
 const DIAL_TIMEOUT_MS = 8_000
+/** Away at least this long and the connection is asked, not trusted. */
+export const PROBE_AFTER_AWAY_MS = 60_000
+/** How long the relay gets to answer that question. */
+export const PROBE_TIMEOUT_MS = 3_000
+
+/**
+ * What to do when the app comes back on screen (`refresh`). Coming back from a
+ * long background (Android, 2026-11-12: ten hours, then a minute of
+ * "reconnecting") the transport is in one of two traps, and each used to cost
+ * up to half a minute:
+ *   - a re-dial is already under way and SLEEPING in its backoff (up to 30 s,
+ *     and a frozen timer only resumes with the app) -> `wake` it now;
+ *   - the connection looks alive and is not: nothing has noticed yet, and the
+ *     rooms' isolation detector needs two silent heartbeats -> after a real
+ *     absence, `probe` it, and re-dial if the relay does not answer.
+ * A short absence (a glance at another app) is trusted, so returning costs no
+ * round trip.
+ */
+export function resumeStep(s: { redialing: boolean; connected: boolean; awayMs: number; canProbe: boolean }): 'wake' | 'redial' | 'probe' | 'none' {
+  if (s.redialing) return 'wake'
+  if (!s.connected) return 'redial'
+  if (s.canProbe && s.awayMs >= PROBE_AFTER_AWAY_MS) return 'probe'
+  return 'none'
+}
+
+/** A backoff wait that `wake()` cuts short; `wake` with nothing waiting does nothing. */
+export function wakeableWait() {
+  let cut: (() => void) | null = null
+  return {
+    wait(ms: number): Promise<void> {
+      return new Promise<void>((resolve) => {
+        const done = () => { clearTimeout(t); if (cut === done) cut = null; resolve() }
+        const t = setTimeout(done, ms)
+        cut = done
+      })
+    },
+    /** True if a wait was running and is now over. */
+    wake(): boolean { const c = cut; if (!c) return false; c(); return true },
+  }
+}
 
 /**
  * Try each relay candidate in order; the first that connects wins and its addr
@@ -983,6 +1027,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
   let link: LinkState = 'online'
   let redialing = false
   let closed = false
+  const backoff = wakeableWait()
   const setLink = (s: LinkState) => {
     if (s === link) return
     link = s
@@ -1018,7 +1063,7 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
         // Past the first few tries this is a machine with no network at all;
         // saying "offline" is more honest than an endless "reconnecting".
         if (i >= 2) setLink('offline')
-        await new Promise((r) => setTimeout(r, wait))
+        await backoff.wait(wait) // cut short by refresh(): the app came back on screen
       }
     }
     redialing = false
@@ -1420,8 +1465,17 @@ export async function startSession(id: Identity, opts: SessionOpts): Promise<Cli
       if (!gs) throw new Error(`openGroup: unknown group ${gidHex.slice(0, 12)}...`)
       return joinGroup(node, gs, handlers)
     },
-    async refresh() {
-      if (!connected()) { log('back with no relay connection — re-dialing'); await reconnect() }
+    async refresh(awayMs = 0) {
+      const step = resumeStep({ redialing, connected: connected(), awayMs, canProbe: typeof node.probe === 'function' })
+      // reconnect() refreshes and flushes the rooms itself once it is through;
+      // the loop below is the same as it always was, for the watches above all.
+      if (step === 'wake' && backoff.wake()) log('back on screen during a re-dial wait - dialing now')
+      if (step === 'redial') { log('back with no relay connection — re-dialing'); await reconnect() }
+      if (step === 'probe' && !(await node.probe(PROBE_TIMEOUT_MS)) && !closed) {
+        log(`back after ${Math.round(awayMs / 1000)} s and the relay did not answer in ${PROBE_TIMEOUT_MS / 1000} s - re-dialing`)
+        await reconnect(true)
+      }
+      if (closed) return
       for (const r of rooms) { r.refresh(); r.flushPending() }
       for (const w of presence.values()) w.watch.announce()
     },
