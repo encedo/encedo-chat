@@ -79,11 +79,25 @@ export interface KeystoreSlot extends SlotCommon {
   wct: string
 }
 
-export type UnlockSlot = PrfSlot | KeystoreSlot
+/**
+ * The Windows app: a Windows Hello key (RSA in the TPM, released by a
+ * fingerprint, a face or the Hello PIN) signs a fixed challenge; PKCS#1 v1.5
+ * is deterministic, so SHA-256 of the signature is the same 32 bytes every
+ * time and nothing else is stored (src-tauri/plugins/onchato-bio, hello.rs).
+ * `synced` is always false.
+ */
+export interface HelloSlot extends SlotCommon {
+  kind: 'windows-hello'
+  /** The Hello credential's name, random hex: it names no profile. */
+  alias: string
+}
+
+export type UnlockSlot = PrfSlot | KeystoreSlot | HelloSlot
 /** What a slot records about the key behind it: everything but the seal. */
 export type SlotMeta =
   | Pick<PrfSlot, 'kind' | 'rpId' | 'credId' | 'prfSalt' | 'synced'>
   | Pick<KeystoreSlot, 'kind' | 'alias' | 'wiv' | 'wct' | 'synced'>
+  | Pick<HelloSlot, 'kind' | 'alias' | 'synced'>
 
 const str = (x: any) => typeof x === 'string' && x.length > 0
 
@@ -92,6 +106,7 @@ export function isUnlockSlot(v: any): v is UnlockSlot {
     || typeof v.iv !== 'string' || typeof v.ct !== 'string') return false
   if (v.kind === 'webauthn-prf') return str(v.rpId) && str(v.credId) && typeof v.prfSalt === 'string'
   if (v.kind === 'android-keystore') return /^[0-9a-f]{32}$/.test(v.alias) && str(v.wiv) && str(v.wct) && v.synced === false
+  if (v.kind === 'windows-hello') return /^[0-9a-f]{32}$/.test(v.alias) && v.synced === false
   return false
 }
 
@@ -118,6 +133,7 @@ export async function sealSlot(
   const key = await slotKey(secret)
   const ct = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(name) }, key, new TextEncoder().encode(plaintext)))
   const seal = { v: 1 as const, pwAt: now, iv: b64(iv), ct: b64(ct) }
+  if (meta.kind === 'windows-hello') return { ...seal, kind: 'windows-hello', alias: meta.alias, synced: false }
   return meta.kind === 'android-keystore'
     ? { ...seal, kind: 'android-keystore', alias: meta.alias, wiv: meta.wiv, wct: meta.wct, synced: false }
     : { ...seal, kind: 'webauthn-prf', rpId: meta.rpId, credId: meta.credId, prfSalt: meta.prfSalt, synced: meta.synced }

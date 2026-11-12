@@ -1,6 +1,7 @@
-# The Android side of a software profile's unlock slot (SPEC 4.5, Unlock
-# slot; web/src/passkey.ts): an AES key in AndroidKeyStore that only a
-# fingerprint, a face or the device's own unlock releases. Ours, not a fork.
+# The native side of a software profile's unlock slot (SPEC 4.5, Unlock
+# slot; web/src/passkey.ts): on Android an AES key in AndroidKeyStore that only
+# a fingerprint, a face or the device's own unlock releases (Kotlin); on
+# Windows a Windows Hello key in the TPM (src/hello.rs). Ours, not a fork.
 
 [package]
 name = "tauri-plugin-onchato-bio"
@@ -18,6 +19,22 @@ path = "src/lib.rs"
 
 [dependencies]
 tauri = { version = "2.10", default-features = false }
+
+# Windows Hello (KeyCredentialManager, WinRT). `windows` at the version tauri
+# already links; the features are the WinRT namespaces hello.rs touches plus
+# FindWindow/SetForegroundWindow to lift the Hello prompt above the app.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Foundation",
+  "Security_Credentials",
+  "Security_Cryptography",
+  "Storage_Streams",
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging",
+] }
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+base64 = "0.22"
 
 [build-dependencies]
 tauri-plugin = { version = "2.5", features = ["build"] }

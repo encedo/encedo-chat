@@ -65,8 +65,8 @@ const LOOKS_LIKE_A_FLAG = /^[a-z][a-z0-9-]*$/
 
 function trKeys(src: string): string[] {
   const out: string[] = []
-  // `bt(passkey, phone)` and `bioText(id, passkey, phone)` (app.ts) pick one of
-  // two captions by platform; both are keys, and their calls span lines.
+  // `bt(passkey, phone, win)` and `bioText(id, passkey, phone, win)` (app.ts) pick one of
+  // three captions by platform; all are keys, and their calls span lines.
   for (const m of src.matchAll(/\b(tr|bt|bioText)\(/g)) {
     const multiline = m[1] !== 'tr'
     // Walk to the matching close paren, collecting the quoted literals on the

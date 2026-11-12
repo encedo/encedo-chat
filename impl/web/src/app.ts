@@ -1614,13 +1614,18 @@ function dropSlot(name: string) {
 
 /**
  * The words follow the way in: a passkey in a browser, the fingerprint (or the
- * phone's screen lock) in the Android app. Both strings are i18n keys.
+ * phone's screen lock) in the Android app, Windows Hello in the Windows app.
+ * Every string is an i18n key.
  */
 const onPhone = () => unlockKind() === 'android'
-const bt = (passkey: string, phone: string) => tr(onPhone() ? phone : passkey)
+/** A key in this device's own store (Android keystore, Windows Hello): device-bound, nothing to choose. */
+const nativeUnlock = () => unlockKind() === 'android' || unlockKind() === 'windows'
+const pickBio = (passkey: string, phone: string, win: string) =>
+  unlockKind() === 'windows' ? win : onPhone() ? phone : passkey
+const bt = (passkey: string, phone: string, win: string) => tr(pickBio(passkey, phone, win))
 /** A static element's text, swapped together with its i18n key so a language switch keeps it. */
-function bioText(id: string, passkey: string, phone: string) {
-  const el = $(id), key = onPhone() ? phone : passkey
+function bioText(id: string, passkey: string, phone: string, win: string) {
+  const el = $(id), key = pickBio(passkey, phone, win)
   el.setAttribute('data-i18n', key); el.textContent = tr(key)
 }
 const promptText = (name: string) => ({ title: tr('Odblokuj profil'), subtitle: name })
@@ -1643,9 +1648,9 @@ function paintSoftBio() {
   const usable = !!slot && slotAllowed(ACTIVE.policy.softUnlock, slot.synced)
   const due = usable && passwordDue(slot!, Date.now())
   $('soft-bio-wrap').hidden = !usable || due
-  if (usable) bioText('soft-bio', 'Kontynuuj z passkeyem', 'Kontynuuj odciskiem palca')
+  if (usable) bioText('soft-bio', 'Kontynuuj z passkeyem', 'Kontynuuj odciskiem palca', 'Kontynuuj z Windows Hello')
   const note = $('soft-bio-note')
-  note.textContent = due ? bt('Raz na 14 dni wejdź hasłem, potem znowu wystarczy passkey.', 'Raz na 14 dni wejdź hasłem, potem znowu wystarczy odcisk palca.') : ''
+  note.textContent = due ? bt('Raz na 14 dni wejdź hasłem, potem znowu wystarczy passkey.', 'Raz na 14 dni wejdź hasłem, potem znowu wystarczy odcisk palca.', 'Raz na 14 dni wejdź hasłem, potem znowu wystarczy Windows Hello.') : ''
   note.hidden = !due
 }
 
@@ -1671,20 +1676,22 @@ async function softBioLogin() {
     const id = await browserSoftwareIdentity(name, () => plain, () => {})
     await finishSoftLogin(name, id)
   } catch (e: any) {
-    if (e instanceof PasskeyCancelled) setMsg('soft-msg', bt('Passkey nie został użyty. Możesz też wejść hasłem.', 'Odcisk palca nie został użyty. Możesz też wejść hasłem.'), 'err')
+    if (e instanceof PasskeyCancelled) setMsg('soft-msg', bt('Passkey nie został użyty. Możesz też wejść hasłem.', 'Odcisk palca nie został użyty. Możesz też wejść hasłem.', 'Windows Hello nie zostało użyte. Możesz też wejść hasłem.'), 'err')
     else if (e instanceof PasskeyNoPrf) setMsg('soft-msg', tr('Ten passkey nie podał klucza do profilu. Wejdź hasłem.'), 'err')
     else if (e instanceof SlotRefused) {
       // Another passkey's secret, or an altered record: this slot will never
       // open, so it goes rather than being offered again.
       dropSlot(name)
       paintSoftBio()
-      setMsg('soft-msg', bt('Ten passkey nie otwiera już profilu, więc odblokowanie passkeyem zostało wyłączone. Wejdź hasłem i włącz je ponownie w Ustawieniach.', 'Klucz odblokowania w telefonie już nie otwiera profilu, więc odblokowanie odciskiem palca zostało wyłączone. Wejdź hasłem i włącz je ponownie w Ustawieniach.'), 'err')
+      setMsg('soft-msg', bt('Ten passkey nie otwiera już profilu, więc odblokowanie passkeyem zostało wyłączone. Wejdź hasłem i włącz je ponownie w Ustawieniach.', 'Klucz odblokowania w telefonie już nie otwiera profilu, więc odblokowanie odciskiem palca zostało wyłączone. Wejdź hasłem i włącz je ponownie w Ustawieniach.', 'Klucz Windows Hello już nie otwiera profilu, więc odblokowanie przez Windows Hello zostało wyłączone. Wejdź hasłem i włącz je ponownie w Ustawieniach.'), 'err')
     } else if (e instanceof UnlockKeyGone) {
       // Android invalidates the key when a fingerprint is added or the screen
-      // lock removed: by design, so the slot goes and the password takes over.
+      // lock removed; a Hello credential goes with a reset of Hello or its PIN.
+      // By design: the slot goes and the password takes over.
       dropSlot(name)
       paintSoftBio()
-      setMsg('soft-msg', tr('Klucz odblokowania w telefonie został unieważniony (na przykład dodano nowy odcisk palca), więc odblokowanie zostało wyłączone. Wejdź hasłem i włącz je ponownie w Ustawieniach.'), 'err')
+      const gone = 'Klucz odblokowania w telefonie został unieważniony (na przykład dodano nowy odcisk palca), więc odblokowanie zostało wyłączone. Wejdź hasłem i włącz je ponownie w Ustawieniach.'
+      setMsg('soft-msg', bt(gone, gone, 'Klucza Windows Hello już nie ma (na przykład zresetowano Windows Hello albo PIN), więc odblokowanie zostało wyłączone. Wejdź hasłem i włącz je ponownie w Ustawieniach.'), 'err')
     } else setMsg('soft-msg', tr('Błąd tożsamości software: ') + (e?.message ?? e), 'err')
   } finally { secret?.fill(0); btn.disabled = false }
 }
@@ -1723,7 +1730,7 @@ async function finishSoftLogin(name: string, id: Identity) {
       // re-sealing it would need the passkey: it goes, and says so.
       if (localStorage.getItem(unlockSlotKey(activeSoftProfile))) {
         dropSlot(activeSoftProfile)
-        toast(bt('Odblokowanie passkeyem wyłączone, bo zmieniła się nazwa profilu. Włączysz je ponownie w Ustawieniach.', 'Odblokowanie odciskiem palca wyłączone, bo zmieniła się nazwa profilu. Włączysz je ponownie w Ustawieniach.'))
+        toast(bt('Odblokowanie passkeyem wyłączone, bo zmieniła się nazwa profilu. Włączysz je ponownie w Ustawieniach.', 'Odblokowanie odciskiem palca wyłączone, bo zmieniła się nazwa profilu. Włączysz je ponownie w Ustawieniach.', 'Odblokowanie przez Windows Hello wyłączone, bo zmieniła się nazwa profilu. Włączysz je ponownie w Ustawieniach.'))
       }
     }
     localStorage.setItem(LAST_PROFILE, next)
@@ -4049,7 +4056,7 @@ const openPasswd = () => {
   ;($('pw-who') as HTMLInputElement).value = activeSoftProfile
   ;($('pw-bio-off') as HTMLInputElement).checked = false
   $('pw-bio-wrap').hidden = !localStorage.getItem(unlockSlotKey(activeSoftProfile))
-  bioText('pw-bio-label', 'Wyłącz też odblokowanie passkeyem', 'Wyłącz też odblokowanie odciskiem palca')
+  bioText('pw-bio-label', 'Wyłącz też odblokowanie passkeyem', 'Wyłącz też odblokowanie odciskiem palca', 'Wyłącz też odblokowanie przez Windows Hello')
   $('pw-old').focus()
 }
 const closePasswd = () => dropModal('passwd-modal')
@@ -4093,7 +4100,10 @@ function paintBioSetting() {
   $('bio-sec').hidden = !on
   if (!on) return
   const slot = softSlotFor(activeSoftProfile)
-  $('bio-state').textContent = onPhone()
+  $('bio-state').textContent = unlockKind() === 'windows'
+    ? (slot ? tr('Odblokowanie przez Windows Hello jest włączone. Klucz jest tylko w tym komputerze.')
+      : tr('Do tego profilu możesz wchodzić przez Windows Hello (odcisk palca, twarz albo PIN) zamiast hasłem.'))
+    : onPhone()
     ? (slot ? tr('Odblokowanie odciskiem palca jest włączone. Klucz jest tylko w tym telefonie.')
       : tr('Do tego profilu możesz wchodzić odciskiem palca albo blokadą ekranu telefonu zamiast hasłem.'))
     : !slot
@@ -4101,37 +4111,38 @@ function paintBioSetting() {
       : slot.synced
         ? tr('Odblokowanie passkeyem jest włączone. Passkey może się synchronizować przez menedżer haseł.')
         : tr('Odblokowanie passkeyem jest włączone. Passkey jest tylko na tym urządzeniu albo kluczu sprzętowym.')
-  $('btn-bio').textContent = slot ? bt('Wyłącz odblokowanie passkeyem', 'Wyłącz odblokowanie odciskiem palca')
-    : bt('Włącz odblokowanie passkeyem', 'Włącz odblokowanie odciskiem palca')
+  $('btn-bio').textContent = slot ? bt('Wyłącz odblokowanie passkeyem', 'Wyłącz odblokowanie odciskiem palca', 'Wyłącz odblokowanie przez Windows Hello')
+    : bt('Włącz odblokowanie passkeyem', 'Włącz odblokowanie odciskiem palca', 'Włącz odblokowanie przez Windows Hello')
 }
 
 function openBio() {
   pushModal('bio-modal'); clr('bio-msg')
   ;($('bio-pass') as HTMLInputElement).value = ''
-  bioText('bio-title', 'Odblokowanie passkeyem', 'Odblokowanie odciskiem palca')
+  bioText('bio-title', 'Odblokowanie passkeyem', 'Odblokowanie odciskiem palca', 'Odblokowanie przez Windows Hello')
   bioText('bio-sub', 'Do tego profilu wejdziesz wtedy przez Touch ID, Face ID, Windows Hello albo odcisk palca, bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne: bez niego nie przeniesiesz profilu na inne urządzenie.',
-    'Do tego profilu wejdziesz wtedy odciskiem palca, twarzą albo blokadą ekranu telefonu, bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne: bez niego nie przeniesiesz profilu na inne urządzenie.')
-  // The phone's keystore is device-bound by construction: nothing to choose.
-  $('bio-kinds').hidden = onPhone()
+    'Do tego profilu wejdziesz wtedy odciskiem palca, twarzą albo blokadą ekranu telefonu, bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne: bez niego nie przeniesiesz profilu na inne urządzenie.',
+    'Do tego profilu wejdziesz wtedy przez Windows Hello (odcisk palca, twarz albo PIN), bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne: bez niego nie przeniesiesz profilu na inne urządzenie.')
+  // The phone's keystore and Windows Hello are device-bound by construction: nothing to choose.
+  $('bio-kinds').hidden = nativeUnlock()
   // A network that refuses synced passkeys leaves one choice, and says why.
   const deviceOnly = ACTIVE.policy.softUnlock === 'device-bound'
   const synced = $('bio-kind-synced') as HTMLInputElement, device = $('bio-kind-device') as HTMLInputElement
   synced.disabled = deviceOnly
   if (deviceOnly) device.checked = true
   else synced.checked = true
-  $('bio-kind-note').hidden = !deviceOnly || onPhone()
+  $('bio-kind-note').hidden = !deviceOnly || nativeUnlock()
   $('bio-pass').focus()
 }
 $('bio-cancel').addEventListener('click', () => dropModal('bio-modal'))
 $('btn-bio').addEventListener('click', async () => {
   if (!activeSoftProfile) return
   if (!localStorage.getItem(unlockSlotKey(activeSoftProfile))) { openBio(); return }
-  const { ok } = await ask(bt('Wyłączyć odblokowanie passkeyem?', 'Wyłączyć odblokowanie odciskiem palca?'),
-    bt('Do profilu wejdziesz wtedy tylko hasłem. Sam passkey zostaje w menedżerze haseł i możesz go tam usunąć.', 'Do profilu wejdziesz wtedy tylko hasłem. Klucz odblokowania zostanie usunięty z telefonu.'), tr('Wyłącz'))
+  const { ok } = await ask(bt('Wyłączyć odblokowanie passkeyem?', 'Wyłączyć odblokowanie odciskiem palca?', 'Wyłączyć odblokowanie przez Windows Hello?'),
+    bt('Do profilu wejdziesz wtedy tylko hasłem. Sam passkey zostaje w menedżerze haseł i możesz go tam usunąć.', 'Do profilu wejdziesz wtedy tylko hasłem. Klucz odblokowania zostanie usunięty z telefonu.', 'Do profilu wejdziesz wtedy tylko hasłem. Klucz odblokowania zostanie usunięty z tego komputera.'), tr('Wyłącz'))
   if (!ok) return
   dropSlot(activeSoftProfile)
   paintBioSetting()
-  toast(bt('Odblokowanie passkeyem wyłączone.', 'Odblokowanie odciskiem palca wyłączone.'))
+  toast(bt('Odblokowanie passkeyem wyłączone.', 'Odblokowanie odciskiem palca wyłączone.', 'Odblokowanie przez Windows Hello wyłączone.'))
 })
 $('bio-save').addEventListener('click', async () => {
   const name = activeSoftProfile
@@ -4145,7 +4156,7 @@ $('bio-save').addEventListener('click', async () => {
   try {
     // The password first: a wrong one must not cost the person a passkey made for nothing.
     const plain = await unseal(pw, blob)
-    btn.textContent = bt('Czekam na passkey…', 'Czekam na odcisk palca…')
+    btn.textContent = bt('Czekam na passkey…', 'Czekam na odcisk palca…', 'Czekam na Windows Hello…')
     const deviceOnly = ($('bio-kind-device') as HTMLInputElement).checked || ACTIVE.policy.softUnlock === 'device-bound'
     const made = await enrollUnlock(name, deviceOnly, promptText(name))
     try {
@@ -4153,10 +4164,10 @@ $('bio-save').addEventListener('click', async () => {
     } finally { made.secret.fill(0) }
     dropModal('bio-modal')
     paintBioSetting()
-    toast(bt('Odblokowanie passkeyem włączone.', 'Odblokowanie odciskiem palca włączone.'))
+    toast(bt('Odblokowanie passkeyem włączone.', 'Odblokowanie odciskiem palca włączone.', 'Odblokowanie przez Windows Hello włączone.'))
   } catch (e: any) {
     if (e instanceof BadPassword) setMsg('bio-msg', tr('Złe hasło.'), 'err')
-    else if (e instanceof PasskeyCancelled) setMsg('bio-msg', bt('Passkey nie został utworzony.', 'Odblokowanie nie zostało włączone.'), 'err')
+    else if (e instanceof PasskeyCancelled) setMsg('bio-msg', bt('Passkey nie został utworzony.', 'Odblokowanie nie zostało włączone.', 'Odblokowanie nie zostało włączone.'), 'err')
     else if (e instanceof PasskeyNoPrf) setMsg('bio-msg', tr('Ta przeglądarka albo menedżer haseł nie potrafi odblokować profilu passkeyem (brak rozszerzenia PRF). Spróbuj innej przeglądarki albo klucza sprzętowego.'), 'err')
     else if (e instanceof PasskeySynced) setMsg('bio-msg', tr('Ten passkey się synchronizuje, a wybrano opcję bez synchronizacji. Na Macu i iPhonie passkey zawsze trafia do iCloud albo Google, więc tam ta opcja działa tylko z kluczem sprzętowym (np. YubiKey). Wybierz pierwszą opcję albo użyj klucza sprzętowego.'), 'err')
     else setMsg('bio-msg', tr('Błąd: ') + (e?.message ?? e), 'err')
@@ -4174,8 +4185,8 @@ let offerPlain = ''
 let offerName = ''
 async function offerPasskey(name: string, plain: string) {
   const policy = ACTIVE.policy.softUnlock ?? 'any'
-  if (onPhone()) {
-    // The keystore is device-bound, so a 'device-bound' network takes it too.
+  if (nativeUnlock()) {
+    // The keystore and Hello are device-bound, so a 'device-bound' network takes them too.
     if (policy === 'none') return
   } else {
     if (unlockKind() !== 'passkey' || policy !== 'any') return
@@ -4187,10 +4198,11 @@ async function offerPasskey(name: string, plain: string) {
   if (activeSoftProfile !== name) return
   offerPlain = plain; offerName = name
   clr('bio-offer-msg')
-  bioText('bio-offer-title', 'Wchodź do profilu passkeyem', 'Wchodź do profilu odciskiem palca')
+  bioText('bio-offer-title', 'Wchodź do profilu passkeyem', 'Wchodź do profilu odciskiem palca', 'Wchodź do profilu przez Windows Hello')
   bioText('bio-offer-sub', 'To urządzenie potrafi otworzyć profil przez Touch ID, Face ID, Windows Hello albo odcisk palca, bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne. Klucz sprzętowy (np. YubiKey) włączysz w Ustawieniach.',
-    'Ten telefon potrafi otworzyć profil odciskiem palca, twarzą albo blokadą ekranu, bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne.')
-  bioText('bio-offer-yes', 'Włącz passkey', 'Włącz odcisk palca')
+    'Ten telefon potrafi otworzyć profil odciskiem palca, twarzą albo blokadą ekranu, bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne.',
+    'Ten komputer potrafi otworzyć profil przez Windows Hello (odcisk palca, twarz albo PIN), bez wpisywania hasła. Hasło dalej działa i raz na 14 dni będzie potrzebne.')
+  bioText('bio-offer-yes', 'Włącz passkey', 'Włącz odcisk palca', 'Włącz Windows Hello')
   pushModal('bio-offer-modal')
 }
 MODAL_EXIT['bio-offer-modal'] = () => { offerPlain = ''; offerName = '' }
@@ -4199,19 +4211,19 @@ $('bio-offer-yes').addEventListener('click', async () => {
   const name = offerName, plain = offerPlain
   if (!name || !plain || name !== activeSoftProfile) { dropModal('bio-offer-modal'); return }
   const btn = $('bio-offer-yes') as HTMLButtonElement
-  btn.disabled = true; clr('bio-offer-msg'); btn.textContent = bt('Czekam na passkey…', 'Czekam na odcisk palca…')
+  btn.disabled = true; clr('bio-offer-msg'); btn.textContent = bt('Czekam na passkey…', 'Czekam na odcisk palca…', 'Czekam na Windows Hello…')
   try {
     const made = await enrollUnlock(name, false, promptText(name))
     try {
       localStorage.setItem(unlockSlotKey(name), JSON.stringify(await sealSlot(made.secret, plain, name, made, Date.now())))
     } finally { made.secret.fill(0) }
     dropModal('bio-offer-modal')
-    toast(bt('Odblokowanie passkeyem włączone.', 'Odblokowanie odciskiem palca włączone.'))
+    toast(bt('Odblokowanie passkeyem włączone.', 'Odblokowanie odciskiem palca włączone.', 'Odblokowanie przez Windows Hello włączone.'))
   } catch (e: any) {
-    if (e instanceof PasskeyCancelled) setMsg('bio-offer-msg', bt('Passkey nie został utworzony.', 'Odblokowanie nie zostało włączone.'), 'err')
+    if (e instanceof PasskeyCancelled) setMsg('bio-offer-msg', bt('Passkey nie został utworzony.', 'Odblokowanie nie zostało włączone.', 'Odblokowanie nie zostało włączone.'), 'err')
     else if (e instanceof PasskeyNoPrf) setMsg('bio-offer-msg', tr('Ta przeglądarka albo menedżer haseł nie potrafi odblokować profilu passkeyem (brak rozszerzenia PRF). Spróbuj innej przeglądarki albo klucza sprzętowego.'), 'err')
     else setMsg('bio-offer-msg', tr('Błąd: ') + (e?.message ?? e), 'err')
-  } finally { btn.disabled = false; btn.textContent = bt('Włącz passkey', 'Włącz odcisk palca') }
+  } finally { btn.disabled = false; btn.textContent = bt('Włącz passkey', 'Włącz odcisk palca', 'Włącz Windows Hello') }
 })
 
 $('btn-settings').addEventListener('click', openDrawer)

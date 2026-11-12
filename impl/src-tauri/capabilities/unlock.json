@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/mobile-schema.json",
   "identifier": "unlock",
-  "description": "Phone only: the unlock key of a software profile (plugins/onchato-bio) - AndroidKeyStore behind a fingerprint or the screen lock. Registered on iOS as well, where it has no native side yet and every command fails, so the page offers no unlock there.",
+  "description": "The unlock key of a software profile (plugins/onchato-bio): AndroidKeyStore behind a fingerprint or the screen lock, Windows Hello on Windows. Registered on iOS as well, where it has no native side yet and every command fails, so the page offers no unlock there.",
   "platforms": [
     "android",
-    "iOS"
+    "iOS",
+    "windows"
   ],
   "windows": [
     "main"

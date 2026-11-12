@@ -105,6 +105,13 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 # version is pinned to the one `wry` already links: two versions of this crate
 # would give two incompatible `WebView` types and `with_webview` would not
 # compile against ours.
+# Windows Hello unlock of a software profile (web/src/passkey.ts): the same
+# plugin as on the phones, with its desktop half in Rust (hello.rs). Not on
+# macOS (a Keychain item behind Touch ID needs a Developer ID entitlement the
+# ad-hoc-signed build does not have) nor Linux (no platform authenticator).
+[target.'cfg(windows)'.dependencies]
+tauri-plugin-onchato-bio = { path = "plugins/onchato-bio" }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # The direct plane for Linux, where WebKitGTK has no RTCPeerConnection: a
 # DataChannel in Rust (`webrtc-rs`), exposed to the webview behind the same

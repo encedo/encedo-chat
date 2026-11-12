@@ -1304,7 +1304,7 @@ mod desk {
         //
         // The second launch now does what the person meant by it: it brings the
         // running window back and exits.
-        b.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        let b = b.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             reveal(app);
         }))
         // `onchato://` (a company sign-in coming back from the browser). With
@@ -1522,7 +1522,14 @@ mod desk {
                         let _ = deliver(app2, title, body, 1).await;
                     });
                 }
-            })
+            });
+        // Windows Hello unlock of a software profile (plugins/onchato-bio,
+        // hello.rs). Windows only: the plugin is not linked on macOS or Linux,
+        // where the page then offers no unlock. After single-instance, which
+        // has to come first.
+        #[cfg(windows)]
+        let b = b.plugin(tauri_plugin_onchato_bio::init());
+        b
     }
 }
 
