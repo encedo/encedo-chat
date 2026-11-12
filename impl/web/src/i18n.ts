@@ -1075,6 +1075,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'zmiana nazwy na {d}': 'renaming to {d}',
     'nowa grupa': 'new group',
     'zmiana w grupie': 'group change',
+    'zapis grupy {d}': 'saving group {d}',
   },
 }
 

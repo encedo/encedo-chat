@@ -187,13 +187,15 @@ test('engine, phone: adding a contact asks the phone with the contact name', asy
   assert.deepEqual(h.imports.length, 1)
 })
 
-test('engine, phone: joining a group as a member never pushes for the portable record', async () => {
+test('engine, phone: joining a group as a member asks the phone, naming the group', async () => {
   const h = new FakeHem()
   remote(h)
   await token(h, ['keymgmt:list', `keymgmt:use:${OWNER}`], { kind: 'login' })
-  await assert.rejects(hemGkBackend(h).importPub!(new Uint8Array(32), 'g', 'd'), HemReauthNeeded)
-  assert.equal(h.pushes.length, 1)
-  assert.equal(h.imports.length, 0)
+  await hemGkBackend(h).importPub!(new Uint8Array(32), 'g', 'd', 'team')
+  assert.equal(h.pushes.length, 2)
+  assert.equal(h.pushes[1].scope, 'keymgmt:imp')
+  assert.match(h.pushes[1].note, /group-join team/)
+  assert.equal(h.imports.length, 1)
 })
 
 test('engine, phone: the own key is read with the sign-in scope, not a new push for keymgmt:get', async () => {

@@ -772,6 +772,7 @@ function phoneWhat(w: Why): string {
     'self-rename': tr('zmiana nazwy na {d}', { d }),
     'group-create': tr('nowa grupa'),
     'group-admin': tr('zmiana w grupie'),
+    'group-join': tr('zapis grupy {d}', { d }),
   } as Record<string, string>)[w.kind] ?? w.kind
   return s.trim()
 }

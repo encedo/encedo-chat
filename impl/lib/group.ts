@@ -430,7 +430,7 @@ export interface GkBackend {
    * a new device recovers nothing (§8 Proposal). Absent on software backends,
    * which have no HSM to hold it.
    */
-  importPub?(pub: Uint8Array, label: string, descr: string): Promise<string>
+  importPub?(pub: Uint8Array, label: string, descr: string, name?: string): Promise<string>
   /**
    * Every group entry in the device, with its marker text and public key. This
    * is the portable group list — the one thing that survives a browser, and the
@@ -648,7 +648,7 @@ export class GroupManager {
         await this.gkBackend.setMarker(rec.memberGkKid, label, descr)
       } else {
         if (!this.gkBackend?.importPub) return false
-        rec.memberGkKid = await this.gkBackend.importPub(rec.gkPub, label, descr)
+        rec.memberGkKid = await this.gkBackend.importPub(rec.gkPub, label, descr, name)
       }
       return true
     } catch { return false }

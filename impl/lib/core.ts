@@ -153,11 +153,11 @@ export function hemGkBackend(hem: any, adminKid?: string): GkBackend {
     // and nothing else — `group_secret` and the sender keys stay client-side and
     // forward-secret, so what this recovers is the group's existence, not a word
     // anyone said in it.
-    async importPub(pub: Uint8Array, label: string, descr: string) {
-      // Background on purpose: it runs when SOMEONE ELSE adds us to a group. A
-      // phone session imports only with a token it already holds; otherwise this
-      // throws, writeMemberMarker returns false and the group works from the cache.
-      const imp = await token(hem, 'keymgmt:imp')
+    async importPub(pub: Uint8Array, label: string, descr: string, name?: string) {
+      // Someone else added us, but the record is ours: a phone session asks for
+      // keymgmt:imp naming the group. A refusal leaves writeMemberMarker false and
+      // the group working from the cache, without a record that outlives it.
+      const imp = await token(hem, 'keymgmt:imp', { kind: 'group-join', detail: name })
       const r = await hem.importPublicKey(imp, label, 'CURVE25519', pub, { descr })
       // Older firmware answers an import with nothing useful; the KID is derived
       // from the key's content, so it is the same value either way.

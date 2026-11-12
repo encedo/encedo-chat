@@ -32,7 +32,7 @@
 export type WhyKind =
   | 'login' | 'read-keys' | 'renew' | 'register'
   | 'contact-add' | 'contact-del' | 'contact-rename' | 'self-rename'
-  | 'group-create' | 'group-admin'
+  | 'group-create' | 'group-admin' | 'group-join'
 export interface Why { kind: WhyKind; detail?: string }
 
 /** Scopes a session holds for its whole life and renews: everything else is per action. */
