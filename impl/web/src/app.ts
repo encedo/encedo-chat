@@ -9239,15 +9239,16 @@ if (!isDesktopShell()) {
 // The watchdog stays, for a bundle that breaks before this line.
 if (isDesktopShell()) showWindow()
 
-// Every outward anchor in the desktop shell goes to the system browser.
-// The webview turns `target="_blank"` into a new-window request for the host,
-// no handler is installed for those, and the click DIES SILENTLY — which is
-// what the .deb's update-download button did. Capture phase, so the anchors'
-// own listeners (closing the ask modal, say) still run; the mobile shell is
-// left to its platform, checked at click time because the platform answer
-// arrives after this listener is registered.
+// Every outward anchor in a packaged shell - desktop AND phone - goes to the
+// system browser. The webview turns `target="_blank"` into a new-window
+// request for the host, no handler is installed for those, and the click DIES
+// SILENTLY — which is what the .deb's update-download button did. Capture
+// phase, so the anchors' own listeners (closing the ask modal, say) still run.
+// The phones were once left out, when they had no host command to open a URL;
+// they have had one since 0.7.70 (desk_open_url over the opener plugin, for
+// the company sign-in), and the exception left "Open" in a message link's
+// warning doing nothing on Android (2026-11-18).
 if (isDesktopShell()) document.addEventListener('click', (e) => {
-  if (isMobileShell()) return
   const a = (e.target as HTMLElement | null)?.closest?.('a[target="_blank"]') as HTMLAnchorElement | null
   if (!a?.href || !/^https?:/i.test(a.href) || a.dataset.invite) return
   e.preventDefault()
