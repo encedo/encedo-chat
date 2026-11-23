@@ -6214,6 +6214,27 @@ function jumpToLatest() {
 $('messages').addEventListener('scroll', refreshJump)
 $('to-bottom').addEventListener('click', jumpToLatest)
 
+/**
+ * Rebuild the transcript of the room or group being opened from its log.
+ *
+ * The replay goes through the same appendMsg as a live arrival, and a live
+ * arrival is allowed to leave the view alone: a late message (`ooo`) does not
+ * pull a reader down. Replayed, that rule stopped the view on the first late
+ * message in the log, and every message after it counted as "new below" - the
+ * jump button said 10 on a conversation that had been read to the end, and
+ * said it again on every entry (reported 2026-11-24). A replay is not an
+ * arrival: it starts with nothing counted and ends at the newest message.
+ */
+function replayTranscript(log: readonly Ev[]) {
+  const box = $('messages')
+  box.innerHTML = ''; msgEls.clear(); stateEls.clear(); albumEls.clear(); setTyping(false); cancelReply(); cancelEdit()
+  unread = 0
+  for (const ev of log) applyEv(ev)
+  box.scrollTop = box.scrollHeight
+  unread = 0
+  refreshJump()
+}
+
 /** msg id -> the little delivery marker under our own bubble. */
 const stateEls = new Map<string, HTMLElement>()
 function setDelivery(id: string, state: 'ok' | 'lost' | 'late', ms?: number) {
@@ -9449,8 +9470,7 @@ async function activateRoom(pub: string) {
   // Read what was kept BEFORE the replay: the pins go to the head of the log, so
   // the replay itself puts them at the top with no special case.
   await loadPins(pub, room.log)
-  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); albumEls.clear(); setTyping(false); cancelReply(); cancelEdit()
-  for (const ev of room.log) applyEv(ev)
+  replayTranscript(room.log)
   paintSecurity(room); paintTransport(room); paintStatus(); paintKnockButton()
   startRotation(); renderContacts()
   void syncPresence() // foreground changed → light-watch the contact we just left
@@ -10566,8 +10586,7 @@ async function activateGroup(gid: string) {
   $('transport-badge').title = tr('Grupa idzie przez relay (GossipSub) — nie WebRTC')
   $('sess-peerid').textContent = gid.slice(0, 12) + '…'
   await loadPins(gid, gu.log) // as in activateRoom: before the replay, so they land first
-  $('messages').innerHTML = ''; msgEls.clear(); stateEls.clear(); albumEls.clear(); setTyping(false); cancelReply(); cancelEdit()
-  for (const ev of gu.log) applyEv(ev)
+  replayTranscript(gu.log)
   startRotation(); renderGroups()
 }
 
