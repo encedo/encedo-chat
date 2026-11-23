@@ -40,7 +40,7 @@ import { splitByLinks } from '../../lib/linkify.ts'
 import { splitByMentions, resolveMention, mentionName, closeMentions, mentionsPub, pubHint } from '../../lib/mentions.ts'
 import { makeQuote, type QuoteRef } from '../../lib/quote.ts'
 import { canEdit, acceptEdit, EDIT_WINDOW_MS } from '../../lib/edits.ts'
-import { planNotification, isNotifyMode, type NotifyMode } from '../../lib/notify.ts'
+import { planNotification, planArrivalBar, isNotifyMode, type NotifyMode } from '../../lib/notify.ts'
 import {
   isDesktopShell, notifySupported, notifyPermission, notifyRequest, notifyShow, type Banner,
   updateKind, updateCheck, updateDownload, updateProgress, updateApply,
@@ -5038,6 +5038,34 @@ function toast(msg: string, ms = 1500) {
   const el = $('toast'); el.textContent = msg; el.classList.add('show')
   clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove('show'), ms)
 }
+
+/**
+ * The in-app bar: who wrote, at the top of the screen, for a message that
+ * arrived in a conversation other than the one on screen (`planArrivalBar`
+ * decides when). A tap opens that conversation. One bar at a time: the next
+ * arrival replaces it and restarts the clock, so a burst is one bar, not ten.
+ * The name goes in as text - it is a contact's own choice of name.
+ */
+const ARRIVAL_BAR_MS = 4000
+let arrivalT: ReturnType<typeof setTimeout> | undefined
+let arrivalGo: (() => void) | null = null
+function showArrivalBar(name: string, what: string, go: () => void) {
+  const el = $('arrival-bar')
+  const n = document.createElement('b'); n.textContent = name
+  const w = document.createElement('span'); w.textContent = what
+  el.replaceChildren(n, w)
+  arrivalGo = go
+  el.hidden = false
+  // A frame between unhiding and the class, or the slide-in has nothing to start from.
+  requestAnimationFrame(() => el.classList.add('show'))
+  clearTimeout(arrivalT); arrivalT = setTimeout(hideArrivalBar, ARRIVAL_BAR_MS)
+}
+function hideArrivalBar() {
+  const el = $('arrival-bar')
+  el.classList.remove('show'); arrivalGo = null
+  clearTimeout(arrivalT); arrivalT = setTimeout(() => { if (!arrivalGo) el.hidden = true }, 250)
+}
+$('arrival-bar').addEventListener('click', () => { const go = arrivalGo; hideArrivalBar(); go?.() })
 async function copyPub() {
   if (!session) return
   try {
@@ -9408,6 +9436,10 @@ const record = (room: Room, ev: Ev) => {
   room.log.push(ev); if (room.log.length > LOG_CAP) room.log.shift()
   if (isViewing(room)) applyEv(ev)
   else if (isArrival(ev)) { room.unseen++; renderContacts() }
+  if (isArrival(ev) && planArrivalBar({ onScreen: !document.hidden, viewing: isViewing(room), mine: false, group: false, mentioned: false })) {
+    const pub = room.contact.pub
+    showArrivalBar(room.contact.name, ev.t === 'file' ? tr('Przysłano plik') : tr('Nowa wiadomość'), () => void activateRoom(pub))
+  }
   // Independent of which room is on screen: what decides a notification is
   // whether the WINDOW is, and an open room in a hidden window is still missed.
   if (isArrival(ev)) notifyArrival(ev, { pub: room.contact.pub, name: room.contact.name })
@@ -10320,8 +10352,13 @@ function recordGroup(gu: GroupUI, ev: Ev) {
     // `closeMentions` on the way out, so "@Ala popatrz" attached to a scan has
     // to light the group the way the sentence alone would.
     const said = ev.t === 'msg' ? ev.text : (ev.file as any).body ?? ''
-    if (session && said && mentionsPub(said, session.pub)) gu.called = true
+    const named = !!(session && said && mentionsPub(said, session.pub))
+    if (named) gu.called = true
     renderGroups()
+    if (planArrivalBar({ onScreen: !document.hidden, viewing: false, mine: false, group: true, mentioned: named })) {
+      const gid = gu.gid
+      showArrivalBar(groupDisplay(gu), tr('Wspomniano Cię'), () => void activateGroup(gid))
+    }
   }
   // A send must be durable at once (a spent counter cannot be reused after a fast
   // reload); a receive is self-healing (the chain re-walks) so it can debounce.

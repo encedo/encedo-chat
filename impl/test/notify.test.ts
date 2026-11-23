@@ -11,7 +11,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { planNotification, isNotifyMode, NOTIFY_MODES } from '../lib/notify.ts'
+import { planNotification, planArrivalBar, isNotifyMode, NOTIFY_MODES } from '../lib/notify.ts'
 
 const base = { mode: 'name' as const, granted: true, away: true, mine: false, name: 'Ala' }
 
@@ -51,4 +51,19 @@ test('an unknown stored mode is not a mode', () => {
 
 test('a missing name degrades to quiet, it does not invent one', () => {
   assert.deepEqual(planNotification({ ...base, name: undefined }), { show: true, name: null })
+})
+
+test('in-app bar: a 1:1 arrival for another conversation while the app is on screen', () => {
+  const base = { onScreen: true, viewing: false, mine: false, group: false, mentioned: false }
+  assert.equal(planArrivalBar(base), true)
+  assert.equal(planArrivalBar({ ...base, onScreen: false }), false, 'hidden app: the system banner job')
+  assert.equal(planArrivalBar({ ...base, viewing: true }), false, 'the bubble on screen is the news')
+  assert.equal(planArrivalBar({ ...base, mine: true }), false)
+})
+
+test('in-app bar: a group arrival only when it names you', () => {
+  const base = { onScreen: true, viewing: false, mine: false, group: true, mentioned: false }
+  assert.equal(planArrivalBar(base), false)
+  assert.equal(planArrivalBar({ ...base, mentioned: true }), true)
+  assert.equal(planArrivalBar({ ...base, mentioned: true, viewing: true }), false)
 })

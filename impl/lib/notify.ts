@@ -64,3 +64,31 @@ export function planNotification(o: {
   if (o.mode === 'off' || !o.granted || !o.away || o.mine) return { show: false }
   return { show: true, name: o.mode === 'name' ? (o.name ?? null) : null }
 }
+
+/**
+ * Whether an arrival earns the in-app bar: a strip at the top of the screen,
+ * "bs2-bot - New message", that opens the conversation when tapped.
+ *
+ * It is the notification for the time the app IS on screen. A system banner
+ * waits for `away`; while you are in one conversation a message for another
+ * used to light only a count on the contact list - and on a phone that list
+ * is not on screen while a conversation is (reported 2026-11-24). Nothing
+ * leaves the app, so it needs no permission and ignores `NotifyMode`; it
+ * still never carries the message text, as everywhere else.
+ *
+ * A group earns it only when the message names you, for the same reason a
+ * group gets no system banner: five people talking is not five interruptions.
+ */
+export function planArrivalBar(o: {
+  /** The app is on screen: `!document.hidden`. A hidden app is the system banner's job. */
+  onScreen: boolean
+  /** The arrival is for the conversation being shown - the bubble is the news. */
+  viewing: boolean
+  mine: boolean
+  group: boolean
+  /** Group only: the message names this user. */
+  mentioned: boolean
+}): boolean {
+  if (!o.onScreen || o.viewing || o.mine) return false
+  return !o.group || o.mentioned
+}

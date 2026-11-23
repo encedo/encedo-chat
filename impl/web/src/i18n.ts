@@ -517,6 +517,7 @@ const CATALOG: Record<string, Record<string, Entry>> = {
     'Nie znaleziono profilu do zmiany.': 'No profile found to change.',
     'Niżej': 'Move down',
     'Nowa wiadomość': 'New message',
+    'Wspomniano Cię': 'You were mentioned',
     'Nowa grupa': 'New group',
     'Nowa tożsamość na tym urządzeniu. Hasła nie da się odzyskać ani zmienić bez niego — nie ma czego z nim porównać.':
       'A new identity on this device. The password cannot be recovered, and cannot be changed without it \u2014 there is nothing stored to compare it against.',
